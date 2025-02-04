@@ -133,6 +133,17 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
           const hpr = new Cesium.HeadingPitchRoll(0, Cesium.Math.toRadians(180), 0);
           return Cesium.Transforms.headingPitchRollQuaternion(position, hpr);
         }, false);
+      } else if (type === "3D model") {
+        component.position = fixed;
+        // Add a constant 2deg/s orientation to the model
+        console.log("3D Model", component.orientation);
+        component.orientation = new Cesium.CallbackProperty((time) => {
+          const position = this.props.position(time);
+          // ADCS frame -z, -x, y
+          //const hpr = new Cesium.HeadingPitchRoll(0, 0, -Cesium.Math.toRadians(2) * time.secondsOfDay);
+          const hpr = new Cesium.HeadingPitchRoll(0, -Cesium.Math.toRadians(30) * time.secondsOfDay, 0);
+          return Cesium.Transforms.headingPitchRollQuaternion(position, hpr);
+        }, false);
       } else {
         component.position = fixed;
         component.orientation = new Cesium.VelocityOrientationProperty(fixed);
