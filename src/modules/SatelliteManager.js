@@ -316,4 +316,8 @@ export class SatelliteManager {
       }
     });
   }
+
+  get pendingUpdate() {
+    return SatelliteComponentCollection.primitivePendingUpdate;
+  }
 }
