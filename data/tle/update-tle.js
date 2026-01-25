@@ -16,13 +16,17 @@ function downloadTLE(groupName) {
   const url = `https://celestrak.org/NORAD/elements/gp.php?GROUP=${groupName}&FORMAT=tle`;
   const path = "groups/";
   const filename = `${groupName}.txt`;
+  process.stdout.write(`Downloading ${filename}...`);
 
-  https.get(url, (res) => {
-    const writeStream = fs.createWriteStream(path + filename);
-    res.pipe(writeStream);
-    writeStream.on("finish", () => {
-      writeStream.close();
-      console.log(`Downloaded ${filename}`);
+  return new Promise((resolve) => {
+    https.get(url, (res) => {
+      const writeStream = fs.createWriteStream(path + filename);
+      res.pipe(writeStream);
+      writeStream.on("finish", () => {
+        writeStream.close();
+        process.stdout.write(` Done\n`);
+        resolve();
+      });
     });
   });
 }
@@ -85,6 +89,6 @@ const groups = [
   "eutelsat",
 ];
 
-groups.forEach((group) => {
-  downloadTLE(group);
-});
+for (const group of groups) {
+  await downloadTLE(group);
+}
