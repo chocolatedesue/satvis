@@ -25,13 +25,13 @@ export default defineConfig({
           if ((id.includes("vue") && !id.includes("primevue")) || id.includes("vue-router") || id.includes("pinia")) {
             return "vue-vendor";
           }
-          if (id.includes("primevue") || id.includes("@primevue/themes") || id.includes("@primeuix")) {
+          if (id.includes("primevue") || id.includes("@primeuix")) {
             return "primevue-vendor";
           }
           if (id.includes("@fortawesome")) {
             return "icons-vendor";
           }
-          if (id.includes("cesium") || id.includes("@cesium")) {
+          if (id.includes("cesium")) {
             return "cesium-vendor";
           }
           if (id.includes("node_modules")) {
