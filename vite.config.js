@@ -22,17 +22,23 @@ export default defineConfig({
       output: {
         // Separate vendor chunks for better caching
         manualChunks: (id) => {
-          if ((id.includes("vue") && !id.includes("primevue")) || id.includes("vue-router") || id.includes("pinia")) {
+          if (id.includes("@vue") || id.includes("vue-router") || id.includes("pinia")) {
             return "vue-vendor";
           }
-          if (id.includes("primevue") || id.includes("@primeuix")) {
+          if (id.includes("primevue")) {
             return "primevue-vendor";
+          }
+          if (id.includes("@primeuix")) {
+            return "primeuix-vendor";
           }
           if (id.includes("@fortawesome")) {
             return "icons-vendor";
           }
           if (id.includes("cesium")) {
             return "cesium-vendor";
+          }
+          if (id.includes("sentry") || id.includes("posthog")) {
+            return "stats-vendor";
           }
           if (id.includes("node_modules")) {
             return "vendor";
