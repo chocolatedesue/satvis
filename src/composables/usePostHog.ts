@@ -8,7 +8,7 @@ export function usePostHog() {
     const apiHost = import.meta.env.VITE_POSTHOG_API_HOST || "https://eu.i.posthog.com";
     const uiHost = import.meta.env.VITE_POSTHOG_UI_HOST || "https://eu.posthog.com";
 
-    if (projectKey) {
+    if (projectKey && window.location.href.includes("satvis.space")) {
       posthog.init(projectKey, {
         api_host: apiHost,
         ui_host: uiHost,
