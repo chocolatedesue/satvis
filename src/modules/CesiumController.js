@@ -307,21 +307,37 @@ export class CesiumController {
       this.viewer.scene.morphTo3D();
       return;
     }
+
+    const morph = () => {
+      if (sceneMode === "2D") {
+        this.viewer.scene.morphTo2D();
+        return;
+      }
+      if (sceneMode === "Columbus") {
+        this.viewer.scene.morphToColumbusView();
+      }
+    };
+
     if (this.sats.enabledComponents.includes("Orbit")) {
-      useToastProxy().add({
-        severity: "warn",
-        summary: "Warning",
-        detail: "Disable the Orbit satellite element for 2D mode",
-        life: 3000,
-      });
-      return;
-    }
-    if (sceneMode === "2D") {
-      this.viewer.scene.morphTo2D();
-      return;
-    }
-    if (sceneMode === "Columbus") {
-      this.viewer.scene.morphToColumbusView();
+      this.sats.disableComponent("Orbit");
+
+      const enableOrbits = () => {
+        this.sats.enableComponent("Orbit");
+        this.viewer.scene.morphComplete.removeEventListener(enableOrbits);
+      };
+      this.viewer.scene.morphComplete.addEventListener(enableOrbits);
+
+      // wait until orbit elements are removed
+      const checkPending = () => {
+        if (!this.sats.pendingUpdate) {
+          morph();
+        } else {
+          requestAnimationFrame(checkPending);
+        }
+      };
+      checkPending();
+    } else {
+      morph();
     }
   }
 
