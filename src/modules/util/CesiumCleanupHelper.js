@@ -8,12 +8,16 @@ export class CesiumCleanupHelper {
       console.info("Removing leftover Cesium internal data");
       onTickEventRemovalCallback();
 
-      const labelCollection = viewer.scene.primitives?._primitives[0]?._primitives[0]._primitives[0]._labelCollection;
-      if (labelCollection) {
-        labelCollection._spareBillboards.forEach((billboard) => {
-          labelCollection._billboardCollection.remove(billboard);
+      const primitives = viewer.scene.primitives;
+      const labelCollection = primitives?._primitives[0]?._primitives[0]?._primitives[0]?._labelCollection;
+      const spareBillboards = labelCollection?._spareBillboards;
+      const billboardCollection = labelCollection?._billboardCollection;
+
+      if (spareBillboards && billboardCollection) {
+        spareBillboards.forEach((billboard) => {
+          billboardCollection.remove(billboard);
         });
-        labelCollection._spareBillboards.length = 0;
+        spareBillboards.length = 0;
       }
     });
   }
