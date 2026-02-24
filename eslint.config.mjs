@@ -30,6 +30,11 @@ export default [
         sourceType: "module",
       },
     },
+    settings: {
+      "import/resolver": {
+        typescript: true,
+      },
+    },
     rules: {
       "no-console": "off",
       "no-param-reassign": ["error", { props: false }],
@@ -57,7 +62,6 @@ export default [
         {
           ignore: [
             "\\?raw$", // Ignore ?raw imports (Vite feature)
-            "cesium", // Ignore cesium imports (handled by Vite)
             "^virtual:", // Ignore Vite virtual modules
           ],
         },
@@ -86,6 +90,11 @@ export default [
         parser: tseslint.parser,
         project: "./tsconfig.json",
         extraFileExtensions: [".vue"],
+      },
+    },
+    settings: {
+      "import/resolver": {
+        typescript: true,
       },
     },
     rules: {

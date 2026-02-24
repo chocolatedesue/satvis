@@ -12,10 +12,10 @@ import { faGithub } from "@fortawesome/free-brands-svg-icons";
 
 import App from "./App.vue";
 import { router, setupRouterGuards } from "./router";
-import piniaUrlSync from "./modules/util/pinia-plugin-url-sync.ts";
+import piniaUrlSync from "./modules/util/pinia-plugin-url-sync";
 import { CesiumController } from "./modules/CesiumController";
 import { getConfigPreset } from "./config/presets";
-import { usePWAUpdate } from "./composables/usePWAUpdate.ts";
+import { usePWAUpdate } from "./composables/usePWAUpdate";
 
 // Enable sentry for production version
 if (window.location.href.includes("satvis.space")) {

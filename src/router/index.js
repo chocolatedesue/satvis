@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
-import { usePostHog } from "../composables/usePostHog.ts";
+import { usePostHog } from "../composables/usePostHog";
 
 import { getConfigPreset, updateMetadata } from "../config/presets";
 import Satvis from "../components/Satvis.vue";
