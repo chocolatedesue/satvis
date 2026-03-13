@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "satvis",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-03-10",
+  "send_metrics": false,
+  "routes": [
+    {
+      "pattern": "satvis.space",
+      "custom_domain": true,
+    },
+  ],
+  "assets": {
+    "directory": "../dist",
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS",
+    // "run_worker_first": [],
+  },
+  "observability": {
+    "enabled": true,
+  },
+}

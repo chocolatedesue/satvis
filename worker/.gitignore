@@ -1,0 +1,7 @@
+# Cloudflare Worker specific
+.dev.vars
+.wrangler/
+
+# Wrangler output
+worker.js
+worker.js.map

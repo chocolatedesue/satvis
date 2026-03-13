@@ -1,0 +1,19 @@
+{
+  "name": "satvis-worker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cloudflare Worker backend for satvis",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --port 8080",
+    "lint": "prettier src --check && tsc --noEmit",
+    "lint:fix": "prettier src --write",
+    "generate-types": "wrangler types src/worker-configuration.d.ts",
+    "type-check": "tsc"
+  },
+  "devDependencies": {
+    "prettier": "3.8.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.73.0"
+  }
+}
