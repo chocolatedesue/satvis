@@ -66,7 +66,7 @@ export default defineConfig({
       ],
     }),
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: "prompt",
       manifest: {
         name: "Satellite Orbit Visualization",
         short_name: "SatVis",
@@ -85,7 +85,7 @@ export default defineConfig({
         globIgnores: ["cesium/ThirdParty/**/*", "cesium/Widgets/**/*", "cesium/Workers/**/*", "cesium/Assets/Textures/maki/*", "**/*.map"],
         sourcemap: true,
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/\.(css|js|png|svg|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|txt)$/],
+        navigateFallbackDenylist: [/\.(css|js|png|svg|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|txt|glb)$/],
         runtimeCaching: [
           {
             urlPattern: /cesium\/(Assets|Widgets|Workers)\/.*\.(css|js|json|jpg)$/,
@@ -111,12 +111,24 @@ export default defineConfig({
           },
           {
             urlPattern: /data\/tle\/.*\.txt$/,
-            handler: "StaleWhileRevalidate",
+            handler: "NetworkFirst",
             options: {
               cacheName: "satellite-data-cache",
               expiration: {
                 maxAgeSeconds: 48 * 60 * 60, // 2 days
                 maxEntries: 50,
+              },
+            },
+          },
+          {
+            urlPattern: /data\/models\/.*\.glb$/,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "satellite-model-cache",
+              expiration: {
+                maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+                maxEntries: 50,
+                purgeOnQuotaError: true,
               },
             },
           },
