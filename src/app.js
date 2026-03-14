@@ -23,8 +23,7 @@ if (window.location.href.includes("satvis.space")) {
 }
 
 // Register Service Worker with automatic reload on update
-const { registerPWA } = usePWAUpdate({ autoUpdate: true });
-registerPWA();
+usePWAUpdate({ autoUpdate: true });
 
 // Setup Vue app
 const app = createApp(App);

@@ -15,21 +15,28 @@ interface UsePWAUpdateOptions {
   updateInterval?: number;
 }
 
+// Singleton state — shared across all callers
+const needRefresh = ref(false);
+const offlineReady = ref(false);
+let updateSW: ((reloadPage?: boolean) => Promise<void>) | undefined;
+let registered = false;
+let intervalId: ReturnType<typeof setInterval> | undefined;
+
 /**
  * Composable for managing PWA service worker updates.
+ *
+ * State is shared (singleton) across all callers. The service worker is registered immediately on the first call.
  *
  * @param options - Configuration options
  * @returns Object containing PWA update state and methods
  *
  * @example
- * // Automatic updates (recommended for production)
- * const { registerPWA } = usePWAUpdate({ autoUpdate: true });
- * registerPWA();
+ * // Automatic updates
+ * const { needRefresh } = usePWAUpdate({ autoUpdate: true });
  *
  * @example
  * // Manual updates with UI notification
- * const { needRefresh, updateApp, registerPWA } = usePWAUpdate();
- * registerPWA();
+ * const { needRefresh, updateApp } = usePWAUpdate();
  * // In your component, watch needRefresh and show update prompt
  * watch(needRefresh, (value) => {
  *   if (value) {
@@ -41,14 +48,10 @@ interface UsePWAUpdateOptions {
 export function usePWAUpdate(options: UsePWAUpdateOptions = {}) {
   const { autoUpdate = false, updateInterval = 60 * 60 * 24 } = options;
 
-  const needRefresh = ref(false);
-  const offlineReady = ref(false);
-  const updateSW = ref<((reloadPage?: boolean) => Promise<void>) | undefined>();
-
   const updateApp = async () => {
-    if (updateSW.value) {
+    if (updateSW) {
       try {
-        await updateSW.value(true);
+        await updateSW(true);
         needRefresh.value = false;
       } catch (error) {
         console.error("PWA: Failed to update app:", error);
@@ -56,52 +59,45 @@ export function usePWAUpdate(options: UsePWAUpdateOptions = {}) {
     }
   };
 
-  const onNeedRefresh = () => {
-    console.log("PWA: Update available - need refresh");
-    needRefresh.value = true;
+  // Register the service worker exactly once
+  if (!registered) {
+    registered = true;
 
-    if (autoUpdate) {
-      console.log("PWA: Auto-update enabled, updating app...");
-      updateApp();
-    }
-  };
-
-  const onOfflineReady = () => {
-    console.log("PWA: App is ready to work offline");
-    offlineReady.value = true;
-  };
-
-  const onRegistered = (registration: ServiceWorkerRegistration | undefined) => {
-    console.log("PWA: Service worker registered successfully");
-
-    // Set up periodic update checks
-    if (registration && updateInterval > 0) {
-      setInterval(() => {
-        console.log("PWA: Checking for updates...");
-        registration.update();
-      }, updateInterval * 1000);
-    }
-  };
-
-  const onRegisterError = (error: Error) => {
-    console.error("PWA: Service worker registration error:", error);
-  };
-
-  const registerPWA = () => {
-    const update = registerSW({
-      onNeedRefresh,
-      onOfflineReady,
-      onRegistered,
-      onRegisterError,
+    updateSW = registerSW({
       immediate: true,
+      onNeedRefresh() {
+        console.log("PWA: Update available - need refresh");
+        needRefresh.value = true;
+
+        if (autoUpdate) {
+          console.log("PWA: Auto-update enabled, updating app...");
+          updateApp();
+        }
+      },
+      onOfflineReady() {
+        console.log("PWA: App is ready to work offline");
+        offlineReady.value = true;
+      },
+      onRegistered(registration: ServiceWorkerRegistration | undefined) {
+        console.log("PWA: Service worker registered successfully");
+
+        // Set up periodic update checks (only once)
+        if (registration && updateInterval > 0 && !intervalId) {
+          intervalId = setInterval(() => {
+            console.log("PWA: Checking for updates...");
+            registration.update();
+          }, updateInterval * 1000);
+        }
+      },
+      onRegisterError(error: Error) {
+        console.error("PWA: Service worker registration error:", error);
+      },
     });
-    updateSW.value = update;
-  };
+  }
 
   return {
     needRefresh,
     offlineReady,
     updateApp,
-    registerPWA,
   };
 }
