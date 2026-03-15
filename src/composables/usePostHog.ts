@@ -15,6 +15,10 @@ export function usePostHog() {
         cookieless_mode: "always",
         defaults: "2026-01-30",
       });
+      posthog.register({
+        build_date: __BUILD_DATE__,
+        build_sha: __BUILD_SHA__,
+      });
     }
     initialized = true;
   }

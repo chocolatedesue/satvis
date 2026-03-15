@@ -3,10 +3,14 @@ import vue from "@vitejs/plugin-vue";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
+import { execSync } from "child_process";
 
 const cesiumEngineSource = "node_modules/@cesium/engine";
 const cesiumWidgetsSource = "node_modules/@cesium/widgets";
 const cesiumBaseUrl = "cesium";
+
+const buildDate = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+const buildSha = execSync("git rev-parse --short HEAD").toString().trim();
 
 export default defineConfig({
   base: "",
@@ -50,6 +54,8 @@ export default defineConfig({
   define: {
     // Define relative base path in cesium for loading assets
     CESIUM_BASE_URL: JSON.stringify("./cesium"),
+    __BUILD_DATE__: JSON.stringify(buildDate),
+    __BUILD_SHA__: JSON.stringify(buildSha),
   },
   plugins: [
     vue(),
