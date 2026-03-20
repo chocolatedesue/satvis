@@ -17,7 +17,7 @@ export default defineConfig({
   build: {
     sourcemap: true,
     chunkSizeWarningLimit: 1000,
-    rollupOptions: {
+    rolldownOptions: {
       input: {
         index: path.resolve(__dirname, "index.html"),
         embedded: path.resolve(__dirname, "embedded.html"),
@@ -25,28 +25,16 @@ export default defineConfig({
       },
       output: {
         // Separate vendor chunks for better caching
-        manualChunks: (id) => {
-          if (id.includes("@vue") || id.includes("vue-router") || id.includes("pinia")) {
-            return "vue-vendor";
-          }
-          if (id.includes("primevue")) {
-            return "primevue-vendor";
-          }
-          if (id.includes("@primeuix")) {
-            return "primeuix-vendor";
-          }
-          if (id.includes("@fortawesome")) {
-            return "icons-vendor";
-          }
-          if (id.includes("cesium")) {
-            return "cesium-vendor";
-          }
-          if (id.includes("sentry") || id.includes("posthog")) {
-            return "stats-vendor";
-          }
-          if (id.includes("node_modules")) {
-            return "vendor";
-          }
+        codeSplitting: {
+          groups: [
+            { name: "vue", test: /@vue|vue-router|pinia|@vueuse/, priority: 60 },
+            { name: "primevue", test: /primevue|@primeuix/, priority: 50 },
+            { name: "icons", test: /@fortawesome/, priority: 40 },
+            { name: "cesium", test: /@?cesium/, priority: 30 },
+            { name: "analytics", test: /sentry|posthog/, priority: 20 },
+            { name: "vendor", test: /node_modules/, priority: 10 },
+            { name: "app", test: /src/, priority: 1 },
+          ],
         },
       },
     },
