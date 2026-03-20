@@ -4,7 +4,7 @@ import PrimeVue from "primevue/config";
 import Aura from "@primeuix/themes/aura";
 import Tooltip from "primevue/tooltip";
 import ToastService from "primevue/toastservice";
-import * as Sentry from "@sentry/browser";
+
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import { faLayerGroup, faGlobeAfrica, faMobileAlt, faHammer, faEye } from "@fortawesome/free-solid-svg-icons";
@@ -16,11 +16,6 @@ import piniaUrlSync from "./modules/util/pinia-plugin-url-sync";
 import { CesiumController } from "./modules/CesiumController";
 import { getConfigPreset } from "./config/presets";
 import { usePWAUpdate } from "./composables/usePWAUpdate";
-
-// Enable sentry for production version
-if (window.location.href.includes("satvis.space")) {
-  Sentry.init({ dsn: "https://6c17c8b3e731026b3e9e0df0ecfc1b83@o294643.ingest.us.sentry.io/1541793" });
-}
 
 // Register Service Worker with automatic reload on update
 usePWAUpdate({ autoUpdate: true });

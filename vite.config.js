@@ -31,7 +31,7 @@ export default defineConfig({
             { name: "primevue", test: /primevue|@primeuix/, priority: 50 },
             { name: "icons", test: /@fortawesome/, priority: 40 },
             { name: "cesium", test: /@?cesium/, priority: 30 },
-            { name: "analytics", test: /sentry|posthog/, priority: 20 },
+            { name: "analytics", test: /posthog/, priority: 20 },
             { name: "vendor", test: /node_modules/, priority: 10 },
             { name: "app", test: /src/, priority: 1 },
           ],

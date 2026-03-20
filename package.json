@@ -27,7 +27,6 @@
     "@fortawesome/free-solid-svg-icons": "^7.2.0",
     "@fortawesome/vue-fontawesome": "^3.1.3",
     "@primeuix/themes": "^2.0.3",
-    "@sentry/browser": "^10.45.0",
     "cesium": "^1.139.1",
     "cesium-sensor-volumes": "github:Flowm/cesium-sensor-volumes#1.138.1",
     "dayjs": "^1.11.20",
