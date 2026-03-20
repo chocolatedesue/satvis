@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
-    "target": "esnext",
-    "module": "esnext",
+    "target": "ES2023",
+    "module": "ESNext",
 
     /* Bundler mode */
     "moduleResolution": "bundler",
@@ -19,24 +19,15 @@
     "noUncheckedIndexedAccess": true,
 
     /* Vue & Vite */
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
-    "resolveJsonModule": true,
-    "types": ["vite/client"],
+    "types": ["vite/client", "vite-plugin-pwa/client"],
 
     /* Path mapping */
     "baseUrl": ".",
     "paths": {
+      "@components/*": ["src/components/*"],
+      "@lib/*": ["src/lib/*"],
       "@/*": ["src/*"]
     }
   },
-  "include": [
-    "src/**/*.ts",
-    "src/**/*.vue",
-    "vite.config.js"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist"
-  ]
+  "include": ["src/**/*.ts", "src/**/*.vue", "auto-imports.d.ts", "vite.config.ts"]
 }
