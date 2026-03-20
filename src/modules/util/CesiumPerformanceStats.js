@@ -1,5 +1,7 @@
 import { getTimestamp } from "@cesium/engine";
 
+const fmt = (n) => n.toFixed(2).padStart(8);
+
 // A Cesium Performance Monitor that logs avarage and worst performance over a sample period
 export class CesiumPerformanceStats {
   constructor(scene, logContinuously = false) {
@@ -69,7 +71,6 @@ export class CesiumPerformanceStats {
   }
 
   formatStats() {
-    const fmt = (n) => n.toFixed(2).padStart(8);
     return `Avg FPS: ${fmt(this.avgFps)}; Avg Frametime: ${fmt(this.avgFrameTime)}; Worst Frametime: ${fmt(this.worstFrameTime)};`;
   }
 }

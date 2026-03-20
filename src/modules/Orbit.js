@@ -70,6 +70,7 @@ export default class Orbit {
     let pass = false;
     let ongoingPass = false;
     let lastElevation = 0;
+    // eslint-disable-next-line no-unmodified-loop-condition -- date is mutated via setMinutes/setSeconds
     while (date < endDate) {
       const positionEcf = this.positionECF(date);
       if (!positionEcf) {
@@ -144,6 +145,7 @@ export default class Orbit {
     let ongoingPass = false;
     let lastDistance = Number.MAX_VALUE;
 
+    // eslint-disable-next-line no-unmodified-loop-condition -- date is mutated via setMinutes/setSeconds
     while (date < endDate) {
       const positionGeodetic = this.positionGeodetic(date);
       if (!positionGeodetic) {

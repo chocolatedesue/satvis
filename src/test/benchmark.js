@@ -21,6 +21,7 @@ async function logPerformance() {
   cc.performanceStats.reset();
   // Wait for performance to settle and stats to be updated
   while (cc.performanceStats.getStats().avgFps === 0) {
+    // eslint-disable-next-line no-await-in-loop
     await sleep(1);
   }
   console.log(
@@ -40,6 +41,7 @@ async function test() {
         .map((sat) => sat.props.name);
       console.log(cc.sats.enabledSatellites, cc.sats.getSatellitesWithTag(satelliteTag));
 
+      // eslint-disable-next-line no-await-in-loop
       await logPerformance();
     }
     cc.sats.enabledSatellites = [];

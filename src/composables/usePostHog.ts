@@ -1,4 +1,4 @@
-import posthog from "posthog-js/dist/module.full.no-external";
+import posthogClient from "posthog-js/dist/module.full.no-external";
 
 let initialized = false;
 
@@ -9,13 +9,13 @@ export function usePostHog() {
     const uiHost = import.meta.env.VITE_POSTHOG_UI_HOST || "https://eu.posthog.com";
 
     if (projectKey && window.location.href.includes("satvis.space")) {
-      posthog.init(projectKey, {
+      posthogClient.init(projectKey, {
         api_host: apiHost,
         ui_host: uiHost,
         cookieless_mode: "always",
         defaults: "2026-01-30",
       });
-      posthog.register({
+      posthogClient.register({
         build_date: __BUILD_DATE__,
         build_sha: __BUILD_SHA__,
       });
@@ -23,5 +23,5 @@ export function usePostHog() {
     initialized = true;
   }
 
-  return { posthog };
+  return { posthog: posthogClient };
 }

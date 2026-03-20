@@ -23,8 +23,8 @@ export const router = createRouter({
  * Router guard to handle configuration changes when navigating between routes
  * Note: Initial load is handled in main.js before mounting
  */
-export function setupRouterGuards(router, cc) {
-  router.beforeEach((to, from, next) => {
+export function setupRouterGuards(routerInstance, cc) {
+  routerInstance.beforeEach((to, from, next) => {
     console.log(`Navigating to ${to.path} from ${from.path}`);
 
     // Get the new configuration preset based on the target route

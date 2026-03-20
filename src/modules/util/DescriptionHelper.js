@@ -6,6 +6,10 @@ import utc from "dayjs/plugin/utc";
 dayjs.extend(relativeTime);
 dayjs.extend(utc);
 
+function pad2(num) {
+  return String(num).padStart(2, "0");
+}
+
 export class DescriptionHelper {
   /** cachedCallbackProperty
    * Caches the results of a callback property to prevent unnecessary recalculation.
@@ -135,9 +139,6 @@ export class DescriptionHelper {
   }
 
   static renderPass(time, pass, passNameField = "name", overpassMode = "elevation") {
-    function pad2(num) {
-      return String(num).padStart(2, "0");
-    }
     let countdown = "ONGOING";
     if (dayjs(pass.end).diff(time) < 0) {
       countdown = "PREVIOUS";

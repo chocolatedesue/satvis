@@ -89,7 +89,7 @@ export class PushManager {
         delay: waitMs / 1000,
         message,
       };
-      window.webkit.messageHandlers.iosNotify.postMessage(content);
+      window.webkit.messageHandlers.iosNotify.postMessage(content, self.location.origin);
     } else {
       const id = setTimeout(() => {
         this.persistentNotification(message, options);

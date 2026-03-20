@@ -63,7 +63,7 @@ export class GroundStationEntity extends CesiumComponentCollection {
     passes = passes.filter((pass) => pass.groundStationName === this.name);
 
     // Sort passes by time
-    passes = passes.sort((a, b) => a.start - b.start);
+    passes.sort((a, b) => a.start - b.start);
     return passes;
   }
 }

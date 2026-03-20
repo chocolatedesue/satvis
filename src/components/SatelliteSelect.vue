@@ -79,7 +79,7 @@ export default {
   },
   methods: {
     getSatellitesFromTags(taglist) {
-      return taglist.map((tag) => this.availableSatellitesByTag[tag] || []).flat();
+      return taglist.flatMap((tag) => this.availableSatellitesByTag[tag] || []);
     },
   },
 };

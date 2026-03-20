@@ -209,8 +209,8 @@ export default {
         // Ensure only a single base layer is active
         const newBaseLayers = newLayers.filter((layer) => cc.baseLayers.includes(layer));
         if (newBaseLayers.length > 1) {
-          const oldBaseLayers = oldLayers.filter((layer) => cc.baseLayers.includes(layer));
-          this.layers = newBaseLayers.filter((layer) => !oldBaseLayers.includes(layer));
+          const oldBaseLayers = new Set(oldLayers.filter((layer) => cc.baseLayers.includes(layer)));
+          this.layers = newBaseLayers.filter((layer) => !oldBaseLayers.has(layer));
           return;
         }
         cc.imageryLayers = newLayers;

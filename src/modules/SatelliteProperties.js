@@ -257,7 +257,7 @@ export class SatelliteProperties {
     });
 
     // Sort passes by time
-    allPasses = allPasses.sort((a, b) => a.start - b.start);
+    allPasses.sort((a, b) => a.start - b.start);
 
     this.passes = allPasses;
     this.computePassIntervals();
