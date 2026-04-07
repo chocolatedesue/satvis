@@ -22,11 +22,10 @@
     "types": ["vite/client", "vite-plugin-pwa/client"],
 
     /* Path mapping */
-    "baseUrl": ".",
     "paths": {
-      "@components/*": ["src/components/*"],
-      "@lib/*": ["src/lib/*"],
-      "@/*": ["src/*"]
+      "@components/*": ["./src/components/*"],
+      "@lib/*": ["./src/lib/*"],
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "auto-imports.d.ts", "vite.config.ts"]
