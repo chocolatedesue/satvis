@@ -50,13 +50,13 @@ export default defineConfig({
     viteStaticCopy({
       targets: [
         // Copy Cesium Assets, Widgets, and Workers to a static directory
-        { src: `${cesiumEngineSource}/Build/ThirdParty`, dest: cesiumBaseUrl },
-        { src: `${cesiumEngineSource}/Build/Workers`, dest: cesiumBaseUrl },
-        { src: `${cesiumEngineSource}/Source/Assets`, dest: cesiumBaseUrl },
-        { src: `${cesiumWidgetsSource}/Source`, dest: `${cesiumBaseUrl}/Widgets` },
+        { src: `${cesiumEngineSource}/Build/ThirdParty`, dest: cesiumBaseUrl, rename: { stripBase: 4 } },
+        { src: `${cesiumEngineSource}/Build/Workers`, dest: cesiumBaseUrl, rename: { stripBase: 4 } },
+        { src: `${cesiumEngineSource}/Source/Assets`, dest: cesiumBaseUrl, rename: { stripBase: 4 } },
+        { src: `${cesiumWidgetsSource}/Source`, dest: `${cesiumBaseUrl}/Widgets`, rename: { stripBase: 4 } },
         // Copy data files
-        { src: ["data/*", "!data/custom"], dest: "data" },
-        { src: ["data/custom/dist/*"], dest: "data" },
+        { src: ["data/**", "!data/custom/**"], dest: "data", rename: { stripBase: 1 } },
+        { src: ["data/custom/dist/**"], dest: "data", rename: { stripBase: 3 } },
       ],
     }),
     VitePWA({
@@ -152,4 +152,7 @@ export default defineConfig({
       },
     }),
   ],
+  worker: {
+    format: "es",
+  },
 });
