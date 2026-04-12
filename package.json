@@ -25,14 +25,14 @@
     "@fortawesome/fontawesome-svg-core": "^7.2.0",
     "@fortawesome/free-brands-svg-icons": "^7.2.0",
     "@fortawesome/free-solid-svg-icons": "^7.2.0",
-    "@fortawesome/vue-fontawesome": "^3.1.3",
+    "@fortawesome/vue-fontawesome": "^3.2.0",
     "@primeuix/themes": "^2.0.3",
     "cesium": "^1.140.0",
     "cesium-sensor-volumes": "github:Flowm/cesium-sensor-volumes#1.138.1",
     "dayjs": "^1.11.20",
     "pinia": "^3.0.4",
-    "posthog-js": "^1.365.0",
-    "primevue": "^4.5.4",
+    "posthog-js": "^1.369.0",
+    "primevue": "^4.5.5",
     "satellite.js": "^7.0.0",
     "vue": "^3.5.32",
     "vue-multiselect": "^3.5.0",
@@ -40,17 +40,18 @@
   },
   "devDependencies": {
     "@vite-pwa/assets-generator": "^1.0.2",
-    "@vitejs/plugin-vue": "^6.0.5",
-    "oxlint": "^1.59.0",
-    "prettier": "^3.8.1",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "oxlint": "^1.60.0",
+    "prettier": "^3.8.3",
     "rimraf": "^6.1.3",
     "typescript": "^6.0.2",
-    "vite": "^8.0.7",
+    "vite": "^8.0.8",
     "vite-plugin-pwa": "^1.2.0",
     "vite-plugin-static-copy": "^4.0.1",
     "vue-tsc": "^3.2.6"
   },
   "overrides": {
+    "serialize-javascript": "^7.0.3",
     "vite-plugin-pwa": {
       "vite": "$vite"
     }
