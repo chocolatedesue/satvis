@@ -52,8 +52,7 @@ export const presets = {
     tleData: [
       ["data/tle/ot.txt", ["OT"]],
       ["data/tle/wfs.txt", ["WFS"]],
-      ["data/tle/otc.txt", ["OTC"]],
-      ["data/tle/groups/iridium-NEXT.txt", ["IridiumNEXT"]],
+      ["data/tle/ot-next.txt", ["OTNext"]],
     ],
   },
 };
