@@ -12,23 +12,37 @@ const __dirname = dirname(__filename);
 // Change dir to the location of this script
 process.chdir(__dirname);
 
-function downloadTLE(groupName) {
+async function downloadTLE(groupName) {
   const url = `https://celestrak.org/NORAD/elements/gp.php?GROUP=${groupName}&FORMAT=tle`;
   const path = "groups/";
   const filename = `${groupName}.txt`;
+  const targetPath = path + filename;
   process.stdout.write(`Downloading ${filename}...`);
 
-  return new Promise((resolve) => {
-    https.get(url, (res) => {
-      const writeStream = fs.createWriteStream(path + filename);
-      res.pipe(writeStream);
-      writeStream.on("finish", () => {
-        writeStream.close();
-        process.stdout.write(` Done\n`);
-        resolve();
-      });
+  const data = await new Promise((resolve, reject) => {
+    const request = https.get(url, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        process.stdout.write(` Failed (${res.statusCode})\n`);
+        resolve(null);
+        return;
+      }
+
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
     });
+
+    request.on("error", reject);
   });
+
+  if (data === null) {
+    return;
+  }
+
+  await fs.promises.writeFile(targetPath, data);
+  process.stdout.write(` Done\n`);
 }
 
 // https://celestrak.org/NORAD/elements/
