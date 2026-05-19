@@ -7,6 +7,9 @@ cd "${0%/*}"
 DATA_DIR="$(readlink -f ../)"
 OUT_DIR="$(readlink -f dist)"
 
+# Clean out dir to remove old files
+rm -r "$OUT_DIR/"*
+
 # Iterates through all subfolders of this folder
 for dir in */; do
   # Executes sync.sh if it exists in that folder
