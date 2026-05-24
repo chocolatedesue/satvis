@@ -9,7 +9,8 @@
   "rules": {
     "no-console": "off",
     "import/no-unassigned-import": ["warn", { "allow": ["**/*.css", "**/CesiumSampledPositionRawValueAccess"] }],
-    "typescript/no-extraneous-class": "off"
+    "typescript/no-extraneous-class": "off",
+    "no-underscore-dangle": "off"
   },
   "ignorePatterns": ["dist"]
 }
