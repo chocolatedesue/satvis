@@ -6,14 +6,15 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev --port 8080",
-    "lint": "prettier src --check && tsc --noEmit",
-    "lint:fix": "prettier src --write",
+    "lint": "oxlint src && oxfmt --check src && tsc --noEmit",
+    "lint:fix": "oxlint --fix src && oxfmt src",
     "generate-types": "wrangler types src/worker-configuration.d.ts",
     "type-check": "tsc"
   },
   "devDependencies": {
-    "prettier": "3.8.1",
-    "typescript": "^5.9.3",
-    "wrangler": "^4.73.0"
+    "oxfmt": "^0.51.0",
+    "oxlint": "^1.66.0",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.93.1"
   }
 }
