@@ -1,32 +1,17 @@
 {
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
   "compilerOptions": {
-    "target": "ES2023",
-    "module": "ESNext",
-
-    /* Bundler mode */
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
     "isolatedModules": true,
-    "moduleDetection": "force",
-    "noEmit": true,
-    "skipLibCheck": true,
-
-    /* Linting */
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
-
-    /* Vue & Vite */
-    "types": ["vite/client", "vite-plugin-pwa/client"],
-
-    /* Path mapping */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["vite-plugin-pwa/client"],
     "paths": {
       "@components/*": ["./src/components/*"],
       "@lib/*": ["./src/lib/*"],
-      "@/*": ["./src/*"]
-    }
+      "@/*": ["./src/*"],
+    },
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "auto-imports.d.ts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"],
 }

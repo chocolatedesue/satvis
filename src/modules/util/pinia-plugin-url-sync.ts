@@ -1,4 +1,4 @@
-import { PiniaPluginContext } from "pinia";
+import type { PiniaPluginContext } from "pinia";
 import type { Router } from "vue-router";
 
 export interface SyncConfigEntry {
@@ -98,7 +98,10 @@ function stateToUrl(store: ExtendedStore, syncConfig: SyncConfigEntry[]): void {
     const serialize = config.serialize || defaultSerialize;
     console.info("State update", config.name, value);
 
-    if (config.name in store.defaults && serialize(store.defaults[config.name]) === serialize(value)) {
+    if (
+      config.name in store.defaults &&
+      serialize(store.defaults[config.name]) === serialize(value)
+    ) {
       params.delete(param);
     } else {
       params.set(param, serialize(value));
