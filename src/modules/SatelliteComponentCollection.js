@@ -36,10 +36,10 @@ import {
 import CesiumSensorVolumes from "cesium-sensor-volumes";
 
 import { SatelliteProperties } from "./SatelliteProperties";
+import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
 import { CesiumTimelineHelper } from "./util/CesiumTimelineHelper";
 import { DescriptionHelper } from "./util/DescriptionHelper";
-import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 
 export class SatelliteComponentCollection extends CesiumComponentCollection {
   constructor(viewer, tle, tags) {

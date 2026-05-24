@@ -14,7 +14,6 @@ import {
 
 import Orbit from "./Orbit";
 import "./util/CesiumSampledPositionRawValueAccess";
-
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 
 export class SatelliteProperties {

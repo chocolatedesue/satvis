@@ -1,7 +1,6 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "printWidth": 180,
-  "singleQuote": false,
-  "semi": true,
-  "useTabs": false
+  "sortImports": true,
+  "sortPackageJson": true
 }

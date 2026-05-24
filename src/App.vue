@@ -11,6 +11,7 @@ import "./css/main.css";
 import Toast from "primevue/toast";
 import { useToast } from "primevue/usetoast";
 import { onMounted } from "vue";
+
 import { initToastProxy } from "./composables/useToastProxy";
 
 export default {

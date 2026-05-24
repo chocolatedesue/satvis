@@ -12,5 +12,10 @@
     "typescript/no-extraneous-class": "off",
     "no-underscore-dangle": "off"
   },
-  "ignorePatterns": ["dist"]
+  "env": {
+    "builtin": true,
+    "browser": true,
+    "vue": true
+  },
+  "ignorePatterns": ["dist", "data", "ios", "worker"]
 }

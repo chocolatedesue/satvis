@@ -1,5 +1,5 @@
-import { ref } from "vue";
 import { registerSW } from "virtual:pwa-register";
+import { ref } from "vue";
 
 interface UsePWAUpdateOptions {
   /**

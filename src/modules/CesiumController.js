@@ -24,20 +24,21 @@ import {
   defined,
 } from "@cesium/engine";
 import { Viewer } from "@cesium/widgets";
-import dayjs from "dayjs";
-import utc from "dayjs/plugin/utc";
 import { icon } from "@fortawesome/fontawesome-svg-core";
 import { faBell, faInfo } from "@fortawesome/free-solid-svg-icons";
-import infoBoxCss from "@cesium/widgets/Source/InfoBox/InfoBoxDescription.css?raw";
-import { usePostHog } from "../composables/usePostHog";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
 
-import { useCesiumStore } from "../stores/cesium";
-import infoBoxOverrideCss from "../css/infobox.css?raw";
+import { usePostHog } from "../composables/usePostHog";
 import { useToastProxy } from "../composables/useToastProxy";
+import { useCesiumStore } from "../stores/cesium";
+import { SatelliteManager } from "./SatelliteManager";
+import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
 import { PushManager } from "./util/PushManager";
-import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
-import { SatelliteManager } from "./SatelliteManager";
+
+import infoBoxOverrideCss from "../css/infobox.css?raw";
+import infoBoxCss from "@cesium/widgets/Source/InfoBox/InfoBoxDescription.css?raw";
 
 dayjs.extend(utc);
 

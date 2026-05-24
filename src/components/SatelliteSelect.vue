@@ -26,8 +26,8 @@
 </template>
 
 <script>
-import VueMultiselect from "vue-multiselect";
 import { mapWritableState } from "pinia";
+import VueMultiselect from "vue-multiselect";
 
 import { useSatStore } from "../stores/sat";
 

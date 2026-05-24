@@ -176,10 +176,10 @@
 
 <script>
 import { mapWritableState } from "pinia";
-import { useCesiumStore } from "../stores/cesium";
-import { useSatStore } from "../stores/sat";
 
 import { DeviceDetect } from "../modules/util/DeviceDetect";
+import { useCesiumStore } from "../stores/cesium";
+import { useSatStore } from "../stores/sat";
 import SatelliteSelect from "./SatelliteSelect.vue";
 
 export default {

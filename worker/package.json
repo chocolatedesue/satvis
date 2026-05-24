@@ -6,8 +6,8 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev --port 8080",
-    "lint": "oxlint src && oxfmt --check src && tsc --noEmit",
-    "lint:fix": "oxlint --fix src && oxfmt src",
+    "lint": "oxlint && oxfmt --check && tsc --noEmit",
+    "lint:fix": "oxlint --fix && oxfmt --write",
     "generate-types": "wrangler types src/worker-configuration.d.ts",
     "type-check": "tsc"
   },

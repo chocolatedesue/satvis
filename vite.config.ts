@@ -1,9 +1,10 @@
-import { defineConfig } from "vite";
-import vue from "@vitejs/plugin-vue";
-import { viteStaticCopy } from "vite-plugin-static-copy";
-import { VitePWA } from "vite-plugin-pwa";
-import path from "path";
 import { execSync } from "child_process";
+import path from "path";
+
+import vue from "@vitejs/plugin-vue";
+import { defineConfig } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
+import { viteStaticCopy } from "vite-plugin-static-copy";
 
 const cesiumEngineSource = "node_modules/@cesium/engine";
 const cesiumWidgetsSource = "node_modules/@cesium/widgets";
@@ -75,7 +76,7 @@ export default defineConfig({
       },
       workbox: {
         maximumFileSizeToCacheInBytes: 5000000,
-        globPatterns: ["**/*.{css,html,js,png,svg}", "cesium/Assets/**/*.{jpg,png,xml,json}"],
+        globPatterns: ["**/*.{js,css,html,svg,png,ico}", "cesium/Assets/**/*.{jpg,png,xml,json}"],
         globIgnores: ["cesium/ThirdParty/**/*", "cesium/Widgets/**/*", "cesium/Workers/**/*", "cesium/Assets/Textures/maki/*", "**/*.map"],
         sourcemap: true,
         navigateFallback: "/index.html",
@@ -152,6 +153,7 @@ export default defineConfig({
       },
     }),
   ],
+  resolve: { tsconfigPaths: true },
   worker: {
     format: "es",
   },

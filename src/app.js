@@ -1,21 +1,20 @@
-import { createApp, markRaw } from "vue";
+import { library } from "@fortawesome/fontawesome-svg-core";
+import { faGithub } from "@fortawesome/free-brands-svg-icons";
+import { faLayerGroup, faGlobeAfrica, faMobileAlt, faHammer, faEye } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
+import Aura from "@primeuix/themes/aura";
 import { createPinia } from "pinia";
 import PrimeVue from "primevue/config";
-import Aura from "@primeuix/themes/aura";
-import Tooltip from "primevue/tooltip";
 import ToastService from "primevue/toastservice";
-
-import { library } from "@fortawesome/fontawesome-svg-core";
-import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
-import { faLayerGroup, faGlobeAfrica, faMobileAlt, faHammer, faEye } from "@fortawesome/free-solid-svg-icons";
-import { faGithub } from "@fortawesome/free-brands-svg-icons";
+import Tooltip from "primevue/tooltip";
+import { createApp, markRaw } from "vue";
 
 import App from "./App.vue";
-import { router, setupRouterGuards } from "./router";
-import piniaUrlSync from "./modules/util/pinia-plugin-url-sync";
-import { CesiumController } from "./modules/CesiumController";
-import { getConfigPreset } from "./config/presets";
 import { usePWAUpdate } from "./composables/usePWAUpdate";
+import { getConfigPreset } from "./config/presets";
+import { CesiumController } from "./modules/CesiumController";
+import piniaUrlSync from "./modules/util/pinia-plugin-url-sync";
+import { router, setupRouterGuards } from "./router";
 
 // Register Service Worker with automatic reload on update
 usePWAUpdate({ autoUpdate: true });
