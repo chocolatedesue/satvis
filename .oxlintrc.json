@@ -7,10 +7,11 @@
     "perf": "warn"
   },
   "rules": {
-    "no-console": "off",
+    "consistent-function-scoping": "off",
     "import/no-unassigned-import": ["warn", { "allow": ["**/*.css", "**/CesiumSampledPositionRawValueAccess"] }],
-    "typescript/no-extraneous-class": "off",
-    "no-underscore-dangle": "off"
+    "no-console": "off",
+    "no-underscore-dangle": "off",
+    "typescript/no-extraneous-class": "off"
   },
   "env": {
     "builtin": true,
