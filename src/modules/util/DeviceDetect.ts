@@ -1,5 +1,5 @@
 export class DeviceDetect {
-  static inIframe() {
+  static inIframe(): boolean {
     try {
       return window.self !== window.top;
     } catch {
@@ -7,37 +7,38 @@ export class DeviceDetect {
     }
   }
 
-  static hasTouch() {
+  static hasTouch(): boolean {
     return window.matchMedia("(pointer: coarse)").matches;
   }
 
-  static canHover() {
+  static canHover(): boolean {
     return !window.matchMedia("(hover: none)").matches;
   }
 
-  static isIos() {
+  static isIos(): boolean {
     const userAgent = window.navigator.userAgent.toLowerCase();
     return /iphone|ipad|ipod/.test(userAgent);
   }
 
-  static isSafari() {
+  static isSafari(): boolean {
     const userAgent = window.navigator.userAgent.toLowerCase();
     return /safari/.test(userAgent);
   }
 
-  static isInStandaloneMode() {
-    return "standalone" in window.navigator && window.navigator.standalone;
+  static isInStandaloneMode(): boolean {
+    // Non-standard Safari property
+    return "standalone" in window.navigator && Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
   }
 
-  static isiPhoneWithNotch() {
+  static isiPhoneWithNotch(): boolean {
     return this.isIos() && /iPhone X/.test(this.getiPhoneModel());
   }
 
-  static isiPhoneWithNotchVisible() {
+  static isiPhoneWithNotchVisible(): boolean {
     return this.isiPhoneWithNotch() && (this.isInStandaloneMode() || !this.isSafari());
   }
 
-  static getiPhoneModel() {
+  static getiPhoneModel(): string {
     // Detect iPhone model
     // Based on: https://51degrees.com/blog/website-optimisation-for-apple-devices-ipad-and-iphone
     const ratio = window.devicePixelRatio;

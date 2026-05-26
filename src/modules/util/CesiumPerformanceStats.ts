@@ -1,19 +1,36 @@
 import { getTimestamp } from "@cesium/engine";
 
-const fmt = (n) => n.toFixed(2).padStart(8);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Scene = any;
+
+const fmt = (n: number): string => n.toFixed(2).padStart(8);
+
+export interface CesiumPerformanceStatsResult {
+  avgFps: number;
+  avgFrameTime: number;
+  worstFrameTime: number;
+}
 
 // A Cesium Performance Monitor that logs avarage and worst performance over a sample period
 export class CesiumPerformanceStats {
-  constructor(scene, logContinuously = false) {
-    this.scene = scene;
-    this.sampleCount = 60;
-    this.idx = 0;
-    this.postRenderTimes = [];
-    this.discardNext = true;
+  scene: Scene;
 
-    this.avgFps = 0;
-    this.avgFrameTime = 0;
-    this.worstFrameTime = 0;
+  sampleCount = 60;
+
+  idx = 0;
+
+  postRenderTimes: number[] = [];
+
+  discardNext = true;
+
+  avgFps = 0;
+
+  avgFrameTime = 0;
+
+  worstFrameTime = 0;
+
+  constructor(scene: Scene, logContinuously = false) {
+    this.scene = scene;
 
     // Disable requestRenderMode to caclulate time betweeen consecutive postRender events
     // This is required as many updates happen during clock onTick events before scene.preUpdate is called
@@ -41,20 +58,26 @@ export class CesiumPerformanceStats {
     });
   }
 
-  calculateStats() {
+  calculateStats(): void {
     this.worstFrameTime = 0;
     for (let i = 0; i < this.sampleCount - 1; i += 1) {
-      const frametime = this.postRenderTimes[i + 1] - this.postRenderTimes[i];
+      const a = this.postRenderTimes[i + 1];
+      const b = this.postRenderTimes[i];
+      if (a === undefined || b === undefined) continue;
+      const frametime = a - b;
       if (frametime > this.worstFrameTime) {
         this.worstFrameTime = frametime;
       }
     }
-    const duration = this.postRenderTimes[this.sampleCount - 1] - this.postRenderTimes[0];
+    const last = this.postRenderTimes[this.sampleCount - 1];
+    const first = this.postRenderTimes[0];
+    if (last === undefined || first === undefined) return;
+    const duration = last - first;
     this.avgFps = this.sampleCount / (duration / 1000);
     this.avgFrameTime = duration / this.sampleCount;
   }
 
-  reset(discardNext = true) {
+  reset(discardNext = true): void {
     this.idx = 0;
     this.discardNext = discardNext;
     this.avgFps = 0;
@@ -62,7 +85,7 @@ export class CesiumPerformanceStats {
     this.worstFrameTime = 0;
   }
 
-  getStats() {
+  getStats(): CesiumPerformanceStatsResult {
     return {
       avgFps: this.avgFps,
       avgFrameTime: this.avgFrameTime,
@@ -70,7 +93,7 @@ export class CesiumPerformanceStats {
     };
   }
 
-  formatStats() {
+  formatStats(): string {
     return `Avg FPS: ${fmt(this.avgFps)}; Avg Frametime: ${fmt(this.avgFrameTime)}; Worst Frametime: ${fmt(this.worstFrameTime)};`;
   }
 }

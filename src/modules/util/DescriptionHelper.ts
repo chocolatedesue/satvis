@@ -6,28 +6,34 @@ import utc from "dayjs/plugin/utc";
 dayjs.extend(relativeTime);
 dayjs.extend(utc);
 
-function pad2(num) {
+function pad2(num: number | string): string {
   return String(num).padStart(2, "0");
 }
+
+// Loose typings for Pass and related domain objects; tighten when domain modules
+// are migrated in Phase 2.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Pass = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Position = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SatelliteDescriptionProps = any;
 
 export class DescriptionHelper {
   /** cachedCallbackProperty
    * Caches the results of a callback property to prevent unnecessary recalculation.
-   * @param {function} callback - The amount of simulation time to use the calculated result
-   * @param {number} updateTreshold - The amount of simulation time to use the calculated result
-   * @param {number} usageTreshold - The number of invocations to serve the same result
    */
-  static cachedCallbackProperty(callback, updateTreshold = 1, usageTreshold = 1000) {
-    let cache;
-    return new CallbackProperty((time) => {
-      if (cache && JulianDate.equalsEpsilon(time, cache.time, updateTreshold) && cache.usage < usageTreshold) {
-        // console.log("Cached callback", time, cache.usage);
+  static cachedCallbackProperty<T>(callback: (time: JulianDate) => T, updateTreshold = 1, usageTreshold = 1000): CallbackProperty {
+    let cache: { time: JulianDate; content: T; usage: number } | undefined;
+    return new CallbackProperty((time?: JulianDate) => {
+      const t = time ?? JulianDate.now();
+      if (cache && JulianDate.equalsEpsilon(t, cache.time, updateTreshold) && cache.usage < usageTreshold) {
         cache.usage += 1;
         return cache.content;
       }
-      const content = callback(time);
+      const content = callback(t);
       cache = {
-        time,
+        time: t,
         content,
         usage: 0,
       };
@@ -35,7 +41,7 @@ export class DescriptionHelper {
     }, false);
   }
 
-  static renderSatelliteDescription(time, position, props) {
+  static renderSatelliteDescription(time: JulianDate, position: Position, props: SatelliteDescriptionProps): string {
     const { name, passes, orbit, overpassMode } = props;
     const { tle, julianDate } = orbit;
     const description = `
@@ -68,7 +74,7 @@ export class DescriptionHelper {
     return description;
   }
 
-  static renderGroundstationDescription(time, name, position, passes, overpassMode = null) {
+  static renderGroundstationDescription(time: JulianDate, name: string, position: Position, passes: Pass[], overpassMode: string | null = null): string {
     const description = `
       <div class="ib">
         <h3>Position</h3>
@@ -94,7 +100,7 @@ export class DescriptionHelper {
     return description;
   }
 
-  static renderPasses(passes, time, isGroundStation, overpassMode) {
+  static renderPasses(passes: Pass[], time: JulianDate, isGroundStation: boolean, overpassMode: string | null): string {
     if (passes.length === 0) {
       if (isGroundStation) {
         return `
@@ -108,8 +114,8 @@ export class DescriptionHelper {
         `;
     }
 
-    const start = dayjs(time);
-    const upcomingPassIdx = passes.findIndex((pass) => dayjs(pass.end).isAfter(start));
+    const start = dayjs(time as unknown as Date);
+    const upcomingPassIdx = passes.findIndex((pass: Pass) => dayjs(pass.end).isAfter(start));
     if (upcomingPassIdx < 0) {
       return "";
     }
@@ -117,8 +123,9 @@ export class DescriptionHelper {
 
     const passNameField = isGroundStation ? "name" : "groundStationName";
     const htmlName = passNameField ? "<th>Name</th>\n" : "";
+    const mode = overpassMode ?? "elevation";
     const html = `
-      <h3>Passes (${overpassMode.charAt(0).toUpperCase() + overpassMode.slice(1)})</h3>
+      <h3>Passes (${mode.charAt(0).toUpperCase() + mode.slice(1)})</h3>
       <table class="ibt">
         <thead>
           <tr>
@@ -126,29 +133,31 @@ export class DescriptionHelper {
             <th>Countdown</th>
             <th>Start</th>
             <th>End</th>
-            <th>${overpassMode === "elevation" ? "El" : "Dist"}</th>
-            <th>${overpassMode === "elevation" ? "Az" : "Swath"}</th>
+            <th>${mode === "elevation" ? "El" : "Dist"}</th>
+            <th>${mode === "elevation" ? "Az" : "Swath"}</th>
           </tr>
         </thead>
         <tbody>
-          ${upcomingPasses.map((pass) => this.renderPass(start, pass, passNameField, overpassMode)).join("")}
+          ${upcomingPasses.map((pass: Pass) => this.renderPass(start, pass, passNameField, mode)).join("")}
         </tbody>
       </table>
     `;
     return html;
   }
 
-  static renderPass(time, pass, passNameField = "name", overpassMode = "elevation") {
+  static renderPass(time: dayjs.Dayjs | JulianDate, pass: Pass, passNameField: string = "name", overpassMode: string = "elevation"): string {
     let countdown = "ONGOING";
-    if (dayjs(pass.end).diff(time) < 0) {
+    if (dayjs(pass.end).diff(time as unknown as Date) < 0) {
       countdown = "PREVIOUS";
-    } else if (dayjs(pass.start).diff(time) > 0) {
-      countdown = `${pad2(dayjs(pass.start).diff(time, "days"))}:${pad2(dayjs(pass.start).diff(time, "hours") % 24)}:${pad2(dayjs(pass.start).diff(time, "minutes") % 60)}:${pad2(dayjs(pass.start).diff(time, "seconds") % 60)}`;
+    } else if (dayjs(pass.start).diff(time as unknown as Date) > 0) {
+      const t = time as unknown as Date;
+      countdown = `${pad2(dayjs(pass.start).diff(t, "days"))}:${pad2(dayjs(pass.start).diff(t, "hours") % 24)}:${pad2(dayjs(pass.start).diff(t, "minutes") % 60)}:${pad2(dayjs(pass.start).diff(t, "seconds") % 60)}`;
     }
     const htmlName = passNameField ? `<td>${pass[passNameField]}</td>\n` : "";
 
     // Handle different pass types based on overpass mode
-    let elevationCell, azimuthCell;
+    let elevationCell: string;
+    let azimuthCell: string;
     if (overpassMode === "swath") {
       elevationCell = `${pass.minDistance.toFixed(1)}km`;
       azimuthCell = `${pass.swathWidth.toFixed(0)}km`;
@@ -171,11 +180,11 @@ export class DescriptionHelper {
     return html;
   }
 
-  static renderTLE(tle, julianDate) {
+  static renderTLE(tle: string[], julianDate: number): string {
     const julianDayNumber = Math.floor(julianDate);
     const secondsOfDay = (julianDate - julianDayNumber) * 60 * 60 * 24;
     const tleDate = new JulianDate(julianDayNumber, secondsOfDay);
-    const formattedDate = dayjs.utc(tleDate).format("YYYY-MM-DD HH:mm:ss");
+    const formattedDate = dayjs.utc(tleDate as unknown as Date).format("YYYY-MM-DD HH:mm:ss");
     const html = `
       <h3>TLE (Epoch ${formattedDate})</h3>
       <div class="ib-code"><code>${tle.slice(1, 3).join("\n")}</code></div>`;

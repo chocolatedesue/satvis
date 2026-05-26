@@ -1,7 +1,15 @@
 import { Color, JulianDate } from "@cesium/engine";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Viewer = any;
+
+export interface TimelineRange {
+  start: string | number | Date;
+  end: string | number | Date;
+}
+
 export class CesiumTimelineHelper {
-  static clearHighlightRanges(viewer) {
+  static clearHighlightRanges(viewer: Viewer): void {
     if (!viewer.timeline || viewer.timeline._highlightRanges.length === 0) {
       return;
     }
@@ -11,7 +19,7 @@ export class CesiumTimelineHelper {
     viewer.timeline.zoomTo(viewer.clock.startTime, viewer.clock.stopTime);
   }
 
-  static addHighlightRanges(viewer, ranges) {
+  static addHighlightRanges(viewer: Viewer, ranges: TimelineRange[]): void {
     if (!viewer.timeline) {
       return;
     }
@@ -25,7 +33,7 @@ export class CesiumTimelineHelper {
     });
   }
 
-  static updateHighlightRanges(viewer, ranges) {
+  static updateHighlightRanges(viewer: Viewer, ranges: TimelineRange[]): void {
     this.clearHighlightRanges(viewer);
     this.addHighlightRanges(viewer, ranges);
   }

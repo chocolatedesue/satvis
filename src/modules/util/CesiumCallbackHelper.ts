@@ -1,15 +1,17 @@
 import { JulianDate } from "@cesium/engine";
 
+// Use `any` for Cesium viewer/event - tightening Cesium types is out of scope.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Viewer = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CesiumEvent = any;
+
 export class CesiumCallbackHelper {
   /**
    * Register an event listener that will execute a callback every refreshRate ticks of clock time.
-   * @param {Cesium.Viewer} viewer - Cesium viewer
-   * @param {Function} callback - function to execute
-   * @param {Number} refreshRate - in ticks
-   * @param {Cesium.Event} event - event to listen to (e.g. viewer.clock.onTick)
-   * @returns {Function} - function to remove the event listener
+   * @returns function to remove the event listener
    */
-  static createPeriodicTickCallback(viewer, refreshRate, callback, event = viewer.clock.onTick) {
+  static createPeriodicTickCallback(viewer: Viewer, refreshRate: number, callback: (time: JulianDate) => void, event: CesiumEvent = viewer.clock.onTick): () => void {
     let ticks = 0;
     return event.addEventListener(() => {
       if (ticks < refreshRate) {
@@ -23,13 +25,9 @@ export class CesiumCallbackHelper {
 
   /**
    * Register an event listener that will execute a callback every refreshRate seconds of clock time.
-   * @param {Cesium.Viewer} viewer - Cesium viewer
-   * @param {Function} callback - function to execute
-   * @param {Number} refreshRate - in seconds
-   * @param {Cesium.Event} event - event to listen to (e.g. viewer.clock.onTick)
-   * @returns {Function} - function to remove the event listener
+   * @returns function to remove the event listener
    */
-  static createPeriodicTimeCallback(viewer, refreshRate, callback, event = viewer.clock.onTick) {
+  static createPeriodicTimeCallback(viewer: Viewer, refreshRate: number, callback: (time: JulianDate) => void, event: CesiumEvent = viewer.clock.onTick): () => void {
     let lastUpdated = viewer.clock.currentTime;
     return event.addEventListener(() => {
       const time = viewer.clock.currentTime;
