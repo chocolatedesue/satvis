@@ -112,7 +112,7 @@
           Decrease play speed
         </label>
         <label class="toolbarSwitch">
-          <input type="button" @click="($router.go as unknown as (to: unknown) => void)({ path: '', force: true })" />
+          <input type="button" @click="reload" />
           Reload
         </label>
       </div>
@@ -277,6 +277,9 @@ export default {
       if (!cc.minimalUI) {
         cc.showUI = this.showUI;
       }
+    },
+    reload() {
+      window.location.reload();
     },
   },
 };
