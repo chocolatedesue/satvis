@@ -1,4 +1,11 @@
 // Paste into browser console in a clean session without satellites visible
+// This file is not bundled; it is intended to be pasted into the browser console.
+declare global {
+  interface Performance {
+    memory?: { usedJSHeapSize: number };
+  }
+}
+
 cc.enablePerformanceStats();
 const satelliteTag = "Active";
 const satelliteCounts = [0, 10, 50, 100, 500, 1000, 5000];
@@ -11,27 +18,27 @@ const componentTests = [
   // ["Point", "Label", "Orbit", "Orbit track", "Ground track", "Sensor cone"],
 ];
 
-function sleep(s) {
+function sleep(s: number): Promise<void> {
   return new Promise((r) => {
     setTimeout(r, s * 1000);
   });
 }
 
-async function logPerformance() {
-  cc.performanceStats.reset();
+async function logPerformance(): Promise<void> {
+  cc.performanceStats!.reset();
   // Wait for performance to settle and stats to be updated
-  while (cc.performanceStats.getStats().avgFps === 0) {
+  while (cc.performanceStats!.getStats().avgFps === 0) {
     // eslint-disable-next-line no-await-in-loop
     await sleep(1);
   }
   console.log(
-    cc.performanceStats.formatStats(),
+    cc.performanceStats!.formatStats(),
     `Satellites: ${cc.sats.visibleSatellites.length.toString().padStart(5)}; Components: ${cc.sats.enabledComponents};`,
     `Memory: ${((performance.memory?.usedJSHeapSize || 0) / 1024 / 1024).toFixed(2)};`,
   );
 }
 
-async function test() {
+async function test(): Promise<void> {
   for (const components of componentTests) {
     for (const satelliteCount of satelliteCounts) {
       cc.sats.enabledComponents = components;
