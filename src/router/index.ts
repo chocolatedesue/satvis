@@ -1,12 +1,13 @@
-import { createRouter, createWebHistory } from "vue-router";
+import { createRouter, createWebHistory, type Router } from "vue-router";
 
 import Satvis from "../components/Satvis.vue";
 import { usePostHog } from "../composables/usePostHog";
 import { getConfigPreset, updateMetadata } from "../config/presets";
+import type { CesiumController } from "../modules/CesiumController";
 
-const base = document.location.pathname.match(".*/")[0];
+const base = document.location.pathname.match(".*/")?.[0] ?? "/";
 
-export const router = createRouter({
+export const router: Router = createRouter({
   history: createWebHistory(base),
   routes: [
     { path: "/", component: Satvis, name: "default" },
@@ -23,7 +24,7 @@ export const router = createRouter({
  * Router guard to handle configuration changes when navigating between routes
  * Note: Initial load is handled in main.js before mounting
  */
-export function setupRouterGuards(routerInstance, cc) {
+export function setupRouterGuards(routerInstance: Router, cc: CesiumController): void {
   routerInstance.beforeEach((to, from, next) => {
     console.log(`Navigating to ${to.path} from ${from.path}`);
 

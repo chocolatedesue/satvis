@@ -105,8 +105,7 @@ export class SatelliteManager {
   }
 
   updateStore(): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const satStore = useSatStore() as any;
+    const satStore = useSatStore();
     satStore.availableTags = this.tags;
     satStore.availableSatellitesByTag = this.taglist;
   }
@@ -175,8 +174,7 @@ export class SatelliteManager {
     this.#enabledSatellites = newSats;
     this.showEnabledSatellites();
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const satStore = useSatStore() as any;
+    const satStore = useSatStore();
     satStore.enabledSatellites = newSats;
   }
 
@@ -223,8 +221,7 @@ export class SatelliteManager {
     this.#enabledTags = newTags;
     this.showEnabledSatellites();
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const satStore = useSatStore() as any;
+    const satStore = useSatStore();
     satStore.enabledTags = newTags;
   }
 
@@ -305,8 +302,7 @@ export class SatelliteManager {
     });
 
     // Update store for url state
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const satStore = useSatStore() as any;
+    const satStore = useSatStore();
     const serialized: SerializedGroundStation[] = this.#groundStations.map((gs) => ({
       lat: gs.position.latitude,
       lon: gs.position.longitude,
