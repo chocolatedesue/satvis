@@ -5,7 +5,7 @@
   </div>
 </template>
 
-<script>
+<script lang="ts">
 import "@cesium/widgets/Source/widgets.css";
 import "./css/main.css";
 import Toast from "primevue/toast";

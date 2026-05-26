@@ -112,7 +112,7 @@
           Decrease play speed
         </label>
         <label class="toolbarSwitch">
-          <input type="button" @click="$router.go({ path: '', force: true })" />
+          <input type="button" @click="($router.go as unknown as (to: unknown) => void)({ path: '', force: true })" />
           Reload
         </label>
       </div>
@@ -174,13 +174,16 @@
   </div>
 </template>
 
-<script>
+<script lang="ts">
 import { mapWritableState } from "pinia";
 
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
+import type { SerializedGroundStation } from "../stores/sat";
 import { useSatStore } from "../stores/sat";
 import SatelliteSelect from "./SatelliteSelect.vue";
+
+type MenuKey = "cat" | "sat" | "gs" | "map" | "ios" | "dbg";
 
 export default {
   components: {
@@ -195,7 +198,7 @@ export default {
         map: false,
         ios: false,
         dbg: false,
-      },
+      } as Record<MenuKey, boolean>,
       showUI: true,
     };
   },
@@ -205,7 +208,7 @@ export default {
   },
   watch: {
     layers: {
-      handler(newLayers, oldLayers) {
+      handler(newLayers: string[], oldLayers: string[]) {
         // Ensure only a single base layer is active
         const newBaseLayers = newLayers.filter((layer) => cc.baseLayers.includes(layer));
         if (newBaseLayers.length > 1) {
@@ -217,54 +220,54 @@ export default {
       },
       deep: true,
     },
-    terrainProvider(newProvider) {
+    terrainProvider(newProvider: string) {
       cc.terrainProvider = newProvider;
     },
-    sceneMode(newMode) {
+    sceneMode(newMode: string) {
       cc.sceneMode = newMode;
     },
-    cameraMode(newMode) {
+    cameraMode(newMode: string) {
       cc.cameraMode = newMode;
     },
     qualityPreset: {
-      handler(value) {
+      handler(value: string) {
         cc.qualityPreset = value;
       },
       immediate: true,
     },
-    showFps(value) {
+    showFps(value: boolean) {
       cc.showFps = value;
     },
-    background(value) {
+    background(value: boolean) {
       cc.background = value;
     },
     enabledComponents: {
-      handler(newComponents) {
+      handler(newComponents: string[]) {
         cc.sats.enabledComponents = newComponents;
       },
       deep: true,
     },
-    groundStations(newGroundStations, oldGroundStations) {
+    groundStations(newGroundStations: SerializedGroundStation[], oldGroundStations: SerializedGroundStation[]) {
       // Ignore if new and old positions are identical
       if (oldGroundStations.length === newGroundStations.length) {
         return;
       }
       cc.setGroundStations(newGroundStations);
     },
-    overpassMode(newMode) {
+    overpassMode(newMode: string) {
       cc.sats.overpassMode = newMode;
     },
   },
   mounted() {
     if (this.$route.query.time) {
-      cc.setTime(this.$route.query.time);
+      cc.setTime(this.$route.query.time as string);
     }
     this.showUI = !DeviceDetect.inIframe();
   },
   methods: {
-    toggleMenu(name) {
+    toggleMenu(name: MenuKey) {
       const oldState = this.menu[name];
-      Object.keys(this.menu).forEach((k) => {
+      (Object.keys(this.menu) as MenuKey[]).forEach((k) => {
         this.menu[k] = false;
       });
       this.menu[name] = !oldState;

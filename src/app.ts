@@ -16,6 +16,12 @@ import { CesiumController } from "./modules/CesiumController";
 import piniaUrlSync from "./modules/util/pinia-plugin-url-sync";
 import { router, setupRouterGuards } from "./router";
 
+declare module "vue" {
+  interface ComponentCustomProperties {
+    cc: CesiumController;
+  }
+}
+
 // Register Service Worker with automatic reload on update
 usePWAUpdate({ autoUpdate: true });
 
