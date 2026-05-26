@@ -1,4 +1,5 @@
 import { BillboardGraphics, type CallbackProperty, HorizontalOrigin, type JulianDate, NearFarScalar, VerticalOrigin } from "@cesium/engine";
+import type { Viewer } from "@cesium/widgets";
 import dayjs from "dayjs";
 
 import icon from "../images/icons/dish.svg";
@@ -6,9 +7,6 @@ import type { SatelliteManager } from "./SatelliteManager";
 import type { Pass } from "./SatelliteProperties";
 import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
 import { DescriptionHelper } from "./util/DescriptionHelper";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Viewer = any;
 
 export interface GroundStationPositionData {
   latitude: number;

@@ -1,7 +1,6 @@
-import { CesiumCallbackHelper } from "./CesiumCallbackHelper";
+import type { Viewer } from "@cesium/widgets";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Viewer = any;
+import { CesiumCallbackHelper } from "./CesiumCallbackHelper";
 
 export class CesiumCleanupHelper {
   // Cleanup leftover Cesium internal data after removing satellites
@@ -11,7 +10,10 @@ export class CesiumCleanupHelper {
       console.info("Removing leftover Cesium internal data");
       onTickEventRemovalCallback();
 
-      const primitives = viewer.scene.primitives;
+      // Walk Cesium's internal primitive/label/billboard graph - none of these
+      // underscore-prefixed members are part of the public type definitions.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const primitives = viewer.scene.primitives as any;
       const labelCollection = primitives?._primitives[0]?._primitives[0]?._primitives[0]?._labelCollection;
       const spareBillboards = labelCollection?._spareBillboards;
       const billboardCollection = labelCollection?._billboardCollection;

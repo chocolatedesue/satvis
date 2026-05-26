@@ -11,13 +11,11 @@ import {
   Transforms,
   defined,
 } from "@cesium/engine";
+import type { Viewer } from "@cesium/widgets";
 
 import Orbit, { type ElevationPass, type GroundStationPosition, type SwathPass } from "./Orbit";
 import "./util/CesiumSampledPositionRawValueAccess";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Viewer = any;
 
 export type Pass = (ElevationPass | SwathPass) & { groundStationName?: string };
 

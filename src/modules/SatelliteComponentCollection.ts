@@ -33,6 +33,7 @@ import {
   VelocityOrientationProperty,
   defined,
 } from "@cesium/engine";
+import type { Viewer } from "@cesium/widgets";
 import CesiumSensorVolumes from "cesium-sensor-volumes";
 
 import { SatelliteProperties, type GroundStation } from "./SatelliteProperties";
@@ -41,8 +42,6 @@ import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
 import { CesiumTimelineHelper } from "./util/CesiumTimelineHelper";
 import { DescriptionHelper } from "./util/DescriptionHelper";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Viewer = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SatelliteComponentName = string;
 

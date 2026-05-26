@@ -1,10 +1,9 @@
+import type { Viewer } from "@cesium/widgets";
+
 import { useSatStore } from "../stores/sat";
 import { GroundStationEntity, type GroundStationPositionData } from "./GroundStationEntity";
 import { SatelliteComponentCollection } from "./SatelliteComponentCollection";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Viewer = any;
 
 interface SerializedGroundStation {
   lat: number;

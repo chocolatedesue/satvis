@@ -46,9 +46,6 @@ import infoBoxCss from "@cesium/widgets/Source/InfoBox/InfoBoxDescription.css?ra
 
 dayjs.extend(utc);
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyViewer = any;
-
 interface ImageryProviderEntry {
   create: () => ImageryProvider | Promise<ImageryProvider>;
   alpha: number;
@@ -73,7 +70,7 @@ declare global {
 }
 
 export class CesiumController {
-  viewer: AnyViewer;
+  viewer: Viewer;
 
   minimalUI: boolean;
 
@@ -691,13 +688,17 @@ export class CesiumController {
       "load",
       () => {
         // Inline infobox css as iframe does not use service worker
-        const { head } = frame.contentDocument;
+        const doc = frame.contentDocument;
+        if (!doc) {
+          return;
+        }
+        const { head } = doc;
         const links = head.getElementsByTagName("link");
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         [...(links as any)].forEach((link: HTMLLinkElement) => {
           head.removeChild(link);
         });
-        const style = frame.contentDocument.createElement("style");
+        const style = doc.createElement("style");
         const node = document.createTextNode(infoBoxCss + "\n" + infoBoxOverrideCss);
         style.appendChild(node);
         head.appendChild(style);

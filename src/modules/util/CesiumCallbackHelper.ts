@@ -1,8 +1,7 @@
 import { JulianDate } from "@cesium/engine";
+import type { Viewer } from "@cesium/widgets";
 
 // Use `any` for Cesium viewer/event - tightening Cesium types is out of scope.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Viewer = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type CesiumEvent = any;
 

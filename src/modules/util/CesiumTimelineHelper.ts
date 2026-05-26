@@ -1,7 +1,5 @@
 import { Color, JulianDate } from "@cesium/engine";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Viewer = any;
+import type { Viewer } from "@cesium/widgets";
 
 export interface TimelineRange {
   start: string | number | Date;

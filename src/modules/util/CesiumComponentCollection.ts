@@ -12,11 +12,10 @@ import {
   VelocityOrientationProperty,
   defined,
 } from "@cesium/engine";
+import type { Viewer } from "@cesium/widgets";
 
 import { CesiumCallbackHelper } from "./CesiumCallbackHelper";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Viewer = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Clock = any;
 
@@ -248,7 +247,7 @@ export class CesiumComponentCollection {
       () => {
         onUntrackCallback();
         // Restore default view angle if no new entity is tracked
-        if (typeof this.viewer.trackedEntity === "undefined") {
+        if (typeof this.viewer.trackedEntity === "undefined" && this.defaultEntity) {
           this.viewer.flyTo(this.defaultEntity, {
             offset: new HeadingPitchRange(0, CesiumMath.toRadians(-90.0), 2000000),
           });
