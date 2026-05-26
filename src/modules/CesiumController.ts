@@ -8,6 +8,7 @@ import {
   Credit,
   EllipsoidTerrainProvider,
   ImageryLayer,
+  type ImageryProvider,
   JulianDate,
   Math as CesiumMath,
   Matrix4,
@@ -15,6 +16,7 @@ import {
   SceneMode,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
+  type TerrainProvider,
   TileCoordinatesImageryProvider,
   TileMapServiceImageryProvider,
   TimeInterval,
@@ -32,7 +34,9 @@ import utc from "dayjs/plugin/utc";
 import { usePostHog } from "../composables/usePostHog";
 import { useToastProxy } from "../composables/useToastProxy";
 import { useCesiumStore } from "../stores/cesium";
+import type { GroundStationPositionData } from "./GroundStationEntity";
 import { SatelliteManager } from "./SatelliteManager";
+import type { Pass } from "./SatelliteProperties";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
 import { PushManager } from "./util/PushManager";
@@ -42,7 +46,55 @@ import infoBoxCss from "@cesium/widgets/Source/InfoBox/InfoBoxDescription.css?ra
 
 dayjs.extend(utc);
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyViewer = any;
+
+interface ImageryProviderEntry {
+  create: () => ImageryProvider | Promise<ImageryProvider>;
+  alpha: number;
+  base: boolean;
+}
+
+interface TerrainProviderEntry {
+  create: () => TerrainProvider | Promise<TerrainProvider>;
+  visible?: boolean;
+}
+
+interface SerializedGroundStationInput {
+  lat: number;
+  lon: number;
+  name?: string;
+}
+
+declare global {
+  interface Window {
+    cc?: CesiumController;
+  }
+}
+
 export class CesiumController {
+  viewer: AnyViewer;
+
+  minimalUI: boolean;
+
+  sats!: SatelliteManager;
+
+  pm!: PushManager;
+
+  sceneModes: string[] = [];
+
+  cameraModes: string[] = [];
+
+  activeLayers: string[] = [];
+
+  imageryProviders!: Record<string, ImageryProviderEntry>;
+
+  terrainProviders!: Record<string, TerrainProviderEntry>;
+
+  performanceStats: CesiumPerformanceStats | undefined;
+
+  oldBottomContainerStyleLeft: string = "";
+
   constructor() {
     this.initConstants();
     this.preloadReferenceFrameData();
@@ -50,7 +102,8 @@ export class CesiumController {
 
     this.viewer = new Viewer("cesiumContainer", {
       animation: !this.minimalUI,
-      baseLayer: this.createImageryLayer("OfflineHighres"),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      baseLayer: this.createImageryLayer("OfflineHighres") as any,
       baseLayerPicker: false,
       fullscreenButton: !this.minimalUI,
       fullscreenElement: document.body,
@@ -75,14 +128,6 @@ export class CesiumController {
     this.viewer.scene.highDynamicRange = true;
     this.viewer.scene.maximumRenderTimeChange = 1 / 30;
     this.viewer.scene.requestRenderMode = true;
-
-    // Cesium Performance Tools
-    // this.viewer.scene.debugShowFramesPerSecond = true;
-    // this.FrameRateMonitor = FrameRateMonitor.fromScene(this.viewer.scene);
-    // this.viewer.scene.postRender.addEventListener((scene) => {
-    //   console.log(this.FrameRateMonitor.lastFramesPerSecond)
-    // });
-    // this.performanceStats = new CesiumPerformanceStats(this.viewer.scene, true);
 
     // Export CesiumController for debugger
     window.cc = this;
@@ -116,7 +161,7 @@ export class CesiumController {
     this.activeLayers = [];
   }
 
-  initConstants() {
+  initConstants(): void {
     this.imageryProviders = {
       Offline: {
         create: () => TileMapServiceImageryProvider.fromUrl("/cesium/Assets/Textures/NaturalEarthII"),
@@ -168,7 +213,7 @@ export class CesiumController {
             tileWidth: 512,
             tileHeight: 512,
             credit: "NASA Global Imagery Browse Services for EOSDIS",
-          }),
+          } as any),
         alpha: 1,
         base: true,
       },
@@ -225,7 +270,7 @@ export class CesiumController {
     };
   }
 
-  preloadReferenceFrameData() {
+  preloadReferenceFrameData(): void {
     // Preload reference frame data for a timeframe of 180 days
     const timeInterval = new TimeInterval({
       start: JulianDate.addDays(JulianDate.now(), -60, new JulianDate()),
@@ -236,80 +281,78 @@ export class CesiumController {
     });
   }
 
-  get imageryProviderNames() {
+  get imageryProviderNames(): string[] {
     return Object.keys(this.imageryProviders);
   }
 
-  get baseLayers() {
+  get baseLayers(): string[] {
     return Object.entries(this.imageryProviders)
       .filter(([, val]) => val.base)
       .map(([key]) => key);
   }
 
-  get overlayLayers() {
+  get overlayLayers(): string[] {
     return Object.entries(this.imageryProviders)
       .filter(([, val]) => !val.base)
       .map(([key]) => key);
   }
 
-  set imageryLayers(newLayerNames) {
+  set imageryLayers(newLayerNames: string[]) {
     this.clearImageryLayers();
     newLayerNames.forEach((layerName) => {
-      const [name, alpha] = layerName.split("_");
-      const layer = this.createImageryLayer(name, alpha);
+      const [name, alphaStr] = layerName.split("_");
+      const alpha = alphaStr === undefined ? undefined : Number(alphaStr);
+      const layer = this.createImageryLayer(name as string, alpha);
       if (layer) {
         this.viewer.scene.imageryLayers.add(layer);
       }
     });
   }
 
-  clearImageryLayers() {
+  clearImageryLayers(): void {
     this.viewer.scene.imageryLayers.removeAll();
   }
 
-  createImageryLayer(imageryProviderName, alpha) {
+  createImageryLayer(imageryProviderName: string, alpha?: number): ImageryLayer | false {
     if (!this.imageryProviderNames.includes(imageryProviderName)) {
       console.error("Unknown imagery layer");
       return false;
     }
 
-    const provider = this.imageryProviders[imageryProviderName];
-    const layer = ImageryLayer.fromProviderAsync(provider.create());
-    if (alpha === undefined) {
-      layer.alpha = provider.alpha;
-    } else {
-      layer.alpha = alpha;
-    }
+    const provider = this.imageryProviders[imageryProviderName] as ImageryProviderEntry;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const layer = ImageryLayer.fromProviderAsync(provider.create() as any, {});
+    layer.alpha = alpha === undefined ? provider.alpha : alpha;
     return layer;
   }
 
-  get terrainProviderNames() {
+  get terrainProviderNames(): string[] {
     return Object.entries(this.terrainProviders)
       .filter(([, val]) => val.visible ?? true)
       .map(([key]) => key);
   }
 
-  set terrainProvider(terrainProviderName) {
+  set terrainProvider(terrainProviderName: string) {
     this.updateTerrainProvider(terrainProviderName);
   }
 
-  async updateTerrainProvider(terrainProviderName) {
+  async updateTerrainProvider(terrainProviderName: string): Promise<void> {
     if (!this.terrainProviderNames.includes(terrainProviderName)) {
       console.error("Unknown terrain provider");
       return;
     }
 
-    const provider = await this.terrainProviders[terrainProviderName].create();
+    const provider = await (this.terrainProviders[terrainProviderName] as TerrainProviderEntry).create();
     this.viewer.terrainProvider = provider;
   }
 
-  set sceneMode(sceneMode) {
+  set sceneMode(sceneMode: string) {
     if (sceneMode === "3D") {
       this.viewer.scene.morphTo3D();
       return;
     }
 
-    const morph = () => {
+    const morph = (): void => {
       if (sceneMode === "2D") {
         this.viewer.scene.morphTo2D();
         return;
@@ -322,14 +365,14 @@ export class CesiumController {
     if (this.sats.enabledComponents.includes("Orbit")) {
       this.sats.disableComponent("Orbit");
 
-      const enableOrbits = () => {
+      const enableOrbits = (): void => {
         this.sats.enableComponent("Orbit");
         this.viewer.scene.morphComplete.removeEventListener(enableOrbits);
       };
       this.viewer.scene.morphComplete.addEventListener(enableOrbits);
 
       // wait until orbit elements are removed
-      const checkPending = () => {
+      const checkPending = (): void => {
         if (!this.sats.pendingUpdate) {
           morph();
         } else {
@@ -342,7 +385,7 @@ export class CesiumController {
     }
   }
 
-  jumpTo(location) {
+  jumpTo(location: string): void {
     switch (location) {
       case "Everest": {
         const target = new Cartesian3(300770.50872389384, 5634912.131394585, 2978152.2865545116);
@@ -363,7 +406,7 @@ export class CesiumController {
     }
   }
 
-  set cameraMode(cameraMode) {
+  set cameraMode(cameraMode: string) {
     switch (cameraMode) {
       case "Inertial":
         this.viewer.scene.postUpdate.addEventListener(this.cameraTrackEci);
@@ -376,7 +419,8 @@ export class CesiumController {
     }
   }
 
-  cameraTrackEci(scene, time) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cameraTrackEci(scene: any, time: JulianDate): void {
     if (scene.mode !== SceneMode.SCENE3D) {
       return;
     }
@@ -390,7 +434,11 @@ export class CesiumController {
     }
   }
 
-  setTime(current, start = dayjs.utc(current).subtract(12, "hour").toISOString(), stop = dayjs.utc(current).add(7, "day").toISOString()) {
+  setTime(
+    current: string | number | Date,
+    start: string = dayjs.utc(current).subtract(12, "hour").toISOString(),
+    stop: string = dayjs.utc(current).add(7, "day").toISOString(),
+  ): void {
     this.viewer.clock.startTime = JulianDate.fromIso8601(dayjs.utc(start).toISOString());
     this.viewer.clock.stopTime = JulianDate.fromIso8601(dayjs.utc(stop).toISOString());
     this.viewer.clock.currentTime = JulianDate.fromIso8601(dayjs.utc(current).toISOString());
@@ -400,9 +448,10 @@ export class CesiumController {
     }
   }
 
-  createInputHandler() {
+  createInputHandler(): void {
     const handler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
-    handler.setInputAction((event) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    handler.setInputAction((event: any) => {
       const { pickMode } = useCesiumStore();
       if (!pickMode) {
         return;
@@ -411,72 +460,70 @@ export class CesiumController {
     }, ScreenSpaceEventType.LEFT_CLICK);
   }
 
-  setGroundStationFromClickEvent(event) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setGroundStationFromClickEvent(event: any): void {
     const cartesian = this.viewer.camera.pickEllipsoid(event.position);
     const didHitGlobe = defined(cartesian);
     if (didHitGlobe) {
-      const coordinates = {};
       const cartographicPosition = Cartographic.fromCartesian(cartesian);
-      coordinates.longitude = CesiumMath.toDegrees(cartographicPosition.longitude);
-      coordinates.latitude = CesiumMath.toDegrees(cartographicPosition.latitude);
-      coordinates.height = CesiumMath.toDegrees(cartographicPosition.height);
-      coordinates.cartesian = cartesian;
-      this.sats.addGroundStation(coordinates);
+      const coordinates: GroundStationPositionData = {
+        longitude: CesiumMath.toDegrees(cartographicPosition.longitude),
+        latitude: CesiumMath.toDegrees(cartographicPosition.latitude),
+        height: CesiumMath.toDegrees(cartographicPosition.height),
+        cartesian,
+      };
+      this.sats.addGroundStation(coordinates, "");
       useCesiumStore().pickMode = false;
     }
   }
 
-  setGroundStationFromGeolocation() {
+  setGroundStationFromGeolocation(): void {
     navigator.geolocation.getCurrentPosition((position) => {
       if (typeof position === "undefined") {
         return;
       }
-      const coordinates = {};
-      coordinates.longitude = position.coords.longitude;
-      coordinates.latitude = position.coords.latitude;
-      coordinates.height = position.coords.altitude;
-      coordinates.cartesian = Cartesian3.fromDegrees(coordinates.longitude, coordinates.latitude, coordinates.height);
+      const coordinates: GroundStationPositionData = {
+        longitude: position.coords.longitude,
+        latitude: position.coords.latitude,
+        height: position.coords.altitude ?? 0,
+        cartesian: Cartesian3.fromDegrees(position.coords.longitude, position.coords.latitude, position.coords.altitude ?? 0),
+      };
       this.sats.addGroundStation(coordinates, "Geolocation");
     });
   }
 
-  setGroundStationFromLatLon(lat, lon, height = 0) {
+  setGroundStationFromLatLon(lat: number, lon: number, height = 0): void {
     if (!lat || !lon) {
       return;
     }
-    const coordinates = {
+    const coordinates: GroundStationPositionData = {
       longitude: lon,
       latitude: lat,
       height,
+      cartesian: Cartesian3.fromDegrees(lon, lat, height),
     };
-    coordinates.longitude = lon;
-    coordinates.latitude = lat;
-    coordinates.height = height;
-    coordinates.cartesian = Cartesian3.fromDegrees(coordinates.longitude, coordinates.latitude, coordinates.height);
-    this.sats.addGroundStation(coordinates);
+    this.sats.addGroundStation(coordinates, "");
   }
 
-  setGroundStations(groundStations) {
-    if (!groundStations && groundStations.length === 0) {
+  setGroundStations(groundStations: SerializedGroundStationInput[]): void {
+    if (!groundStations || groundStations.length === 0) {
       return;
     }
-    const groundStationEntities = [];
-    groundStations.forEach((gs) => {
-      if (!gs.lat || !gs.lon) {
-        return;
-      }
-      const coordinates = {
-        longitude: gs.lon,
-        latitude: gs.lat,
-        height: 0,
-      };
-      coordinates.cartesian = Cartesian3.fromDegrees(coordinates.longitude, coordinates.latitude, coordinates.height);
-      groundStationEntities.push(this.sats.createGroundstation(coordinates, gs.name));
-    });
+    const groundStationEntities = groundStations
+      .filter((gs) => gs.lat && gs.lon)
+      .map((gs) => {
+        const coordinates: GroundStationPositionData = {
+          longitude: gs.lon,
+          latitude: gs.lat,
+          height: 0,
+          cartesian: Cartesian3.fromDegrees(gs.lon, gs.lat, 0),
+        };
+        return this.sats.createGroundstation(coordinates, gs.name ?? "");
+      });
     this.sats.groundStations = groundStationEntities;
   }
 
-  set showUI(enabled) {
+  set showUI(enabled: boolean) {
     if (enabled) {
       this.viewer._animation.container.style.visibility = "";
       this.viewer._timeline.container.style.visibility = "";
@@ -495,11 +542,11 @@ export class CesiumController {
     }
   }
 
-  get showUI() {
+  get showUI(): boolean {
     return this.viewer._timeline.container.style.visibility !== "hidden";
   }
 
-  fixLogo() {
+  fixLogo(): void {
     if (this.minimalUI) {
       this.viewer._bottomContainer.style.left = "5px";
     }
@@ -508,7 +555,7 @@ export class CesiumController {
     }
   }
 
-  set qualityPreset(quality) {
+  set qualityPreset(quality: string) {
     switch (quality) {
       case "low":
         // Ignore browser's device pixel ratio and use CSS pixels instead of device pixels for render resolution
@@ -523,11 +570,11 @@ export class CesiumController {
     }
   }
 
-  set showFps(value) {
-    cc.viewer.scene.debugShowFramesPerSecond = value;
+  set showFps(value: boolean) {
+    this.viewer.scene.debugShowFramesPerSecond = value;
   }
 
-  set background(active) {
+  set background(active: boolean) {
     if (!active) {
       this.viewer.scene.backgroundColor = Color.TRANSPARENT;
       this.viewer.scene.moon = undefined;
@@ -536,18 +583,20 @@ export class CesiumController {
       this.viewer.scene.sun = undefined;
       document.documentElement.style.background = "transparent";
       document.body.style.background = "transparent";
-      document.getElementById("cesiumContainer").style.background = "transparent";
+      const container = document.getElementById("cesiumContainer");
+      if (container) container.style.background = "transparent";
     }
   }
 
-  enablePerformanceStats(logContinuously = false) {
+  enablePerformanceStats(logContinuously = false): void {
     this.performanceStats = new CesiumPerformanceStats(this.viewer.scene, logContinuously);
   }
 
-  addErrorHandler() {
+  addErrorHandler(): void {
     // Rethrow scene render errors
     this.viewer.scene.rethrowRenderErrors = true;
-    this.viewer.scene.renderError.addEventListener((scene, error) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.viewer.scene.renderError.addEventListener((scene: any, error: Error) => {
       console.error(scene, error);
       usePostHog().posthog.captureException(error);
     });
@@ -555,13 +604,14 @@ export class CesiumController {
     // Proxy and log CesiumWidget render loop errors that only display a UI error message
     const widget = this.viewer.cesiumWidget;
     const proxied = widget.showErrorPanel;
-    widget.showErrorPanel = function widgetError(title, message, error) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    widget.showErrorPanel = function widgetError(this: unknown, title: string, message: string, error: any) {
       proxied.apply(this, [title, message, error]);
       usePostHog().posthog.captureException(error);
     };
   }
 
-  styleInfoBox() {
+  styleInfoBox(): void {
     const infoBox = this.viewer.infoBox.container.getElementsByClassName("cesium-infoBox")[0];
     const close = this.viewer.infoBox.container.getElementsByClassName("cesium-infoBox-close")[0];
     if (infoBox && close) {
@@ -570,20 +620,19 @@ export class CesiumController {
       container.setAttribute("class", "cesium-infoBox-container");
       infoBox.insertBefore(container, close);
 
-      const notifyForPass = (pass, aheadMin = 5) => {
+      const notifyForPass = (pass: Pass, aheadMin = 5): void => {
         const start = dayjs(pass.start).startOf("second");
-        this.pm.notifyAtDate(start.subtract(aheadMin, "minute"), `${pass.name} pass in ${aheadMin} minutes`);
-        this.pm.notifyAtDate(start, `${pass.name} pass starting now`);
-        // this.pm.notifyAtDate(dayjs().add(5, "second"), `${pass.name} notification test`);
+        this.pm.notifyAtDate(start.subtract(aheadMin, "minute").toDate(), `${pass.name} pass in ${aheadMin} minutes`);
+        this.pm.notifyAtDate(start.toDate(), `${pass.name} pass starting now`);
       };
 
       // Notify button
       const notifyButton = document.createElement("button");
       notifyButton.setAttribute("type", "button");
       notifyButton.setAttribute("class", "cesium-button cesium-infoBox-custom");
-      notifyButton.innerHTML = icon(faBell).html;
+      notifyButton.innerHTML = icon(faBell)?.html.join("") ?? "";
       notifyButton.addEventListener("click", () => {
-        let passes = [];
+        let passes: Pass[] = [];
         const toast = useToastProxy();
         if (!this.sats.groundStationAvailable) {
           toast.add({
@@ -596,7 +645,7 @@ export class CesiumController {
         }
         const selectedGroundstation = this.sats.groundStations.find((gs) => gs.isSelected);
         if (this.sats.selectedSatellite) {
-          passes = this.sats.getSatellite(this.sats.selectedSatellite).props.passes;
+          passes = this.sats.getSatellite(this.sats.selectedSatellite)?.props.passes ?? [];
         } else if (selectedGroundstation) {
           passes = selectedGroundstation.passes(this.viewer.clock.currentTime);
         }
@@ -623,12 +672,14 @@ export class CesiumController {
       const infoButton = document.createElement("button");
       infoButton.setAttribute("type", "button");
       infoButton.setAttribute("class", "cesium-button cesium-infoBox-custom");
-      infoButton.innerHTML = icon(faInfo).html;
+      infoButton.innerHTML = icon(faInfo)?.html.join("") ?? "";
       infoButton.addEventListener("click", () => {
         if (!this.sats.selectedSatellite) {
           return;
         }
-        const { satnum } = this.sats.getSatellite(this.sats.selectedSatellite).props;
+        const sat = this.sats.getSatellite(this.sats.selectedSatellite);
+        if (!sat) return;
+        const { satnum } = sat.props;
         const url = `https://www.n2yo.com/satellite/?s=${satnum}`;
         window.open(url, "_blank", "noopener");
       });
@@ -642,7 +693,8 @@ export class CesiumController {
         // Inline infobox css as iframe does not use service worker
         const { head } = frame.contentDocument;
         const links = head.getElementsByTagName("link");
-        [...links].forEach((link) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        [...(links as any)].forEach((link: HTMLLinkElement) => {
           head.removeChild(link);
         });
         const style = frame.contentDocument.createElement("style");
@@ -659,9 +711,9 @@ export class CesiumController {
     frame.src = "about:blank";
 
     // Allow time changes from infobox
-    window.addEventListener("message", (e) => {
+    window.addEventListener("message", (e: MessageEvent) => {
       const pass = e.data;
-      if ("start" in pass) {
+      if (pass && typeof pass === "object" && "start" in pass) {
         this.setTime(pass.start);
       }
     });
