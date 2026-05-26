@@ -13,6 +13,7 @@ import {
   Math as CesiumMath,
   Matrix4,
   OpenStreetMapImageryProvider,
+  type Scene,
   SceneMode,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
@@ -99,8 +100,7 @@ export class CesiumController {
 
     this.viewer = new Viewer("cesiumContainer", {
       animation: !this.minimalUI,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      baseLayer: this.createImageryLayer("OfflineHighres") as any,
+      baseLayer: this.createImageryLayer("OfflineHighres"),
       baseLayerPicker: false,
       fullscreenButton: !this.minimalUI,
       fullscreenElement: document.body,
@@ -317,8 +317,7 @@ export class CesiumController {
     }
 
     const provider = this.imageryProviders[imageryProviderName] as ImageryProviderEntry;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const layer = ImageryLayer.fromProviderAsync(provider.create() as any, {});
+    const layer = ImageryLayer.fromProviderAsync(Promise.resolve(provider.create()), {});
     layer.alpha = alpha === undefined ? provider.alpha : alpha;
     return layer;
   }
@@ -416,8 +415,7 @@ export class CesiumController {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  cameraTrackEci(scene: any, time: JulianDate): void {
+  cameraTrackEci(scene: Scene, time: JulianDate): void {
     if (scene.mode !== SceneMode.SCENE3D) {
       return;
     }
