@@ -42,7 +42,6 @@ import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
 import { CesiumTimelineHelper } from "./util/CesiumTimelineHelper";
 import { DescriptionHelper } from "./util/DescriptionHelper";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SatelliteComponentName = string;
 
 export class SatelliteComponentCollection extends CesiumComponentCollection {
@@ -310,6 +309,9 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       // Use a path graphic to visualize the currently tracked satellite's orbit or when the scene mode doesn't support primitive modelmatrix updates
       return true;
     }
+    // For all other satellites use a polyline geometry to visualize the orbit for significantly improved performance.
+    // A polyline geometry is used instead of a polyline graphic as entities don't support adjusting the model matrix
+    // in order to display the orbit in the inertial frame.
     return false;
   }
 
