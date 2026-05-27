@@ -1,4 +1,4 @@
-import { BillboardGraphics, type CallbackProperty, type Cartesian3, HorizontalOrigin, type JulianDate, NearFarScalar, VerticalOrigin } from "@cesium/engine";
+import { BillboardGraphics, type CallbackProperty, type Cartesian3, HorizontalOrigin, JulianDate, NearFarScalar, VerticalOrigin } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 import dayjs from "dayjs";
 
@@ -76,7 +76,8 @@ export class GroundStationEntity extends CesiumComponentCollection {
     });
 
     // Filter passes based on time
-    passes = passes.filter((pass) => dayjs(pass.start).diff(time as unknown as Date, "hours") < deltaHours);
+    const timeDate = JulianDate.toDate(time);
+    passes = passes.filter((pass) => dayjs(pass.start).diff(timeDate, "hours") < deltaHours);
 
     // Filter passes based on groundstation
     passes = passes.filter((pass) => pass.groundStationName === this.name);

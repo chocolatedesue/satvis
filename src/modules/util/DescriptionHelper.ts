@@ -114,7 +114,7 @@ export class DescriptionHelper {
         `;
     }
 
-    const start = dayjs(time as unknown as Date);
+    const start = dayjs(JulianDate.toDate(time));
     const upcomingPassIdx = passes.findIndex((pass: Pass) => dayjs(pass.end).isAfter(start));
     if (upcomingPassIdx < 0) {
       return "";
@@ -146,11 +146,11 @@ export class DescriptionHelper {
   }
 
   static renderPass(time: dayjs.Dayjs | JulianDate, pass: Pass, passNameField: string = "name", overpassMode: string = "elevation"): string {
+    const t = dayjs.isDayjs(time) ? time : dayjs(JulianDate.toDate(time));
     let countdown = "ONGOING";
-    if (dayjs(pass.end).diff(time as unknown as Date) < 0) {
+    if (dayjs(pass.end).diff(t) < 0) {
       countdown = "PREVIOUS";
-    } else if (dayjs(pass.start).diff(time as unknown as Date) > 0) {
-      const t = time as unknown as Date;
+    } else if (dayjs(pass.start).diff(t) > 0) {
       countdown = `${pad2(dayjs(pass.start).diff(t, "days"))}:${pad2(dayjs(pass.start).diff(t, "hours") % 24)}:${pad2(dayjs(pass.start).diff(t, "minutes") % 60)}:${pad2(dayjs(pass.start).diff(t, "seconds") % 60)}`;
     }
     const htmlName = passNameField ? `<td>${pass[passNameField]}</td>\n` : "";
