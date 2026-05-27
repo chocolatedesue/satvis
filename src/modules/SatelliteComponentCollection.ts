@@ -421,7 +421,6 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       return;
     }
     const polyline = new PolylineGraphics({
-      followSurface: false,
       material: new PolylineGlowMaterialProperty({
         glowPower: 0.5,
         color: Color.FORESTGREEN,
@@ -435,7 +434,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       }, false),
       show: new CallbackProperty((time?: JulianDate) => this.props.passIntervals.contains(time as JulianDate), false),
       width: 5,
-    } as any);
+    });
     this.createCesiumSatelliteEntity("Ground station link", "polyline", polyline);
   }
 

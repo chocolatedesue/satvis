@@ -204,13 +204,13 @@ export class CesiumController {
           new WebMapServiceImageryProvider({
             url: "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi",
             layers: "VIIRS_Black_Marble",
-            style: "default",
-            tileMatrixSetID: "250m",
-            format: "image/png",
+            parameters: {
+              format: "image/png",
+            },
             tileWidth: 512,
             tileHeight: 512,
             credit: "NASA Global Imagery Browse Services for EOSDIS",
-          } as any),
+          }),
         alpha: 1,
         base: true,
       },
@@ -445,8 +445,7 @@ export class CesiumController {
 
   createInputHandler(): void {
     const handler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    handler.setInputAction((event: any) => {
+    handler.setInputAction((event: ScreenSpaceEventHandler.PositionedEvent) => {
       const { pickMode } = useCesiumStore();
       if (!pickMode) {
         return;
@@ -455,8 +454,7 @@ export class CesiumController {
     }, ScreenSpaceEventType.LEFT_CLICK);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setGroundStationFromClickEvent(event: any): void {
+  setGroundStationFromClickEvent(event: ScreenSpaceEventHandler.PositionedEvent): void {
     const cartesian = this.viewer.camera.pickEllipsoid(event.position);
     const didHitGlobe = defined(cartesian);
     if (didHitGlobe) {
@@ -590,8 +588,7 @@ export class CesiumController {
   addErrorHandler(): void {
     // Rethrow scene render errors
     this.viewer.scene.rethrowRenderErrors = true;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.viewer.scene.renderError.addEventListener((scene: any, error: Error) => {
+    this.viewer.scene.renderError.addEventListener((scene: Scene, error: Error) => {
       console.error(scene, error);
       usePostHog().posthog.captureException(error);
     });
@@ -692,8 +689,7 @@ export class CesiumController {
         }
         const { head } = doc;
         const links = head.getElementsByTagName("link");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        [...(links as any)].forEach((link: HTMLLinkElement) => {
+        Array.from(links).forEach((link) => {
           head.removeChild(link);
         });
         const style = doc.createElement("style");

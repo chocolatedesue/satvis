@@ -226,7 +226,7 @@ export class SatelliteManager {
 
   get components(): unknown[] {
     const components = this.satellites.map((sat) => sat.components);
-    return [...new Set<unknown>(([] as unknown[]).concat(...components))];
+    return [...new Set<unknown>(([] as unknown[]).concat(...(components as unknown as unknown[][])))];
   }
 
   get enabledComponents(): string[] {

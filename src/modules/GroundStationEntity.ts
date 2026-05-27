@@ -1,4 +1,4 @@
-import { BillboardGraphics, type CallbackProperty, HorizontalOrigin, type JulianDate, NearFarScalar, VerticalOrigin } from "@cesium/engine";
+import { BillboardGraphics, type CallbackProperty, type Cartesian3, HorizontalOrigin, type JulianDate, NearFarScalar, VerticalOrigin } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 import dayjs from "dayjs";
 
@@ -12,8 +12,7 @@ export interface GroundStationPositionData {
   latitude: number;
   longitude: number;
   height: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  cartesian: any;
+  cartesian: Cartesian3;
 }
 
 export class GroundStationEntity extends CesiumComponentCollection {

@@ -1,5 +1,6 @@
 import {
   Cartesian3,
+  type Clock,
   Entity,
   EntityView,
   GeometryInstance,
@@ -15,9 +16,6 @@ import {
 import type { Viewer } from "@cesium/widgets";
 
 import { CesiumCallbackHelper } from "./CesiumCallbackHelper";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Clock = any;
 
 type Component = Entity | Primitive | GeometryInstance;
 
@@ -206,8 +204,7 @@ export class CesiumComponentCollection {
       .flyTo(this.defaultEntity, {
         offset: new HeadingPitchRange(0, -CesiumMath.PI_OVER_FOUR, 1580000),
       })
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .then((result: any) => {
+      .then((result: boolean) => {
         if (result) {
           this.viewer.trackedEntity = this.defaultEntity;
           this.viewer.clock.shouldAnimate = clockRunning;
