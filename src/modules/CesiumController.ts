@@ -462,7 +462,7 @@ export class CesiumController {
       const coordinates: GroundStationPositionData = {
         longitude: CesiumMath.toDegrees(cartographicPosition.longitude),
         latitude: CesiumMath.toDegrees(cartographicPosition.latitude),
-        height: CesiumMath.toDegrees(cartographicPosition.height),
+        height: cartographicPosition.height,
         cartesian,
       };
       this.sats.addGroundStation(coordinates, "");

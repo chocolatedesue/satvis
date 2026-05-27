@@ -7,14 +7,14 @@ const rad2deg = 180 / Math.PI;
 export interface GeodeticPosition {
   longitude: number; // degrees
   latitude: number; // degrees
-  height: number; // meters (positionGeodetic) or km (groundStationPosition input)
+  height: number; // meters
   velocity?: number; // km/s, present when calculateVelocity = true
 }
 
 export interface GroundStationPosition {
   longitude: number; // degrees
   latitude: number; // degrees
-  height: number; // km
+  height: number; // meters (converted to km internally before passing to satellite.js)
 }
 
 export interface ElevationPass {

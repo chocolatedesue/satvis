@@ -88,8 +88,7 @@ export class SatelliteManager {
       return;
     }
     if (this.groundStationAvailable) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      newSat.groundStations = this.#groundStations as any;
+      newSat.groundStations = this.#groundStations;
     }
     // Set overpass mode for newly added satellite
     newSat.props.overpassMode = this.#overpassMode;
@@ -296,8 +295,7 @@ export class SatelliteManager {
 
     // Set groundstation for all satellites
     this.satellites.forEach((sat) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      sat.groundStations = this.#groundStations as any;
+      sat.groundStations = this.#groundStations;
     });
 
     // Update store for url state
