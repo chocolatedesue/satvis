@@ -71,9 +71,10 @@ export const useSatStore = defineStore("sat", {
         deserialize: (v) =>
           v.split("_").map((gs) => {
             const g = gs.split(",");
+            // Preserve NaN for missing components; downstream callers filter these out.
             return {
-              lat: parseFloat(g[0] ?? "0"),
-              lon: parseFloat(g[1] ?? "0"),
+              lat: g[0] === undefined ? Number.NaN : parseFloat(g[0]),
+              lon: g[1] === undefined ? Number.NaN : parseFloat(g[1]),
               name: g[2],
             };
           }),

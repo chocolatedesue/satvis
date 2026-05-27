@@ -501,7 +501,7 @@ export class CesiumController {
   }
 
   setGroundStations(groundStations: SerializedGroundStationInput[]): void {
-    if (!groundStations || groundStations.length === 0) {
+    if (!groundStations) {
       return;
     }
     const groundStationEntities = groundStations
