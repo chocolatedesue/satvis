@@ -1,13 +1,19 @@
 import { SampledPositionProperty, binarySearch, JulianDate } from "@cesium/engine";
 
+// Augment Cesium's SampledPositionProperty with custom raw value accessors.
+declare module "@cesium/engine" {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface SampledPositionProperty {
+    getRawValues(start: JulianDate, end: JulianDate): unknown[];
+    length(): number;
+  }
+}
+
 /**
  * Gets the original values stored in the sampled property for the provided timeframe.
- *
- * @param {JulianDate} start The start time for which to retrieve the values.
- * @param {JulianDate} end The end time for which to retrieve the values.
- * @returns {object} An array of all values within the provided timeframe.
  */
-SampledPositionProperty.prototype.getRawValues = function (start, end) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(SampledPositionProperty.prototype as any).getRawValues = function (this: any, start: JulianDate, end: JulianDate): unknown[] {
   const times = this._property._times;
   if (times.length === 0) {
     return [];
@@ -23,7 +29,7 @@ SampledPositionProperty.prototype.getRawValues = function (start, end) {
   if (endIndex < 0) {
     endIndex = ~endIndex;
   }
-  const result = [];
+  const result: unknown[] = [];
   for (let i = startIndex; i < endIndex; i += 1) {
     result.push(innerType.unpack(values, i * innerType.packedLength));
   }
@@ -32,9 +38,8 @@ SampledPositionProperty.prototype.getRawValues = function (start, end) {
 
 /**
  * Gets the number of samples stored in the sampled property.
- *
- * @returns {number} The number of samples stored in the sampled property.
  */
-SampledPositionProperty.prototype.length = function () {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(SampledPositionProperty.prototype as any).length = function (this: any): number {
   return this._property._times.length;
 };

@@ -1,5 +1,6 @@
 import {
   Cartesian3,
+  type Clock,
   Entity,
   EntityView,
   GeometryInstance,
@@ -12,8 +13,11 @@ import {
   VelocityOrientationProperty,
   defined,
 } from "@cesium/engine";
+import type { Viewer } from "@cesium/widgets";
 
 import { CesiumCallbackHelper } from "./CesiumCallbackHelper";
+
+type Component = Entity | Primitive | GeometryInstance;
 
 /** CesiumComponentCollection
  *
@@ -22,47 +26,53 @@ import { CesiumCallbackHelper } from "./CesiumCallbackHelper";
  * to a common entity collection or primitive collection shared between all ComponentCollections.
  */
 export class CesiumComponentCollection {
-  #components = {};
+  #components: Record<string, Component> = {};
 
-  static geometries = [];
+  static geometries: GeometryInstance[] = [];
 
-  static primitive = undefined;
+  static primitive: Primitive | undefined = undefined;
 
   static primitivePendingUpdate = false;
 
   static primitivePendingCreation = false;
 
-  constructor(viewer, lazy = true) {
+  viewer: Viewer;
+
+  lazy: boolean;
+
+  defaultEntity: Entity | undefined;
+
+  constructor(viewer: Viewer, lazy = true) {
     this.viewer = viewer;
     // Create entities only when needed and delete them on disable
     this.lazy = lazy;
   }
 
-  get components() {
+  get components(): Record<string, Component> {
     return this.#components;
   }
 
-  get componentNames() {
+  get componentNames(): string[] {
     return Object.keys(this.components);
   }
 
-  get created() {
+  get created(): boolean {
     return this.componentNames.length > 0;
   }
 
-  show(componentNames = this.componentNames) {
+  show(componentNames: string[] = this.componentNames): void {
     componentNames.forEach((componentName) => {
       this.enableComponent(componentName);
     });
   }
 
-  hide(componentNames = this.componentNames) {
+  hide(componentNames: string[] = this.componentNames): void {
     componentNames.forEach((componentName) => {
       this.disableComponent(componentName);
     });
   }
 
-  enableComponent(name) {
+  enableComponent(name: string): void {
     if (!(name in this.components)) {
       return;
     }
@@ -72,25 +82,26 @@ export class CesiumComponentCollection {
     } else if (component instanceof Primitive && !this.viewer.scene.primitives.contains(component)) {
       this.viewer.scene.primitives.add(component);
     } else if (component instanceof GeometryInstance) {
-      this.constructor.geometries.push(component);
+      (this.constructor as typeof CesiumComponentCollection).geometries.push(component);
       this.recreateGeometryInstancePrimitive();
     }
-    if (!this.defaultEntity) {
+    if (!this.defaultEntity && component instanceof Entity) {
       this.defaultEntity = component;
     }
   }
 
-  disableComponent(name) {
+  disableComponent(name: string): void {
     if (!(name in this.components)) {
       return;
     }
     const component = this.components[name];
+    const ctor = this.constructor as typeof CesiumComponentCollection;
     if (component instanceof Entity) {
       this.viewer.entities.remove(component);
     } else if (component instanceof Primitive) {
       this.viewer.scene.primitives.remove(component);
     } else if (component instanceof GeometryInstance) {
-      this.constructor.geometries = this.constructor.geometries.filter((geometry) => geometry !== component);
+      ctor.geometries = ctor.geometries.filter((geometry) => geometry !== component);
       this.recreateGeometryInstancePrimitive();
     }
     if (this.lazy) {
@@ -98,36 +109,39 @@ export class CesiumComponentCollection {
     }
   }
 
-  recreateGeometryInstancePrimitive() {
-    if (this.constructor.primitivePendingUpdate) {
+  recreateGeometryInstancePrimitive(): void {
+    const ctor = this.constructor as typeof CesiumComponentCollection;
+    if (ctor.primitivePendingUpdate) {
       return;
     }
-    this.constructor.primitivePendingUpdate = true;
+    ctor.primitivePendingUpdate = true;
     const removeCallback = CesiumCallbackHelper.createPeriodicTickCallback(this.viewer, 30, () => {
-      if (this.constructor.primitivePendingCreation) {
+      if (ctor.primitivePendingCreation) {
         return;
       }
-      this.constructor.primitivePendingUpdate = false;
-      if (this.constructor.geometries.length === 0) {
-        this.viewer.scene.primitives.remove(this.constructor.primitive);
-        this.constructor.primitive = undefined;
+      ctor.primitivePendingUpdate = false;
+      if (ctor.geometries.length === 0) {
+        this.viewer.scene.primitives.remove(ctor.primitive);
+        ctor.primitive = undefined;
         this.viewer.scene.requestRender();
         return;
       }
-      this.constructor.primitivePendingCreation = true;
+      ctor.primitivePendingCreation = true;
       const primitive = new Primitive({
-        geometryInstances: this.constructor.geometries,
+        geometryInstances: ctor.geometries,
         appearance: new PolylineColorAppearance(),
       });
       // Force asyncrounous primitve creation before adding to scene
       let lastState = -1;
       const readyCallback = this.viewer.clock.onTick.addEventListener(() => {
         if (!primitive.ready) {
-          const state = primitive._state;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const state = (primitive as any)._state;
           if (state !== lastState) {
             lastState = state;
             // Trigger primitive update to progress through creation states
-            primitive.update(this.viewer.scene.frameState);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (primitive as any).update(this.viewer.scene.frameState);
             return;
           }
           return;
@@ -137,13 +151,13 @@ export class CesiumComponentCollection {
         if (defined(icrfToFixed)) {
           primitive.modelMatrix = Matrix4.fromRotationTranslation(icrfToFixed);
         }
-        if (this.constructor.primitive) {
-          this.viewer.scene.primitives.remove(this.constructor.primitive);
+        if (ctor.primitive) {
+          this.viewer.scene.primitives.remove(ctor.primitive);
         }
         this.viewer.scene.primitives.add(primitive);
-        this.constructor.primitive = primitive;
+        ctor.primitive = primitive;
         this.viewer.scene.requestRender();
-        this.constructor.primitivePendingCreation = false;
+        ctor.primitivePendingCreation = false;
         readyCallback();
       });
       removeCallback();
@@ -152,9 +166,8 @@ export class CesiumComponentCollection {
 
   /**
    * Returns an array of all components that are added to the viewer.
-   * If component creation is
    */
-  get visibleComponents() {
+  get visibleComponents(): Component[] {
     return Object.values(this.components).filter((component) => {
       if (component instanceof Entity) {
         return this.viewer.entities.contains(component);
@@ -166,15 +179,15 @@ export class CesiumComponentCollection {
     });
   }
 
-  get isSelected() {
+  get isSelected(): boolean {
     return Object.values(this.components).some((entity) => this.viewer.selectedEntity === entity);
   }
 
-  get isTracked() {
+  get isTracked(): boolean {
     return Object.values(this.components).some((entity) => this.viewer.trackedEntity === entity);
   }
 
-  track(animate = false) {
+  track(animate = false): void {
     if (!this.defaultEntity) {
       return;
     }
@@ -191,7 +204,7 @@ export class CesiumComponentCollection {
       .flyTo(this.defaultEntity, {
         offset: new HeadingPitchRange(0, -CesiumMath.PI_OVER_FOUR, 1580000),
       })
-      .then((result) => {
+      .then((result: boolean) => {
         if (result) {
           this.viewer.trackedEntity = this.defaultEntity;
           this.viewer.clock.shouldAnimate = clockRunning;
@@ -199,8 +212,8 @@ export class CesiumComponentCollection {
       });
   }
 
-  setSelectedOnTickCallback(onTickCallback = () => {}, onUnselectCallback = () => {}) {
-    const onTickEventRemovalCallback = this.viewer.clock.onTick.addEventListener((clock) => {
+  setSelectedOnTickCallback(onTickCallback: (clock: Clock) => void = () => {}, onUnselectCallback: () => void = () => {}): void {
+    const onTickEventRemovalCallback = this.viewer.clock.onTick.addEventListener((clock: Clock) => {
       onTickCallback(clock);
     });
     const onSelectedEntityChangedRemovalCallback = this.viewer.selectedEntityChanged.addEventListener(() => {
@@ -210,8 +223,8 @@ export class CesiumComponentCollection {
     });
   }
 
-  setTrackedOnTickCallback(onTickCallback = () => {}, onUntrackCallback = () => {}) {
-    const onTickEventRemovalCallback = this.viewer.clock.onTick.addEventListener((clock) => {
+  setTrackedOnTickCallback(onTickCallback: (clock: Clock) => void = () => {}, onUntrackCallback: () => void = () => {}): void {
+    const onTickEventRemovalCallback = this.viewer.clock.onTick.addEventListener((clock: Clock) => {
       onTickCallback(clock);
     });
     const onTrackedEntityChangedRemovalCallback = this.viewer.trackedEntityChanged.addEventListener(() => {
@@ -221,8 +234,8 @@ export class CesiumComponentCollection {
     });
   }
 
-  artificiallyTrack(onTickCallback = () => {}, onUntrackCallback = () => {}) {
-    const cameraTracker = new EntityView(this.defaultEntity, this.viewer.scene, this.viewer.scene.globe.ellipsoid);
+  artificiallyTrack(onTickCallback: () => void = () => {}, onUntrackCallback: () => void = () => {}): void {
+    const cameraTracker = new EntityView(this.defaultEntity as Entity, this.viewer.scene, this.viewer.scene.globe.ellipsoid);
     this.setTrackedOnTickCallback(
       (clock) => {
         cameraTracker.update(clock.currentTime);
@@ -231,7 +244,7 @@ export class CesiumComponentCollection {
       () => {
         onUntrackCallback();
         // Restore default view angle if no new entity is tracked
-        if (typeof this.viewer.trackedEntity === "undefined") {
+        if (typeof this.viewer.trackedEntity === "undefined" && this.defaultEntity) {
           this.viewer.flyTo(this.defaultEntity, {
             offset: new HeadingPitchRange(0, CesiumMath.toRadians(-90.0), 2000000),
           });
@@ -240,7 +253,18 @@ export class CesiumComponentCollection {
     );
   }
 
-  createCesiumEntity(componentName, entityKey, entityValue, name, description, position, moving) {
+  createCesiumEntity(
+    componentName: string,
+    entityKey: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    entityValue: any,
+    name: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    description: any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    position: any,
+    moving: boolean,
+  ): void {
     const entity = new Entity({
       name,
       description,
@@ -252,7 +276,8 @@ export class CesiumComponentCollection {
       entity.orientation = new VelocityOrientationProperty(position);
     }
 
-    entity[entityKey] = entityValue;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (entity as any)[entityKey] = entityValue;
     this.components[componentName] = entity;
   }
 }

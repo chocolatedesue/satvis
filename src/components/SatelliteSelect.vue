@@ -25,7 +25,7 @@
   </div>
 </template>
 
-<script>
+<script lang="ts">
 import { mapWritableState } from "pinia";
 import VueMultiselect from "vue-multiselect";
 
@@ -40,25 +40,25 @@ export default {
   },
   computed: {
     ...mapWritableState(useSatStore, ["availableSatellitesByTag", "availableTags", "enabledSatellites", "enabledTags", "trackedSatellite"]),
-    availableSatellites() {
+    availableSatellites(): { tag: string; sats: string[] }[] {
       let satlist = Object.keys(this.availableSatellitesByTag).map((tag) => ({
         tag,
-        sats: this.availableSatellitesByTag[tag],
+        sats: this.availableSatellitesByTag[tag] ?? [],
       }));
       if (satlist.length === 0) {
         satlist = [];
       }
       return satlist;
     },
-    satellitesEnabledByTag() {
+    satellitesEnabledByTag(): string[] {
       return this.getSatellitesFromTags(this.enabledTags);
     },
     allEnabledSatellites: {
-      get() {
+      get(): string[] {
         return this.satellitesEnabledByTag.concat(this.enabledSatellites ?? []);
       },
-      set(sats) {
-        const enabledTags = this.availableTags.filter((tag) => !this.availableSatellitesByTag[tag].some((sat) => !sats.includes(sat)));
+      set(sats: string[]) {
+        const enabledTags = this.availableTags.filter((tag) => !(this.availableSatellitesByTag[tag] ?? []).some((sat) => !sats.includes(sat)));
         const satellitesInEnabledTags = this.getSatellitesFromTags(enabledTags);
         const enabledSatellites = sats.filter((sat) => !satellitesInEnabledTags.includes(sat));
         cc.sats.enabledSatellites = enabledSatellites;
@@ -67,18 +67,18 @@ export default {
     },
   },
   watch: {
-    enabledSatellites(sats) {
+    enabledSatellites(sats: string[]) {
       cc.sats.enabledSatellites = sats;
     },
-    enabledTags(tags) {
+    enabledTags(tags: string[]) {
       cc.sats.enabledTags = tags;
     },
-    trackedSatellite(satellite) {
+    trackedSatellite(satellite: string) {
       cc.sats.trackedSatellite = satellite;
     },
   },
   methods: {
-    getSatellitesFromTags(taglist) {
+    getSatellitesFromTags(taglist: string[]): string[] {
       return taglist.flatMap((tag) => this.availableSatellitesByTag[tag] || []);
     },
   },

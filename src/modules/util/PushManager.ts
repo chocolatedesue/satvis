@@ -1,12 +1,36 @@
 import dayjs from "dayjs";
 
+export interface PushNotificationOptions extends NotificationOptions {
+  [key: string]: unknown;
+}
+
+interface TimerEntry {
+  id: ReturnType<typeof setTimeout>;
+  date: Date | string | number | dayjs.Dayjs;
+  message: string;
+}
+
+// Non-standard webkit message-handler bridge used by the iOS wrapper app
+interface WebkitWindow {
+  webkit?: {
+    messageHandlers: {
+      iosNotify: {
+        postMessage(content: unknown, origin: string): void;
+      };
+    };
+  };
+}
+
 export class PushManager {
-  constructor(options = {}) {
+  options: PushNotificationOptions;
+
+  timers: TimerEntry[] = [];
+
+  constructor(options: PushNotificationOptions = {}) {
     this.options = options;
-    this.timers = [];
   }
 
-  get available() {
+  get available(): boolean {
     if ("webkit" in window) {
       return true;
     }
@@ -27,24 +51,24 @@ export class PushManager {
     }
   }
 
-  requestPermission() {
-    Notification.requestPermission((result) => {
+  requestPermission(): void {
+    Notification.requestPermission().then((result) => {
       console.log(`Notifcation permission result: ${result}`);
     });
   }
 
-  get active() {
+  get active(): boolean {
     return this.timers.length > 0;
   }
 
-  clearTimers() {
+  clearTimers(): void {
     this.timers.forEach((timer) => {
       clearTimeout(timer.id);
     });
     this.timers = [];
   }
 
-  persistentNotification(message, options) {
+  persistentNotification(message: string, options?: PushNotificationOptions): void {
     if (!this.available) {
       return;
     }
@@ -52,14 +76,14 @@ export class PushManager {
     try {
       navigator.serviceWorker
         .getRegistration()
-        .then((reg) => reg.showNotification(message, optionsMerged))
+        .then((reg) => reg?.showNotification(message, optionsMerged))
         .catch((err) => console.log(`Service Worker registration error: ${err}`));
     } catch (err) {
       console.log(`Notification API error: ${err}`);
     }
   }
 
-  notifyInMs(ms, message, options) {
+  notifyInMs(ms: number, message: string, options?: PushNotificationOptions): void {
     if (!this.available) {
       return;
     }
@@ -69,7 +93,7 @@ export class PushManager {
     }, ms);
   }
 
-  notifyAtDate(date, message, options) {
+  notifyAtDate(date: Date | string | number, message: string, options?: PushNotificationOptions): void {
     if (!this.available) {
       return;
     }
@@ -77,7 +101,7 @@ export class PushManager {
     if (waitMs < 0) {
       return;
     }
-    if (this.timers.some((timer) => Math.abs(timer.date.diff(date, "seconds")) < 10)) {
+    if (this.timers.some((timer) => Math.abs(dayjs(timer.date as Date).diff(date, "seconds")) < 10)) {
       console.log("Ignore duplicate entry");
       return;
     }
@@ -89,7 +113,8 @@ export class PushManager {
         delay: waitMs / 1000,
         message,
       };
-      window.webkit.messageHandlers.iosNotify.postMessage(content, self.location.origin);
+      const w = window as unknown as WebkitWindow;
+      w.webkit?.messageHandlers.iosNotify.postMessage(content, self.location.origin);
     } else {
       const id = setTimeout(() => {
         this.persistentNotification(message, options);

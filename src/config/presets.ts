@@ -2,7 +2,28 @@
  * Configuration manager for different application presets
  * Maps routes to their respective configurations and TLE data
  */
-export const presets = {
+
+export type TleDataEntry = [path: string, tags: string[]];
+
+export interface PresetConfig {
+  sat?: {
+    enabledTags?: string[];
+    enabledComponents?: string[];
+    overpassMode?: string;
+  };
+  cesium?: {
+    layers?: string[];
+  };
+}
+
+export interface Preset {
+  title: string;
+  description?: string;
+  config: PresetConfig;
+  tleData: TleDataEntry[];
+}
+
+export const presets: Record<string, Preset> = {
   default: {
     title: "Satellite Orbit Visualization",
     config: {
@@ -60,31 +81,27 @@ export const presets = {
 /**
  * Get configuration preset based on current route/path
  */
-export function getConfigPreset(path = window.location.pathname) {
+export function getConfigPreset(path: string = window.location.pathname): Preset {
   // Extract the last path segment, removing .html extension if present
-  const routeName = path
-    .split("/")
-    .pop()
-    .replace(/\.html$/, "");
+  const routeName = (path.split("/").pop() ?? "").replace(/\.html$/, "");
 
   switch (routeName) {
     case "move":
-      return presets.move;
+      return presets.move as Preset;
     case "ot":
-      return presets.ot;
+      return presets.ot as Preset;
     default:
-      return presets.default;
+      return presets.default as Preset;
   }
 }
 
 /**
  * Update document title and meta description based on preset
- * @param {Object} preset - Configuration preset with title and description
  */
-export function updateMetadata(preset) {
+export function updateMetadata(preset: Preset): void {
   document.title = preset.title;
   const metaDescription = document.querySelector('meta[name="description"]');
-  if (metaDescription) {
+  if (metaDescription && preset.description) {
     metaDescription.setAttribute("content", preset.description);
   }
 }

@@ -1,40 +1,53 @@
+import type { Viewer } from "@cesium/widgets";
+
 import { useSatStore } from "../stores/sat";
-import { GroundStationEntity } from "./GroundStationEntity";
+import { GroundStationEntity, type GroundStationPositionData } from "./GroundStationEntity";
 import { SatelliteComponentCollection } from "./SatelliteComponentCollection";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
 
+interface SerializedGroundStation {
+  lat: number;
+  lon: number;
+  name?: string;
+}
+
 export class SatelliteManager {
-  #enabledComponents = ["Point", "Label"];
+  #enabledComponents: string[] = ["Point", "Label"];
 
-  #enabledTags = [];
+  #enabledTags: string[] = [];
 
-  #enabledSatellites = [];
+  #enabledSatellites: string[] = [];
 
-  #groundStations = [];
+  #groundStations: GroundStationEntity[] = [];
 
-  #overpassMode = "elevation";
+  #overpassMode: string = "elevation";
 
-  constructor(viewer) {
+  viewer: Viewer;
+
+  satellites: SatelliteComponentCollection[] = [];
+
+  availableComponents: string[] = ["Point", "Label", "Orbit", "Orbit track", "Ground track", "Sensor cone", "3D model"];
+
+  pendingTrackedSatellite: string | undefined;
+
+  constructor(viewer: Viewer) {
     this.viewer = viewer;
-
-    this.satellites = [];
-    this.availableComponents = ["Point", "Label", "Orbit", "Orbit track", "Ground track", "Sensor cone", "3D model"];
 
     this.viewer.trackedEntityChanged.addEventListener(() => {
       if (this.trackedSatellite) {
-        this.getSatellite(this.trackedSatellite).show(this.#enabledComponents);
+        this.getSatellite(this.trackedSatellite)?.show(this.#enabledComponents);
       }
       useSatStore().trackedSatellite = this.trackedSatellite;
     });
   }
 
-  addFromTleUrls(urlTagList) {
+  addFromTleUrls(urlTagList: ReadonlyArray<readonly [string, string[]]>): void {
     // Initiate async download of all TLE URLs and update store afterwards
     const promises = urlTagList.map(([url, tags]) => this.addFromTleUrl(url, tags, false));
     Promise.all(promises).then(() => this.updateStore());
   }
 
-  addFromTleUrl(url, tags, updateStore = true) {
+  addFromTleUrl(url: string, tags: string[], updateStore = true): Promise<void> {
     return fetch(url, {
       mode: "no-cors",
     })
@@ -57,7 +70,7 @@ export class SatelliteManager {
       });
   }
 
-  addFromTle(tle, tags, updateStore = true) {
+  addFromTle(tle: string, tags: string[], updateStore = true): void {
     const sat = new SatelliteComponentCollection(this.viewer, tle, tags);
     this.#add(sat);
     if (updateStore) {
@@ -65,7 +78,7 @@ export class SatelliteManager {
     }
   }
 
-  #add(newSat) {
+  #add(newSat: SatelliteComponentCollection): void {
     const existingSat = this.satellites.find((sat) => sat.props.satnum === newSat.props.satnum && sat.props.name === newSat.props.name);
     if (existingSat) {
       existingSat.props.addTags(newSat.props.tags);
@@ -89,14 +102,14 @@ export class SatelliteManager {
     }
   }
 
-  updateStore() {
+  updateStore(): void {
     const satStore = useSatStore();
     satStore.availableTags = this.tags;
     satStore.availableSatellitesByTag = this.taglist;
   }
 
-  get taglist() {
-    const taglist = {};
+  get taglist(): Record<string, string[]> {
+    const taglist: Record<string, string[]> = {};
     this.satellites.forEach((sat) => {
       sat.props.tags.forEach((tag) => {
         (taglist[tag] = taglist[tag] || []).push(sat.props.name);
@@ -108,17 +121,17 @@ export class SatelliteManager {
     return taglist;
   }
 
-  get selectedSatellite() {
+  get selectedSatellite(): string {
     const satellite = this.satellites.find((sat) => sat.isSelected);
     return satellite ? satellite.props.name : "";
   }
 
-  get trackedSatellite() {
+  get trackedSatellite(): string {
     const satellite = this.satellites.find((sat) => sat.isTracked);
     return satellite ? satellite.props.name : "";
   }
 
-  set trackedSatellite(name) {
+  set trackedSatellite(name: string | undefined) {
     if (!name) {
       if (this.trackedSatellite) {
         this.viewer.trackedEntity = undefined;
@@ -139,23 +152,23 @@ export class SatelliteManager {
     }
   }
 
-  get visibleSatellites() {
+  get visibleSatellites(): SatelliteComponentCollection[] {
     return this.satellites.filter((sat) => sat.created);
   }
 
-  get satelliteNames() {
+  get satelliteNames(): string[] {
     return this.satellites.map((sat) => sat.props.name);
   }
 
-  getSatellite(name) {
+  getSatellite(name: string): SatelliteComponentCollection | undefined {
     return this.satellites.find((sat) => sat.props.name === name);
   }
 
-  get enabledSatellites() {
+  get enabledSatellites(): string[] {
     return this.#enabledSatellites;
   }
 
-  set enabledSatellites(newSats) {
+  set enabledSatellites(newSats: string[]) {
     this.#enabledSatellites = newSats;
     this.showEnabledSatellites();
 
@@ -163,31 +176,29 @@ export class SatelliteManager {
     satStore.enabledSatellites = newSats;
   }
 
-  get tags() {
+  get tags(): string[] {
     const tags = this.satellites.map((sat) => sat.props.tags);
-    return [...new Set([].concat(...tags))];
+    return [...new Set<string>(([] as string[]).concat(...tags))];
   }
 
-  getSatellitesWithTag(tag) {
+  getSatellitesWithTag(tag: string): SatelliteComponentCollection[] {
     return this.satellites.filter((sat) => sat.props.hasTag(tag));
   }
 
   /**
    * Returns true if the satellite is enabled by tag or name
-   * @param {SatelliteComponentCollection} sat
-   * @returns {boolean} true if the satellite is enabled
    */
-  satIsActive(sat) {
+  satIsActive(sat: SatelliteComponentCollection): boolean {
     const enabledByTag = this.#enabledTags.some((tag) => sat.props.hasTag(tag));
     const enabledByName = this.#enabledSatellites.includes(sat.props.name);
     return enabledByTag || enabledByName;
   }
 
-  get activeSatellites() {
+  get activeSatellites(): SatelliteComponentCollection[] {
     return this.satellites.filter((sat) => this.satIsActive(sat));
   }
 
-  showEnabledSatellites() {
+  showEnabledSatellites(): void {
     this.satellites.forEach((sat) => {
       if (this.satIsActive(sat)) {
         sat.show(this.#enabledComponents);
@@ -200,11 +211,11 @@ export class SatelliteManager {
     }
   }
 
-  get enabledTags() {
+  get enabledTags(): string[] {
     return this.#enabledTags;
   }
 
-  set enabledTags(newTags) {
+  set enabledTags(newTags: string[]) {
     this.#enabledTags = newTags;
     this.showEnabledSatellites();
 
@@ -212,16 +223,16 @@ export class SatelliteManager {
     satStore.enabledTags = newTags;
   }
 
-  get components() {
+  get components(): unknown[] {
     const components = this.satellites.map((sat) => sat.components);
-    return [...new Set([].concat(...components))];
+    return [...new Set<unknown>(([] as unknown[]).concat(...(components as unknown as unknown[][])))];
   }
 
-  get enabledComponents() {
+  get enabledComponents(): string[] {
     return this.#enabledComponents;
   }
 
-  set enabledComponents(newComponents) {
+  set enabledComponents(newComponents: string[]) {
     const oldComponents = this.#enabledComponents;
     const add = newComponents.filter((x) => !oldComponents.includes(x));
     const del = oldComponents.filter((x) => !newComponents.includes(x));
@@ -233,7 +244,7 @@ export class SatelliteManager {
     });
   }
 
-  enableComponent(componentName) {
+  enableComponent(componentName: string): void {
     if (!this.#enabledComponents.includes(componentName)) {
       this.#enabledComponents.push(componentName);
     }
@@ -243,7 +254,7 @@ export class SatelliteManager {
     });
   }
 
-  disableComponent(componentName) {
+  disableComponent(componentName: string): void {
     this.#enabledComponents = this.#enabledComponents.filter((name) => name !== componentName);
 
     this.activeSatellites.forEach((sat) => {
@@ -251,23 +262,23 @@ export class SatelliteManager {
     });
   }
 
-  get groundStationAvailable() {
+  get groundStationAvailable(): boolean {
     return this.#groundStations.length > 0;
   }
 
-  focusGroundStation() {
+  focusGroundStation(): void {
     if (this.groundStationAvailable) {
-      this.#groundStations[0].track();
+      this.#groundStations[0]?.track();
     }
   }
 
-  createGroundstation(position, name) {
+  createGroundstation(position: GroundStationPositionData, name: string): GroundStationEntity {
     const groundStation = new GroundStationEntity(this.viewer, this, position, name);
     groundStation.show();
     return groundStation;
   }
 
-  addGroundStation(position, name) {
+  addGroundStation(position: GroundStationPositionData, name: string): void {
     if (position.height < 1) {
       position.height = 0;
     }
@@ -275,11 +286,11 @@ export class SatelliteManager {
     this.groundStations = [...this.#groundStations, groundStation];
   }
 
-  get groundStations() {
+  get groundStations(): GroundStationEntity[] {
     return this.#groundStations;
   }
 
-  set groundStations(newGroundStations) {
+  set groundStations(newGroundStations: GroundStationEntity[]) {
     this.#groundStations = newGroundStations;
 
     // Set groundstation for all satellites
@@ -289,19 +300,19 @@ export class SatelliteManager {
 
     // Update store for url state
     const satStore = useSatStore();
-    // TODO Store all groundsations in url param with name
-    satStore.groundStations = this.#groundStations.map((gs) => ({
+    const serialized: SerializedGroundStation[] = this.#groundStations.map((gs) => ({
       lat: gs.position.latitude,
       lon: gs.position.longitude,
       name: gs.hasName ? gs.name : undefined,
     }));
+    satStore.groundStations = serialized;
   }
 
-  get overpassMode() {
+  get overpassMode(): string {
     return this.#overpassMode;
   }
 
-  set overpassMode(newMode) {
+  set overpassMode(newMode: string) {
     this.#overpassMode = newMode;
     // Update overpass mode for all satellites
     this.satellites.forEach((sat) => {
@@ -316,7 +327,7 @@ export class SatelliteManager {
     });
   }
 
-  get pendingUpdate() {
+  get pendingUpdate(): boolean {
     return SatelliteComponentCollection.primitivePendingUpdate;
   }
 }

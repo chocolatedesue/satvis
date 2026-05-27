@@ -4,37 +4,78 @@ import * as satellitejs from "satellite.js";
 const deg2rad = Math.PI / 180;
 const rad2deg = 180 / Math.PI;
 
+export interface GeodeticPosition {
+  longitude: number; // degrees
+  latitude: number; // degrees
+  height: number; // meters
+  velocity?: number; // km/s, present when calculateVelocity = true
+}
+
+export interface GroundStationPosition {
+  longitude: number; // degrees
+  latitude: number; // degrees
+  height: number; // meters (converted to km internally before passing to satellite.js)
+}
+
+export interface ElevationPass {
+  name: string;
+  start: number;
+  end: number;
+  duration: number;
+  azimuthStart: number;
+  azimuthApex: number;
+  azimuthEnd: number;
+  maxElevation: number;
+  apex?: number;
+}
+
+export interface SwathPass {
+  name: string;
+  start: number;
+  end: number;
+  duration: number;
+  minDistance: number;
+  minDistanceTime: number;
+  swathWidth: number;
+}
+
 export default class Orbit {
-  constructor(name, tle) {
+  name: string;
+
+  tle: string[];
+
+  satrec: satellitejs.SatRec;
+
+  constructor(name: string, tle: string) {
     this.name = name;
     this.tle = tle.split("\n");
-    this.satrec = satellitejs.twoline2satrec(this.tle[1], this.tle[2]);
+    this.satrec = satellitejs.twoline2satrec(this.tle[1] as string, this.tle[2] as string);
   }
 
-  get satnum() {
+  get satnum(): string {
     return this.satrec.satnum;
   }
 
-  get error() {
+  get error(): number {
     return this.satrec.error;
   }
 
-  get julianDate() {
+  get julianDate(): number {
     return this.satrec.jdsatepoch;
   }
 
-  get orbitalPeriod() {
+  get orbitalPeriod(): number {
     const meanMotionRad = this.satrec.no;
     const period = (2 * Math.PI) / meanMotionRad;
     return period;
   }
 
-  positionECI(time) {
+  positionECI(time: Date): satellitejs.EciVec3<number> | null {
     const result = satellitejs.propagate(this.satrec, time);
-    return result ? result.position : null;
+    return result && typeof result.position !== "boolean" ? result.position : null;
   }
 
-  positionECF(time) {
+  positionECF(time: Date): satellitejs.EcfVec3<number> | null {
     const positionEci = this.positionECI(time);
     if (!positionEci) return null;
     const gmst = satellitejs.gstime(time);
@@ -42,9 +83,9 @@ export default class Orbit {
     return positionEcf;
   }
 
-  positionGeodetic(timestamp, calculateVelocity = false) {
+  positionGeodetic(timestamp: Date, calculateVelocity = false): GeodeticPosition | null {
     const result = satellitejs.propagate(this.satrec, timestamp);
-    if (!result) return null;
+    if (!result || typeof result.position === "boolean" || typeof result.velocity === "boolean") return null;
     const { position: positionEci, velocity: velocityVector } = result;
     const gmst = satellitejs.gstime(timestamp);
     const positionGd = satellitejs.eciToGeodetic(positionEci, gmst);
@@ -59,15 +100,21 @@ export default class Orbit {
     };
   }
 
-  computePassesElevation(groundStationPosition, startDate = dayjs().toDate(), endDate = dayjs(startDate).add(7, "day").toDate(), minElevation = 5, maxPasses = 50) {
+  computePassesElevation(
+    groundStationPosition: GroundStationPosition,
+    startDate: Date = dayjs().toDate(),
+    endDate: Date = dayjs(startDate).add(7, "day").toDate(),
+    minElevation = 5,
+    maxPasses = 50,
+  ): ElevationPass[] {
     const groundStation = { ...groundStationPosition };
     groundStation.latitude *= deg2rad;
     groundStation.longitude *= deg2rad;
     groundStation.height /= 1000;
 
     const date = new Date(startDate);
-    const passes = [];
-    let pass = false;
+    const passes: ElevationPass[] = [];
+    let pass: Partial<ElevationPass> | null = null;
     let ongoingPass = false;
     let lastElevation = 0;
     // eslint-disable-next-line no-unmodified-loop-condition -- date is mutated via setMinutes/setSeconds
@@ -91,22 +138,22 @@ export default class Orbit {
             azimuthApex: lookAngles.azimuth,
           };
           ongoingPass = true;
-        } else if (elevation > pass.maxElevation) {
+        } else if (pass && elevation > (pass.maxElevation ?? -Infinity)) {
           // Ongoing pass
           pass.maxElevation = elevation;
           pass.apex = date.getTime();
           pass.azimuthApex = lookAngles.azimuth;
         }
         date.setSeconds(date.getSeconds() + 5);
-      } else if (ongoingPass) {
+      } else if (ongoingPass && pass) {
         // End of pass
         pass.end = date.getTime();
-        pass.duration = pass.end - pass.start;
+        pass.duration = (pass.end as number) - (pass.start as number);
         pass.azimuthEnd = lookAngles.azimuth;
-        pass.azimuthStart /= deg2rad;
-        pass.azimuthApex /= deg2rad;
-        pass.azimuthEnd /= deg2rad;
-        passes.push(pass);
+        pass.azimuthStart = (pass.azimuthStart as number) / deg2rad;
+        pass.azimuthApex = (pass.azimuthApex as number) / deg2rad;
+        pass.azimuthEnd = (pass.azimuthEnd as number) / deg2rad;
+        passes.push(pass as ElevationPass);
         if (passes.length >= maxPasses) {
           break;
         }
@@ -133,15 +180,21 @@ export default class Orbit {
     return passes;
   }
 
-  computePassesSwath(groundStationPosition, swathKm, startDate = dayjs().toDate(), endDate = dayjs(startDate).add(7, "day").toDate(), maxPasses = 50) {
+  computePassesSwath(
+    groundStationPosition: GroundStationPosition,
+    swathKm: number,
+    startDate: Date = dayjs().toDate(),
+    endDate: Date = dayjs(startDate).add(7, "day").toDate(),
+    maxPasses = 50,
+  ): SwathPass[] {
     const groundStation = { ...groundStationPosition };
     groundStation.latitude *= deg2rad;
     groundStation.longitude *= deg2rad;
     groundStation.height /= 1000;
 
     const date = new Date(startDate);
-    const passes = [];
-    let pass = false;
+    const passes: SwathPass[] = [];
+    let pass: Partial<SwathPass> | null = null;
     let ongoingPass = false;
     let lastDistance = Number.MAX_VALUE;
 
@@ -180,17 +233,17 @@ export default class Orbit {
             swathWidth: swathKm,
           };
           ongoingPass = true;
-        } else if (distanceKm < pass.minDistance) {
+        } else if (pass && distanceKm < (pass.minDistance ?? Infinity)) {
           // Update minimum distance (closest approach)
           pass.minDistance = distanceKm;
           pass.minDistanceTime = date.getTime();
         }
         date.setSeconds(date.getSeconds() + 30); // 30 second steps during pass
-      } else if (ongoingPass) {
+      } else if (ongoingPass && pass) {
         // End of pass
         pass.end = date.getTime();
-        pass.duration = pass.end - pass.start;
-        passes.push(pass);
+        pass.duration = (pass.end as number) - (pass.start as number);
+        passes.push(pass as SwathPass);
         if (passes.length >= maxPasses) {
           break;
         }
