@@ -427,15 +427,35 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       }),
       positions: new CallbackProperty((time?: JulianDate) => {
         const satPosition = this.props.position(time as JulianDate);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const groundPosition = (this.props as any).groundStationPosition?.cartesian;
-        const positions = [satPosition, groundPosition];
-        return positions;
+        const groundPosition = this.activeGroundStationCartesian(time as JulianDate);
+        return [satPosition, groundPosition];
       }, false),
       show: new CallbackProperty((time?: JulianDate) => this.props.passIntervals.contains(time as JulianDate), false),
       width: 5,
     });
     this.createCesiumSatelliteEntity("Ground station link", "polyline", polyline);
+  }
+
+  /**
+   * Resolve the cartesian endpoint for the ground-station link at the given time.
+   *
+   * The polyline is only shown during a pass (see `show` callback), so we find the
+   * pass that contains `time` and look up the ground station that recorded it.
+   * Falls back to the first ground station if no active pass is found (e.g. when
+   * Cesium evaluates the positions callback outside of any pass interval).
+   */
+  private activeGroundStationCartesian(time: JulianDate): Cartesian3 | undefined {
+    const groundStations = this.props.groundStations;
+    if (groundStations.length === 0) {
+      return undefined;
+    }
+    const timeMs = JulianDate.toDate(time).getTime();
+    const activePass = this.props.passes.find((pass) => timeMs >= pass.start && timeMs <= pass.end);
+    const target = (activePass && groundStations.find((gs) => gs.name === activePass.groundStationName)) ?? groundStations[0];
+    if (!target) {
+      return undefined;
+    }
+    return Cartesian3.fromDegrees(target.position.longitude, target.position.latitude, target.position.height);
   }
 
   set groundStations(groundStations: GroundStation[]) {
