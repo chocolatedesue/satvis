@@ -5,7 +5,7 @@
   </div>
 </template>
 
-<script lang="ts">
+<script setup lang="ts">
 import "@cesium/widgets/Source/widgets.css";
 import "./css/main.css";
 import Toast from "primevue/toast";
@@ -14,17 +14,10 @@ import { onMounted } from "vue";
 
 import { initToastProxy } from "./composables/useToastProxy";
 
-export default {
-  components: {
-    Toast,
-  },
-  setup() {
-    const toast = useToast();
+const toast = useToast();
 
-    onMounted(() => {
-      // Initialize toast utility for non-Vue contexts
-      initToastProxy(toast);
-    });
-  },
-};
+onMounted(() => {
+  // Initialize toast utility for non-Vue contexts
+  initToastProxy(toast);
+});
 </script>
