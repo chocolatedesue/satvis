@@ -174,8 +174,10 @@
   </div>
 </template>
 
-<script lang="ts">
-import { mapWritableState } from "pinia";
+<script setup lang="ts">
+import { storeToRefs } from "pinia";
+import { onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
@@ -185,102 +187,101 @@ import SatelliteSelect from "./SatelliteSelect.vue";
 
 type MenuKey = "cat" | "sat" | "gs" | "map" | "ios" | "dbg";
 
-export default {
-  components: {
-    "satellite-select": SatelliteSelect,
-  },
-  data() {
-    return {
-      menu: {
-        cat: false,
-        sat: false,
-        gs: false,
-        map: false,
-        ios: false,
-        dbg: false,
-      } as Record<MenuKey, boolean>,
-      showUI: true,
-    };
-  },
-  computed: {
-    ...mapWritableState(useCesiumStore, ["layers", "terrainProvider", "sceneMode", "cameraMode", "qualityPreset", "showFps", "background", "pickMode"]),
-    ...mapWritableState(useSatStore, ["enabledComponents", "groundStations", "overpassMode"]),
-  },
-  watch: {
-    layers: {
-      handler(newLayers: string[], oldLayers: string[]) {
-        // Ensure only a single base layer is active
-        const newBaseLayers = newLayers.filter((layer) => cc.baseLayers.includes(layer));
-        if (newBaseLayers.length > 1) {
-          const oldBaseLayers = new Set(oldLayers.filter((layer) => cc.baseLayers.includes(layer)));
-          this.layers = newBaseLayers.filter((layer) => !oldBaseLayers.has(layer));
-          return;
-        }
-        cc.imageryLayers = newLayers;
-      },
-      deep: true,
-    },
-    terrainProvider(newProvider: string) {
-      cc.terrainProvider = newProvider;
-    },
-    sceneMode(newMode: string) {
-      cc.sceneMode = newMode;
-    },
-    cameraMode(newMode: string) {
-      cc.cameraMode = newMode;
-    },
-    qualityPreset: {
-      handler(value: string) {
-        cc.qualityPreset = value;
-      },
-      immediate: true,
-    },
-    showFps(value: boolean) {
-      cc.showFps = value;
-    },
-    background(value: boolean) {
-      cc.background = value;
-    },
-    enabledComponents: {
-      handler(newComponents: string[]) {
-        cc.sats.enabledComponents = newComponents;
-      },
-      deep: true,
-    },
-    groundStations(newGroundStations: SerializedGroundStation[], oldGroundStations: SerializedGroundStation[]) {
-      // Ignore if new and old positions are identical
-      if (oldGroundStations.length === newGroundStations.length) {
-        return;
-      }
-      cc.setGroundStations(newGroundStations);
-    },
-    overpassMode(newMode: string) {
-      cc.sats.overpassMode = newMode;
-    },
-  },
-  mounted() {
-    if (this.$route.query.time) {
-      cc.setTime(this.$route.query.time as string);
+const route = useRoute();
+
+const menu = reactive<Record<MenuKey, boolean>>({
+  cat: false,
+  sat: false,
+  gs: false,
+  map: false,
+  ios: false,
+  dbg: false,
+});
+const showUI = ref(true);
+
+const cesiumStore = useCesiumStore();
+const { layers, terrainProvider, sceneMode, cameraMode, qualityPreset, showFps, background, pickMode } = storeToRefs(cesiumStore);
+
+const satStore = useSatStore();
+const { enabledComponents, groundStations, overpassMode } = storeToRefs(satStore);
+
+watch(
+  layers,
+  (newLayers: string[], oldLayers: string[]) => {
+    // Ensure only a single base layer is active
+    const newBaseLayers = newLayers.filter((layer) => cc.baseLayers.includes(layer));
+    if (newBaseLayers.length > 1) {
+      const oldBaseLayers = new Set(oldLayers.filter((layer) => cc.baseLayers.includes(layer)));
+      layers.value = newBaseLayers.filter((layer) => !oldBaseLayers.has(layer));
+      return;
     }
-    this.showUI = !DeviceDetect.inIframe();
+    cc.imageryLayers = newLayers;
   },
-  methods: {
-    toggleMenu(name: MenuKey) {
-      const oldState = this.menu[name];
-      (Object.keys(this.menu) as MenuKey[]).forEach((k) => {
-        this.menu[k] = false;
-      });
-      this.menu[name] = !oldState;
-    },
-    toggleUI() {
-      this.showUI = !this.showUI;
-      if (!cc.minimalUI) {
-        cc.showUI = this.showUI;
-      }
-    },
-    reload() {
-      window.location.reload();
-    },
+  { deep: true },
+);
+watch(terrainProvider, (newProvider: string) => {
+  cc.terrainProvider = newProvider;
+});
+watch(sceneMode, (newMode: string) => {
+  cc.sceneMode = newMode;
+});
+watch(cameraMode, (newMode: string) => {
+  cc.cameraMode = newMode;
+});
+watch(
+  qualityPreset,
+  (value: string) => {
+    cc.qualityPreset = value;
   },
-};
+  { immediate: true },
+);
+watch(showFps, (value: boolean) => {
+  cc.showFps = value;
+});
+watch(background, (value: boolean) => {
+  cc.background = value;
+});
+watch(
+  enabledComponents,
+  (newComponents: string[]) => {
+    cc.sats.enabledComponents = newComponents;
+  },
+  { deep: true },
+);
+watch(groundStations, (newGroundStations: SerializedGroundStation[], oldGroundStations: SerializedGroundStation[]) => {
+  // Ignore if new and old positions are identical
+  if (oldGroundStations.length === newGroundStations.length) {
+    return;
+  }
+  cc.setGroundStations(newGroundStations);
+});
+watch(overpassMode, (newMode: string) => {
+  cc.sats.overpassMode = newMode;
+});
+
+onMounted(() => {
+  if (route.query.time) {
+    cc.setTime(route.query.time as string);
+  }
+  showUI.value = !DeviceDetect.inIframe();
+});
+
+function toggleMenu(name: MenuKey) {
+  const oldState = menu[name];
+  (Object.keys(menu) as MenuKey[]).forEach((k) => {
+    menu[k] = false;
+  });
+  menu[name] = !oldState;
+}
+
+function toggleUI() {
+  showUI.value = !showUI.value;
+  if (!cc.minimalUI) {
+    cc.showUI = showUI.value;
+  }
+}
+
+function reload() {
+  window.location.reload();
+}
 </script>
