@@ -37,13 +37,6 @@ export function setupRouterGuards(routerInstance: Router, cc: CesiumController):
     // Load new TLE data (with delay to allow cleanup to complete)
     cc.sats.addFromTleUrls(preset.tleData);
 
-    // Skip initial load
-    const isInitialLoad = from.name === undefined;
-    if (isInitialLoad) {
-      next();
-      return;
-    }
-
     next();
   });
 }
