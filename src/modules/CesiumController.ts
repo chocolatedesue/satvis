@@ -1,23 +1,17 @@
 import { Cartesian3, Cartographic, Color, Credit, ImageryLayer, JulianDate, Math as CesiumMath, Matrix4, type Scene, SceneMode, ScreenSpaceEventHandler, ScreenSpaceEventType, TimeInterval, Transforms, defined } from "@cesium/engine";
 import { Viewer } from "@cesium/widgets";
-import { icon } from "@fortawesome/fontawesome-svg-core";
-import { faBell, faInfo } from "@fortawesome/free-solid-svg-icons";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
 import { usePostHog } from "../composables/usePostHog";
-import { useToastProxy } from "../composables/useToastProxy";
 import { useCesiumStore } from "../stores/cesium";
 import { type ImageryProviderEntry, imageryProviders, type TerrainProviderEntry, terrainProviders } from "./CesiumLayerProviders";
 import type { GroundStationPositionData } from "./GroundStationEntity";
 import { SatelliteManager } from "./SatelliteManager";
-import type { Pass } from "./SatelliteProperties";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
+import { InfoBoxController } from "./util/InfoBoxController";
 import { PushManager } from "./util/PushManager";
-
-import infoBoxOverrideCss from "../css/infobox.css?raw";
-import infoBoxCss from "@cesium/widgets/Source/InfoBox/InfoBoxDescription.css?raw";
 
 dayjs.extend(utc);
 
@@ -93,12 +87,13 @@ export class CesiumController {
 
     this.createInputHandler();
     this.addErrorHandler();
-    this.styleInfoBox();
 
     // Create Satellite Manager
     this.sats = new SatelliteManager(this.viewer);
 
     this.pm = new PushManager();
+
+    new InfoBoxController(this.viewer, this.sats, (date, message) => this.pm.notifyAtDate(date, message), (time) => this.setTime(time)).init();
 
     // Add privacy policy to credits when not running in iframe
     if (!DeviceDetect.inIframe()) {
@@ -450,116 +445,5 @@ export class CesiumController {
       proxied.apply(this, [title, message, error]);
       usePostHog().posthog.captureException(error);
     };
-  }
-
-  styleInfoBox(): void {
-    const infoBox = this.viewer.infoBox.container.getElementsByClassName("cesium-infoBox")[0];
-    const close = this.viewer.infoBox.container.getElementsByClassName("cesium-infoBox-close")[0];
-    if (infoBox && close) {
-      // Container for additional buttons
-      const container = document.createElement("div");
-      container.setAttribute("class", "cesium-infoBox-container");
-      infoBox.insertBefore(container, close);
-
-      const notifyForPass = (pass: Pass, aheadMin = 5): void => {
-        const start = dayjs(pass.start).startOf("second");
-        this.pm.notifyAtDate(start.subtract(aheadMin, "minute").toDate(), `${pass.name} pass in ${aheadMin} minutes`);
-        this.pm.notifyAtDate(start.toDate(), `${pass.name} pass starting now`);
-      };
-
-      // Notify button
-      const notifyButton = document.createElement("button");
-      notifyButton.setAttribute("type", "button");
-      notifyButton.setAttribute("class", "cesium-button cesium-infoBox-custom");
-      notifyButton.innerHTML = icon(faBell)?.html.join("") ?? "";
-      notifyButton.addEventListener("click", () => {
-        let passes: Pass[] = [];
-        const toast = useToastProxy();
-        if (!this.sats.groundStationAvailable) {
-          toast.add({
-            severity: "warn",
-            summary: "Warning",
-            detail: "Ground station required to notify for passes",
-            life: 3000,
-          });
-          return;
-        }
-        const selectedGroundstation = this.sats.groundStations.find((gs) => gs.isSelected);
-        if (this.sats.selectedSatellite) {
-          passes = this.sats.getSatellite(this.sats.selectedSatellite)?.props.passes ?? [];
-        } else if (selectedGroundstation) {
-          passes = selectedGroundstation.passes(this.viewer.clock.currentTime);
-        }
-        if (!passes) {
-          toast.add({
-            severity: "info",
-            summary: "Info",
-            detail: `No passes available`,
-            life: 3000,
-          });
-          return;
-        }
-        passes.forEach((pass) => notifyForPass(pass));
-        toast.add({
-          severity: "success",
-          summary: "Success",
-          detail: `Notifying for ${passes.length} passes`,
-          life: 3000,
-        });
-      });
-      container.appendChild(notifyButton);
-
-      // Info button
-      const infoButton = document.createElement("button");
-      infoButton.setAttribute("type", "button");
-      infoButton.setAttribute("class", "cesium-button cesium-infoBox-custom");
-      infoButton.innerHTML = icon(faInfo)?.html.join("") ?? "";
-      infoButton.addEventListener("click", () => {
-        if (!this.sats.selectedSatellite) {
-          return;
-        }
-        const sat = this.sats.getSatellite(this.sats.selectedSatellite);
-        if (!sat) return;
-        const { satnum } = sat.props;
-        const url = `https://www.n2yo.com/satellite/?s=${satnum}`;
-        window.open(url, "_blank", "noopener");
-      });
-      container.appendChild(infoButton);
-    }
-
-    const { frame } = this.viewer.infoBox;
-    frame.addEventListener(
-      "load",
-      () => {
-        // Inline infobox css as iframe does not use service worker
-        const doc = frame.contentDocument;
-        if (!doc) {
-          return;
-        }
-        const { head } = doc;
-        const links = head.getElementsByTagName("link");
-        Array.from(links).forEach((link) => {
-          head.removeChild(link);
-        });
-        const style = doc.createElement("style");
-        const node = document.createTextNode(infoBoxCss + "\n" + infoBoxOverrideCss);
-        style.appendChild(node);
-        head.appendChild(style);
-      },
-      false,
-    );
-
-    // Allow js in infobox
-    frame.setAttribute("sandbox", "allow-same-origin allow-popups allow-forms allow-scripts");
-    frame.setAttribute("allowTransparency", "true");
-    frame.src = "about:blank";
-
-    // Allow time changes from infobox
-    window.addEventListener("message", (e: MessageEvent) => {
-      const pass = e.data;
-      if (pass && typeof pass === "object" && "start" in pass) {
-        this.setTime(pass.start);
-      }
-    });
   }
 }
