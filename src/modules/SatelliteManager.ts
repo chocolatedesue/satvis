@@ -1,15 +1,9 @@
 import type { Viewer } from "@cesium/widgets";
 
-import { useSatStore } from "../stores/sat";
+import { type SerializedGroundStation, useSatStore } from "../stores/sat";
 import { GroundStationEntity, type GroundStationPositionData } from "./GroundStationEntity";
 import { SatelliteComponentCollection } from "./SatelliteComponentCollection";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
-
-interface SerializedGroundStation {
-  lat: number;
-  lon: number;
-  name?: string;
-}
 
 export class SatelliteManager {
   #enabledComponents: string[] = ["Point", "Label"];

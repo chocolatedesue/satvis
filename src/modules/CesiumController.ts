@@ -5,6 +5,7 @@ import utc from "dayjs/plugin/utc";
 
 import { usePostHog } from "../composables/usePostHog";
 import { useCesiumStore } from "../stores/cesium";
+import type { SerializedGroundStation } from "../stores/sat";
 import { type ImageryProviderEntry, imageryProviders, type TerrainProviderEntry, terrainProviders } from "./CesiumLayerProviders";
 import type { GroundStationPositionData } from "./GroundStationEntity";
 import { SatelliteManager } from "./SatelliteManager";
@@ -14,12 +15,6 @@ import { InfoBoxController } from "./util/InfoBoxController";
 import { PushManager } from "./util/PushManager";
 
 dayjs.extend(utc);
-
-interface SerializedGroundStationInput {
-  lat: number;
-  lon: number;
-  name?: string;
-}
 
 declare global {
   interface Window {
@@ -337,7 +332,7 @@ export class CesiumController {
     this.sats.addGroundStation(this.groundStationPosition(lat, lon, height), "");
   }
 
-  setGroundStations(groundStations: SerializedGroundStationInput[]): void {
+  setGroundStations(groundStations: SerializedGroundStation[]): void {
     if (!groundStations) {
       return;
     }
