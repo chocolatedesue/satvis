@@ -238,6 +238,9 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
   createDescription(): void {
     this.description = DescriptionHelper.cachedCallbackProperty((time: JulianDate) => {
       const cartographic = this.props.orbit.positionGeodetic(JulianDate.toDate(time), true);
+      if (!cartographic) {
+        return "";
+      }
       const content = DescriptionHelper.renderSatelliteDescription(time, cartographic, this.props);
       return content;
     });
