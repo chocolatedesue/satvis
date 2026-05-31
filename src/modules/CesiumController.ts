@@ -1,4 +1,20 @@
-import { Cartesian3, Cartographic, Color, Credit, ImageryLayer, JulianDate, Math as CesiumMath, Matrix4, type Scene, SceneMode, ScreenSpaceEventHandler, ScreenSpaceEventType, TimeInterval, Transforms, defined } from "@cesium/engine";
+import {
+  Cartesian3,
+  Cartographic,
+  Color,
+  Credit,
+  ImageryLayer,
+  JulianDate,
+  Math as CesiumMath,
+  Matrix4,
+  type Scene,
+  SceneMode,
+  ScreenSpaceEventHandler,
+  ScreenSpaceEventType,
+  TimeInterval,
+  Transforms,
+  defined,
+} from "@cesium/engine";
 import { Viewer } from "@cesium/widgets";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
@@ -88,7 +104,12 @@ export class CesiumController {
 
     this.pm = new PushManager();
 
-    new InfoBoxController(this.viewer, this.sats, (date, message) => this.pm.notifyAtDate(date, message), (time) => this.setTime(time)).init();
+    new InfoBoxController(
+      this.viewer,
+      this.sats,
+      (date, message) => this.pm.notifyAtDate(date, message),
+      (time) => this.setTime(time),
+    ).init();
 
     // Add privacy policy to credits when not running in iframe
     if (!DeviceDetect.inIframe()) {
