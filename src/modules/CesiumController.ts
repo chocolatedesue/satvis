@@ -298,20 +298,26 @@ export class CesiumController {
     }, ScreenSpaceEventType.LEFT_CLICK);
   }
 
+  private groundStationPosition(latitude: number, longitude: number, height: number): GroundStationPositionData {
+    return {
+      latitude,
+      longitude,
+      height,
+      cartesian: Cartesian3.fromDegrees(longitude, latitude, height),
+    };
+  }
+
   setGroundStationFromClickEvent(event: ScreenSpaceEventHandler.PositionedEvent): void {
     const cartesian = this.viewer.camera.pickEllipsoid(event.position);
-    const didHitGlobe = defined(cartesian);
-    if (didHitGlobe) {
-      const cartographicPosition = Cartographic.fromCartesian(cartesian);
-      const coordinates: GroundStationPositionData = {
-        longitude: CesiumMath.toDegrees(cartographicPosition.longitude),
-        latitude: CesiumMath.toDegrees(cartographicPosition.latitude),
-        height: cartographicPosition.height,
-        cartesian,
-      };
-      this.sats.addGroundStation(coordinates, "");
-      useCesiumStore().pickMode = false;
+    if (!defined(cartesian)) {
+      return;
     }
+    const cartographicPosition = Cartographic.fromCartesian(cartesian);
+    this.sats.addGroundStation(
+      this.groundStationPosition(CesiumMath.toDegrees(cartographicPosition.latitude), CesiumMath.toDegrees(cartographicPosition.longitude), cartographicPosition.height),
+      "",
+    );
+    useCesiumStore().pickMode = false;
   }
 
   setGroundStationFromGeolocation(): void {
@@ -319,13 +325,8 @@ export class CesiumController {
       if (typeof position === "undefined") {
         return;
       }
-      const coordinates: GroundStationPositionData = {
-        longitude: position.coords.longitude,
-        latitude: position.coords.latitude,
-        height: position.coords.altitude ?? 0,
-        cartesian: Cartesian3.fromDegrees(position.coords.longitude, position.coords.latitude, position.coords.altitude ?? 0),
-      };
-      this.sats.addGroundStation(coordinates, "Geolocation");
+      const { latitude, longitude, altitude } = position.coords;
+      this.sats.addGroundStation(this.groundStationPosition(latitude, longitude, altitude ?? 0), "Geolocation");
     });
   }
 
@@ -333,31 +334,16 @@ export class CesiumController {
     if (!lat || !lon) {
       return;
     }
-    const coordinates: GroundStationPositionData = {
-      longitude: lon,
-      latitude: lat,
-      height,
-      cartesian: Cartesian3.fromDegrees(lon, lat, height),
-    };
-    this.sats.addGroundStation(coordinates, "");
+    this.sats.addGroundStation(this.groundStationPosition(lat, lon, height), "");
   }
 
   setGroundStations(groundStations: SerializedGroundStationInput[]): void {
     if (!groundStations) {
       return;
     }
-    const groundStationEntities = groundStations
+    this.sats.groundStations = groundStations
       .filter((gs) => gs.lat && gs.lon)
-      .map((gs) => {
-        const coordinates: GroundStationPositionData = {
-          longitude: gs.lon,
-          latitude: gs.lat,
-          height: 0,
-          cartesian: Cartesian3.fromDegrees(gs.lon, gs.lat, 0),
-        };
-        return this.sats.createGroundstation(coordinates, gs.name ?? "");
-      });
-    this.sats.groundStations = groundStationEntities;
+      .map((gs) => this.sats.createGroundstation(this.groundStationPosition(gs.lat, gs.lon, 0), gs.name ?? ""));
   }
 
   set showUI(enabled: boolean) {
