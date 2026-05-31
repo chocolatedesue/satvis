@@ -1,15 +1,9 @@
 import type { Viewer } from "@cesium/widgets";
 
-import { useSatStore } from "../stores/sat";
+import { type SerializedGroundStation, useSatStore } from "../stores/sat";
 import { GroundStationEntity, type GroundStationPositionData } from "./GroundStationEntity";
 import { SatelliteComponentCollection } from "./SatelliteComponentCollection";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
-
-interface SerializedGroundStation {
-  lat: number;
-  lon: number;
-  name?: string;
-}
 
 export class SatelliteManager {
   #enabledComponents: string[] = ["Point", "Label"];
@@ -60,9 +54,12 @@ export class SatelliteManager {
       .then((response) => response.text())
       .then((data) => {
         const lines = data.split(/\r?\n/);
-        for (let i = 3; i < lines.length; i + 3) {
-          const tle = lines.splice(i - 3, i).join("\n");
-          this.addFromTle(tle, tags, updateStore);
+        // TLE entries are 3 lines each: name, line 1, line 2.
+        for (let i = 0; i + 3 <= lines.length; i += 3) {
+          const tle = lines.slice(i, i + 3).join("\n");
+          if (tle.trim()) {
+            this.addFromTle(tle, tags, updateStore);
+          }
         }
       })
       .catch((error) => {

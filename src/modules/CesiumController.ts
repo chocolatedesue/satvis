@@ -1,68 +1,36 @@
 import {
-  ArcGisMapServerImageryProvider,
-  ArcGISTiledElevationTerrainProvider,
   Cartesian3,
   Cartographic,
-  CesiumTerrainProvider,
   Color,
   Credit,
-  EllipsoidTerrainProvider,
   ImageryLayer,
-  type ImageryProvider,
   JulianDate,
   Math as CesiumMath,
   Matrix4,
-  OpenStreetMapImageryProvider,
   type Scene,
   SceneMode,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
-  type TerrainProvider,
-  TileCoordinatesImageryProvider,
-  TileMapServiceImageryProvider,
   TimeInterval,
   Transforms,
-  UrlTemplateImageryProvider,
-  WebMapServiceImageryProvider,
   defined,
 } from "@cesium/engine";
 import { Viewer } from "@cesium/widgets";
-import { icon } from "@fortawesome/fontawesome-svg-core";
-import { faBell, faInfo } from "@fortawesome/free-solid-svg-icons";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
 import { usePostHog } from "../composables/usePostHog";
-import { useToastProxy } from "../composables/useToastProxy";
 import { useCesiumStore } from "../stores/cesium";
+import type { SerializedGroundStation } from "../stores/sat";
+import { type ImageryProviderEntry, imageryProviders, type TerrainProviderEntry, terrainProviders } from "./CesiumLayerProviders";
 import type { GroundStationPositionData } from "./GroundStationEntity";
 import { SatelliteManager } from "./SatelliteManager";
-import type { Pass } from "./SatelliteProperties";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
+import { InfoBoxController } from "./util/InfoBoxController";
 import { PushManager } from "./util/PushManager";
 
-import infoBoxOverrideCss from "../css/infobox.css?raw";
-import infoBoxCss from "@cesium/widgets/Source/InfoBox/InfoBoxDescription.css?raw";
-
 dayjs.extend(utc);
-
-interface ImageryProviderEntry {
-  create: () => ImageryProvider | Promise<ImageryProvider>;
-  alpha: number;
-  base: boolean;
-}
-
-interface TerrainProviderEntry {
-  create: () => TerrainProvider | Promise<TerrainProvider>;
-  visible?: boolean;
-}
-
-interface SerializedGroundStationInput {
-  lat: number;
-  lon: number;
-  name?: string;
-}
 
 declare global {
   interface Window {
@@ -85,16 +53,11 @@ export class CesiumController {
 
   activeLayers: string[] = [];
 
-  imageryProviders!: Record<string, ImageryProviderEntry>;
-
-  terrainProviders!: Record<string, TerrainProviderEntry>;
-
   performanceStats: CesiumPerformanceStats | undefined;
 
   oldBottomContainerStyleLeft: string = "";
 
   constructor() {
-    this.initConstants();
     this.preloadReferenceFrameData();
     this.minimalUI = DeviceDetect.inIframe() || DeviceDetect.isIos();
 
@@ -135,12 +98,18 @@ export class CesiumController {
 
     this.createInputHandler();
     this.addErrorHandler();
-    this.styleInfoBox();
 
     // Create Satellite Manager
     this.sats = new SatelliteManager(this.viewer);
 
     this.pm = new PushManager();
+
+    new InfoBoxController(
+      this.viewer,
+      this.sats,
+      (date, message) => this.pm.notifyAtDate(date, message),
+      (time) => this.setTime(time),
+    ).init();
 
     // Add privacy policy to credits when not running in iframe
     if (!DeviceDetect.inIframe()) {
@@ -158,115 +127,6 @@ export class CesiumController {
     this.activeLayers = [];
   }
 
-  initConstants(): void {
-    this.imageryProviders = {
-      Offline: {
-        create: () => TileMapServiceImageryProvider.fromUrl("/cesium/Assets/Textures/NaturalEarthII"),
-        alpha: 1,
-        base: true,
-      },
-      OfflineHighres: {
-        create: () =>
-          TileMapServiceImageryProvider.fromUrl("data/cesium-assets/imagery/NaturalEarthII", {
-            maximumLevel: 5,
-            credit: "Imagery courtesy Natural Earth",
-          }),
-        alpha: 1,
-        base: true,
-      },
-      ArcGis: {
-        create: () =>
-          ArcGisMapServerImageryProvider.fromUrl("https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer", {
-            enablePickFeatures: false,
-          }),
-        alpha: 1,
-        base: true,
-      },
-      OSM: {
-        create: () =>
-          new OpenStreetMapImageryProvider({
-            url: "https://a.tile.openstreetmap.org/",
-          }),
-        alpha: 1,
-        base: true,
-      },
-      Topo: {
-        create: () =>
-          new UrlTemplateImageryProvider({
-            url: "https://api.maptiler.com/maps/topo-v2/{z}/{x}/{y}@2x.png?key=tiHE8Ed08u6ZoFjbE32Z",
-            credit: `<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>`,
-          }),
-        alpha: 1,
-        base: true,
-      },
-      BlackMarble: {
-        create: () =>
-          new WebMapServiceImageryProvider({
-            url: "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi",
-            layers: "VIIRS_Black_Marble",
-            parameters: {
-              format: "image/png",
-            },
-            tileWidth: 512,
-            tileHeight: 512,
-            credit: "NASA Global Imagery Browse Services for EOSDIS",
-          }),
-        alpha: 1,
-        base: true,
-      },
-      Tiles: {
-        create: () => new TileCoordinatesImageryProvider(),
-        alpha: 1,
-        base: false,
-      },
-      "GOES-IR": {
-        create: () =>
-          new WebMapServiceImageryProvider({
-            url: "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/conus_ir.cgi?",
-            layers: "goes_conus_ir",
-            credit: "Infrared data courtesy Iowa Environmental Mesonet",
-            parameters: {
-              transparent: "true",
-              format: "image/png",
-            },
-          }),
-        alpha: 0.5,
-        base: false,
-      },
-      Nextrad: {
-        create: () =>
-          new WebMapServiceImageryProvider({
-            url: "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi?",
-            layers: "nexrad-n0r",
-            credit: "US Radar data courtesy Iowa Environmental Mesonet",
-            parameters: {
-              transparent: "true",
-              format: "image/png",
-            },
-          }),
-        alpha: 0.5,
-        base: false,
-      },
-    };
-    this.terrainProviders = {
-      None: {
-        create: () => new EllipsoidTerrainProvider(),
-      },
-      Maptiler: {
-        create: () =>
-          CesiumTerrainProvider.fromUrl("https://api.maptiler.com/tiles/terrain-quantized-mesh/?key=tiHE8Ed08u6ZoFjbE32Z", {
-            credit:
-              '<a href="https://www.maptiler.com/copyright/" target="_blank">© MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap contributors</a>',
-            requestVertexNormals: true,
-          }),
-      },
-      ArcGIS: {
-        create: () => ArcGISTiledElevationTerrainProvider.fromUrl("https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer"),
-        visible: false,
-      },
-    };
-  }
-
   preloadReferenceFrameData(): void {
     // Preload reference frame data for a timeframe of 180 days
     const timeInterval = new TimeInterval({
@@ -279,17 +139,17 @@ export class CesiumController {
   }
 
   get imageryProviderNames(): string[] {
-    return Object.keys(this.imageryProviders);
+    return Object.keys(imageryProviders);
   }
 
   get baseLayers(): string[] {
-    return Object.entries(this.imageryProviders)
+    return Object.entries(imageryProviders)
       .filter(([, val]) => val.base)
       .map(([key]) => key);
   }
 
   get overlayLayers(): string[] {
-    return Object.entries(this.imageryProviders)
+    return Object.entries(imageryProviders)
       .filter(([, val]) => !val.base)
       .map(([key]) => key);
   }
@@ -316,14 +176,14 @@ export class CesiumController {
       return false;
     }
 
-    const provider = this.imageryProviders[imageryProviderName] as ImageryProviderEntry;
+    const provider = imageryProviders[imageryProviderName] as ImageryProviderEntry;
     const layer = ImageryLayer.fromProviderAsync(Promise.resolve(provider.create()), {});
     layer.alpha = alpha === undefined ? provider.alpha : alpha;
     return layer;
   }
 
   get terrainProviderNames(): string[] {
-    return Object.entries(this.terrainProviders)
+    return Object.entries(terrainProviders)
       .filter(([, val]) => val.visible ?? true)
       .map(([key]) => key);
   }
@@ -338,7 +198,7 @@ export class CesiumController {
       return;
     }
 
-    const provider = await (this.terrainProviders[terrainProviderName] as TerrainProviderEntry).create();
+    const provider = await (terrainProviders[terrainProviderName] as TerrainProviderEntry).create();
     this.viewer.terrainProvider = provider;
   }
 
@@ -454,20 +314,26 @@ export class CesiumController {
     }, ScreenSpaceEventType.LEFT_CLICK);
   }
 
+  private groundStationPosition(latitude: number, longitude: number, height: number): GroundStationPositionData {
+    return {
+      latitude,
+      longitude,
+      height,
+      cartesian: Cartesian3.fromDegrees(longitude, latitude, height),
+    };
+  }
+
   setGroundStationFromClickEvent(event: ScreenSpaceEventHandler.PositionedEvent): void {
     const cartesian = this.viewer.camera.pickEllipsoid(event.position);
-    const didHitGlobe = defined(cartesian);
-    if (didHitGlobe) {
-      const cartographicPosition = Cartographic.fromCartesian(cartesian);
-      const coordinates: GroundStationPositionData = {
-        longitude: CesiumMath.toDegrees(cartographicPosition.longitude),
-        latitude: CesiumMath.toDegrees(cartographicPosition.latitude),
-        height: cartographicPosition.height,
-        cartesian,
-      };
-      this.sats.addGroundStation(coordinates, "");
-      useCesiumStore().pickMode = false;
+    if (!defined(cartesian)) {
+      return;
     }
+    const cartographicPosition = Cartographic.fromCartesian(cartesian);
+    this.sats.addGroundStation(
+      this.groundStationPosition(CesiumMath.toDegrees(cartographicPosition.latitude), CesiumMath.toDegrees(cartographicPosition.longitude), cartographicPosition.height),
+      "",
+    );
+    useCesiumStore().pickMode = false;
   }
 
   setGroundStationFromGeolocation(): void {
@@ -475,13 +341,8 @@ export class CesiumController {
       if (typeof position === "undefined") {
         return;
       }
-      const coordinates: GroundStationPositionData = {
-        longitude: position.coords.longitude,
-        latitude: position.coords.latitude,
-        height: position.coords.altitude ?? 0,
-        cartesian: Cartesian3.fromDegrees(position.coords.longitude, position.coords.latitude, position.coords.altitude ?? 0),
-      };
-      this.sats.addGroundStation(coordinates, "Geolocation");
+      const { latitude, longitude, altitude } = position.coords;
+      this.sats.addGroundStation(this.groundStationPosition(latitude, longitude, altitude ?? 0), "Geolocation");
     });
   }
 
@@ -489,31 +350,16 @@ export class CesiumController {
     if (!lat || !lon) {
       return;
     }
-    const coordinates: GroundStationPositionData = {
-      longitude: lon,
-      latitude: lat,
-      height,
-      cartesian: Cartesian3.fromDegrees(lon, lat, height),
-    };
-    this.sats.addGroundStation(coordinates, "");
+    this.sats.addGroundStation(this.groundStationPosition(lat, lon, height), "");
   }
 
-  setGroundStations(groundStations: SerializedGroundStationInput[]): void {
+  setGroundStations(groundStations: SerializedGroundStation[]): void {
     if (!groundStations) {
       return;
     }
-    const groundStationEntities = groundStations
+    this.sats.groundStations = groundStations
       .filter((gs) => gs.lat && gs.lon)
-      .map((gs) => {
-        const coordinates: GroundStationPositionData = {
-          longitude: gs.lon,
-          latitude: gs.lat,
-          height: 0,
-          cartesian: Cartesian3.fromDegrees(gs.lon, gs.lat, 0),
-        };
-        return this.sats.createGroundstation(coordinates, gs.name ?? "");
-      });
-    this.sats.groundStations = groundStationEntities;
+      .map((gs) => this.sats.createGroundstation(this.groundStationPosition(gs.lat, gs.lon, 0), gs.name ?? ""));
   }
 
   set showUI(enabled: boolean) {
@@ -601,116 +447,5 @@ export class CesiumController {
       proxied.apply(this, [title, message, error]);
       usePostHog().posthog.captureException(error);
     };
-  }
-
-  styleInfoBox(): void {
-    const infoBox = this.viewer.infoBox.container.getElementsByClassName("cesium-infoBox")[0];
-    const close = this.viewer.infoBox.container.getElementsByClassName("cesium-infoBox-close")[0];
-    if (infoBox && close) {
-      // Container for additional buttons
-      const container = document.createElement("div");
-      container.setAttribute("class", "cesium-infoBox-container");
-      infoBox.insertBefore(container, close);
-
-      const notifyForPass = (pass: Pass, aheadMin = 5): void => {
-        const start = dayjs(pass.start).startOf("second");
-        this.pm.notifyAtDate(start.subtract(aheadMin, "minute").toDate(), `${pass.name} pass in ${aheadMin} minutes`);
-        this.pm.notifyAtDate(start.toDate(), `${pass.name} pass starting now`);
-      };
-
-      // Notify button
-      const notifyButton = document.createElement("button");
-      notifyButton.setAttribute("type", "button");
-      notifyButton.setAttribute("class", "cesium-button cesium-infoBox-custom");
-      notifyButton.innerHTML = icon(faBell)?.html.join("") ?? "";
-      notifyButton.addEventListener("click", () => {
-        let passes: Pass[] = [];
-        const toast = useToastProxy();
-        if (!this.sats.groundStationAvailable) {
-          toast.add({
-            severity: "warn",
-            summary: "Warning",
-            detail: "Ground station required to notify for passes",
-            life: 3000,
-          });
-          return;
-        }
-        const selectedGroundstation = this.sats.groundStations.find((gs) => gs.isSelected);
-        if (this.sats.selectedSatellite) {
-          passes = this.sats.getSatellite(this.sats.selectedSatellite)?.props.passes ?? [];
-        } else if (selectedGroundstation) {
-          passes = selectedGroundstation.passes(this.viewer.clock.currentTime);
-        }
-        if (!passes) {
-          toast.add({
-            severity: "info",
-            summary: "Info",
-            detail: `No passes available`,
-            life: 3000,
-          });
-          return;
-        }
-        passes.forEach((pass) => notifyForPass(pass));
-        toast.add({
-          severity: "success",
-          summary: "Success",
-          detail: `Notifying for ${passes.length} passes`,
-          life: 3000,
-        });
-      });
-      container.appendChild(notifyButton);
-
-      // Info button
-      const infoButton = document.createElement("button");
-      infoButton.setAttribute("type", "button");
-      infoButton.setAttribute("class", "cesium-button cesium-infoBox-custom");
-      infoButton.innerHTML = icon(faInfo)?.html.join("") ?? "";
-      infoButton.addEventListener("click", () => {
-        if (!this.sats.selectedSatellite) {
-          return;
-        }
-        const sat = this.sats.getSatellite(this.sats.selectedSatellite);
-        if (!sat) return;
-        const { satnum } = sat.props;
-        const url = `https://www.n2yo.com/satellite/?s=${satnum}`;
-        window.open(url, "_blank", "noopener");
-      });
-      container.appendChild(infoButton);
-    }
-
-    const { frame } = this.viewer.infoBox;
-    frame.addEventListener(
-      "load",
-      () => {
-        // Inline infobox css as iframe does not use service worker
-        const doc = frame.contentDocument;
-        if (!doc) {
-          return;
-        }
-        const { head } = doc;
-        const links = head.getElementsByTagName("link");
-        Array.from(links).forEach((link) => {
-          head.removeChild(link);
-        });
-        const style = doc.createElement("style");
-        const node = document.createTextNode(infoBoxCss + "\n" + infoBoxOverrideCss);
-        style.appendChild(node);
-        head.appendChild(style);
-      },
-      false,
-    );
-
-    // Allow js in infobox
-    frame.setAttribute("sandbox", "allow-same-origin allow-popups allow-forms allow-scripts");
-    frame.setAttribute("allowTransparency", "true");
-    frame.src = "about:blank";
-
-    // Allow time changes from infobox
-    window.addEventListener("message", (e: MessageEvent) => {
-      const pass = e.data;
-      if (pass && typeof pass === "object" && "start" in pass) {
-        this.setTime(pass.start);
-      }
-    });
   }
 }

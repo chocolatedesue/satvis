@@ -9,15 +9,15 @@ npm ci
 
 ## Commands
 
-| Task            | Command                                                     |
-| --------------- | ----------------------------------------------------------- |
-| Dev server      | `npm run dev`                                               |
-| Build           | `npm run build`                                             |
-| Lint (CI)       | `npm run lint` (runs oxlint, prettier --check, and vue-tsc) |
-| Lint fix        | `npm run lint:fix` (oxlint --fix + prettier --write)        |
-| Type-check only | `npm run type-check`                                        |
-| Update TLE data | `npm run update-tle` (fetches from CelesTrak/NORAD)         |
-| Deploy          | `npm run deploy` (builds frontend, then deploys worker)     |
+| Task            | Command                                                  |
+| --------------- | -------------------------------------------------------- |
+| Dev server      | `npm run dev`                                            |
+| Build           | `npm run build`                                          |
+| Lint (CI)       | `npm run lint` (runs oxlint, oxfmt --check, and vue-tsc) |
+| Lint fix        | `npm run lint:fix` (oxlint --fix + oxfmt --write)        |
+| Type-check only | `npm run type-check`                                     |
+| Update TLE data | `npm run update-tle` (fetches from CelesTrak/NORAD)      |
+| Deploy          | `npm run deploy` (builds frontend, then deploys worker)  |
 
 CI runs `lint` then `build` — no test suite exists.
 
@@ -30,13 +30,13 @@ CI runs `lint` then `build` — no test suite exists.
 
 ## Key quirks
 
-- **Cesium static assets**: Vite copies Cesium engine assets from `node_modules/@cesium/engine` and `@cesium/widgets` into `dist/cesium/`. The global `CESIUM_BASE_URL` is defined as `"./cesium"` in `vite.config.js`.
+- **Cesium static assets**: Vite copies Cesium engine assets from `node_modules/@cesium/engine` and `@cesium/widgets` into `dist/cesium/`. The global `CESIUM_BASE_URL` is defined as `"./cesium"` in `vite.config.ts`.
 - **Git submodules**: Required — `data/` content depends on them. Run `git submodule update --init` before first build.
-- **Build globals**: `__BUILD_DATE__` and `__BUILD_SHA__` are injected via `vite.config.js` `define`.
+- **Build globals**: `__BUILD_DATE__` and `__BUILD_SHA__` are injected via `vite.config.ts` `define`.
 - **Path aliases**: `@/*` → `src/*`, `@components/*` → `src/components/*`, `@lib/*` → `src/lib/*` (in `tsconfig.json`).
-- **Prettier**: `printWidth: 180`.
-- **Linting**: `oxlint` (primary fast linter) + `prettier` for formatting + `vue-tsc` for type-checking. ESLint config exists (`eslint.config.mjs`) but is not in the `lint` script.
+- **Formatting**: `oxfmt` (config in `.oxfmtrc.json`): `printWidth: 180`, `sortImports`, and `sortPackageJson` enabled.
+- **Linting**: `oxlint` (primary fast linter) + `oxfmt` for formatting + `vue-tsc` for type-checking, all run via `npm run lint`. A legacy `eslint.config.mjs` still exists but is not part of the `lint` script.
 - **Env files**: `.env.development` / `.env.production` — only PostHog keys (`VITE_POSTHOG_*`). See `.env.example`.
 - **PWA**: Service worker via `vite-plugin-pwa` with Workbox caching strategies.
 - **TypeScript**: Strict mode, `noUnusedLocals`, `noUncheckedIndexedAccess`. Unused vars must be prefixed with `_`.
-- **Vue conventions**: Component names in templates must use kebab-case (enforced by eslint).
+- **Vue conventions**: Component names in templates must use kebab-case.

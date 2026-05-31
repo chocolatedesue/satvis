@@ -3,21 +3,16 @@ import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import utc from "dayjs/plugin/utc";
 
+import type { GroundStationPositionData } from "../GroundStationEntity";
+import type { GeodeticPosition } from "../Orbit";
+import type { Pass, SatelliteProperties } from "../SatelliteProperties";
+
 dayjs.extend(relativeTime);
 dayjs.extend(utc);
 
 function pad2(num: number | string): string {
   return String(num).padStart(2, "0");
 }
-
-// Loose typings for Pass and related domain objects; tighten when domain modules
-// are migrated in Phase 2.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Pass = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Position = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SatelliteDescriptionProps = any;
 
 export class DescriptionHelper {
   /** cachedCallbackProperty
@@ -41,7 +36,7 @@ export class DescriptionHelper {
     }, false);
   }
 
-  static renderSatelliteDescription(time: JulianDate, position: Position, props: SatelliteDescriptionProps): string {
+  static renderSatelliteDescription(time: JulianDate, position: GeodeticPosition, props: SatelliteProperties): string {
     const { name, passes, orbit, overpassMode } = props;
     const { tle, julianDate } = orbit;
     const description = `
@@ -63,7 +58,7 @@ export class DescriptionHelper {
               <td>${position.latitude.toFixed(2)}&deg</td>
               <td>${position.longitude.toFixed(2)}&deg</td>
               <td>${(position.height / 1000).toFixed(2)} km</td>
-              <td>${position.velocity.toFixed(2)} km/s</td>
+              <td>${(position.velocity ?? 0).toFixed(2)} km/s</td>
             </tr>
           </tbody>
         </table>
@@ -74,7 +69,7 @@ export class DescriptionHelper {
     return description;
   }
 
-  static renderGroundstationDescription(time: JulianDate, name: string, position: Position, passes: Pass[], overpassMode: string | null = null): string {
+  static renderGroundstationDescription(time: JulianDate, name: string, position: GroundStationPositionData, passes: Pass[], overpassMode: string | null = null): string {
     const description = `
       <div class="ib">
         <h3>Position</h3>
@@ -121,15 +116,14 @@ export class DescriptionHelper {
     }
     const upcomingPasses = passes.slice(upcomingPassIdx);
 
-    const passNameField = isGroundStation ? "name" : "groundStationName";
-    const htmlName = passNameField ? "<th>Name</th>\n" : "";
+    const passNameField: "name" | "groundStationName" = isGroundStation ? "name" : "groundStationName";
     const mode = overpassMode ?? "elevation";
     const html = `
       <h3>Passes (${mode.charAt(0).toUpperCase() + mode.slice(1)})</h3>
       <table class="ibt">
         <thead>
           <tr>
-            ${htmlName}
+            <th>Name</th>
             <th>Countdown</th>
             <th>Start</th>
             <th>End</th>
@@ -145,7 +139,7 @@ export class DescriptionHelper {
     return html;
   }
 
-  static renderPass(time: dayjs.Dayjs | JulianDate, pass: Pass, passNameField: string = "name", overpassMode: string = "elevation"): string {
+  static renderPass(time: dayjs.Dayjs | JulianDate, pass: Pass, passNameField: "name" | "groundStationName" = "name", overpassMode: string = "elevation"): string {
     const t = dayjs.isDayjs(time) ? time : dayjs(JulianDate.toDate(time));
     let countdown = "ONGOING";
     if (dayjs(pass.end).diff(t) < 0) {
@@ -153,18 +147,21 @@ export class DescriptionHelper {
     } else if (dayjs(pass.start).diff(t) > 0) {
       countdown = `${pad2(dayjs(pass.start).diff(t, "days"))}:${pad2(dayjs(pass.start).diff(t, "hours") % 24)}:${pad2(dayjs(pass.start).diff(t, "minutes") % 60)}:${pad2(dayjs(pass.start).diff(t, "seconds") % 60)}`;
     }
-    const htmlName = passNameField ? `<td>${pass[passNameField]}</td>\n` : "";
+    const htmlName = `<td>${pass[passNameField] ?? ""}</td>\n`;
 
     // Handle different pass types based on overpass mode
     let elevationCell: string;
     let azimuthCell: string;
-    if (overpassMode === "swath") {
+    if (overpassMode === "swath" && "minDistance" in pass) {
       elevationCell = `${pass.minDistance.toFixed(1)}km`;
       azimuthCell = `${pass.swathWidth.toFixed(0)}km`;
-    } else {
+    } else if ("maxElevation" in pass) {
       // Default to elevation mode
       elevationCell = `${pass.maxElevation.toFixed(0)}&deg`;
       azimuthCell = `${pass.azimuthApex.toFixed(2)}&deg`;
+    } else {
+      elevationCell = "";
+      azimuthCell = "";
     }
 
     const html = `

@@ -249,8 +249,10 @@ watch(
   { deep: true },
 );
 watch(groundStations, (newGroundStations: SerializedGroundStation[], oldGroundStations: SerializedGroundStation[]) => {
-  // Ignore if new and old positions are identical
-  if (oldGroundStations.length === newGroundStations.length) {
+  // Ignore if new and old ground stations are identical (also avoids a re-entrant
+  // update loop, since setGroundStations writes the same values back to the store)
+  const serialize = (stations: SerializedGroundStation[]) => JSON.stringify(stations.map((gs) => [gs.lat, gs.lon, gs.name]));
+  if (serialize(newGroundStations) === serialize(oldGroundStations)) {
     return;
   }
   cc.setGroundStations(newGroundStations);
