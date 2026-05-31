@@ -1,31 +1,4 @@
-import {
-  ArcGisMapServerImageryProvider,
-  ArcGISTiledElevationTerrainProvider,
-  Cartesian3,
-  Cartographic,
-  CesiumTerrainProvider,
-  Color,
-  Credit,
-  EllipsoidTerrainProvider,
-  ImageryLayer,
-  type ImageryProvider,
-  JulianDate,
-  Math as CesiumMath,
-  Matrix4,
-  OpenStreetMapImageryProvider,
-  type Scene,
-  SceneMode,
-  ScreenSpaceEventHandler,
-  ScreenSpaceEventType,
-  type TerrainProvider,
-  TileCoordinatesImageryProvider,
-  TileMapServiceImageryProvider,
-  TimeInterval,
-  Transforms,
-  UrlTemplateImageryProvider,
-  WebMapServiceImageryProvider,
-  defined,
-} from "@cesium/engine";
+import { Cartesian3, Cartographic, Color, Credit, ImageryLayer, JulianDate, Math as CesiumMath, Matrix4, type Scene, SceneMode, ScreenSpaceEventHandler, ScreenSpaceEventType, TimeInterval, Transforms, defined } from "@cesium/engine";
 import { Viewer } from "@cesium/widgets";
 import { icon } from "@fortawesome/fontawesome-svg-core";
 import { faBell, faInfo } from "@fortawesome/free-solid-svg-icons";
@@ -35,6 +8,7 @@ import utc from "dayjs/plugin/utc";
 import { usePostHog } from "../composables/usePostHog";
 import { useToastProxy } from "../composables/useToastProxy";
 import { useCesiumStore } from "../stores/cesium";
+import { type ImageryProviderEntry, imageryProviders, type TerrainProviderEntry, terrainProviders } from "./CesiumLayerProviders";
 import type { GroundStationPositionData } from "./GroundStationEntity";
 import { SatelliteManager } from "./SatelliteManager";
 import type { Pass } from "./SatelliteProperties";
@@ -46,17 +20,6 @@ import infoBoxOverrideCss from "../css/infobox.css?raw";
 import infoBoxCss from "@cesium/widgets/Source/InfoBox/InfoBoxDescription.css?raw";
 
 dayjs.extend(utc);
-
-interface ImageryProviderEntry {
-  create: () => ImageryProvider | Promise<ImageryProvider>;
-  alpha: number;
-  base: boolean;
-}
-
-interface TerrainProviderEntry {
-  create: () => TerrainProvider | Promise<TerrainProvider>;
-  visible?: boolean;
-}
 
 interface SerializedGroundStationInput {
   lat: number;
@@ -85,16 +48,11 @@ export class CesiumController {
 
   activeLayers: string[] = [];
 
-  imageryProviders!: Record<string, ImageryProviderEntry>;
-
-  terrainProviders!: Record<string, TerrainProviderEntry>;
-
   performanceStats: CesiumPerformanceStats | undefined;
 
   oldBottomContainerStyleLeft: string = "";
 
   constructor() {
-    this.initConstants();
     this.preloadReferenceFrameData();
     this.minimalUI = DeviceDetect.inIframe() || DeviceDetect.isIos();
 
@@ -158,115 +116,6 @@ export class CesiumController {
     this.activeLayers = [];
   }
 
-  initConstants(): void {
-    this.imageryProviders = {
-      Offline: {
-        create: () => TileMapServiceImageryProvider.fromUrl("/cesium/Assets/Textures/NaturalEarthII"),
-        alpha: 1,
-        base: true,
-      },
-      OfflineHighres: {
-        create: () =>
-          TileMapServiceImageryProvider.fromUrl("data/cesium-assets/imagery/NaturalEarthII", {
-            maximumLevel: 5,
-            credit: "Imagery courtesy Natural Earth",
-          }),
-        alpha: 1,
-        base: true,
-      },
-      ArcGis: {
-        create: () =>
-          ArcGisMapServerImageryProvider.fromUrl("https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer", {
-            enablePickFeatures: false,
-          }),
-        alpha: 1,
-        base: true,
-      },
-      OSM: {
-        create: () =>
-          new OpenStreetMapImageryProvider({
-            url: "https://a.tile.openstreetmap.org/",
-          }),
-        alpha: 1,
-        base: true,
-      },
-      Topo: {
-        create: () =>
-          new UrlTemplateImageryProvider({
-            url: "https://api.maptiler.com/maps/topo-v2/{z}/{x}/{y}@2x.png?key=tiHE8Ed08u6ZoFjbE32Z",
-            credit: `<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>`,
-          }),
-        alpha: 1,
-        base: true,
-      },
-      BlackMarble: {
-        create: () =>
-          new WebMapServiceImageryProvider({
-            url: "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi",
-            layers: "VIIRS_Black_Marble",
-            parameters: {
-              format: "image/png",
-            },
-            tileWidth: 512,
-            tileHeight: 512,
-            credit: "NASA Global Imagery Browse Services for EOSDIS",
-          }),
-        alpha: 1,
-        base: true,
-      },
-      Tiles: {
-        create: () => new TileCoordinatesImageryProvider(),
-        alpha: 1,
-        base: false,
-      },
-      "GOES-IR": {
-        create: () =>
-          new WebMapServiceImageryProvider({
-            url: "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/conus_ir.cgi?",
-            layers: "goes_conus_ir",
-            credit: "Infrared data courtesy Iowa Environmental Mesonet",
-            parameters: {
-              transparent: "true",
-              format: "image/png",
-            },
-          }),
-        alpha: 0.5,
-        base: false,
-      },
-      Nextrad: {
-        create: () =>
-          new WebMapServiceImageryProvider({
-            url: "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi?",
-            layers: "nexrad-n0r",
-            credit: "US Radar data courtesy Iowa Environmental Mesonet",
-            parameters: {
-              transparent: "true",
-              format: "image/png",
-            },
-          }),
-        alpha: 0.5,
-        base: false,
-      },
-    };
-    this.terrainProviders = {
-      None: {
-        create: () => new EllipsoidTerrainProvider(),
-      },
-      Maptiler: {
-        create: () =>
-          CesiumTerrainProvider.fromUrl("https://api.maptiler.com/tiles/terrain-quantized-mesh/?key=tiHE8Ed08u6ZoFjbE32Z", {
-            credit:
-              '<a href="https://www.maptiler.com/copyright/" target="_blank">© MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap contributors</a>',
-            requestVertexNormals: true,
-          }),
-      },
-      ArcGIS: {
-        create: () => ArcGISTiledElevationTerrainProvider.fromUrl("https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer"),
-        visible: false,
-      },
-    };
-  }
-
   preloadReferenceFrameData(): void {
     // Preload reference frame data for a timeframe of 180 days
     const timeInterval = new TimeInterval({
@@ -279,17 +128,17 @@ export class CesiumController {
   }
 
   get imageryProviderNames(): string[] {
-    return Object.keys(this.imageryProviders);
+    return Object.keys(imageryProviders);
   }
 
   get baseLayers(): string[] {
-    return Object.entries(this.imageryProviders)
+    return Object.entries(imageryProviders)
       .filter(([, val]) => val.base)
       .map(([key]) => key);
   }
 
   get overlayLayers(): string[] {
-    return Object.entries(this.imageryProviders)
+    return Object.entries(imageryProviders)
       .filter(([, val]) => !val.base)
       .map(([key]) => key);
   }
@@ -316,14 +165,14 @@ export class CesiumController {
       return false;
     }
 
-    const provider = this.imageryProviders[imageryProviderName] as ImageryProviderEntry;
+    const provider = imageryProviders[imageryProviderName] as ImageryProviderEntry;
     const layer = ImageryLayer.fromProviderAsync(Promise.resolve(provider.create()), {});
     layer.alpha = alpha === undefined ? provider.alpha : alpha;
     return layer;
   }
 
   get terrainProviderNames(): string[] {
-    return Object.entries(this.terrainProviders)
+    return Object.entries(terrainProviders)
       .filter(([, val]) => val.visible ?? true)
       .map(([key]) => key);
   }
@@ -338,7 +187,7 @@ export class CesiumController {
       return;
     }
 
-    const provider = await (this.terrainProviders[terrainProviderName] as TerrainProviderEntry).create();
+    const provider = await (terrainProviders[terrainProviderName] as TerrainProviderEntry).create();
     this.viewer.terrainProvider = provider;
   }
 
