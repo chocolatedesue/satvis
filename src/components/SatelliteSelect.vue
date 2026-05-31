@@ -25,64 +25,55 @@
   </div>
 </template>
 
-<script lang="ts">
-import { mapWritableState } from "pinia";
+<script setup lang="ts">
+import { storeToRefs } from "pinia";
+import { computed, watch } from "vue";
 import VueMultiselect from "vue-multiselect";
 
 import { useSatStore } from "../stores/sat";
 
-export default {
-  components: {
-    VueMultiselect,
+const satStore = useSatStore();
+const { availableSatellitesByTag, availableTags, enabledSatellites, enabledTags, trackedSatellite } = storeToRefs(satStore);
+
+const availableSatellites = computed<{ tag: string; sats: string[] }[]>(() => {
+  let satlist = Object.keys(availableSatellitesByTag.value).map((tag) => ({
+    tag,
+    sats: availableSatellitesByTag.value[tag] ?? [],
+  }));
+  if (satlist.length === 0) {
+    satlist = [];
+  }
+  return satlist;
+});
+
+function getSatellitesFromTags(taglist: string[]): string[] {
+  return taglist.flatMap((tag) => availableSatellitesByTag.value[tag] || []);
+}
+
+const satellitesEnabledByTag = computed<string[]>(() => getSatellitesFromTags(enabledTags.value));
+
+const allEnabledSatellites = computed<string[]>({
+  get() {
+    return satellitesEnabledByTag.value.concat(enabledSatellites.value ?? []);
   },
-  data() {
-    return {};
+  set(sats: string[]) {
+    const newEnabledTags = availableTags.value.filter((tag) => !(availableSatellitesByTag.value[tag] ?? []).some((sat) => !sats.includes(sat)));
+    const satellitesInEnabledTags = getSatellitesFromTags(newEnabledTags);
+    const newEnabledSatellites = sats.filter((sat) => !satellitesInEnabledTags.includes(sat));
+    cc.sats.enabledSatellites = newEnabledSatellites;
+    cc.sats.enabledTags = newEnabledTags;
   },
-  computed: {
-    ...mapWritableState(useSatStore, ["availableSatellitesByTag", "availableTags", "enabledSatellites", "enabledTags", "trackedSatellite"]),
-    availableSatellites(): { tag: string; sats: string[] }[] {
-      let satlist = Object.keys(this.availableSatellitesByTag).map((tag) => ({
-        tag,
-        sats: this.availableSatellitesByTag[tag] ?? [],
-      }));
-      if (satlist.length === 0) {
-        satlist = [];
-      }
-      return satlist;
-    },
-    satellitesEnabledByTag(): string[] {
-      return this.getSatellitesFromTags(this.enabledTags);
-    },
-    allEnabledSatellites: {
-      get(): string[] {
-        return this.satellitesEnabledByTag.concat(this.enabledSatellites ?? []);
-      },
-      set(sats: string[]) {
-        const enabledTags = this.availableTags.filter((tag) => !(this.availableSatellitesByTag[tag] ?? []).some((sat) => !sats.includes(sat)));
-        const satellitesInEnabledTags = this.getSatellitesFromTags(enabledTags);
-        const enabledSatellites = sats.filter((sat) => !satellitesInEnabledTags.includes(sat));
-        cc.sats.enabledSatellites = enabledSatellites;
-        cc.sats.enabledTags = enabledTags;
-      },
-    },
-  },
-  watch: {
-    enabledSatellites(sats: string[]) {
-      cc.sats.enabledSatellites = sats;
-    },
-    enabledTags(tags: string[]) {
-      cc.sats.enabledTags = tags;
-    },
-    trackedSatellite(satellite: string) {
-      cc.sats.trackedSatellite = satellite;
-    },
-  },
-  methods: {
-    getSatellitesFromTags(taglist: string[]): string[] {
-      return taglist.flatMap((tag) => this.availableSatellitesByTag[tag] || []);
-    },
-  },
-};
+});
+
+watch(enabledSatellites, (sats: string[]) => {
+  cc.sats.enabledSatellites = sats;
+});
+watch(enabledTags, (tags: string[]) => {
+  cc.sats.enabledTags = tags;
+});
+watch(trackedSatellite, (satellite: string) => {
+  cc.sats.trackedSatellite = satellite;
+});
 </script>
 
 <style scoped>
