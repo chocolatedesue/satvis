@@ -1,5 +1,7 @@
-import { execSync } from "child_process";
-import path from "path";
+/// <reference types="node" />
+
+import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
@@ -20,9 +22,9 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000,
     rolldownOptions: {
       input: {
-        index: path.resolve(__dirname, "index.html"),
-        embedded: path.resolve(__dirname, "embedded.html"),
-        test: path.resolve(__dirname, "test.html"),
+        index: fileURLToPath(new URL("index.html", import.meta.url)),
+        embedded: fileURLToPath(new URL("embedded.html", import.meta.url)),
+        test: fileURLToPath(new URL("test.html", import.meta.url)),
       },
       output: {
         // Separate vendor chunks for better caching
