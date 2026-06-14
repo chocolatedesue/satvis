@@ -12,9 +12,9 @@
     "type-check": "tsc"
   },
   "devDependencies": {
-    "oxfmt": "^0.51.0",
-    "oxlint": "^1.66.0",
+    "oxfmt": "^0.54.0",
+    "oxlint": "^1.69.0",
     "typescript": "^6.0.3",
-    "wrangler": "^4.93.1"
+    "wrangler": "^4.100.0"
   }
 }
