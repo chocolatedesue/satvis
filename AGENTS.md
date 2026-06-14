@@ -5,19 +5,20 @@
 ```sh
 git submodule update --init
 npm ci
+npm --prefix worker ci
 ```
 
 ## Commands
 
-| Task            | Command                                                  |
-| --------------- | -------------------------------------------------------- |
-| Dev server      | `npm run dev`                                            |
-| Build           | `npm run build`                                          |
-| Lint (CI)       | `npm run lint` (runs oxlint, oxfmt --check, and vue-tsc) |
-| Lint fix        | `npm run lint:fix` (oxlint --fix + oxfmt --write)        |
-| Type-check only | `npm run type-check`                                     |
-| Update TLE data | `npm run update-tle` (fetches from CelesTrak/NORAD)      |
-| Deploy          | `npm run deploy` (builds frontend, then deploys worker)  |
+| Task            | Command                                                 |
+| --------------- | ------------------------------------------------------- |
+| Dev server      | `npm run dev`                                           |
+| Build           | `npm run build`                                         |
+| Lint (CI)       | `npm run lint` (runs frontend and worker lint)          |
+| Lint fix        | `npm run lint:fix` (runs frontend and worker fixes)     |
+| Type-check only | `npm run type-check`                                    |
+| Update TLE data | `npm run update-tle` (fetches from CelesTrak/NORAD)     |
+| Deploy          | `npm run deploy` (builds frontend, then deploys worker) |
 
 CI runs `lint` then `build` — no test suite exists.
 
@@ -35,7 +36,7 @@ CI runs `lint` then `build` — no test suite exists.
 - **Build globals**: `__BUILD_DATE__` and `__BUILD_SHA__` are injected via `vite.config.ts` `define`.
 - **Path aliases**: `@/*` → `src/*`, `@components/*` → `src/components/*`, `@lib/*` → `src/lib/*` (in `tsconfig.json`).
 - **Formatting**: `oxfmt` (config in `.oxfmtrc.json`): `printWidth: 180`, `sortImports`, and `sortPackageJson` enabled.
-- **Linting**: `oxlint` (primary fast linter) + `oxfmt` for formatting + `vue-tsc` for type-checking, all run via `npm run lint`. A legacy `eslint.config.mjs` still exists but is not part of the `lint` script.
+- **Linting**: `npm run lint` runs frontend `oxlint`, `oxfmt --check`, and `vue-tsc`, then the worker's own lint script.
 - **Env files**: `.env.development` / `.env.production` — only PostHog keys (`VITE_POSTHOG_*`). See `.env.example`.
 - **PWA**: Service worker via `vite-plugin-pwa` with Workbox caching strategies.
 - **TypeScript**: Strict mode, `noUnusedLocals`, `noUncheckedIndexedAccess`. Unused vars must be prefixed with `_`.
