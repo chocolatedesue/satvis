@@ -20,6 +20,6 @@
     "noUncheckedIndexedAccess": true,
 
     /* Worker */
-    "types": ["./src/worker-configuration.d.ts"],
-  },
+    "types": ["./src/worker-configuration.d.ts"]
+  }
 }

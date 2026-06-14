@@ -188,6 +188,7 @@ import SatelliteSelect from "./SatelliteSelect.vue";
 type MenuKey = "cat" | "sat" | "gs" | "map" | "ios" | "dbg";
 
 const route = useRoute();
+const cc = globalThis.cc;
 
 const menu = reactive<Record<MenuKey, boolean>>({
   cat: false,
