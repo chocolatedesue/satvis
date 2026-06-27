@@ -33,15 +33,19 @@ Initialize submodules and install npm build dependencies:
 
 ```
 git submodule update --init
-npm clean-install
+mise install         # provision Node 24 + pnpm 11 (see mise.toml); or bring your own
+pnpm install
 ```
+
+A single `pnpm install` at the repository root installs dependencies for both
+the SPA and the `worker/` package.
 
 ### Run
 
-- `npm run start` for the dev server
-- `npm run build` to build the application (output in `dist` folder)
-- `npm run serve` to build the application and serve with static webserver
-- `npm run update-tle` to retrieve the latest satellite TLEs from NORAD
+- `pnpm start` for the dev server
+- `pnpm build` to build the application (output in `dist` folder)
+- `pnpm serve` to build the application and serve with static webserver
+- `pnpm update-tle` to retrieve the latest satellite TLEs from NORAD
 
 ## iOS App
 
