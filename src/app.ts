@@ -7,7 +7,7 @@ import { createPinia } from "pinia";
 import PrimeVue from "primevue/config";
 import ToastService from "primevue/toastservice";
 import Tooltip from "primevue/tooltip";
-import { createApp, markRaw } from "vue";
+import { createApp, markRaw, type Component } from "vue";
 
 import App from "./App.vue";
 import { usePWAUpdate } from "./composables/usePWAUpdate";
@@ -53,7 +53,10 @@ app.use(PrimeVue, {
 app.directive("tooltip", Tooltip);
 app.use(ToastService);
 library.add(faLayerGroup, faGlobeAfrica, faMobileAlt, faHammer, faEye, faGithub);
-app.component("FontAwesomeIcon", FontAwesomeIcon);
+// Cast to the generic Component type to avoid TS2590 (union too complex):
+// vue-fontawesome's DefineComponent props are large enough that app.component()
+// overflows TypeScript's union-complexity limit on some platforms.
+app.component("FontAwesomeIcon", FontAwesomeIcon as Component);
 
 // Mount the app
 app.mount("#app");
