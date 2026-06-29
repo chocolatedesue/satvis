@@ -42,9 +42,10 @@ the SPA and the `worker/` package.
 
 ### Run
 
-- `pnpm start` for the dev server
+- `pnpm dev` for the dev server
+- `pnpm dev:host` to expose the dev server on the local network
 - `pnpm build` to build the application (output in `dist` folder)
-- `pnpm serve` to build the application and serve with static webserver
+- `pnpm preview` to preview the production build locally
 - `pnpm update-tle` to retrieve the latest satellite TLEs from NORAD
 
 ## iOS App

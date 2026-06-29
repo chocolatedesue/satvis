@@ -7,8 +7,10 @@
   "author": "Florian Mauracher",
   "type": "module",
   "scripts": {
-    "build": "vite build",
     "dev": "vite",
+    "dev:host": "vite --host 0.0.0.0",
+    "dev:worker": "pnpm --filter satvis-worker dev",
+    "build": "vite build",
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "lint": "pnpm lint:web && pnpm lint:worker",
@@ -17,9 +19,6 @@
     "lint:fix": "pnpm lint:fix:web && pnpm lint:fix:worker",
     "lint:fix:web": "oxlint --fix && oxfmt --write",
     "lint:fix:worker": "pnpm --filter satvis-worker lint:fix",
-    "serve": "pnpm build && pnpm preview",
-    "start": "vite",
-    "start:anyhost": "vite --host 0.0.0.0",
     "update-tle": "node data/tle/update-tle.js",
     "update-custom-data": "pnpm update-tle && bash data/custom/update-custom-data.sh",
     "deploy": "pnpm build && pnpm --filter satvis-worker deploy"
