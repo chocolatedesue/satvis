@@ -15,6 +15,6 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:",
-    "wrangler": "^4.100.0"
+    "wrangler": "^4.106.0"
   }
 }

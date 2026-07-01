@@ -35,7 +35,7 @@
     "cesium-sensor-volumes": "github:Flowm/cesium-sensor-volumes#1.140.0",
     "dayjs": "^1.11.21",
     "pinia": "^3.0.4",
-    "posthog-js": "^1.395.0",
+    "posthog-js": "^1.396.3",
     "primevue": "^4.5.5",
     "satellite.js": "^7.0.1",
     "vue": "^3.5.39",
@@ -43,7 +43,7 @@
     "vue-router": "^5.1.0"
   },
   "devDependencies": {
-    "@types/node": "^25.9.4",
+    "@types/node": "^26.0.1",
     "@vite-pwa/assets-generator": "^1.0.2",
     "@vitejs/plugin-vue": "^6.0.7",
     "@vue/tsconfig": "^0.9.1",
@@ -53,7 +53,7 @@
     "vite": "8.0.16",
     "vite-plugin-pwa": "^1.3.0",
     "vite-plugin-static-copy": "^4.1.1",
-    "vue-tsc": "^3.3.5"
+    "vue-tsc": "^3.3.6"
   },
   "packageManager": "pnpm@11.9.0"
 }
