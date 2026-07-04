@@ -1,0 +1,144 @@
+<template>
+  <!-- Group row: expand chevron + tri-state checkbox + tag name + count badge. -->
+  <div v-if="row.kind === 'group'" class="browser-row browser-row--group">
+    <button type="button" class="browser-chevron" :aria-label="row.expanded ? 'Collapse group' : 'Expand group'" @click="emit('toggle-expand', row.tag)">
+      <font-awesome-icon :icon="row.expanded ? 'fas fa-chevron-down' : 'fas fa-chevron-right'" />
+    </button>
+    <input
+      ref="groupCheckbox"
+      class="browser-checkbox"
+      type="checkbox"
+      :checked="row.state === 'all'"
+      :aria-label="`Toggle group ${row.tag}`"
+      @click.stop="emit('toggle-group', row.tag)"
+    />
+    <span class="browser-label browser-label--group" @click="emit('toggle-expand', row.tag)">{{ row.tag }}</span>
+    <span class="browser-badge">{{ row.activeCount }}/{{ row.count }}</span>
+  </div>
+
+  <!-- Satellite row: indent + checkbox + name + dimmed satnum (+ dimmed group labels in search mode). -->
+  <div v-else class="browser-row browser-row--sat" :class="{ 'browser-row--via-group': row.viaGroup }">
+    <UTooltip v-if="row.viaGroup" text="Enabled via group — uncheck the group to deselect">
+      <input class="browser-checkbox" type="checkbox" :checked="true" :aria-label="`${row.name} enabled via group`" @click.prevent />
+    </UTooltip>
+    <input v-else class="browser-checkbox" type="checkbox" :checked="row.checked" :aria-label="`Toggle ${row.name}`" @click.stop="emit('toggle-sat', row.name)" />
+    <span class="browser-label browser-label--sat" :class="{ 'browser-label--dimmed': row.viaGroup }" @click="!row.viaGroup && emit('toggle-sat', row.name)">{{ row.name }}</span>
+    <span class="browser-satnum">{{ row.satnum }}</span>
+    <span v-if="row.groupsLabel" class="browser-groups">{{ row.groupsLabel }}</span>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { onMounted, ref, watch } from "vue";
+
+import type { BrowserRow } from "../composables/useSatelliteBrowser";
+
+const props = defineProps<{ row: BrowserRow }>();
+const emit = defineEmits<{
+  "toggle-group": [tag: string];
+  "toggle-sat": [name: string];
+  "toggle-expand": [tag: string];
+}>();
+
+// Native checkboxes expose `indeterminate` only via the DOM property, not an
+// attribute — set it imperatively for the tri-state "some members active" case.
+// (UCheckbox exists but renders a light-theme surface here; a native input with
+// accent-color reads consistently in the dark panel.)
+const groupCheckbox = ref<HTMLInputElement | null>(null);
+function syncIndeterminate() {
+  if (props.row.kind === "group" && groupCheckbox.value) {
+    groupCheckbox.value.indeterminate = props.row.state === "some";
+  }
+}
+onMounted(syncIndeterminate);
+watch(() => (props.row.kind === "group" ? props.row.state : undefined), syncIndeterminate);
+</script>
+
+<style scoped>
+.browser-row {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  gap: 6px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.browser-row--group {
+  font-weight: 600;
+}
+
+.browser-chevron {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #b8c4c4;
+  font-size: 11px;
+}
+
+.browser-chevron:hover {
+  color: #edffff;
+}
+
+.browser-checkbox {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: #2f9e44;
+}
+
+.browser-row--sat .browser-checkbox {
+  margin-left: 16px;
+}
+
+.browser-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.browser-label--sat {
+  font-weight: 400;
+}
+
+.browser-label--dimmed {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.browser-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: #b8c4c4;
+  font-variant-numeric: tabular-nums;
+}
+
+.browser-satnum {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: #8a9797;
+  font-variant-numeric: tabular-nums;
+}
+
+.browser-groups {
+  flex: 0 1 auto;
+  font-size: 11px;
+  color: #8a9797;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+</style>

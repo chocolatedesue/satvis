@@ -33,8 +33,14 @@
           </button>
         </UTooltip>
       </div>
-      <div v-show="menu.cat" class="toolbarSwitches">
-        <satellite-select />
+      <!-- v-if (not v-show like the other panels): the virtualized list inside
+           measures its scroll element on mount, and mounting hidden (display:none)
+           yields a 0-height measurement that only a later ResizeObserver tick would
+           fix. Mounting on open guarantees a correct first paint; browser state
+           (search, expansion) is module-scoped in useSatelliteBrowser and survives
+           remounts. -->
+      <div v-if="menu.cat" class="toolbarSwitches">
+        <satellite-browser />
       </div>
       <div v-show="menu.sat" class="toolbarSwitches">
         <div class="toolbarTitle">Satellite elements</div>
@@ -199,7 +205,7 @@ import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
 import type { SerializedGroundStation } from "../stores/sat";
 import { useSatStore } from "../stores/sat";
-import SatelliteSelect from "./SatelliteSelect.vue";
+import SatelliteBrowser from "./SatelliteBrowser.vue";
 
 type MenuKey = "cat" | "sat" | "gs" | "map" | "ios" | "dbg";
 
@@ -278,9 +284,10 @@ watch(overpassMode, (newMode: string) => {
   cc.sats.overpassMode = newMode;
 });
 // Carry the store's satellite activation state into the SatelliteManager. These
-// live here (an always-mounted component) rather than in SatelliteSelect.vue so
-// that URL-hydrated state (applied by the url-sync plugin after mount, as a
-// store change) reaches Cesium even when the catalog panel is never opened.
+// live here (an always-mounted component) rather than in the catalog panel
+// (SatelliteBrowser, mounted behind a v-show) so that URL-hydrated state
+// (applied by the url-sync plugin after mount, as a store change) reaches
+// Cesium even when the catalog panel is never opened.
 // Non-immediate on purpose: the url-sync plugin writes the hydrated values into
 // the store after mount, which fires these watchers; the manager starts from
 // its own matching defaults.
