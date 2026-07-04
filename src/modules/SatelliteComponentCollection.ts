@@ -286,8 +286,11 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
   }
 
   createModel(): void {
+    // Prefer an explicit model URL from catalog metadata; otherwise fall back to
+    // the name-convention path (./data/models/<NAME>.glb).
+    const uri = this.props.entry.metadata.modelUrl ?? `./data/models/${this.props.name.split(" ").join("-")}.glb`;
     const model = new ModelGraphics({
-      uri: `./data/models/${this.props.name.split(" ").join("-")}.glb`,
+      uri,
       minimumPixelSize: 50,
       maximumScale: 10000,
     });
@@ -415,7 +418,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
     this.createCesiumSatelliteEntity("Ground track", "corridor", corridor);
   }
 
-  createCone(fov = 10): void {
+  createCone(fov = this.props.coneFovDeg): void {
     if (this.props.orbit.orbitalPeriod > 60 * 2) {
       // Cone graphic unavailable for non-LEO satellites
       return;

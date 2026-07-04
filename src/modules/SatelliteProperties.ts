@@ -314,29 +314,15 @@ export class SatelliteProperties {
     this.passIntervals = new TimeIntervalCollection(passIntervalArray);
   }
 
+  // Swath width (km), resolved from catalog metadata rules (see
+  // src/config/satelliteMetadata.ts). Defaults kept inline as a belt-and-braces
+  // fallback should metadata resolution be unavailable.
   get swath(): number {
-    // Hardcoded swath for certain satellites
-    if (["SUOMI NPP", "NOAA 20 (JPSS-1)", "NOAA 21 (JPSS-2)"].includes(this.name)) {
-      return 3000;
-    }
-    if (["AQUA", "TERRA"].includes(this.name)) {
-      return 2330;
-    }
-    if (this.name.includes("SENTINEL-2")) {
-      return 290;
-    }
-    if (this.name.includes("SENTINEL-3")) {
-      return 740;
-    }
-    if (this.name.includes("LANDSAT")) {
-      return 185;
-    }
-    if (this.name.includes("FENGYUN")) {
-      return 2900;
-    }
-    if (this.name.includes("METOP")) {
-      return 2900;
-    }
-    return 200;
+    return this.entry.metadata.swathKm ?? 200;
+  }
+
+  // Sensor-cone half-angle FOV (degrees), resolved from catalog metadata rules.
+  get coneFovDeg(): number {
+    return this.entry.metadata.coneFovDeg ?? 10;
   }
 }

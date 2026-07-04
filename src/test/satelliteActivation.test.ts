@@ -5,10 +5,10 @@ import type { CatalogEntry } from "../modules/SatelliteCatalog";
 import type { GpRecord } from "../modules/util/gp";
 
 // Minimal CatalogEntry factory — activeTargetEntries only reads key/name/tags,
-// so the record is a filler value.
+// so record and metadata are filler values.
 function entry(name: string, satnum: string, tags: string[]): CatalogEntry {
   const record: GpRecord = { kind: "tle", name, line1: "", line2: "" };
-  return { key: `${satnum}|${name}`, name, nameUpper: name.toUpperCase(), satnum, tags, record };
+  return { key: `${satnum}|${name}`, name, nameUpper: name.toUpperCase(), satnum, tags, record, metadata: {} };
 }
 
 const ALPHA = entry("ALPHA", "1", ["Weather", "New"]);

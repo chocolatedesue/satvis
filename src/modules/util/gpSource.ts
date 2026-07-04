@@ -8,6 +8,8 @@
 const API_BASE = "/api/gp/";
 const STATIC_BASE = "data/gp/";
 const PROBE_URL = "/api/groups.json";
+const API_METADATA_URL = "/api/metadata.json";
+const STATIC_METADATA_URL = "data/gp/metadata.json";
 const PROBE_TIMEOUT_MS = 3000;
 
 let basePromise: Promise<string> | undefined;
@@ -50,6 +52,12 @@ export function resolveGroupUrl(source: string, base: string): string {
     return `${base}${source}.json`;
   }
   return source;
+}
+
+// The metadata endpoint for the resolved base: the worker serves it at
+// `/api/metadata.json`; the static snapshot writes `data/gp/metadata.json`.
+export function resolveMetadataUrl(base: string): string {
+  return base === API_BASE ? API_METADATA_URL : STATIC_METADATA_URL;
 }
 
 export { API_BASE, STATIC_BASE };
