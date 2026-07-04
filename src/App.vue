@@ -1,15 +1,14 @@
 <template>
-  <div class="app">
-    <toast position="bottom-right" />
-    <router-view />
-  </div>
+  <UApp :toaster="{ position: 'bottom-right' }">
+    <div class="app">
+      <router-view />
+    </div>
+  </UApp>
 </template>
 
 <script setup lang="ts">
 import "@cesium/widgets/Source/widgets.css";
 import "./css/main.css";
-import Toast from "primevue/toast";
-import { useToast } from "primevue/usetoast";
 import { onMounted } from "vue";
 
 import { initToastProxy } from "./composables/useToastProxy";

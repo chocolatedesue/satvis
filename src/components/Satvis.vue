@@ -2,24 +2,36 @@
   <div class="cesium">
     <div v-show="showUI" id="toolbarLeft">
       <div class="toolbarButtons">
-        <button v-tooltip="'Satellite selection'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('cat')">
-          <i class="icon svg-sat"></i>
-        </button>
-        <button v-tooltip="'Satellite elements'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('sat')">
-          <font-awesome-icon icon="fas fa-layer-group" />
-        </button>
-        <button v-tooltip="'Ground station'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('gs')">
-          <i class="icon svg-groundstation"></i>
-        </button>
-        <button v-tooltip="'Map'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('map')">
-          <font-awesome-icon icon="fas fa-globe-africa" />
-        </button>
-        <button v-if="cc.minimalUI" v-tooltip="'Mobile'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('ios')">
-          <font-awesome-icon icon="fas fa-mobile-alt" />
-        </button>
-        <button v-tooltip="'Debug'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('dbg')">
-          <font-awesome-icon icon="fas fa-hammer" />
-        </button>
+        <UTooltip text="Satellite selection">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('cat')">
+            <i class="icon svg-sat"></i>
+          </button>
+        </UTooltip>
+        <UTooltip text="Satellite elements">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('sat')">
+            <font-awesome-icon icon="fas fa-layer-group" />
+          </button>
+        </UTooltip>
+        <UTooltip text="Ground station">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('gs')">
+            <i class="icon svg-groundstation"></i>
+          </button>
+        </UTooltip>
+        <UTooltip text="Map">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('map')">
+            <font-awesome-icon icon="fas fa-globe-africa" />
+          </button>
+        </UTooltip>
+        <UTooltip v-if="cc.minimalUI" text="Mobile">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('ios')">
+            <font-awesome-icon icon="fas fa-mobile-alt" />
+          </button>
+        </UTooltip>
+        <UTooltip text="Debug">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('dbg')">
+            <font-awesome-icon icon="fas fa-hammer" />
+          </button>
+        </UTooltip>
       </div>
       <div v-show="menu.cat" class="toolbarSwitches">
         <satellite-select />
@@ -164,12 +176,16 @@
       </div>
     </div>
     <div id="toolbarRight">
-      <a v-if="showUI" v-tooltip="'Github'" class="cesium-button cesium-toolbar-button" href="https://github.com/Flowm/satvis/" target="_blank" rel="noopener">
-        <font-awesome-icon icon="fab fa-github" />
-      </a>
-      <button v-tooltip="'Toggle UI'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleUI">
-        <font-awesome-icon icon="fas fa-eye" />
-      </button>
+      <UTooltip v-if="showUI" text="Github">
+        <a class="cesium-button cesium-toolbar-button" href="https://github.com/Flowm/satvis/" target="_blank" rel="noopener">
+          <font-awesome-icon icon="fab fa-github" />
+        </a>
+      </UTooltip>
+      <UTooltip text="Toggle UI">
+        <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleUI">
+          <font-awesome-icon icon="fas fa-eye" />
+        </button>
+      </UTooltip>
     </div>
   </div>
 </template>

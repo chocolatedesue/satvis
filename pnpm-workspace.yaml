@@ -10,6 +10,7 @@ allowBuilds:
   core-js: false
   esbuild: false
   sharp: false
+  vue-demi: true
   workerd: true
 
 # Hoist a few transitive packages to the root node_modules so they resolve

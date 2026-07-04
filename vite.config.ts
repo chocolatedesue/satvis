@@ -3,6 +3,7 @@
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import ui from "@nuxt/ui/vite";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
@@ -31,7 +32,7 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             { name: "vue", test: /@vue|vue-router|pinia|@vueuse/, priority: 60 },
-            { name: "primevue", test: /primevue|@primeuix/, priority: 50 },
+            { name: "ui", test: /@nuxt\/ui|reka-ui|tailwindcss|@tanstack/, priority: 50 },
             { name: "icons", test: /@fortawesome/, priority: 40 },
             { name: "cesium", test: /@?cesium/, priority: 30 },
             { name: "analytics", test: /posthog/, priority: 20 },
@@ -50,6 +51,7 @@ export default defineConfig({
   },
   plugins: [
     vue(),
+    ui(),
     viteStaticCopy({
       targets: [
         // Copy Cesium Assets, Widgets, and Workers to a static directory

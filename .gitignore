@@ -2,6 +2,10 @@ node_modules/
 /dist/
 /dev-dist/
 
+# Nuxt UI (Vue mode) generated type declarations
+/auto-imports.d.ts
+/components.d.ts
+
 cypress/screenshots/
 cypress/videos/
 cypress/fixtures/
