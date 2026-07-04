@@ -1,7 +1,6 @@
 */
 
-# Keep the committed example plugin (declarative group definition + sample sync).
+# Keep the committed example plugin (declarative group definition).
 !example/
 example/*
-!example/sync.sh
 !example/groups.json

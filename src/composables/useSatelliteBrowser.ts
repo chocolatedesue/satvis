@@ -1,8 +1,8 @@
 // useSatelliteBrowser — module-scoped state + derived row model for the
 // SatelliteBrowser panel. State lives at module scope (not inside the setup
 // function) so search text, expansion and scroll position survive the panel
-// being remounted (Satvis mounts the panel behind a v-show; a v-if fallback
-// for the virtualizer would remount it, and this keeps that transparent).
+// being remounted (Satvis mounts the panel with a v-if, so opening/closing the
+// catalog panel unmounts and remounts it; module scope keeps that transparent).
 //
 // The catalog itself is intentionally NOT reactive (it holds ~2k plain
 // entries). Instead the store exposes `catalogRevision`, bumped by

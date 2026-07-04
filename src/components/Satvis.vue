@@ -285,9 +285,10 @@ watch(overpassMode, (newMode: string) => {
 });
 // Carry the store's satellite activation state into the SatelliteManager. These
 // live here (an always-mounted component) rather than in the catalog panel
-// (SatelliteBrowser, mounted behind a v-show) so that URL-hydrated state
-// (applied by the url-sync plugin after mount, as a store change) reaches
-// Cesium even when the catalog panel is never opened.
+// (SatelliteBrowser, mounted with a v-if and thus unmounted whenever the panel
+// is closed) so that URL-hydrated state (applied by the url-sync plugin after
+// mount, as a store change) reaches Cesium even when the catalog panel is never
+// opened.
 // Non-immediate on purpose: the url-sync plugin writes the hydrated values into
 // the store after mount, which fires these watchers; the manager starts from
 // its own matching defaults.

@@ -60,8 +60,8 @@ export default defineConfig({
         { src: `${cesiumEngineSource}/Source/Assets`, dest: cesiumBaseUrl, rename: { stripBase: 4 } },
         { src: `${cesiumWidgetsSource}/Source`, dest: `${cesiumBaseUrl}/Widgets`, rename: { stripBase: 4 } },
         // Copy data files (data/gp snapshot flows through here → dist/data/gp/...).
-        // data/tle is excluded: it is removed in a later phase and stale local
-        // files must not ship in the meantime.
+        // data/tle is excluded: the legacy TLE pipeline is gone, but the exclusion
+        // stays so stale local files from an old checkout never ship.
         { src: ["data/**", "!data/custom/**", "!data/tle/**"], dest: "data", rename: { stripBase: 1 } },
         { src: ["data/custom/dist/**"], dest: "data", rename: { stripBase: 3 } },
       ],
