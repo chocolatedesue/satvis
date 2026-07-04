@@ -12,7 +12,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { evaluateGroups, fetchSources } from "../src/gp/evaluate.ts";
 
@@ -22,6 +22,47 @@ const repoRoot = path.resolve(workerDir, "..");
 
 const configPath = path.join(workerDir, "src", "config", "groups.generated.json");
 const outDir = path.join(repoRoot, "data", "gp");
+
+// Read the existing index, tolerating absence or corruption. Mirrors the
+// worker's readIndex so we can carry forward last-known-good status.
+export function readIndex(indexPath) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+    if (raw && typeof raw === "object" && Array.isArray(raw.groups)) {
+      return raw;
+    }
+  } catch {
+    // Missing or corrupt index: start from empty.
+  }
+  return { updated: "", groups: [] };
+}
+
+// Build the new index. Failed groups keep the previous run's `updated`/`count`
+// (their data/gp/<group>.json is still on disk and served) and gain
+// lastError/lastErrorAt; successful groups overwrite. Mirrors refreshAll.
+export function buildStatuses(defs, evaluated, previousIndex, now, onStatus) {
+  const previousByName = new Map(previousIndex.groups.map((status) => [status.name, status]));
+  const statuses = [];
+  for (const def of defs) {
+    const result = evaluated.get(def.name);
+    const prev = previousByName.get(def.name);
+    if (result === undefined || result instanceof Error) {
+      const message = result instanceof Error ? result.message : "not evaluated";
+      statuses.push({
+        name: def.name,
+        updated: prev?.updated ?? null,
+        count: prev?.count ?? 0,
+        lastError: message,
+        lastErrorAt: now,
+      });
+      onStatus?.({ name: def.name, ok: false, message });
+      continue;
+    }
+    statuses.push({ name: def.name, updated: now, count: result.length });
+    onStatus?.({ name: def.name, ok: true, count: result.length });
+  }
+  return statuses;
+}
 
 async function main() {
   const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -33,26 +74,33 @@ async function main() {
 
   fs.mkdirSync(outDir, { recursive: true });
   const now = new Date().toISOString();
-  const statuses = [];
+  const indexPath = path.join(outDir, "index.json");
+  const previousIndex = readIndex(indexPath);
 
+  // Write successful groups; failed groups keep their existing file on disk.
   for (const def of defs) {
     const result = evaluated.get(def.name);
-    if (result === undefined || result instanceof Error) {
-      const message = result instanceof Error ? result.message : "not evaluated";
-      process.stdout.write(`  ${def.name}: FAILED (${message})\n`);
-      statuses.push({ name: def.name, updated: null, count: 0, lastError: message, lastErrorAt: now });
-      continue;
+    if (result !== undefined && !(result instanceof Error)) {
+      fs.writeFileSync(path.join(outDir, `${def.name}.json`), `${JSON.stringify(result)}\n`);
     }
-    fs.writeFileSync(path.join(outDir, `${def.name}.json`), `${JSON.stringify(result)}\n`);
-    process.stdout.write(`  ${def.name}: ${result.length} records\n`);
-    statuses.push({ name: def.name, updated: now, count: result.length });
   }
 
+  const statuses = buildStatuses(defs, evaluated, previousIndex, now, (s) => {
+    if (s.ok) {
+      process.stdout.write(`  ${s.name}: ${s.count} records\n`);
+    } else {
+      process.stdout.write(`  ${s.name}: FAILED (${s.message}) — keeping last-known-good\n`);
+    }
+  });
+
   const index = { updated: now, groups: statuses };
-  fs.writeFileSync(path.join(outDir, "index.json"), `${JSON.stringify(index, null, 2)}\n`);
+  fs.writeFileSync(indexPath, `${JSON.stringify(index, null, 2)}\n`);
   fs.writeFileSync(path.join(outDir, "metadata.json"), `${JSON.stringify(config.metadata ?? [], null, 2)}\n`);
 
   process.stdout.write(`Wrote ${path.relative(repoRoot, outDir)}/ (${statuses.filter((s) => s.updated).length}/${defs.length} groups)\n`);
 }
 
-await main();
+// Only run when invoked directly (not when imported for testing the helpers).
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}

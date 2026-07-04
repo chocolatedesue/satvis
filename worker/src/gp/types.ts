@@ -44,7 +44,11 @@ export interface GroupDefinition {
   select?: GroupSelect;
   // OBJECT_NAME -> new name, applied post-select.
   rename?: Record<string, string>;
-  // Names of other groups whose output is prepended (evaluated first).
+  // Names of other groups whose FULL evaluated output — including their own
+  // extraRecords and renames — is prepended before this group's own records
+  // (they are evaluated first). This differs from the old ot-tle sync.sh, which
+  // concatenated ot.txt into wfs.txt BEFORE appending ot-add.txt extras; authors
+  // who want that ordering should put extras in a separate included group.
   include?: string[];
   // Inlined by the generator from extraRecordsFile; appended verbatim.
   extraRecords?: GpRecord[];
