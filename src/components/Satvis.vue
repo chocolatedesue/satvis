@@ -220,7 +220,7 @@ const cesiumStore = useCesiumStore();
 const { layers, terrainProvider, sceneMode, cameraMode, qualityPreset, showFps, background, pickMode } = storeToRefs(cesiumStore);
 
 const satStore = useSatStore();
-const { enabledComponents, groundStations, overpassMode } = storeToRefs(satStore);
+const { enabledComponents, enabledSatellites, enabledTags, groundStations, overpassMode, trackedSatellite } = storeToRefs(satStore);
 
 watch(
   layers,
@@ -276,6 +276,22 @@ watch(groundStations, (newGroundStations: SerializedGroundStation[], oldGroundSt
 });
 watch(overpassMode, (newMode: string) => {
   cc.sats.overpassMode = newMode;
+});
+// Carry the store's satellite activation state into the SatelliteManager. These
+// live here (an always-mounted component) rather than in SatelliteSelect.vue so
+// that URL-hydrated state (applied by the url-sync plugin after mount, as a
+// store change) reaches Cesium even when the catalog panel is never opened.
+// Non-immediate on purpose: the url-sync plugin writes the hydrated values into
+// the store after mount, which fires these watchers; the manager starts from
+// its own matching defaults.
+watch(enabledSatellites, (sats: string[]) => {
+  cc.sats.enabledSatellites = sats;
+});
+watch(enabledTags, (tags: string[]) => {
+  cc.sats.enabledTags = tags;
+});
+watch(trackedSatellite, (satellite: string) => {
+  cc.sats.trackedSatellite = satellite;
 });
 
 onMounted(() => {

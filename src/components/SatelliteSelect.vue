@@ -27,13 +27,13 @@
 
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
-import { computed, watch } from "vue";
+import { computed } from "vue";
 import VueMultiselect from "vue-multiselect";
 
 import { useSatStore } from "../stores/sat";
 
 const satStore = useSatStore();
-const { availableSatellitesByTag, availableTags, enabledSatellites, enabledTags, trackedSatellite } = storeToRefs(satStore);
+const { availableSatellitesByTag, availableTags, enabledSatellites, enabledTags } = storeToRefs(satStore);
 
 const availableSatellites = computed<{ tag: string; sats: string[] }[]>(() => {
   let satlist = Object.keys(availableSatellitesByTag.value).map((tag) => ({
@@ -60,19 +60,11 @@ const allEnabledSatellites = computed<string[]>({
     const newEnabledTags = availableTags.value.filter((tag) => !(availableSatellitesByTag.value[tag] ?? []).some((sat) => !sats.includes(sat)));
     const satellitesInEnabledTags = getSatellitesFromTags(newEnabledTags);
     const newEnabledSatellites = sats.filter((sat) => !satellitesInEnabledTags.includes(sat));
-    cc.sats.enabledSatellites = newEnabledSatellites;
-    cc.sats.enabledTags = newEnabledTags;
+    // Write to the store only; Satvis.vue watchers propagate to cc.sats. This
+    // keeps the store the single source of truth (and the URL in sync).
+    enabledSatellites.value = newEnabledSatellites;
+    enabledTags.value = newEnabledTags;
   },
-});
-
-watch(enabledSatellites, (sats: string[]) => {
-  cc.sats.enabledSatellites = sats;
-});
-watch(enabledTags, (tags: string[]) => {
-  cc.sats.enabledTags = tags;
-});
-watch(trackedSatellite, (satellite: string) => {
-  cc.sats.trackedSatellite = satellite;
 });
 </script>
 

@@ -10,6 +10,8 @@ export interface SatStoreState {
   enabledComponents: string[];
   availableSatellitesByTag: Record<string, string[]>;
   availableTags: string[];
+  availableGroups: { tag: string; count: number }[];
+  catalogRevision: number;
   enabledSatellites: string[];
   enabledTags: string[];
   groundStations: SerializedGroundStation[];
@@ -22,6 +24,11 @@ export const useSatStore = defineStore("sat", {
     enabledComponents: ["Point", "Label"],
     availableSatellitesByTag: {},
     availableTags: [],
+    // Group list with counts for the Phase 5 UI. Not URL-synced.
+    availableGroups: [],
+    // Bumped by SatelliteManager.updateStore() so the UI can recompute catalog
+    // queries reactively without putting the ~10k entries into Pinia. Not URL-synced.
+    catalogRevision: 0,
     enabledSatellites: [],
     enabledTags: [],
     groundStations: [],

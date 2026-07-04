@@ -168,6 +168,20 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
     this.eventListeners.sampledPosition?.();
     this.eventListeners.selectedEntity?.();
     this.eventListeners.trackedEntity?.();
+    this.eventListeners = {};
+  }
+
+  /**
+   * Fully tear down this collection so it can be dropped from the active set.
+   *
+   * `hide()` disables every created component; removing the last one triggers
+   * `deinit()` (see disableComponent), which detaches the sampledPosition and
+   * viewer listeners and tears down the sampledPosition. For a collection whose
+   * components were never created this is a no-op (empty componentNames), so
+   * dispose is safe to call unconditionally and is idempotent.
+   */
+  dispose(): void {
+    this.hide();
   }
 
   updatedSampledPositionForComponents(update = false): void {

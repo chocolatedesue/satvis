@@ -42,11 +42,13 @@ async function test(): Promise<void> {
   for (const components of componentTests) {
     for (const satelliteCount of satelliteCounts) {
       cc.sats.enabledComponents = components;
-      cc.sats.enabledSatellites = cc.sats
-        .getSatellitesWithTag(satelliteTag)
+      // getSatellitesWithTag is now active-only; take the name list from the
+      // catalog (all known satellites with the tag) so we can enable N of them.
+      cc.sats.enabledSatellites = cc.sats.catalog
+        .entriesWithTag(satelliteTag)
         .slice(0, satelliteCount)
-        .map((sat) => sat.props.name);
-      console.log(cc.sats.enabledSatellites, cc.sats.getSatellitesWithTag(satelliteTag));
+        .map((entry) => entry.name);
+      console.log(cc.sats.enabledSatellites, cc.sats.catalog.entriesWithTag(satelliteTag));
 
       // eslint-disable-next-line no-await-in-loop
       await logPerformance();
