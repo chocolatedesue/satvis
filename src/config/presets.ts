@@ -1,9 +1,13 @@
 /**
  * Configuration manager for different application presets
- * Maps routes to their respective configurations and TLE data
+ * Maps routes to their respective configurations and element-set sources.
  */
 
-export type TleDataEntry = [path: string, tags: string[]];
+// A source is either a bare GP group name (resolved against the probed GP base,
+// worker `/api/gp/<name>.json` or the static `data/gp/<name>.json` snapshot) or
+// an explicit URL/path (anything containing "/" or ".", incl. legacy .txt),
+// which passes through unchanged and is parsed via payload sniffing.
+export type ElementsEntry = [source: string, tags: string[]];
 
 export interface PresetConfig {
   sat?: {
@@ -20,7 +24,7 @@ export interface Preset {
   title: string;
   description?: string;
   config: PresetConfig;
-  tleData: TleDataEntry[];
+  elements: ElementsEntry[];
 }
 
 export const presets: Record<string, Preset> = {
@@ -31,22 +35,22 @@ export const presets: Record<string, Preset> = {
         enabledTags: ["Weather"],
       },
     },
-    tleData: [
-      ["data/tle/groups/cubesat.txt", ["Cubesat"]],
-      ["data/tle/groups/globalstar.txt", ["Globalstar"]],
-      ["data/tle/groups/gnss.txt", ["GNSS"]],
-      ["data/tle/groups/iridium-NEXT.txt", ["IridiumNEXT"]],
-      ["data/tle/groups/last-30-days.txt", ["New"]],
-      ["data/tle/groups/oneweb.txt", ["OneWeb"]],
-      ["data/tle/groups/planet.txt", ["Planet"]],
-      ["data/tle/groups/resource.txt", ["Resource"]],
-      ["data/tle/groups/science.txt", ["Science"]],
-      ["data/tle/groups/spire.txt", ["Spire"]],
-      ["data/tle/groups/starlink.txt", ["Starlink"]],
-      ["data/tle/groups/stations.txt", ["Stations"]],
-      ["data/tle/groups/weather.txt", ["Weather"]],
-      ["data/tle/groups/eutelsat.txt", ["Eutelsat"]],
-      // ["data/tle/groups/active.txt", ["Active"]],
+    // Bare group names matching worker/src/config/groups.core.json.
+    elements: [
+      ["cubesat", ["Cubesat"]],
+      ["globalstar", ["Globalstar"]],
+      ["gnss", ["GNSS"]],
+      ["iridium-NEXT", ["IridiumNEXT"]],
+      ["last-30-days", ["New"]],
+      ["oneweb", ["OneWeb"]],
+      ["planet", ["Planet"]],
+      ["resource", ["Resource"]],
+      ["science", ["Science"]],
+      ["spire", ["Spire"]],
+      ["starlink", ["Starlink"]],
+      ["stations", ["Stations"]],
+      ["weather", ["Weather"]],
+      ["eutelsat", ["Eutelsat"]],
     ],
   },
   move: {
@@ -56,7 +60,7 @@ export const presets: Record<string, Preset> = {
         enabledTags: ["MOVE"],
       },
     },
-    tleData: [["data/tle/move.txt", ["MOVE"]]],
+    elements: [["move", ["MOVE"]]],
   },
   ot: {
     title: "OT Satellite Orbit Visualization",
@@ -70,10 +74,10 @@ export const presets: Record<string, Preset> = {
         layers: ["ArcGis"],
       },
     },
-    tleData: [
-      ["data/tle/ot.txt", ["OT"]],
-      ["data/tle/wfs.txt", ["WFS"]],
-      ["data/tle/ot-next.txt", ["OTNext"]],
+    elements: [
+      ["ot", ["OT"]],
+      ["wfs", ["WFS"]],
+      ["otc", ["OTC"]],
     ],
   },
 };

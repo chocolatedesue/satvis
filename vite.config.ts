@@ -59,8 +59,10 @@ export default defineConfig({
         { src: `${cesiumEngineSource}/Build/Workers`, dest: cesiumBaseUrl, rename: { stripBase: 4 } },
         { src: `${cesiumEngineSource}/Source/Assets`, dest: cesiumBaseUrl, rename: { stripBase: 4 } },
         { src: `${cesiumWidgetsSource}/Source`, dest: `${cesiumBaseUrl}/Widgets`, rename: { stripBase: 4 } },
-        // Copy data files
-        { src: ["data/**", "!data/custom/**"], dest: "data", rename: { stripBase: 1 } },
+        // Copy data files (data/gp snapshot flows through here → dist/data/gp/...).
+        // data/tle is excluded: it is removed in a later phase and stale local
+        // files must not ship in the meantime.
+        { src: ["data/**", "!data/custom/**", "!data/tle/**"], dest: "data", rename: { stripBase: 1 } },
         { src: ["data/custom/dist/**"], dest: "data", rename: { stripBase: 3 } },
       ],
     }),
@@ -109,7 +111,10 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: /data\/tle\/.*\.txt$/,
+            // GP element sets: worker mode (/api/gp/<group>.json, groups, metadata),
+            // static-snapshot mode (data/gp/<group>.json), and the worker probe —
+            // so offline keeps working in every deployment mode.
+            urlPattern: /(\/api\/(gp\/[^/]+|groups|metadata)|data\/gp\/[^/]+)\.json$/,
             handler: "NetworkFirst",
             options: {
               cacheName: "satellite-data-cache",
@@ -158,6 +163,16 @@ export default defineConfig({
     }),
   ],
   resolve: { tsconfigPaths: true },
+  server: {
+    proxy: {
+      // Proxy /api to production by default so `pnpm dev` works out of the box.
+      // Point at a local worker with SATVIS_API_PROXY=http://localhost:8080.
+      "/api": {
+        target: process.env.SATVIS_API_PROXY ?? "https://satvis.space",
+        changeOrigin: true,
+      },
+    },
+  },
   worker: {
     format: "es",
   },

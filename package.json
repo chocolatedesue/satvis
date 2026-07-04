@@ -12,6 +12,7 @@
     "dev:worker": "pnpm --filter satvis-worker dev",
     "build": "vite build",
     "preview": "vite preview",
+    "test": "vitest run",
     "type-check": "vue-tsc --noEmit",
     "lint": "pnpm lint:web && pnpm lint:worker",
     "lint:web": "oxlint && oxfmt --check && vue-tsc",
@@ -54,6 +55,7 @@
     "vite": "^8.1.2",
     "vite-plugin-pwa": "^1.3.0",
     "vite-plugin-static-copy": "^4.1.1",
+    "vitest": "^3.2.6",
     "vue-tsc": "^3.3.6"
   },
   "packageManager": "pnpm@11.9.0"

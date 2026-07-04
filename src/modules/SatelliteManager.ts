@@ -2,8 +2,10 @@ import type { Viewer } from "@cesium/widgets";
 
 import { type SerializedGroundStation, useSatStore } from "../stores/sat";
 import { GroundStationEntity, type GroundStationPositionData } from "./GroundStationEntity";
+import { type CatalogEntry, SatelliteCatalog } from "./SatelliteCatalog";
 import { SatelliteComponentCollection } from "./SatelliteComponentCollection";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
+import type { GpRecord } from "./util/gp";
 
 export class SatelliteManager {
   #enabledComponents: string[] = ["Point", "Label"];
@@ -18,7 +20,12 @@ export class SatelliteManager {
 
   viewer: Viewer;
 
+  readonly catalog = new SatelliteCatalog();
+
   satellites: SatelliteComponentCollection[] = [];
+
+  // Instantiated collections keyed by catalog entry key, to dedup eager creation.
+  #collectionByKey = new Map<string, SatelliteComponentCollection>();
 
   availableComponents: string[] = ["Point", "Label", "Orbit", "Orbit track", "Ground track", "Sensor cone", "3D model"];
 
@@ -33,68 +40,56 @@ export class SatelliteManager {
       }
       useSatStore().trackedSatellite = this.trackedSatellite;
     });
-  }
 
-  addFromTleUrls(urlTagList: ReadonlyArray<readonly [string, string[]]>): void {
-    // Initiate async download of all TLE URLs and update store afterwards
-    const promises = urlTagList.map(([url, tags]) => this.addFromTleUrl(url, tags, false));
-    Promise.all(promises).then(() => this.updateStore());
-  }
-
-  addFromTleUrl(url: string, tags: string[], updateStore = true): Promise<void> {
-    return fetch(url, {
-      mode: "no-cors",
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw Error(response.statusText);
-        }
-        return response;
-      })
-      .then((response) => response.text())
-      .then((data) => {
-        const lines = data.split(/\r?\n/);
-        // TLE entries are 3 lines each: name, line 1, line 2.
-        for (let i = 0; i + 3 <= lines.length; i += 3) {
-          const tle = lines.slice(i, i + 3).join("\n");
-          if (tle.trim()) {
-            this.addFromTle(tle, tags, updateStore);
-          }
-        }
-      })
-      .catch((error) => {
-        console.log(error);
-      });
-  }
-
-  addFromTle(tle: string, tags: string[], updateStore = true): void {
-    const sat = new SatelliteComponentCollection(this.viewer, tle, tags);
-    this.#add(sat);
-    if (updateStore) {
+    // Eagerly instantiate a collection per new/changed catalog entry, then
+    // refresh the store. This replicates today's behavior; lazy instantiation
+    // is deferred to a later phase.
+    this.catalog.onChange((entries) => {
+      entries.forEach((entry) => this.#onCatalogEntry(entry));
       this.updateStore();
-    }
+    });
   }
 
-  #add(newSat: SatelliteComponentCollection): void {
-    const existingSat = this.satellites.find((sat) => sat.props.satnum === newSat.props.satnum && sat.props.name === newSat.props.name);
-    if (existingSat) {
-      existingSat.props.addTags(newSat.props.tags);
-      if (newSat.props.tags.some((tag) => this.#enabledTags.includes(tag))) {
-        existingSat.show(this.#enabledComponents);
+  // Load element sets for all preset sources via the catalog (resolves the GP
+  // base once, fetches all in parallel, per-URL errors logged and skipped).
+  loadElementSets(sourceTagList: ReadonlyArray<readonly [string, string[]]>): Promise<void> {
+    return this.catalog.loadGroups(sourceTagList);
+  }
+
+  // Back-compat alias for the router/legacy callers.
+  addFromTleUrls(urlTagList: ReadonlyArray<readonly [string, string[]]>): void {
+    this.loadElementSets(urlTagList);
+  }
+
+  // Passthrough for custom inline records (e.g. console/testing usage).
+  addCustomRecords(records: GpRecord[], tags: string[]): void {
+    const entries = this.catalog.addRecords(records, tags);
+    entries.forEach((entry) => this.#onCatalogEntry(entry));
+    this.updateStore();
+  }
+
+  #onCatalogEntry(entry: CatalogEntry): void {
+    const existing = this.#collectionByKey.get(entry.key);
+    if (existing) {
+      // Tags merged onto an already-instantiated entry: show it if it is now
+      // enabled by tag (mirrors today's #add merge branch).
+      if (this.satIsActive(existing)) {
+        existing.show(this.#enabledComponents);
       }
       return;
     }
+    const sat = new SatelliteComponentCollection(this.viewer, entry);
     if (this.groundStationAvailable) {
-      newSat.groundStations = this.#groundStations;
+      sat.groundStations = this.#groundStations;
     }
-    // Set overpass mode for newly added satellite
-    newSat.props.overpassMode = this.#overpassMode;
-    this.satellites.push(newSat);
+    sat.props.overpassMode = this.#overpassMode;
+    this.#collectionByKey.set(entry.key, sat);
+    this.satellites.push(sat);
 
-    if (this.satIsActive(newSat)) {
-      newSat.show(this.#enabledComponents);
-      if (this.pendingTrackedSatellite === newSat.props.name) {
-        this.trackedSatellite = newSat.props.name;
+    if (this.satIsActive(sat)) {
+      sat.show(this.#enabledComponents);
+      if (this.pendingTrackedSatellite === sat.props.name) {
+        this.trackedSatellite = sat.props.name;
       }
     }
   }
@@ -106,16 +101,7 @@ export class SatelliteManager {
   }
 
   get taglist(): Record<string, string[]> {
-    const taglist: Record<string, string[]> = {};
-    this.satellites.forEach((sat) => {
-      sat.props.tags.forEach((tag) => {
-        (taglist[tag] = taglist[tag] || []).push(sat.props.name);
-      });
-    });
-    Object.values(taglist).forEach((tag) => {
-      tag.sort();
-    });
-    return taglist;
+    return this.catalog.taglist();
   }
 
   get selectedSatellite(): string {
@@ -174,8 +160,7 @@ export class SatelliteManager {
   }
 
   get tags(): string[] {
-    const tags = this.satellites.map((sat) => sat.props.tags);
-    return [...new Set<string>(([] as string[]).concat(...tags))];
+    return this.catalog.tags;
   }
 
   getSatellitesWithTag(tag: string): SatelliteComponentCollection[] {

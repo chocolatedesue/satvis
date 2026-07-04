@@ -1,6 +1,8 @@
 import dayjs from "dayjs";
 import * as satellitejs from "satellite.js";
 
+import { createSatrec, recordTleLines, type GpRecord } from "./util/gp";
+
 const deg2rad = Math.PI / 180;
 const rad2deg = 180 / Math.PI;
 
@@ -42,14 +44,25 @@ export interface SwathPass {
 export default class Orbit {
   name: string;
 
-  tle: string[];
+  // Present only when TLE-sourced (legacy string path or a kind:"tle" record),
+  // so the InfoBox can render the two lines. Undefined for OMM-sourced orbits.
+  tle?: string[];
+
+  record?: GpRecord;
 
   satrec: satellitejs.SatRec;
 
-  constructor(name: string, tle: string) {
+  constructor(name: string, source: string | GpRecord) {
     this.name = name;
-    this.tle = tle.split("\n");
-    this.satrec = satellitejs.twoline2satrec(this.tle[1] as string, this.tle[2] as string);
+    if (typeof source === "string") {
+      // Legacy path: raw 3-line TLE string.
+      this.tle = source.split("\n");
+      this.satrec = satellitejs.twoline2satrec(this.tle[1] as string, this.tle[2] as string);
+      return;
+    }
+    this.record = source;
+    this.tle = recordTleLines(source);
+    this.satrec = createSatrec(source);
   }
 
   get satnum(): string {

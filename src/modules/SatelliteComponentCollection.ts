@@ -36,6 +36,7 @@ import {
 import type { Viewer } from "@cesium/widgets";
 import CesiumSensorVolumes from "cesium-sensor-volumes";
 
+import type { CatalogEntry } from "./SatelliteCatalog";
 import { SatelliteProperties, type GroundStation } from "./SatelliteProperties";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
@@ -55,9 +56,9 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
 
   description: CallbackProperty | undefined;
 
-  constructor(viewer: Viewer, tle: string, tags: string[]) {
+  constructor(viewer: Viewer, entry: CatalogEntry) {
     super(viewer);
-    this.props = new SatelliteProperties(tle, tags);
+    this.props = new SatelliteProperties(entry);
   }
 
   override enableComponent(name: SatelliteComponentName): void {

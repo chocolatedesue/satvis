@@ -34,8 +34,8 @@ export function setupRouterGuards(routerInstance: Router, cc: CesiumController):
     // Update document title and meta description
     updateMetadata(preset);
 
-    // Load new TLE data (with delay to allow cleanup to complete)
-    cc.sats.addFromTleUrls(preset.tleData);
+    // Load new element sets via the satellite catalog
+    cc.sats.loadElementSets(preset.elements);
 
     next();
   });

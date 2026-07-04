@@ -14,6 +14,7 @@ import {
 import type { Viewer } from "@cesium/widgets";
 
 import Orbit, { type ElevationPass, type GroundStationPosition, type SwathPass } from "./Orbit";
+import type { CatalogEntry } from "./SatelliteCatalog";
 import "./util/CesiumSampledPositionRawValueAccess";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 
@@ -38,13 +39,14 @@ interface PassInterval {
 }
 
 export class SatelliteProperties {
+  // The catalog owns identity and tag merging; properties read through it.
+  entry: CatalogEntry;
+
   name: string;
 
   orbit: Orbit;
 
   satnum: string;
-
-  tags: string[];
 
   overpassMode: string;
 
@@ -58,15 +60,11 @@ export class SatelliteProperties {
 
   sampledPosition: SampledPositionData | undefined;
 
-  constructor(tle: string, tags: string[] = []) {
-    const firstLine = tle.split("\n")[0] ?? "";
-    this.name = firstLine.trim();
-    if (tle.startsWith("0 ")) {
-      this.name = this.name.substring(2);
-    }
-    this.orbit = new Orbit(this.name, tle);
-    this.satnum = this.orbit.satnum;
-    this.tags = tags;
+  constructor(entry: CatalogEntry) {
+    this.entry = entry;
+    this.name = entry.name;
+    this.satnum = entry.satnum;
+    this.orbit = new Orbit(entry.name, entry.record);
     this.overpassMode = "elevation";
 
     this.groundStations = [];
@@ -75,12 +73,13 @@ export class SatelliteProperties {
     this.passIntervals = new TimeIntervalCollection();
   }
 
-  hasTag(tag: string): boolean {
-    return this.tags.includes(tag);
+  // Tags are owned by the catalog entry; this getter reflects live merges.
+  get tags(): string[] {
+    return this.entry.tags;
   }
 
-  addTags(tags: string[]): void {
-    this.tags = [...new Set(this.tags.concat(tags))];
+  hasTag(tag: string): boolean {
+    return this.tags.includes(tag);
   }
 
   position(time: JulianDate): Cartesian3 | undefined {
