@@ -2,6 +2,9 @@ node_modules/
 /dist/
 /dev-dist/
 
+# Generated GP element-set snapshot (pnpm update-gp)
+/data/gp/
+
 # Nuxt UI (Vue mode) generated type declarations
 /auto-imports.d.ts
 /components.d.ts

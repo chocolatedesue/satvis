@@ -13,6 +13,16 @@
   "assets": {
     "directory": "../dist",
     "not_found_handling": "single-page-application",
+    // Route /api/* to the Worker first; otherwise the SPA not_found_handling
+    // fallback swallows the API routes and serves index.html.
+    // /__scheduled is the wrangler-dev cron test endpoint (--test-scheduled);
+    // it must also bypass the SPA fallback to reach the Worker.
+    "run_worker_first": ["/api/*", "/__scheduled"],
+  },
+  "kv_namespaces": [{ "binding": "GP_KV", "id": "26a7848ab641416fa518a3df4790a968" }],
+  "triggers": {
+    // Every 3 h at :23 (>= CelesTrak's ~2 h refresh guidance, off-hour minute).
+    "crons": ["23 */3 * * *"],
   },
   "observability": {
     "enabled": true,

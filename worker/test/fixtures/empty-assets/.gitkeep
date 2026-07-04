@@ -1,0 +1,1 @@
+test fixture: empty assets dir so vitest-pool-workers does not walk the real ../dist

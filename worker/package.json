@@ -3,18 +3,23 @@
   "version": "0.0.0",
   "private": true,
   "description": "Cloudflare Worker backend for satvis",
+  "type": "module",
   "scripts": {
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev --port 8080",
-    "lint": "oxlint && oxfmt --check && tsc --noEmit",
-    "lint:fix": "oxlint --fix && oxfmt --write",
+    "deploy": "pnpm generate-groups && wrangler deploy",
+    "dev": "pnpm generate-groups && wrangler dev --port 8080 --test-scheduled",
+    "generate-groups": "node scripts/generate-groups.mjs",
     "generate-types": "wrangler types src/worker-configuration.d.ts",
+    "lint": "pnpm generate-groups && oxlint && oxfmt --check && tsc --noEmit",
+    "lint:fix": "oxlint --fix && oxfmt --write",
+    "test": "vitest run",
     "type-check": "tsc"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.71",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:",
+    "vitest": "^3.2.6",
     "wrangler": "^4.106.0"
   }
 }

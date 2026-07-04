@@ -1,1 +1,7 @@
 */
+
+# Keep the committed example plugin (declarative group definition + sample sync).
+!example/
+example/*
+!example/sync.sh
+!example/groups.json

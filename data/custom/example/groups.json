@@ -1,0 +1,9 @@
+{
+  "groups": [
+    {
+      "name": "move",
+      "sources": [{ "celestrak": "active" }],
+      "select": { "namePattern": "^(FIRST-MOVE|MOVE-II)" }
+    }
+  ]
+}

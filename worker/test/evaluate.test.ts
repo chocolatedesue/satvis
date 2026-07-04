@@ -1,0 +1,199 @@
+import { describe, expect, it } from "vitest";
+
+import { collectSources, evaluateGroups, fetchSources, type RecordsBySource, sourceKey, sourceUrl } from "../src/gp/evaluate.ts";
+import type { GpRecord, GroupDefinition, OmmRecord } from "../src/gp/types.ts";
+
+function omm(name: string, id: number): OmmRecord {
+  return { OBJECT_NAME: name, NORAD_CAT_ID: id };
+}
+
+function names(result: GpRecord[] | Error | undefined): string[] {
+  if (!result || result instanceof Error) {
+    throw new Error(`expected records, got ${result}`);
+  }
+  return result.map((r) => r.OBJECT_NAME ?? "<unnamed>");
+}
+
+describe("sourceUrl / sourceKey", () => {
+  it("builds celestrak group URLs", () => {
+    expect(sourceUrl({ celestrak: "active" })).toBe("https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=JSON");
+    expect(sourceKey({ celestrak: "active" })).toBe("celestrak:active");
+  });
+  it("builds celestrak supplemental URLs", () => {
+    expect(sourceUrl({ celestrakSup: "transporter-12" })).toBe("https://celestrak.org/NORAD/elements/supplemental/sup-gp.php?FILE=transporter-12&FORMAT=JSON");
+    expect(sourceKey({ celestrakSup: "transporter-12" })).toBe("celestrakSup:transporter-12");
+  });
+  it("passes through raw URLs", () => {
+    expect(sourceUrl({ url: "https://example.com/x.json" })).toBe("https://example.com/x.json");
+    expect(sourceKey({ url: "https://example.com/x.json" })).toBe("url:https://example.com/x.json");
+  });
+});
+
+describe("collectSources", () => {
+  it("dedupes shared sources across groups", () => {
+    const defs: GroupDefinition[] = [
+      { name: "ot", sources: [{ celestrak: "active" }] },
+      { name: "wfs", sources: [{ celestrak: "active" }] },
+      { name: "move", sources: [{ celestrak: "active" }, { celestrak: "cubesat" }] },
+    ];
+    const sources = collectSources(defs);
+    expect(sources.map(sourceKey).toSorted()).toEqual(["celestrak:active", "celestrak:cubesat"]);
+  });
+});
+
+describe("evaluateGroups: select", () => {
+  const records: RecordsBySource = new Map([
+    ["celestrak:active", [omm("FIRST-MOVE", 39439), omm("MOVE-II", 43780), omm("LEMUR-2-ROHOVITHSA", 43547), omm("LEMUR-2-EMBRIONOVIS", 43556), omm("STARLINK-1", 44713)]],
+  ]);
+
+  it("selects by namePattern", () => {
+    const defs: GroupDefinition[] = [{ name: "move", sources: [{ celestrak: "active" }], select: { namePattern: "^(FIRST-MOVE|MOVE-II)" } }];
+    expect(names(evaluateGroups(defs, records).get("move"))).toEqual(["FIRST-MOVE", "MOVE-II"]);
+  });
+
+  it("selects by noradIds (string or number)", () => {
+    const defs: GroupDefinition[] = [{ name: "ot", sources: [{ celestrak: "active" }], select: { noradIds: [43547, "43556"] } }];
+    expect(names(evaluateGroups(defs, records).get("ot"))).toEqual(["LEMUR-2-ROHOVITHSA", "LEMUR-2-EMBRIONOVIS"]);
+  });
+
+  it("selects by names", () => {
+    const defs: GroupDefinition[] = [{ name: "s", sources: [{ celestrak: "active" }], select: { names: ["STARLINK-1"] } }];
+    expect(names(evaluateGroups(defs, records).get("s"))).toEqual(["STARLINK-1"]);
+  });
+
+  it("ORs the select criteria together", () => {
+    const defs: GroupDefinition[] = [{ name: "mix", sources: [{ celestrak: "active" }], select: { noradIds: [44713], namePattern: "^FIRST-MOVE" } }];
+    expect(names(evaluateGroups(defs, records).get("mix"))).toEqual(["FIRST-MOVE", "STARLINK-1"]);
+  });
+
+  it("passes all records through when no select is given", () => {
+    const defs: GroupDefinition[] = [{ name: "all", sources: [{ celestrak: "active" }] }];
+    expect(names(evaluateGroups(defs, records).get("all"))).toHaveLength(5);
+  });
+});
+
+describe("evaluateGroups: rename", () => {
+  it("renames matched OBJECT_NAME after select", () => {
+    const records: RecordsBySource = new Map([["celestrak:active", [omm("LEMUR-2-ROHOVITHSA", 43547), omm("LEMUR-2-EMBRIONOVIS", 43556)]]]);
+    const defs: GroupDefinition[] = [
+      {
+        name: "ot",
+        sources: [{ celestrak: "active" }],
+        select: { noradIds: [43547, 43556] },
+        rename: { "LEMUR-2-ROHOVITHSA": "FOREST-1", "LEMUR-2-EMBRIONOVIS": "FOREST-2" },
+      },
+    ];
+    expect(names(evaluateGroups(defs, records).get("ot"))).toEqual(["FOREST-1", "FOREST-2"]);
+  });
+});
+
+describe("evaluateGroups: include ordering (wfs-includes-ot)", () => {
+  it("prepends included group output before own records, then extras", () => {
+    const records: RecordsBySource = new Map([["celestrak:active", [omm("FOREST-SRC", 1), omm("SENTINEL-2A", 2), omm("NOAA 20 (JPSS-1)", 3)]]]);
+    const defs: GroupDefinition[] = [
+      { name: "wfs", sources: [{ celestrak: "active" }], select: { names: ["SENTINEL-2A", "NOAA 20 (JPSS-1)"] }, include: ["ot"] },
+      {
+        name: "ot",
+        sources: [{ celestrak: "active" }],
+        select: { noradIds: [1] },
+        rename: { "FOREST-SRC": "FOREST-1" },
+        extraRecords: [{ OBJECT_NAME: "OT-ADD-1", TLE_LINE1: "1 ...", TLE_LINE2: "2 ..." }],
+      },
+    ];
+    const result = evaluateGroups(defs, records);
+    // ot: own selected+renamed record, then its own extras.
+    expect(names(result.get("ot"))).toEqual(["FOREST-1", "OT-ADD-1"]);
+    // wfs: included ot output first (incl. ot's extras), then wfs' own records.
+    expect(names(result.get("wfs"))).toEqual(["FOREST-1", "OT-ADD-1", "SENTINEL-2A", "NOAA 20 (JPSS-1)"]);
+  });
+
+  it("evaluates includes regardless of definition order", () => {
+    const records: RecordsBySource = new Map([["celestrak:active", [omm("A", 1)]]]);
+    // wfs listed before ot; topo order must still evaluate ot first.
+    const defs: GroupDefinition[] = [
+      { name: "wfs", include: ["ot"] },
+      { name: "ot", sources: [{ celestrak: "active" }] },
+    ];
+    expect(names(evaluateGroups(defs, records).get("wfs"))).toEqual(["A"]);
+  });
+});
+
+describe("evaluateGroups: extraRecords", () => {
+  it("appends extraRecords for source-less groups", () => {
+    const defs: GroupDefinition[] = [
+      {
+        name: "otc",
+        extraRecords: [
+          { OBJECT_NAME: "OTC-P1-A", TLE_LINE1: "1 63351U ...", TLE_LINE2: "2 63351 ..." },
+          { OBJECT_NAME: "OTC-P1-B", TLE_LINE1: "1 63352U ...", TLE_LINE2: "2 63352 ..." },
+        ],
+      },
+    ];
+    expect(names(evaluateGroups(defs, new Map()).get("otc"))).toEqual(["OTC-P1-A", "OTC-P1-B"]);
+  });
+});
+
+describe("evaluateGroups: failure propagation", () => {
+  it("evaluates a group with a failed source to an Error", () => {
+    const records: RecordsBySource = new Map([["celestrak:active", new Error("HTTP 503")]]);
+    const defs: GroupDefinition[] = [{ name: "weather", sources: [{ celestrak: "active" }] }];
+    const result = evaluateGroups(defs, records).get("weather");
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain("HTTP 503");
+  });
+
+  it("propagates a failed source through an include", () => {
+    const records: RecordsBySource = new Map([["celestrak:active", new Error("boom")]]);
+    const defs: GroupDefinition[] = [
+      { name: "ot", sources: [{ celestrak: "active" }] },
+      { name: "wfs", include: ["ot"], extraRecords: [{ TLE_LINE1: "1", TLE_LINE2: "2" }] },
+    ];
+    const result = evaluateGroups(defs, records);
+    expect(result.get("ot")).toBeInstanceOf(Error);
+    expect(result.get("wfs")).toBeInstanceOf(Error);
+  });
+
+  it("does not fail unrelated groups when one source fails", () => {
+    const records: RecordsBySource = new Map<string, OmmRecord[] | Error>([
+      ["celestrak:active", new Error("boom")],
+      ["celestrak:weather", [omm("GOES 16", 41866)]],
+    ]);
+    const defs: GroupDefinition[] = [
+      { name: "ot", sources: [{ celestrak: "active" }] },
+      { name: "weather", sources: [{ celestrak: "weather" }] },
+    ];
+    const result = evaluateGroups(defs, records);
+    expect(result.get("ot")).toBeInstanceOf(Error);
+    expect(names(result.get("weather"))).toEqual(["GOES 16"]);
+  });
+});
+
+describe("fetchSources validation", () => {
+  const defs: GroupDefinition[] = [{ name: "g", sources: [{ celestrak: "active" }] }];
+
+  it("accepts a valid OMM JSON array", async () => {
+    const result = await fetchSources(defs, async () => ({ status: 200, text: async () => JSON.stringify([{ OBJECT_NAME: "X", NORAD_CAT_ID: 1 }]) }));
+    const records = result.get("celestrak:active");
+    expect(Array.isArray(records)).toBe(true);
+  });
+
+  it("rejects HTML error pages served with HTTP 200", async () => {
+    const result = await fetchSources(defs, async () => ({ status: 200, text: async () => "<html>error</html>" }));
+    expect(result.get("celestrak:active")).toBeInstanceOf(Error);
+  });
+
+  it("rejects empty arrays", async () => {
+    const result = await fetchSources(defs, async () => ({ status: 200, text: async () => "[]" }));
+    expect(result.get("celestrak:active")).toBeInstanceOf(Error);
+  });
+
+  it("rejects arrays whose first element lacks NORAD_CAT_ID", async () => {
+    const result = await fetchSources(defs, async () => ({ status: 200, text: async () => JSON.stringify([{ OBJECT_NAME: "X" }]) }));
+    expect(result.get("celestrak:active")).toBeInstanceOf(Error);
+  });
+
+  it("rejects non-200 statuses", async () => {
+    const result = await fetchSources(defs, async () => ({ status: 404, text: async () => "[]" }));
+    expect(result.get("celestrak:active")).toBeInstanceOf(Error);
+  });
+});
