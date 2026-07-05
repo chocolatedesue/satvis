@@ -11,8 +11,8 @@ const TLE = "ISS (ZARYA)\n1 25544U 98067A   18342.69352573  .00002284  00000-0  
 // hold under 7.0.1's SGP4/coordinate implementation, so we assert physically
 // meaningful invariants (orbital radius, altitude band, non-empty pass list)
 // instead of brittle version-specific decimals.
-describe("Orbit (legacy TLE string path)", () => {
-  const orbit = new Orbit("ISS", TLE);
+describe("Orbit (TLE record)", () => {
+  const orbit = new Orbit("ISS", parseGpPayload(TLE)[0] as GpRecord);
 
   test("calculates a plausible satellite position", () => {
     const time = dayjs("2018-12-01").toDate();
@@ -48,22 +48,6 @@ describe("Orbit (legacy TLE string path)", () => {
 });
 
 describe("Orbit (GpRecord path)", () => {
-  test("TLE record produces the same position as the legacy string path", () => {
-    const record = parseGpPayload(TLE)[0] as GpRecord;
-    const orbit = new Orbit("ISS", record);
-    const legacy = new Orbit("ISS", TLE);
-    const time = dayjs("2018-12-01").toDate();
-    const eci = orbit.positionECI(time);
-    const legacyEci = legacy.positionECI(time);
-    expect(eci).not.toBeNull();
-    // Record path and legacy string path must produce identical positions.
-    expect(eci!.x).toBeCloseTo(legacyEci!.x, 6);
-    expect(eci!.y).toBeCloseTo(legacyEci!.y, 6);
-    expect(eci!.z).toBeCloseTo(legacyEci!.z, 6);
-    expect(orbit.tle).toHaveLength(3);
-    expect(orbit.record?.kind).toBe("tle");
-  });
-
   test("OMM record builds an orbit without tle lines", () => {
     const omm = JSON.stringify([
       {
@@ -87,7 +71,7 @@ describe("Orbit (GpRecord path)", () => {
     const orbit = new Orbit("ISS", record);
     expect(orbit.satnum).toBe("25544");
     expect(orbit.tle).toBeUndefined();
-    expect(orbit.record?.kind).toBe("omm");
+    expect(orbit.record.kind).toBe("omm");
     expect(orbit.error).toBe(0);
   });
 });

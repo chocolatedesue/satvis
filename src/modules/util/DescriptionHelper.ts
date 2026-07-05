@@ -7,6 +7,7 @@ import type { GroundStationPositionData } from "../GroundStationEntity";
 import type Orbit from "../Orbit";
 import type { GeodeticPosition } from "../Orbit";
 import type { Pass, SatelliteProperties } from "../SatelliteProperties";
+import { recordTleLines } from "./gp";
 
 dayjs.extend(relativeTime);
 dayjs.extend(utc);
@@ -179,17 +180,15 @@ export class DescriptionHelper {
 
   static renderElements(orbit: Orbit): string {
     const formattedDate = this.formatEpoch(orbit.julianDate);
-    if (orbit.tle) {
+    if (orbit.record.kind === "tle") {
       // TLE-sourced: render the two element-set lines as today.
+      const tle = orbit.tle ?? recordTleLines(orbit.record)!;
       return `
       <h3>TLE (Epoch ${formattedDate})</h3>
-      <div class="ib-code"><code>${orbit.tle.slice(1, 3).join("\n")}</code></div>`;
+      <div class="ib-code"><code>${tle.slice(1, 3).join("\n")}</code></div>`;
     }
     // OMM-sourced: render a compact element table.
-    const omm = orbit.record?.kind === "omm" ? orbit.record.omm : undefined;
-    if (!omm) {
-      return "";
-    }
+    const { omm } = orbit.record;
     const rows: [string, unknown][] = [
       ["OBJECT_ID", omm.OBJECT_ID],
       ["NORAD_CAT_ID", omm.NORAD_CAT_ID],

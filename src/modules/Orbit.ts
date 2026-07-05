@@ -44,25 +44,20 @@ export interface SwathPass {
 export default class Orbit {
   name: string;
 
-  // Present only when TLE-sourced (legacy string path or a kind:"tle" record),
-  // so the InfoBox can render the two lines. Undefined for OMM-sourced orbits.
-  tle?: string[];
+  // The element set this orbit was built from; always present.
+  record: GpRecord;
 
-  record?: GpRecord;
+  // The three TLE lines, present only for kind:"tle" records so the InfoBox can
+  // render them. Undefined for OMM-sourced orbits.
+  tle?: string[];
 
   satrec: satellitejs.SatRec;
 
-  constructor(name: string, source: string | GpRecord) {
+  constructor(name: string, record: GpRecord) {
     this.name = name;
-    if (typeof source === "string") {
-      // Legacy path: raw 3-line TLE string.
-      this.tle = source.split("\n");
-      this.satrec = satellitejs.twoline2satrec(this.tle[1] as string, this.tle[2] as string);
-      return;
-    }
-    this.record = source;
-    this.tle = recordTleLines(source);
-    this.satrec = createSatrec(source);
+    this.record = record;
+    this.tle = recordTleLines(record);
+    this.satrec = createSatrec(record);
   }
 
   get satnum(): string {
