@@ -189,6 +189,23 @@ describe("evaluateGroups: satellites rows", () => {
     const defs: GroupDefinition[] = [{ name: "ot", sources: [{ celestrak: "active" }], satellites: [{ noradId: 43547, upstreamName: "LEMUR-2-ROHOVITHSA", name: "FOREST-1" }] }];
     expect(warnings(evaluateGroups(defs, records).get("ot"))).toEqual([]);
   });
+
+  it("gives the lowest-index matching row the rename when a record matches both a name row and an id row", () => {
+    // The single LEMUR-2-ROHOVITHSA record is matched by row 0 (name-only) AND
+    // row 1 (id) — row order, not selector kind, decides the rename winner and
+    // the record is emitted exactly once.
+    const defs: GroupDefinition[] = [
+      {
+        name: "ot",
+        sources: [{ celestrak: "active" }],
+        satellites: [
+          { upstreamName: "LEMUR-2-ROHOVITHSA", name: "NAME-ROW-WINS" },
+          { noradId: 43547, name: "ID-ROW-LOSES" },
+        ],
+      },
+    ];
+    expect(names(evaluateGroups(defs, records).get("ot"))).toEqual(["NAME-ROW-WINS"]);
+  });
 });
 
 describe("evaluateGroups: include ordering (wfs-includes-ot)", () => {

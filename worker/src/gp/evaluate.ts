@@ -119,37 +119,100 @@ function recordSatnum(record: GpRecord): string | undefined {
   return id === undefined || id === null ? undefined : String(id);
 }
 
-function selectMatches(record: OmmRecord, select: GroupDefinition["select"]): boolean {
+// A `select` criterion compiled once per group: id and name lookups are Sets and
+// the pattern is a single compiled RegExp, so testing a record is O(1) work and
+// nothing is rebuilt inside the record loop. `undefined` when the group has no
+// `select` at all.
+interface CompiledSelect {
+  noradIds: Set<string>;
+  names: Set<string>;
+  pattern: RegExp | undefined;
+}
+
+function compileSelect(select: GroupDefinition["select"]): CompiledSelect | undefined {
+  if (!select) {
+    return undefined;
+  }
+  return {
+    noradIds: new Set((select.noradIds ?? []).map((id) => String(id))),
+    names: new Set(select.names ?? []),
+    pattern: select.namePattern ? new RegExp(select.namePattern) : undefined,
+  };
+}
+
+// The `select` criteria are OR'd together, exactly as the original per-record
+// checks were: id set, then name set, then pattern.
+function selectMatches(record: OmmRecord, select: CompiledSelect | undefined): boolean {
   if (!select) {
     return false;
   }
-  const noradIds = new Set((select.noradIds ?? []).map((id) => String(id)));
-  if (noradIds.size > 0) {
+  if (select.noradIds.size > 0) {
     const satnum = recordSatnum(record);
-    if (satnum !== undefined && noradIds.has(satnum)) {
+    if (satnum !== undefined && select.noradIds.has(satnum)) {
       return true;
     }
   }
-  if ((select.names ?? []).includes(recordName(record))) {
+  const name = recordName(record);
+  if (select.names.has(name)) {
     return true;
   }
-  if (select.namePattern && new RegExp(select.namePattern).test(recordName(record))) {
-    return true;
-  }
-  return false;
+  return select.pattern !== undefined && select.pattern.test(name);
 }
 
-// A satellites row matches a record by noradId (when present) or, failing that,
-// by exact upstreamName. A row with neither is invalid; the generator rejects
-// it, and this ignores it defensively.
-function rowMatches(record: OmmRecord, row: SatelliteSpec): boolean {
-  if (row.noradId !== undefined) {
-    return recordSatnum(record) === String(row.noradId);
+// The `satellites` rows compiled once per group into lookup maps. A row matches
+// a record by noradId (when present) or, failing that, by exact upstreamName; a
+// row with neither is invalid (the generator rejects it, and we ignore it
+// defensively by never indexing it). Each map keys the matcher (string satnum or
+// upstreamName) to the ascending list of row indices declaring it, so a record
+// looks up its matching rows instead of scanning every row.
+interface CompiledRows {
+  // satnum -> indices of rows that select by that noradId.
+  bySatnum: Map<string, number[]>;
+  // upstreamName -> indices of rows that select by name (rows without a noradId).
+  byName: Map<string, number[]>;
+}
+
+// Append a row index to a matcher map, creating the bucket on first use. Buckets
+// stay in ascending index order because compileRows appends by increasing r.
+function indexRow(map: Map<string, number[]>, key: string, index: number): void {
+  const existing = map.get(key);
+  if (existing) {
+    existing.push(index);
+  } else {
+    map.set(key, [index]);
   }
-  if (row.upstreamName !== undefined) {
-    return recordName(record) === row.upstreamName;
+}
+
+function compileRows(rows: SatelliteSpec[]): CompiledRows {
+  const bySatnum = new Map<string, number[]>();
+  const byName = new Map<string, number[]>();
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r]!;
+    if (row.noradId !== undefined) {
+      indexRow(bySatnum, String(row.noradId), r);
+    } else if (row.upstreamName !== undefined) {
+      indexRow(byName, row.upstreamName, r);
+    }
   }
-  return false;
+  return { bySatnum, byName };
+}
+
+// The ascending row indices matching a record, merging satnum-matched and
+// name-matched rows so row-order precedence (lowest index wins the rename) is
+// preserved. Both source lists are already ascending; each record touches at
+// most one satnum key and one name key, so the union is small — a plain sort
+// keeps the merge obviously correct.
+function matchingRowIndices(record: OmmRecord, compiled: CompiledRows): number[] {
+  const satnum = recordSatnum(record);
+  const bySatnum = satnum !== undefined ? compiled.bySatnum.get(satnum) : undefined;
+  const byName = compiled.byName.get(recordName(record));
+  if (!bySatnum) {
+    return byName ?? [];
+  }
+  if (!byName) {
+    return bySatnum;
+  }
+  return [...bySatnum, ...byName].toSorted((a, b) => a - b);
 }
 
 // Result of selecting/renaming a group's own source records: the surviving
@@ -169,18 +232,23 @@ function applySelectAndRename(records: OmmRecord[], def: GroupDefinition): Selec
   const warnings: string[] = [];
   const matchedByRow = rows.map(() => false);
   const out: OmmRecord[] = [];
+  // Precompile the per-group matchers once, before the record loop, so nothing
+  // (regex, id/name sets, row lookup maps) is rebuilt per record.
+  const compiledRows = compileRows(rows);
+  const compiledSelect = compileSelect(def.select);
   // With neither `satellites` rows nor a `select`, every source record passes
   // through (subject only to the group `rename` map) — the original semantics.
   const passAll = rows.length === 0 && !def.select;
 
   for (const record of records) {
+    // Rows matching this record, already in ascending row order so the
+    // row-order precedence below (first `name` wins) matches the old per-row
+    // scan.
+    const indices = matchingRowIndices(record, compiledRows);
     let matchedRow = false;
     let rowName: string | undefined;
-    for (let r = 0; r < rows.length; r++) {
+    for (const r of indices) {
       const row = rows[r]!;
-      if (!rowMatches(record, row)) {
-        continue;
-      }
       matchedByRow[r] = true;
       // Validate an id-matched record against its expected upstream name.
       if (row.noradId !== undefined && row.upstreamName !== undefined && recordName(record) !== row.upstreamName) {
@@ -200,7 +268,7 @@ function applySelectAndRename(records: OmmRecord[], def: GroupDefinition): Selec
       out.push(rowName !== undefined ? { ...record, OBJECT_NAME: rowName } : applyGroupRename(record, def.rename));
       continue;
     }
-    if (passAll || selectMatches(record, def.select)) {
+    if (passAll || selectMatches(record, compiledSelect)) {
       out.push(applyGroupRename(record, def.rename));
     }
   }
