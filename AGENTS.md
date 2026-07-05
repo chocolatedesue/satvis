@@ -34,7 +34,7 @@ CI runs `lint`, then `test` (frontend + worker), then `build`.
 - **Worker**: Cloudflare Worker backend in `worker/` — a workspace package (`satvis-worker`) with its own `package.json`, installed by the root `pnpm install`. Uses Wrangler for dev/deploy. Has its own `lint`, `type-check`, `test`, and `generate-types` scripts (run via `pnpm --filter satvis-worker <script>`).
 - **Satellite data (GP element sets)**: fetched from CelesTrak as OMM JSON.
   - The worker refreshes each group into Workers KV via a cron trigger (every 3 h) and serves `/api/gp/<group>.json`, `/api/groups.json`, `/api/metadata.json`.
-  - Groups are declarative: core groups in `worker/src/config/groups.core.json`, plugin groups in `data/custom/<plugin>/groups.json` (`sources`/`select`/`rename`/`include`/`extraRecordsFile`). `pnpm --filter satvis-worker generate-groups` merges them into the gitignored `worker/src/config/groups.generated.json`.
+  - Groups are declarative: core groups in `worker/src/config/groups.core.json`, plugin groups in `data/custom/<plugin>/groups.json` (`sources`/`satellites`/`select`/`rename`/`include`/`extraRecordsFile`). `pnpm --filter satvis-worker generate-groups` merges them into the gitignored `worker/src/config/groups.generated.json`.
   - **Worker-less mode**: `pnpm update-gp` runs the same evaluator and writes a static snapshot into `data/gp/` (gitignored). The app probes `/api/groups.json` and falls back to that snapshot.
 - **Data assets**: `data/` also contains Cesium assets (imagery, textures, stars) and 3D-model plugins under `data/custom/`. Copied into `dist/` at build time via `vite-plugin-static-copy`.
 - Entrypoints: `index.html`, `embedded.html`, `test.html` (all configured as Vite MPA inputs).
@@ -72,10 +72,33 @@ be shell scripts that `grep`/`sed`-ed the bundled TLE files. Rewrite each as a
 declarative `data/custom/<plugin>/groups.json` (untracked; same trust model as
 before — never commit private plugin data):
 
-- **`select`**: prefer `noradIds` over `names` — CelesTrak `OBJECT_NAME` values
-  are matched exactly and lose the old fixed-width TLE padding, so name matches
-  are brittle.
-- **`rename`**: `{ "<OBJECT_NAME>": "<new name>" }`, applied after select.
+- **`satellites`** (preferred for known, individually-named satellites): an
+  array of per-satellite rows, each co-locating a satellite's NORAD id, its
+  expected upstream name, and its display name so a rename's three facts live
+  together instead of being scattered across `select.noradIds` and `rename`:
+
+  ```json
+  "satellites": [{ "noradId": 43556, "upstreamName": "LEMUR-2-EMBRIONOVIS", "name": "FOREST-2" }]
+  ```
+
+  A row matches by `noradId` when present (else by exact `upstreamName`), is
+  unioned with `select`, and its `name` renames the matched record (taking
+  precedence over the `rename` map). Omit `name` to keep the upstream name;
+  omit `noradId` to select a satellite that only has an upstream name. When a
+  row carries both id and `upstreamName`, an id match against a differently
+  named record — or a row whose id matches nothing — surfaces a warning in
+  `/api/groups.json` (the group's `warnings` array) so upstream renames and
+  decays are caught. Optional per-row `metadata` (e.g. `{ "swathKm": 290 }`) is
+  lifted into the metadata rules served at `/api/metadata.json`.
+
+- **`select`** (for bulk/pattern selection): `noradIds`, `names`, or a
+  `namePattern` regex, ORed together. Prefer `noradIds` over `names` — CelesTrak
+  `OBJECT_NAME` values are matched exactly and lose the old fixed-width TLE
+  padding, so name matches are brittle. Use `namePattern` for whole
+  constellations (`^(FIRST-MOVE|MOVE-II)`).
+- **`rename`**: `{ "<OBJECT_NAME>": "<new name>" }`, applied after select to any
+  record a `satellites` row did not already rename. Use for bulk/pattern renames;
+  for a single known satellite prefer a `satellites` row.
 - **`extraRecordsFile`**: a path (relative to the config) to a TLE text file for
   pseudo element sets (fake satnums that can't be expressed as OMM). The
   generator inlines it into `extraRecords`.

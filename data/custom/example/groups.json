@@ -4,6 +4,14 @@
       "name": "move",
       "sources": [{ "celestrak": "active" }],
       "select": { "namePattern": "^(FIRST-MOVE|MOVE-II)" }
+    },
+    {
+      "name": "move-sats",
+      "sources": [{ "celestrak": "active" }],
+      "satellites": [
+        { "noradId": 39439, "upstreamName": "FIRST-MOVE" },
+        { "noradId": 43780, "upstreamName": "MOVE-II" }
+      ]
     }
   ]
 }

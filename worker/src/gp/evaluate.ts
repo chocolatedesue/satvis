@@ -1,7 +1,7 @@
 // Pure, runtime-agnostic group evaluator. NO Cloudflare APIs here so it can be
 // unit-tested and reused by the static generator via node type stripping.
 
-import type { GpRecord, GroupDefinition, GroupsIndex, GroupStatus, OmmRecord, SourceSpec } from "./types.ts";
+import type { GpRecord, GroupDefinition, GroupsIndex, GroupStatus, OmmRecord, SatelliteSpec, SourceSpec } from "./types.ts";
 
 const CELESTRAK_BASE = "https://celestrak.org/NORAD/elements/";
 const USER_AGENT = "satvis.space (https://github.com/Flowm/satvis)";
@@ -119,41 +119,103 @@ function recordSatnum(record: GpRecord): string | undefined {
   return id === undefined || id === null ? undefined : String(id);
 }
 
-function applySelect(records: OmmRecord[], select: GroupDefinition["select"]): OmmRecord[] {
+function selectMatches(record: OmmRecord, select: GroupDefinition["select"]): boolean {
   if (!select) {
-    return records;
+    return false;
   }
   const noradIds = new Set((select.noradIds ?? []).map((id) => String(id)));
-  const names = new Set(select.names ?? []);
-  const pattern = select.namePattern ? new RegExp(select.namePattern) : undefined;
-  return records.filter((record) => {
-    if (noradIds.size > 0) {
-      const satnum = recordSatnum(record);
-      if (satnum !== undefined && noradIds.has(satnum)) {
-        return true;
-      }
-    }
-    if (names.size > 0 && names.has(recordName(record))) {
+  if (noradIds.size > 0) {
+    const satnum = recordSatnum(record);
+    if (satnum !== undefined && noradIds.has(satnum)) {
       return true;
     }
-    if (pattern && pattern.test(recordName(record))) {
-      return true;
-    }
-    return false;
-  });
+  }
+  if ((select.names ?? []).includes(recordName(record))) {
+    return true;
+  }
+  if (select.namePattern && new RegExp(select.namePattern).test(recordName(record))) {
+    return true;
+  }
+  return false;
 }
 
-function applyRename(records: GpRecord[], rename: GroupDefinition["rename"]): GpRecord[] {
-  if (!rename) {
-    return records;
+// A satellites row matches a record by noradId (when present) or, failing that,
+// by exact upstreamName. A row with neither is invalid; the generator rejects
+// it, and this ignores it defensively.
+function rowMatches(record: OmmRecord, row: SatelliteSpec): boolean {
+  if (row.noradId !== undefined) {
+    return recordSatnum(record) === String(row.noradId);
   }
-  return records.map((record) => {
-    const current = record.OBJECT_NAME;
-    if (current !== undefined && current in rename) {
-      return { ...record, OBJECT_NAME: rename[current]! };
+  if (row.upstreamName !== undefined) {
+    return recordName(record) === row.upstreamName;
+  }
+  return false;
+}
+
+// Result of selecting/renaming a group's own source records: the surviving
+// records (with row-level renames already applied) plus any validation
+// warnings the rows produced.
+interface SelectResult {
+  records: OmmRecord[];
+  warnings: string[];
+}
+
+// Select source records via the OR-union of `satellites` rows and `select`,
+// apply per-row `name` renames (precedence over the group `rename` map), then
+// the group `rename` map to whatever a row did not rename. Emits warnings for
+// id/name mismatches and rows whose id matched no record.
+function applySelectAndRename(records: OmmRecord[], def: GroupDefinition): SelectResult {
+  const rows = def.satellites ?? [];
+  const warnings: string[] = [];
+  const matchedByRow = rows.map(() => false);
+  const out: OmmRecord[] = [];
+  // With neither `satellites` rows nor a `select`, every source record passes
+  // through (subject only to the group `rename` map) — the original semantics.
+  const passAll = rows.length === 0 && !def.select;
+
+  for (const record of records) {
+    let renamedByRow: OmmRecord | undefined;
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r]!;
+      if (!rowMatches(record, row)) {
+        continue;
+      }
+      matchedByRow[r] = true;
+      // Validate an id-matched record against its expected upstream name.
+      if (row.noradId !== undefined && row.upstreamName !== undefined && recordName(record) !== row.upstreamName) {
+        warnings.push(`noradId ${row.noradId}: expected OBJECT_NAME ${JSON.stringify(row.upstreamName)}, got ${JSON.stringify(recordName(record))}`);
+      }
+      // First matching row with a `name` wins the rename; keep scanning only to
+      // mark later rows as matched (harmless, but rare — usually one row/record).
+      if (renamedByRow === undefined) {
+        renamedByRow = row.name !== undefined ? { ...record, OBJECT_NAME: row.name } : record;
+      }
     }
-    return record;
-  });
+    if (renamedByRow !== undefined) {
+      out.push(renamedByRow);
+      continue;
+    }
+    if (passAll || selectMatches(record, def.select)) {
+      out.push(applyGroupRename(record, def.rename));
+    }
+  }
+
+  // Rows whose id matched no record: satellite gone from the group's sources.
+  for (let r = 0; r < rows.length; r++) {
+    if (!matchedByRow[r] && rows[r]!.noradId !== undefined) {
+      warnings.push(`noradId ${rows[r]!.noradId}: matched no record in the group's sources`);
+    }
+  }
+
+  return { records: out, warnings };
+}
+
+function applyGroupRename(record: OmmRecord, rename: GroupDefinition["rename"]): OmmRecord {
+  const current = record.OBJECT_NAME;
+  if (rename && current !== undefined && current in rename) {
+    return { ...record, OBJECT_NAME: rename[current]! };
+  }
+  return record;
 }
 
 // Topologically order group definitions by their `include` edges so that
@@ -186,11 +248,21 @@ function topoOrder(defs: GroupDefinition[]): GroupDefinition[] {
   return ordered;
 }
 
+// A successfully evaluated group: its final record list plus any non-fatal
+// validation warnings raised by its `satellites` rows. Warnings are per-group
+// (own rows only — a group does not inherit its includes' warnings; those
+// surface on the included group's own status).
+export interface GroupResult {
+  records: GpRecord[];
+  warnings: string[];
+}
+
 // Evaluate every group into its final record list. A group whose source failed
 // (or whose included group failed) evaluates to an Error value rather than
-// throwing.
-export function evaluateGroups(defs: GroupDefinition[], recordsBySource: RecordsBySource): Map<string, GpRecord[] | Error> {
-  const results = new Map<string, GpRecord[] | Error>();
+// throwing; a successful group evaluates to a GroupResult carrying its records
+// and warnings.
+export function evaluateGroups(defs: GroupDefinition[], recordsBySource: RecordsBySource): Map<string, GroupResult | Error> {
+  const results = new Map<string, GroupResult | Error>();
   for (const def of topoOrder(defs)) {
     try {
       // Concat source records (propagating any source failure). Sources always
@@ -208,7 +280,7 @@ export function evaluateGroups(defs: GroupDefinition[], recordsBySource: Records
         sourceRecords = sourceRecords.concat(fetched);
       }
 
-      const records = applyRename(applySelect(sourceRecords, def.select), def.rename);
+      const selected = applySelectAndRename(sourceRecords, def);
 
       // Prepend included groups' outputs (evaluated first via topo order).
       const included: GpRecord[] = [];
@@ -220,12 +292,12 @@ export function evaluateGroups(defs: GroupDefinition[], recordsBySource: Records
         if (depResult instanceof Error) {
           throw new Error(`included group ${dep} failed: ${depResult.message}`);
         }
-        included.push(...depResult);
+        included.push(...depResult.records);
       }
 
       // Final order: includes, then this group's own records, then extras.
       const extras = def.extraRecords ?? [];
-      results.set(def.name, [...included, ...records, ...extras]);
+      results.set(def.name, { records: [...included, ...selected.records, ...extras], warnings: selected.warnings });
     } catch (err) {
       results.set(def.name, err instanceof Error ? err : new Error(String(err)));
     }
@@ -247,7 +319,7 @@ export function coerceIndex(raw: unknown): GroupsIndex {
 // and gain lastError/lastErrorAt; successful groups report fresh values.
 // Shared by the worker cron refresh and the static snapshot generator so the
 // last-known-good semantics cannot diverge.
-export function buildStatuses(defs: GroupDefinition[], evaluated: Map<string, GpRecord[] | Error>, previousIndex: GroupsIndex, now: string): GroupStatus[] {
+export function buildStatuses(defs: GroupDefinition[], evaluated: Map<string, GroupResult | Error>, previousIndex: GroupsIndex, now: string): GroupStatus[] {
   const previousByName = new Map(previousIndex.groups.map((status) => [status.name, status]));
   return defs.map((def) => {
     const result = evaluated.get(def.name);
@@ -256,6 +328,10 @@ export function buildStatuses(defs: GroupDefinition[], evaluated: Map<string, Gp
       const prev = previousByName.get(def.name);
       return { name: def.name, updated: prev?.updated ?? null, count: prev?.count ?? 0, lastError: message, lastErrorAt: now };
     }
-    return { name: def.name, updated: now, count: result.length };
+    const status: GroupStatus = { name: def.name, updated: now, count: result.records.length };
+    if (result.warnings.length > 0) {
+      status.warnings = result.warnings;
+    }
+    return status;
   });
 }

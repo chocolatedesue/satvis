@@ -35,8 +35,11 @@ export async function refreshAll(env: Env): Promise<GroupsIndex> {
       if (result === undefined || result instanceof Error) {
         return undefined;
       }
-      const metadata: KvValueMetadata = { updated: now, count: result.length };
-      return env.GP_KV.put(GP_KEY_PREFIX + def.name, JSON.stringify(result), { metadata });
+      for (const warning of result.warnings) {
+        console.warn(`gp refresh: ${def.name}: ${warning}`);
+      }
+      const metadata: KvValueMetadata = { updated: now, count: result.records.length };
+      return env.GP_KV.put(GP_KEY_PREFIX + def.name, JSON.stringify(result.records), { metadata });
     }),
   );
 

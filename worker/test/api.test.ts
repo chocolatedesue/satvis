@@ -105,16 +105,18 @@ describe("scheduled() refresh", () => {
     fetchMock.assertNoPendingInterceptors();
   });
 
-  // Reply to every celestrak GROUP=<g> request (one per distinct source) with a
-  // synthetic response, so the refresh never hits the network. Sized to exactly
-  // SOURCE_COUNT so all interceptors are consumed within this test.
+  // Reply to every celestrak request (regular gp.php GROUP=<g> and supplemental
+  // sup-gp.php FILE=<f>) — one per distinct source — with a synthetic response,
+  // so the refresh never hits the network. Sized to exactly SOURCE_COUNT so all
+  // interceptors are consumed within this test.
   function interceptCelestrak(reply: (group: string) => unknown, opts?: { status?: number }): void {
     fetchMock
       .get("https://celestrak.org")
-      .intercept({ method: "GET", path: (p) => p.startsWith("/NORAD/elements/gp.php") })
+      .intercept({ method: "GET", path: (p) => p.startsWith("/NORAD/elements/gp.php") || p.startsWith("/NORAD/elements/supplemental/sup-gp.php") })
       .reply((options) => {
-        const group = new URL(`https://celestrak.org${options.path}`).searchParams.get("GROUP") ?? "";
-        return { statusCode: opts?.status ?? 200, data: JSON.stringify(reply(group)) };
+        const params = new URL(`https://celestrak.org${options.path}`).searchParams;
+        const source = params.get("GROUP") ?? params.get("FILE") ?? "";
+        return { statusCode: opts?.status ?? 200, data: JSON.stringify(reply(source)) };
       })
       .times(SOURCE_COUNT);
   }
@@ -137,6 +139,13 @@ describe("scheduled() refresh", () => {
     // The derived `move` group selects FIRST-MOVE/MOVE-II from `active`; our
     // synthetic ACTIVE-1 record matches neither, so it is empty but successful.
     expect(index.groups.some((g) => g.name === "move")).toBe(true);
+    // `move-sats` documents FIRST-MOVE/MOVE-II as satellites rows with noradIds;
+    // the synthetic ACTIVE-1 matches neither id, so both rows raise a
+    // matched-no-record warning that must surface in the index.
+    const moveSatsStatus = index.groups.find((g) => g.name === "move-sats");
+    expect(moveSatsStatus).toBeDefined();
+    expect(moveSatsStatus?.lastError).toBeUndefined();
+    expect(moveSatsStatus?.warnings).toEqual(expect.arrayContaining([expect.stringContaining("matched no record")]));
   });
 
   it("preserves last-known-good on failure", async () => {

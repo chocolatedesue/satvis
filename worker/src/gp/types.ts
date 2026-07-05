@@ -37,11 +37,34 @@ export interface GroupSelect {
   namePattern?: string;
 }
 
+// One row per satellite, co-locating its NORAD id, expected upstream name, and
+// display-name override so a renamed satellite's three facts live together
+// instead of being scattered across select.noradIds / rename. Preferred over
+// select.noradIds+rename for known, individually-named satellites; select is
+// still the tool for bulk/pattern selection.
+export interface SatelliteSpec {
+  // Primary selector — matched against NORAD_CAT_ID (numeric-normalized).
+  noradId?: number;
+  // Expected upstream OBJECT_NAME. Documents the satellite, validates the id
+  // match (mismatch -> warning), and acts as the selector when noradId is
+  // absent (exact OBJECT_NAME match).
+  upstreamName?: string;
+  // Display-name override. Omit to keep the upstream OBJECT_NAME.
+  name?: string;
+  // Optional per-satellite metadata (e.g. { swathKm: 290 }); the generator
+  // lifts this into the merged MetadataRule[] served at /api/metadata.json.
+  metadata?: Record<string, unknown>;
+}
+
 export interface GroupDefinition {
   // Served at /api/gp/<name>.json — must match ^[a-zA-Z0-9_-]+$.
   name: string;
   sources?: SourceSpec[];
   select?: GroupSelect;
+  // Per-satellite rows, unioned with `select`. A row matches by noradId when
+  // present, else by exact upstreamName. A row's `name` renames the records it
+  // matched (taking precedence over the group-level `rename` map).
+  satellites?: SatelliteSpec[];
   // OBJECT_NAME -> new name, applied post-select.
   rename?: Record<string, string>;
   // Names of other groups whose FULL evaluated output — including their own
@@ -78,6 +101,10 @@ export interface GroupStatus {
   count: number;
   lastError?: string;
   lastErrorAt?: string;
+  // Non-fatal issues from the last successful evaluation (e.g. a satellites row
+  // whose id matched a record with an unexpected OBJECT_NAME, or whose id
+  // matched no record at all). Present only when non-empty.
+  warnings?: string[];
 }
 
 export interface GroupsIndex {

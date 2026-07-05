@@ -52,7 +52,7 @@ async function main() {
   for (const def of defs) {
     const result = evaluated.get(def.name);
     if (result !== undefined && !(result instanceof Error)) {
-      fs.writeFileSync(path.join(outDir, `${def.name}.json`), `${JSON.stringify(result)}\n`);
+      fs.writeFileSync(path.join(outDir, `${def.name}.json`), `${JSON.stringify(result.records)}\n`);
     }
   }
 
@@ -62,6 +62,9 @@ async function main() {
       process.stdout.write(`  ${s.name}: FAILED (${s.lastError}) — keeping last-known-good\n`);
     } else {
       process.stdout.write(`  ${s.name}: ${s.count} records\n`);
+    }
+    for (const warning of s.warnings ?? []) {
+      process.stdout.write(`    WARNING: ${warning}\n`);
     }
   }
 

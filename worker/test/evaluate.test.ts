@@ -1,17 +1,25 @@
 import { describe, expect, it } from "vitest";
 
-import { buildStatuses, coerceIndex, collectSources, evaluateGroups, fetchSources, type RecordsBySource, sourceKey, sourceUrl } from "../src/gp/evaluate.ts";
-import type { GpRecord, GroupDefinition, GroupsIndex, OmmRecord } from "../src/gp/types.ts";
+import { buildStatuses, coerceIndex, collectSources, evaluateGroups, fetchSources, type GroupResult, type RecordsBySource, sourceKey, sourceUrl } from "../src/gp/evaluate.ts";
+import type { GroupDefinition, GroupsIndex, OmmRecord } from "../src/gp/types.ts";
 
 function omm(name: string, id: number): OmmRecord {
   return { OBJECT_NAME: name, NORAD_CAT_ID: id };
 }
 
-function names(result: GpRecord[] | Error | undefined): string[] {
+function group(result: GroupResult | Error | undefined): GroupResult {
   if (!result || result instanceof Error) {
     throw new Error(`expected records, got ${result}`);
   }
-  return result.map((r) => r.OBJECT_NAME ?? "<unnamed>");
+  return result;
+}
+
+function names(result: GroupResult | Error | undefined): string[] {
+  return group(result).records.map((r) => r.OBJECT_NAME ?? "<unnamed>");
+}
+
+function warnings(result: GroupResult | Error | undefined): string[] {
+  return group(result).warnings;
 }
 
 describe("sourceUrl / sourceKey", () => {
@@ -84,6 +92,90 @@ describe("evaluateGroups: rename", () => {
       },
     ];
     expect(names(evaluateGroups(defs, records).get("ot"))).toEqual(["FOREST-1", "FOREST-2"]);
+  });
+});
+
+describe("evaluateGroups: satellites rows", () => {
+  const records: RecordsBySource = new Map([
+    ["celestrak:active", [omm("LEMUR-2-ROHOVITHSA", 43547), omm("LEMUR-2-EMBRIONOVIS", 43556), omm("STARLINK-1", 44713), omm("GENA-OT", 66774)]],
+  ]);
+
+  it("selects a row by noradId", () => {
+    const defs: GroupDefinition[] = [{ name: "ot", sources: [{ celestrak: "active" }], satellites: [{ noradId: 43547, upstreamName: "LEMUR-2-ROHOVITHSA", name: "FOREST-1" }] }];
+    expect(names(evaluateGroups(defs, records).get("ot"))).toEqual(["FOREST-1"]);
+  });
+
+  it("selects a row by upstreamName fallback when noradId is absent", () => {
+    const defs: GroupDefinition[] = [{ name: "ot", sources: [{ celestrak: "active" }], satellites: [{ upstreamName: "LEMUR-2-EMBRIONOVIS", name: "FOREST-2" }] }];
+    expect(names(evaluateGroups(defs, records).get("ot"))).toEqual(["FOREST-2"]);
+  });
+
+  it("keeps the upstream name when a row omits `name`", () => {
+    const defs: GroupDefinition[] = [{ name: "ot", sources: [{ celestrak: "active" }], satellites: [{ noradId: 66774, upstreamName: "GENA-OT" }] }];
+    expect(names(evaluateGroups(defs, records).get("ot"))).toEqual(["GENA-OT"]);
+  });
+
+  it("unions satellites rows with `select`", () => {
+    const defs: GroupDefinition[] = [
+      {
+        name: "ot",
+        sources: [{ celestrak: "active" }],
+        satellites: [{ noradId: 43547, upstreamName: "LEMUR-2-ROHOVITHSA", name: "FOREST-1" }],
+        select: { names: ["STARLINK-1"] },
+      },
+    ];
+    expect(names(evaluateGroups(defs, records).get("ot"))).toEqual(["FOREST-1", "STARLINK-1"]);
+  });
+
+  it("gives a row `name` precedence over the group rename map", () => {
+    const defs: GroupDefinition[] = [
+      {
+        name: "ot",
+        sources: [{ celestrak: "active" }],
+        satellites: [{ noradId: 43547, upstreamName: "LEMUR-2-ROHOVITHSA", name: "FOREST-1" }],
+        rename: { "LEMUR-2-ROHOVITHSA": "WRONG" },
+      },
+    ];
+    expect(names(evaluateGroups(defs, records).get("ot"))).toEqual(["FOREST-1"]);
+  });
+
+  it("still applies the rename map to records not renamed by a row", () => {
+    const defs: GroupDefinition[] = [
+      {
+        name: "ot",
+        sources: [{ celestrak: "active" }],
+        satellites: [{ noradId: 43547, upstreamName: "LEMUR-2-ROHOVITHSA", name: "FOREST-1" }],
+        select: { names: ["LEMUR-2-EMBRIONOVIS"] },
+        rename: { "LEMUR-2-EMBRIONOVIS": "FOREST-2" },
+      },
+    ];
+    expect(names(evaluateGroups(defs, records).get("ot"))).toEqual(["FOREST-1", "FOREST-2"]);
+  });
+
+  it("warns when an id matches a record with an unexpected OBJECT_NAME", () => {
+    const defs: GroupDefinition[] = [{ name: "ot", sources: [{ celestrak: "active" }], satellites: [{ noradId: 43547, upstreamName: "LEMUR-2-UNTITLED-SC", name: "FOREST-11" }] }];
+    const result = evaluateGroups(defs, records).get("ot");
+    expect(names(result)).toEqual(["FOREST-11"]);
+    expect(warnings(result)).toEqual([`noradId 43547: expected OBJECT_NAME "LEMUR-2-UNTITLED-SC", got "LEMUR-2-ROHOVITHSA"`]);
+  });
+
+  it("warns when a row's noradId matches no record in the sources", () => {
+    const defs: GroupDefinition[] = [{ name: "ot", sources: [{ celestrak: "active" }], satellites: [{ noradId: 99999, upstreamName: "GONE-SAT", name: "FOREST-99" }] }];
+    const result = evaluateGroups(defs, records).get("ot");
+    expect(names(result)).toEqual([]);
+    expect(warnings(result)).toEqual([`noradId 99999: matched no record in the group's sources`]);
+  });
+
+  it("does not warn for a name-only row that matches nothing (no id to track)", () => {
+    const defs: GroupDefinition[] = [{ name: "ot", sources: [{ celestrak: "active" }], satellites: [{ upstreamName: "GONE-SAT", name: "FOREST-99" }] }];
+    const result = evaluateGroups(defs, records).get("ot");
+    expect(names(result)).toEqual([]);
+    expect(warnings(result)).toEqual([]);
+  });
+
+  it("does not warn when both id and upstreamName match", () => {
+    const defs: GroupDefinition[] = [{ name: "ot", sources: [{ celestrak: "active" }], satellites: [{ noradId: 43547, upstreamName: "LEMUR-2-ROHOVITHSA", name: "FOREST-1" }] }];
+    expect(warnings(evaluateGroups(defs, records).get("ot"))).toEqual([]);
   });
 });
 
@@ -225,14 +317,14 @@ describe("buildStatuses", () => {
   };
 
   it("reports fresh values for successful groups", () => {
-    const evaluated = new Map<string, GpRecord[] | Error>([["ok", [omm("A", 1), omm("B", 2)]]]);
+    const evaluated = new Map<string, GroupResult | Error>([["ok", { records: [omm("A", 1), omm("B", 2)], warnings: [] }]]);
     const statuses = buildStatuses([{ name: "ok" }], evaluated, previous, NOW);
     expect(statuses).toEqual([{ name: "ok", updated: NOW, count: 2 }]);
   });
 
   it("preserves last-known-good for failed groups and records the error", () => {
-    const evaluated = new Map<string, GpRecord[] | Error>([
-      ["ok", [omm("A", 1)]],
+    const evaluated = new Map<string, GroupResult | Error>([
+      ["ok", { records: [omm("A", 1)], warnings: [] }],
       ["broken", new Error("upstream down")],
     ]);
     const statuses = buildStatuses(defs, evaluated, previous, NOW);
@@ -241,5 +333,11 @@ describe("buildStatuses", () => {
       { name: "broken", updated: BEFORE, count: 5, lastError: "upstream down", lastErrorAt: NOW },
       { name: "new-broken", updated: null, count: 0, lastError: "not evaluated", lastErrorAt: NOW },
     ]);
+  });
+
+  it("surfaces evaluation warnings on successful groups", () => {
+    const evaluated = new Map<string, GroupResult | Error>([["ok", { records: [omm("A", 1)], warnings: ["noradId 999: matched no record in the group's sources"] }]]);
+    const statuses = buildStatuses([{ name: "ok" }], evaluated, previous, NOW);
+    expect(statuses).toEqual([{ name: "ok", updated: NOW, count: 1, warnings: ["noradId 999: matched no record in the group's sources"] }]);
   });
 });

@@ -85,6 +85,39 @@ function discoverPluginConfigs() {
   return configs;
 }
 
+// Validate a group's `satellites` rows (if any). Each row must select by
+// `noradId` (number) or `upstreamName` (string); `name`/`metadata` optional
+// with checked types. Throws with the group name on any violation.
+function validateSatellites(group) {
+  if (group.satellites === undefined) {
+    return;
+  }
+  if (!Array.isArray(group.satellites)) {
+    throw new Error(`group ${JSON.stringify(group.name)}: "satellites" must be an array`);
+  }
+  group.satellites.forEach((row, i) => {
+    const where = `group ${JSON.stringify(group.name)} satellites[${i}]`;
+    if (row === null || typeof row !== "object" || Array.isArray(row)) {
+      throw new Error(`${where}: must be an object`);
+    }
+    if (row.noradId !== undefined && typeof row.noradId !== "number") {
+      throw new Error(`${where}: "noradId" must be a number`);
+    }
+    if (row.upstreamName !== undefined && typeof row.upstreamName !== "string") {
+      throw new Error(`${where}: "upstreamName" must be a string`);
+    }
+    if (row.noradId === undefined && row.upstreamName === undefined) {
+      throw new Error(`${where}: must have a "noradId" or "upstreamName"`);
+    }
+    if (row.name !== undefined && typeof row.name !== "string") {
+      throw new Error(`${where}: "name" must be a string`);
+    }
+    if (row.metadata !== undefined && (row.metadata === null || typeof row.metadata !== "object" || Array.isArray(row.metadata))) {
+      throw new Error(`${where}: "metadata" must be an object`);
+    }
+  });
+}
+
 function validate(groups) {
   const names = new Set();
   for (const group of groups) {
@@ -95,6 +128,7 @@ function validate(groups) {
       throw new Error(`duplicate group name ${JSON.stringify(group.name)}`);
     }
     names.add(group.name);
+    validateSatellites(group);
   }
   // include targets must exist.
   for (const group of groups) {
@@ -125,18 +159,45 @@ function validate(groups) {
   }
 }
 
+// Lift each satellites-row `metadata` into a MetadataRule. The frontend matches
+// rules against the SERVED record — its satnum and its displayed name — so:
+//   - a row with a noradId keys on { satnums: [String(noradId)] } (the satnum
+//     is stable across renames, so this is the most robust match);
+//   - a name-only row keys on { names: [row.name ?? row.upstreamName] }, i.e.
+//     the served name (the renamed one if `name` is set, else the upstream
+//     name that passes through unchanged) — never the raw upstreamName, which
+//     the frontend never sees once a row renames the record.
+function liftSatelliteMetadata(groups) {
+  const rules = [];
+  for (const group of groups) {
+    for (const row of group.satellites ?? []) {
+      if (row.metadata === undefined) {
+        continue;
+      }
+      const match = row.noradId !== undefined ? { satnums: [String(row.noradId)] } : { names: [row.name ?? row.upstreamName] };
+      rules.push({ match, metadata: row.metadata });
+    }
+  }
+  return rules;
+}
+
 function main() {
   const core = loadConfig(coreConfigPath);
   const groups = [...core.groups];
-  const metadata = [...core.metadata];
+  const explicitMetadata = [...core.metadata];
 
   for (const configPath of discoverPluginConfigs()) {
     const plugin = loadConfig(configPath);
     groups.push(...plugin.groups);
-    metadata.push(...plugin.metadata);
+    explicitMetadata.push(...plugin.metadata);
   }
 
   validate(groups);
+
+  // Lifted rules come BEFORE explicit rules in the merged array. The frontend
+  // shallow-merges matching rules in array order (later wins field-wise), so
+  // placing explicit rules last lets them override lifted per-satellite values.
+  const metadata = [...liftSatelliteMetadata(groups), ...explicitMetadata];
 
   const generated = { groups, metadata };
   fs.writeFileSync(outPath, `${JSON.stringify(generated, null, 2)}\n`);
