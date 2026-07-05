@@ -4,21 +4,58 @@
 //
 // This module must stay Cesium-free (node-env vitest exercises it).
 
-import { appMetadataConfig, type MetadataRule, type SatelliteMetadata } from "../config/satelliteMetadata";
+import { appMetadataConfig, type MetadataRule, type ResolvedMetadata } from "../config/satelliteMetadata";
 import { parseGpPayload, recordName, recordSatnum, type GpRecord } from "./util/gp";
 import { resolveGpBase, resolveGroupUrl, resolveMetadataUrl } from "./util/gpSource";
 
-export interface CatalogEntry {
+// A single known satellite. Created by SatelliteCatalog.addRecords, which owns
+// the identity/tag indices; the entry keeps a back-reference to its catalog so
+// `metadata` can resolve lazily against the current rule set. The dependency is
+// explicit (constructor arg) rather than closed over, so there is no this-alias.
+export class CatalogEntry {
   // Dedup identity, matching today's SatelliteManager.#add: satnum + "|" + name.
-  key: string;
-  name: string;
-  nameUpper: string;
-  satnum: string;
+  readonly key: string;
+
+  readonly name: string;
+
+  readonly nameUpper: string;
+
+  readonly satnum: string;
+
+  // Mutable: addRecords reassigns it when merging tags across groups.
   tags: string[];
-  record: GpRecord;
-  // Resolved per-satellite metadata (swath, cone FOV, model URL). Memoized
-  // lazily and invalidated when the metadata revision bumps (see #resolveMetadata).
-  readonly metadata: SatelliteMetadata;
+
+  readonly record: GpRecord;
+
+  // Per-entry memoized resolved metadata, tagged with the catalog metadata
+  // revision it was computed against. Invalidated implicitly when the catalog's
+  // revision bumps (mergeMetadataConfig), so a stale cache is never returned.
+  #cache: { revision: number; metadata: ResolvedMetadata } | undefined;
+
+  constructor(
+    private readonly catalog: SatelliteCatalog,
+    fields: { key: string; name: string; nameUpper: string; satnum: string; tags: string[]; record: GpRecord },
+  ) {
+    this.key = fields.key;
+    this.name = fields.name;
+    this.nameUpper = fields.nameUpper;
+    this.satnum = fields.satnum;
+    this.tags = fields.tags;
+    this.record = fields.record;
+  }
+
+  // Resolved per-satellite metadata (swath, cone FOV, model URL). Resolved
+  // lazily via the catalog and memoized against its metadata revision, so
+  // entries created before remote rules arrive still see the merged result.
+  get metadata(): ResolvedMetadata {
+    const revision = this.catalog.metadataRevision;
+    if (this.#cache && this.#cache.revision === revision) {
+      return this.#cache.metadata;
+    }
+    const metadata = this.catalog.resolveMetadata(this);
+    this.#cache = { revision, metadata };
+    return metadata;
+  }
 }
 
 // A rule paired with its compiled RegExp (compiled once, on first match).
@@ -46,9 +83,11 @@ export class SatelliteCatalog {
 
   #metadataRevision = 0;
 
-  // Per-entry memoized resolved metadata, keyed by entry key, tagged with the
-  // revision it was computed against.
-  #metadataCache = new Map<string, { revision: number; metadata: SatelliteMetadata }>();
+  // Current metadata rule-set revision. Read by CatalogEntry to key its memo;
+  // bumped by mergeMetadataConfig to invalidate every entry's cached metadata.
+  get metadataRevision(): number {
+    return this.#metadataRevision;
+  }
 
   #changeCallbacks: CatalogChangeCallback[] = [];
 
@@ -120,9 +159,6 @@ export class SatelliteCatalog {
   // Add records with the given tags, deduping by key and merging tags. Returns
   // the entries that were added or whose tags changed (for the change callback).
   addRecords(records: GpRecord[], tags: string[]): CatalogEntry[] {
-    // Captured by each entry's metadata getter so it can reach the resolver.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const catalog = this;
     const changed: CatalogEntry[] = [];
     for (const record of records) {
       const name = recordName(record);
@@ -138,20 +174,14 @@ export class SatelliteCatalog {
         }
         continue;
       }
-      const entry: CatalogEntry = {
+      const entry = new CatalogEntry(this, {
         key,
         name,
         nameUpper: name.toUpperCase(),
         satnum,
         tags: [...tags],
         record,
-        // Lazily resolved + memoized against the catalog's metadata revision.
-        // A getter (rather than a stored value) keeps entries in sync when
-        // remote rules arrive after the entry was created.
-        get metadata(): SatelliteMetadata {
-          return catalog.#resolveMetadata(this as CatalogEntry);
-        },
-      };
+      });
       this.#byKey.set(key, entry);
       // First-wins by name (matches today's getSatellite lookup).
       if (!this.#byName.has(name)) {
@@ -185,20 +215,18 @@ export class SatelliteCatalog {
   }
 
   // Resolve metadata for an entry: start from app defaults, then shallow-merge
-  // the metadata of every matching rule in order. Memoized per entry, keyed by
-  // the current metadata revision.
-  #resolveMetadata(entry: CatalogEntry): SatelliteMetadata {
-    const cached = this.#metadataCache.get(entry.key);
-    if (cached && cached.revision === this.#metadataRevision) {
-      return cached.metadata;
-    }
-    const metadata: SatelliteMetadata = { ...appMetadataConfig.defaults };
+  // the metadata of every matching rule in order. Package-visible (not #private)
+  // so CatalogEntry.metadata can delegate here; memoization lives in the entry,
+  // keyed by metadataRevision. The result is a ResolvedMetadata because it
+  // spreads `defaults` (which supplies the required fields), and rules only ever
+  // overwrite those fields with values of the same type.
+  resolveMetadata(entry: CatalogEntry): ResolvedMetadata {
+    const metadata: ResolvedMetadata = { ...appMetadataConfig.defaults };
     for (const compiled of this.#compiledRules) {
       if (this.#ruleMatches(compiled, entry)) {
         Object.assign(metadata, compiled.rule.metadata);
       }
     }
-    this.#metadataCache.set(entry.key, { revision: this.#metadataRevision, metadata });
     return metadata;
   }
 

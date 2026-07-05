@@ -6,13 +6,20 @@
 //
 // This module must stay Cesium-free (node-env vitest exercises it).
 
-// Extensible bag of per-satellite metadata. All fields optional; consumers
-// fall back to hardcoded defaults when a field is absent.
+// Extensible bag of per-satellite metadata. All fields optional at the rule
+// level; resolution guarantees the defaulted fields (see ResolvedMetadata).
 export interface SatelliteMetadata {
   swathKm?: number;
   coneFovDeg?: number;
   modelUrl?: string;
 }
+
+// The result of resolving metadata for a satellite. The fields covered by
+// `appMetadataConfig.defaults` are always present, so consumers read them
+// without a fallback. Keep this in sync with the `defaults` shape below: the
+// Required<Pick<...>> and the `defaults: ResolvedMetadata` typing pin the two
+// together, so a field added to one without the other fails to compile.
+export type ResolvedMetadata = SatelliteMetadata & Required<Pick<SatelliteMetadata, "swathKm" | "coneFovDeg">>;
 
 // A rule matches a satellite by exact satnums, exact names, or a name pattern
 // (RegExp tested against the name — mirrors the worker's group-select
@@ -29,7 +36,9 @@ export interface MetadataRule {
 }
 
 export interface MetadataConfig {
-  defaults: SatelliteMetadata;
+  // Typed as ResolvedMetadata so the compiler enforces that defaults cover
+  // exactly the fields resolution promises to always populate.
+  defaults: ResolvedMetadata;
   rules: MetadataRule[];
 }
 

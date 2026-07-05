@@ -315,14 +315,15 @@ export class SatelliteProperties {
   }
 
   // Swath width (km), resolved from catalog metadata rules (see
-  // src/config/satelliteMetadata.ts). Defaults kept inline as a belt-and-braces
-  // fallback should metadata resolution be unavailable.
+  // src/config/satelliteMetadata.ts). Resolution always populates swathKm from
+  // the app defaults, so this is a plain read (no inline fallback).
   get swath(): number {
-    return this.entry.metadata.swathKm ?? 200;
+    return this.entry.metadata.swathKm;
   }
 
   // Sensor-cone half-angle FOV (degrees), resolved from catalog metadata rules.
+  // Always populated by resolution's defaults, so a plain read.
   get coneFovDeg(): number {
-    return this.entry.metadata.coneFovDeg ?? 10;
+    return this.entry.metadata.coneFovDeg;
   }
 }
