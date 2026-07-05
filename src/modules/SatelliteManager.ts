@@ -57,11 +57,6 @@ export class SatelliteManager {
     return this.catalog.loadGroups(sourceTagList);
   }
 
-  // Back-compat alias for the router/legacy callers.
-  addFromTleUrls(urlTagList: ReadonlyArray<readonly [string, string[]]>): void {
-    this.loadElementSets(urlTagList);
-  }
-
   // Passthrough for custom inline records (e.g. console/testing usage).
   addCustomRecords(records: GpRecord[], tags: string[]): void {
     this.catalog.addRecords(records, tags);
@@ -174,16 +169,11 @@ export class SatelliteManager {
       return;
     }
 
-    if (this.catalog.getByName(name)) {
-      // Ensure the satellite is instantiated (tracking alone keeps it alive),
-      // then track it.
-      this.pendingTrackedSatellite = name;
-      this.#reconcileActive();
-    } else {
-      // Satellite is unknown to the catalog (yet?): remember it so #reconcileActive
-      // can track it once a matching entry is loaded.
-      this.pendingTrackedSatellite = name;
-    }
+    // Ensure the satellite is instantiated (tracking alone keeps it alive) and
+    // track it. If the name is unknown to the catalog (yet?), reconciling is a
+    // no-op and the pending name survives until a matching entry is loaded.
+    this.pendingTrackedSatellite = name;
+    this.#reconcileActive();
   }
 
   // Active collections that have created components (i.e. are visible).
@@ -235,14 +225,6 @@ export class SatelliteManager {
     return [...this.#active.values()];
   }
 
-  /**
-   * @deprecated Use the enabledTags/enabledSatellites/trackedSatellite setters,
-   * which reconcile automatically. Kept as an alias for any external callers.
-   */
-  showEnabledSatellites(): void {
-    this.#reconcileActive();
-  }
-
   get enabledTags(): string[] {
     return this.#enabledTags;
   }
@@ -254,15 +236,6 @@ export class SatelliteManager {
     satStore.enabledTags = newTags;
 
     this.#reconcileActive();
-  }
-
-  /**
-   * Now active-only: the union of components across the currently instantiated
-   * collections.
-   */
-  get components(): unknown[] {
-    const components = this.activeSatellites.map((sat) => sat.components);
-    return [...new Set<unknown>(([] as unknown[]).concat(...(components as unknown as unknown[][])))];
   }
 
   get enabledComponents(): string[] {
@@ -351,12 +324,9 @@ export class SatelliteManager {
 
   set overpassMode(newMode: string) {
     this.#overpassMode = newMode;
-    // Update overpass mode for all active satellites
     this.activeSatellites.forEach((sat) => {
       sat.props.overpassMode = newMode;
-    });
-    // Clear and update passes for all satellites with ground stations to force recalculation
-    this.activeSatellites.forEach((sat) => {
+      // Clear and update passes when a ground station is set to force recalculation
       if (sat.props.groundStationAvailable) {
         sat.props.clearPasses();
         sat.props.updatePasses(this.viewer.clock.currentTime);

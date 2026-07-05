@@ -36,7 +36,7 @@ export class SatelliteCatalog {
 
   #bySatnum = new Map<string, CatalogEntry[]>();
 
-  #byTag = new Map<string, CatalogEntry[]>();
+  #byTag = new Map<string, Set<CatalogEntry>>();
 
   // Metadata rules: app rules first, then remote rules appended by
   // mergeMetadataConfig (remote wins field-wise). RegExps are compiled lazily
@@ -168,10 +168,8 @@ export class SatelliteCatalog {
 
   #indexTags(entry: CatalogEntry): void {
     for (const tag of entry.tags) {
-      const tagEntries = this.#byTag.get(tag) ?? [];
-      if (!tagEntries.includes(entry)) {
-        tagEntries.push(entry);
-      }
+      const tagEntries = this.#byTag.get(tag) ?? new Set();
+      tagEntries.add(entry);
       this.#byTag.set(tag, tagEntries);
     }
   }
@@ -227,11 +225,11 @@ export class SatelliteCatalog {
   }
 
   get groups(): { tag: string; count: number }[] {
-    return [...this.#byTag.entries()].map(([tag, entries]) => ({ tag, count: entries.length }));
+    return [...this.#byTag.entries()].map(([tag, entries]) => ({ tag, count: entries.size }));
   }
 
   entriesWithTag(tag: string): CatalogEntry[] {
-    return this.#byTag.get(tag) ?? [];
+    return [...(this.#byTag.get(tag) ?? [])];
   }
 
   getByName(name: string): CatalogEntry | undefined {
@@ -242,7 +240,7 @@ export class SatelliteCatalog {
   taglist(): Record<string, string[]> {
     const taglist: Record<string, string[]> = {};
     for (const [tag, entries] of this.#byTag.entries()) {
-      taglist[tag] = entries.map((entry) => entry.name).toSorted();
+      taglist[tag] = [...entries].map((entry) => entry.name).toSorted();
     }
     return taglist;
   }

@@ -16,8 +16,10 @@
 // never writes cc.sats directly.
 
 import { storeToRefs } from "pinia";
-import { computed, onScopeDispose, ref } from "vue";
+import { computed, ref } from "vue";
 
+import { isEnabledByTag } from "../modules/satelliteActivation";
+import type { CatalogEntry } from "../modules/SatelliteCatalog";
 import { useSatStore } from "../stores/sat";
 
 export type BrowserRow =
@@ -37,6 +39,7 @@ export type BrowserRow =
       satnum: string;
       checked: boolean;
       viaGroup: boolean;
+      // Only populated in search mode (tree-mode rows sit under their group).
       groupsLabel?: string;
     };
 
@@ -49,7 +52,6 @@ const debouncedQuery = ref("");
 const expandedGroups = ref<Set<string>>(new Set());
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-let subscribers = 0;
 
 function scheduleDebounce(): void {
   if (debounceTimer !== undefined) {
@@ -64,17 +66,8 @@ function scheduleDebounce(): void {
 export function useSatelliteBrowser() {
   const satStore = useSatStore();
   const { availableGroups, catalogRevision, enabledSatellites, enabledTags } = storeToRefs(satStore);
-
-  subscribers += 1;
-  onScopeDispose(() => {
-    subscribers -= 1;
-    // Leave module state intact for the next mount; only drop the timer if no
-    // component instance is left to observe the debounce result.
-    if (subscribers === 0 && debounceTimer !== undefined) {
-      clearTimeout(debounceTimer);
-      debounceTimer = undefined;
-    }
-  });
+  // The catalog reference is stable for the lifetime of the app; grab it once.
+  const { catalog } = globalThis.cc.sats;
 
   function setSearchQuery(value: string): void {
     searchQuery.value = value;
@@ -93,9 +86,9 @@ export function useSatelliteBrowser() {
   // Precomputed search index: one entry per catalog satellite with a cheap,
   // uppercased match key (nameUpper already exists on the entry). Recomputed
   // only when the catalog revision bumps.
-  const searchIndex = computed<{ entry: import("../modules/SatelliteCatalog").CatalogEntry; key: string }[]>(() => {
+  const searchIndex = computed<{ entry: CatalogEntry; key: string }[]>(() => {
     void catalogRevision.value;
-    return globalThis.cc.sats.catalog.entries.map((entry) => ({
+    return catalog.entries.map((entry) => ({
       entry,
       key: `${entry.nameUpper} ${entry.satnum}`,
     }));
@@ -109,7 +102,6 @@ export function useSatelliteBrowser() {
   // selection). Also drives group activeCount and the summary bar.
   const activeSatNames = computed<Set<string>>(() => {
     void catalogRevision.value;
-    const { catalog } = globalThis.cc.sats;
     const active = new Set(enabledSatellites.value);
     for (const tag of enabledTags.value) {
       for (const entry of catalog.entriesWithTag(tag)) {
@@ -121,28 +113,21 @@ export function useSatelliteBrowser() {
 
   const activeSatCount = computed(() => activeSatNames.value.size);
 
-  // Per-tag stats: total member count and how many are active. A tag that is
-  // enabled activates all of its members; otherwise a member counts as active
-  // if it is individually selected or active via another enabled tag.
+  // Per-tag stats: total member count and how many are active (member of
+  // activeSatNames — enabled via any tag or individually selected).
   const groupStats = computed<Map<string, { count: number; activeCount: number }>>(() => {
     void catalogRevision.value;
-    const { catalog } = globalThis.cc.sats;
+    const active = activeSatNames.value;
     const stats = new Map<string, { count: number; activeCount: number }>();
     for (const { tag } of availableGroups.value) {
       const members = catalog.entriesWithTag(tag);
-      const count = members.length;
-      let activeCount: number;
-      if (enabledTagSet.value.has(tag)) {
-        activeCount = count;
-      } else {
-        activeCount = 0;
-        for (const member of members) {
-          if (enabledSatSet.value.has(member.name) || member.tags.some((t) => t !== tag && enabledTagSet.value.has(t))) {
-            activeCount += 1;
-          }
+      let activeCount = 0;
+      for (const member of members) {
+        if (active.has(member.name)) {
+          activeCount += 1;
         }
       }
-      stats.set(tag, { count, activeCount });
+      stats.set(tag, { count: members.length, activeCount });
     }
     return stats;
   });
@@ -181,9 +166,9 @@ export function useSatelliteBrowser() {
           expanded,
         });
         if (expanded) {
-          const members = globalThis.cc.sats.catalog.entriesWithTag(tag).toSorted((a, b) => a.name.localeCompare(b.name));
+          const members = catalog.entriesWithTag(tag).toSorted((a, b) => a.name.localeCompare(b.name));
           for (const member of members) {
-            const viaGroup = enabledTagSet.value.has(tag) || member.tags.some((t) => enabledTagSet.value.has(t));
+            const viaGroup = isEnabledByTag(member, enabledTagSet.value);
             result.push({
               kind: "sat",
               id: `s:${tag}:${member.name}`,
@@ -221,7 +206,7 @@ export function useSatelliteBrowser() {
         continue;
       }
       seen.add(entry.name);
-      const viaGroup = entry.tags.some((t) => enabledTagSet.value.has(t));
+      const viaGroup = isEnabledByTag(entry, enabledTagSet.value);
       result.push({
         kind: "sat",
         id: `s:${entry.name}`,
@@ -253,8 +238,8 @@ export function useSatelliteBrowser() {
   // would be to disable the group). A future `xsats=` exclusion URL param is
   // the intended path to real per-member opt-out.
   function toggleSat(name: string): void {
-    const entry = globalThis.cc.sats.catalog.getByName(name);
-    if (entry && entry.tags.some((t) => enabledTagSet.value.has(t))) {
+    const entry = catalog.getByName(name);
+    if (entry && isEnabledByTag(entry, enabledTagSet.value)) {
       return;
     }
     if (enabledSatSet.value.has(name)) {
@@ -288,7 +273,6 @@ export function useSatelliteBrowser() {
 
   return {
     searchQuery,
-    debouncedQuery,
     setSearchQuery,
     clearSearch,
     availableGroups,

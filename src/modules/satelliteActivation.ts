@@ -27,6 +27,13 @@ export interface ActivationState {
   pendingTrackedName?: string;
 }
 
+// The single definition of "enabled via some tag" — also used by the
+// SatelliteBrowser row model, so UI state and manager reconciliation cannot
+// diverge.
+export function isEnabledByTag(entry: CatalogEntry, tagSet: ReadonlySet<string>): boolean {
+  return entry.tags.some((tag) => tagSet.has(tag));
+}
+
 // Returns the map of catalog entry keys to entries that should be active.
 // Deduplicates by key: a satellite enabled by both tag and name (or tracked)
 // appears once.
@@ -36,7 +43,7 @@ export function activeTargetEntries(state: ActivationState): Map<string, Catalog
   const target = new Map<string, CatalogEntry>();
 
   for (const entry of state.entries) {
-    const enabledByTag = entry.tags.some((tag) => enabledTags.has(tag));
+    const enabledByTag = isEnabledByTag(entry, enabledTags);
     const enabledByName = enabledSatellites.has(entry.name);
     const enabledByTrack = entry.name === state.trackedName || entry.name === state.pendingTrackedName;
     if (enabledByTag || enabledByName || enabledByTrack) {

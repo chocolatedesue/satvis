@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { activeTargetEntries } from "../modules/satelliteActivation";
+import { activeTargetEntries, isEnabledByTag } from "../modules/satelliteActivation";
 import type { CatalogEntry } from "../modules/SatelliteCatalog";
 import type { GpRecord } from "../modules/util/gp";
 
@@ -61,5 +61,21 @@ describe("activeTargetEntries", () => {
   test("tracked union with tag selection dedups", () => {
     const target = activeTargetEntries({ entries: ALL, enabledTags: ["Weather"], enabledSatellites: [], trackedName: "ALPHA" });
     expect(keys(target)).toEqual([ALPHA.key, BETA.key]);
+  });
+});
+
+describe("isEnabledByTag", () => {
+  test("matches when any of the entry's tags is enabled", () => {
+    expect(isEnabledByTag(ALPHA, new Set(["New"]))).toBe(true);
+    expect(isEnabledByTag(ALPHA, new Set(["Science", "Weather"]))).toBe(true);
+  });
+
+  test("does not match when no tag is enabled", () => {
+    expect(isEnabledByTag(GAMMA, new Set(["Weather"]))).toBe(false);
+    expect(isEnabledByTag(ALPHA, new Set())).toBe(false);
+  });
+
+  test("never matches an entry without tags", () => {
+    expect(isEnabledByTag(DELTA, new Set(["Weather", "Science", "New"]))).toBe(false);
   });
 });
