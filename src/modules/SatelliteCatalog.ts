@@ -220,10 +220,6 @@ export class SatelliteCatalog {
     return false;
   }
 
-  get tags(): string[] {
-    return [...this.#byTag.keys()];
-  }
-
   get groups(): { tag: string; count: number }[] {
     return [...this.#byTag.entries()].map(([tag, entries]) => ({ tag, count: entries.size }));
   }
@@ -234,15 +230,6 @@ export class SatelliteCatalog {
 
   getByName(name: string): CatalogEntry | undefined {
     return this.#byName.get(name);
-  }
-
-  // tag -> sorted names — the shape the Pinia store consumes today.
-  taglist(): Record<string, string[]> {
-    const taglist: Record<string, string[]> = {};
-    for (const [tag, entries] of this.#byTag.entries()) {
-      taglist[tag] = [...entries].map((entry) => entry.name).toSorted();
-    }
-    return taglist;
   }
 
   get size(): number {

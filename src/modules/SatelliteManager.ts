@@ -44,9 +44,9 @@ export class SatelliteManager {
 
     // New/changed catalog entries may fall into the current activation target
     // (e.g. URL-enabled names or a pendingTrackedSatellite that arrives once the
-    // catalog finishes loading), so refresh the store and reconcile.
+    // catalog finishes loading), so bump the revision and reconcile.
     this.catalog.onChange(() => {
-      this.updateStore();
+      this.#bumpCatalogRevision();
       this.#reconcileActive();
     });
   }
@@ -60,7 +60,7 @@ export class SatelliteManager {
   // Passthrough for custom inline records (e.g. console/testing usage).
   addCustomRecords(records: GpRecord[], tags: string[]): void {
     this.catalog.addRecords(records, tags);
-    this.updateStore();
+    this.#bumpCatalogRevision();
     this.#reconcileActive();
   }
 
@@ -125,16 +125,10 @@ export class SatelliteManager {
     }
   }
 
-  updateStore(): void {
-    const satStore = useSatStore();
-    satStore.availableTags = this.tags;
-    satStore.availableSatellitesByTag = this.taglist;
-    satStore.availableGroups = this.catalog.groups;
-    satStore.catalogRevision += 1;
-  }
-
-  get taglist(): Record<string, string[]> {
-    return this.catalog.taglist();
+  // The catalog is deliberately non-reactive; bumping this revision lets the UI
+  // recompute catalog-derived views without mirroring entries into Pinia.
+  #bumpCatalogRevision(): void {
+    useSatStore().catalogRevision += 1;
   }
 
   get selectedSatellite(): string {
@@ -209,10 +203,6 @@ export class SatelliteManager {
     satStore.enabledSatellites = newSats;
 
     this.#reconcileActive();
-  }
-
-  get tags(): string[] {
-    return this.catalog.tags;
   }
 
   // Active-only. For name lists across the whole catalog use

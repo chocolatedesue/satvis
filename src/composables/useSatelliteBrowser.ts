@@ -5,10 +5,10 @@
 // catalog panel unmounts and remounts it; module scope keeps that transparent).
 //
 // The catalog itself is intentionally NOT reactive (it holds ~2k plain
-// entries). Instead the store exposes `catalogRevision`, bumped by
-// SatelliteManager.updateStore() whenever groups load. Every computed here
-// touches `catalogRevision.value` so it recomputes as groups arrive, while
-// reading the actual entries imperatively from `cc.sats.catalog`.
+// entries). Instead the store exposes `catalogRevision`, bumped whenever the
+// catalog changes. Every computed here touches `catalogRevision.value` so it
+// recomputes as groups arrive, while reading the actual entries imperatively
+// from `cc.sats.catalog`.
 //
 // Writes only ever target the Pinia store, replacing the whole array (the
 // url-sync plugin's $subscribe requires a new array reference to detect the
@@ -65,9 +65,16 @@ function scheduleDebounce(): void {
 
 export function useSatelliteBrowser() {
   const satStore = useSatStore();
-  const { availableGroups, catalogRevision, enabledSatellites, enabledTags } = storeToRefs(satStore);
+  const { catalogRevision, enabledSatellites, enabledTags } = storeToRefs(satStore);
   // The catalog reference is stable for the lifetime of the app; grab it once.
   const { catalog } = globalThis.cc.sats;
+
+  // Group list with counts, derived from the non-reactive catalog and kept
+  // fresh via catalogRevision (same { tag, count }[] shape the store held).
+  const availableGroups = computed(() => {
+    void catalogRevision.value;
+    return catalog.groups;
+  });
 
   function setSearchQuery(value: string): void {
     searchQuery.value = value;

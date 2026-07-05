@@ -48,11 +48,14 @@ describe("SatelliteCatalog", () => {
     expect(catalog.getByName("DUPE")?.satnum).toBe("10");
   });
 
-  test("taglist shape: tag -> sorted names", () => {
+  test("entriesWithTag returns tag members", () => {
     const catalog = new SatelliteCatalog();
     catalog.addRecords([ommRecord("ZULU", 1), ommRecord("ALPHA", 2)], ["Weather"]);
-    const taglist = catalog.taglist();
-    expect(taglist.Weather).toEqual(["ALPHA", "ZULU"]);
+    const names = catalog
+      .entriesWithTag("Weather")
+      .map((entry) => entry.name)
+      .toSorted();
+    expect(names).toEqual(["ALPHA", "ZULU"]);
   });
 
   test("groups reports per-tag counts", () => {
