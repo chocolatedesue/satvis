@@ -1,7 +1,7 @@
 // Pure, runtime-agnostic group evaluator. NO Cloudflare APIs here so it can be
 // unit-tested and reused by the static generator via node type stripping.
 
-import type { GpRecord, GroupDefinition, OmmRecord, SourceSpec } from "./types.ts";
+import type { GpRecord, GroupDefinition, GroupsIndex, GroupStatus, OmmRecord, SourceSpec } from "./types.ts";
 
 const CELESTRAK_BASE = "https://celestrak.org/NORAD/elements/";
 const USER_AGENT = "satvis.space (https://github.com/Flowm/satvis)";
@@ -193,21 +193,22 @@ export function evaluateGroups(defs: GroupDefinition[], recordsBySource: Records
   const results = new Map<string, GpRecord[] | Error>();
   for (const def of topoOrder(defs)) {
     try {
-      // Concat source records (propagating any source failure).
-      let records: GpRecord[] = [];
+      // Concat source records (propagating any source failure). Sources always
+      // yield OMM records (parseOmmArray validates the shape); TLE extras and
+      // includes only join after select/rename.
+      let sourceRecords: OmmRecord[] = [];
       for (const spec of def.sources ?? []) {
-        const sourceRecords = recordsBySource.get(sourceKey(spec));
-        if (sourceRecords === undefined) {
+        const fetched = recordsBySource.get(sourceKey(spec));
+        if (fetched === undefined) {
           throw new Error(`source ${sourceKey(spec)} was not fetched`);
         }
-        if (sourceRecords instanceof Error) {
-          throw new Error(`source ${sourceKey(spec)} failed: ${sourceRecords.message}`);
+        if (fetched instanceof Error) {
+          throw new Error(`source ${sourceKey(spec)} failed: ${fetched.message}`);
         }
-        records = records.concat(sourceRecords);
+        sourceRecords = sourceRecords.concat(fetched);
       }
 
-      // select (only meaningful for OMM records) -> rename.
-      records = applyRename(applySelect(records as OmmRecord[], def.select), def.rename);
+      const records = applyRename(applySelect(sourceRecords, def.select), def.rename);
 
       // Prepend included groups' outputs (evaluated first via topo order).
       const included: GpRecord[] = [];
@@ -230,4 +231,31 @@ export function evaluateGroups(defs: GroupDefinition[], recordsBySource: Records
     }
   }
   return results;
+}
+
+// Coerce a possibly-missing or corrupt raw index value into a valid
+// GroupsIndex, falling back to an empty index.
+export function coerceIndex(raw: unknown): GroupsIndex {
+  if (raw && typeof raw === "object" && Array.isArray((raw as GroupsIndex).groups)) {
+    return raw as GroupsIndex;
+  }
+  return { updated: "", groups: [] };
+}
+
+// Build the per-group status index for a refresh run. Failed groups keep the
+// previous run's `updated`/`count` (their last-known-good data remains served)
+// and gain lastError/lastErrorAt; successful groups report fresh values.
+// Shared by the worker cron refresh and the static snapshot generator so the
+// last-known-good semantics cannot diverge.
+export function buildStatuses(defs: GroupDefinition[], evaluated: Map<string, GpRecord[] | Error>, previousIndex: GroupsIndex, now: string): GroupStatus[] {
+  const previousByName = new Map(previousIndex.groups.map((status) => [status.name, status]));
+  return defs.map((def) => {
+    const result = evaluated.get(def.name);
+    if (result === undefined || result instanceof Error) {
+      const message = result instanceof Error ? result.message : "not evaluated";
+      const prev = previousByName.get(def.name);
+      return { name: def.name, updated: prev?.updated ?? null, count: prev?.count ?? 0, lastError: message, lastErrorAt: now };
+    }
+    return { name: def.name, updated: now, count: result.length };
+  });
 }

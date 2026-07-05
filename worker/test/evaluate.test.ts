@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { collectSources, evaluateGroups, fetchSources, type RecordsBySource, sourceKey, sourceUrl } from "../src/gp/evaluate.ts";
-import type { GpRecord, GroupDefinition, OmmRecord } from "../src/gp/types.ts";
+import { buildStatuses, coerceIndex, collectSources, evaluateGroups, fetchSources, type RecordsBySource, sourceKey, sourceUrl } from "../src/gp/evaluate.ts";
+import type { GpRecord, GroupDefinition, GroupsIndex, OmmRecord } from "../src/gp/types.ts";
 
 function omm(name: string, id: number): OmmRecord {
   return { OBJECT_NAME: name, NORAD_CAT_ID: id };
@@ -195,5 +195,51 @@ describe("fetchSources validation", () => {
   it("rejects non-200 statuses", async () => {
     const result = await fetchSources(defs, async () => ({ status: 404, text: async () => "[]" }));
     expect(result.get("celestrak:active")).toBeInstanceOf(Error);
+  });
+});
+
+describe("coerceIndex", () => {
+  it("passes a valid index through", () => {
+    const index: GroupsIndex = { updated: "2026-07-01T00:00:00Z", groups: [{ name: "g", updated: "2026-07-01T00:00:00Z", count: 1 }] };
+    expect(coerceIndex(index)).toBe(index);
+  });
+
+  it("falls back to an empty index for missing or corrupt values", () => {
+    expect(coerceIndex(undefined)).toEqual({ updated: "", groups: [] });
+    expect(coerceIndex(null)).toEqual({ updated: "", groups: [] });
+    expect(coerceIndex("garbage")).toEqual({ updated: "", groups: [] });
+    expect(coerceIndex({ groups: "not-an-array" })).toEqual({ updated: "", groups: [] });
+  });
+});
+
+describe("buildStatuses", () => {
+  const NOW = "2026-07-05T12:00:00Z";
+  const BEFORE = "2026-07-05T09:00:00Z";
+  const defs: GroupDefinition[] = [{ name: "ok" }, { name: "broken" }, { name: "new-broken" }];
+  const previous: GroupsIndex = {
+    updated: BEFORE,
+    groups: [
+      { name: "ok", updated: BEFORE, count: 1 },
+      { name: "broken", updated: BEFORE, count: 5 },
+    ],
+  };
+
+  it("reports fresh values for successful groups", () => {
+    const evaluated = new Map<string, GpRecord[] | Error>([["ok", [omm("A", 1), omm("B", 2)]]]);
+    const statuses = buildStatuses([{ name: "ok" }], evaluated, previous, NOW);
+    expect(statuses).toEqual([{ name: "ok", updated: NOW, count: 2 }]);
+  });
+
+  it("preserves last-known-good for failed groups and records the error", () => {
+    const evaluated = new Map<string, GpRecord[] | Error>([
+      ["ok", [omm("A", 1)]],
+      ["broken", new Error("upstream down")],
+    ]);
+    const statuses = buildStatuses(defs, evaluated, previous, NOW);
+    expect(statuses).toEqual([
+      { name: "ok", updated: NOW, count: 1 },
+      { name: "broken", updated: BEFORE, count: 5, lastError: "upstream down", lastErrorAt: NOW },
+      { name: "new-broken", updated: null, count: 0, lastError: "not evaluated", lastErrorAt: NOW },
+    ]);
   });
 });
