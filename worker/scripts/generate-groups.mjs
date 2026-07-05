@@ -26,6 +26,11 @@ function readJson(file) {
 
 // Parse TLE text into TleRecord objects. Supports 3-line blocks (optional
 // leading "0 " on the name line), and bare 2-line blocks (no name).
+//
+// Deliberate near-duplicate of src/modules/util/gp.ts parseTleText with an
+// intentionally opposite error policy: this build tool fails loud (throws) so
+// bad input never ships, while the browser path warns and skips. Do not
+// "unify" them.
 function parseTleText(text) {
   const lines = text
     .split(/\r?\n/)

@@ -4,7 +4,10 @@
 // rule in order (app rules first, then remote rules appended by
 // mergeMetadataConfig — remote wins field-wise).
 //
-// This module must stay Cesium-free (node-env vitest exercises it).
+// This module must stay Cesium-free (node-env vitest exercises it). A type-only
+// import from worker/ is fine — it is erased at build and carries no runtime dep.
+
+import type { MetadataRule as WireMetadataRule } from "../../worker/src/gp/types";
 
 // Extensible bag of per-satellite metadata. All fields optional at the rule
 // level; resolution guarantees the defaulted fields (see ResolvedMetadata).
@@ -26,14 +29,11 @@ export type ResolvedMetadata = SatelliteMetadata & Required<Pick<SatelliteMetada
 // semantics). The old `includes()` substrings translate to identical literal
 // regexes. When a rule matches, its `metadata` is shallow-merged over the
 // accumulated result.
-export interface MetadataRule {
-  match: {
-    satnums?: string[];
-    names?: string[];
-    namePattern?: string;
-  };
-  metadata: SatelliteMetadata;
-}
+//
+// The wire `match` shape is single-sourced from the worker; only the payload
+// type narrows (the worker treats `metadata` as opaque, the frontend interprets
+// it as SatelliteMetadata).
+export type MetadataRule = Omit<WireMetadataRule, "metadata"> & { metadata: SatelliteMetadata };
 
 export interface MetadataConfig {
   // Typed as ResolvedMetadata so the compiler enforces that defaults cover

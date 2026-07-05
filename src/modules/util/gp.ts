@@ -88,6 +88,10 @@ function parseJsonPayload(text: string): GpRecord[] {
 
 // Walk TLE text handling 3-line blocks (optionally "0 "-prefixed name),
 // and bare 2-line blocks. Malformed lines are skipped with a warning.
+//
+// Deliberate near-duplicate of worker/scripts/generate-groups.mjs parseTleText
+// with an intentionally opposite error policy: this browser path degrades
+// gracefully (warn and skip), the build tool throws. Do not "unify" them.
 function parseTleText(text: string): GpRecord[] {
   const lines = text.split(/\r?\n/).map((line) => line.trimEnd());
   const records: GpRecord[] = [];
