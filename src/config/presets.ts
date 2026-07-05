@@ -53,15 +53,6 @@ export const presets: Record<string, Preset> = {
       ["eutelsat", ["Eutelsat"]],
     ],
   },
-  move: {
-    title: "MOVE Satellite Orbit Visualization",
-    config: {
-      sat: {
-        enabledTags: ["MOVE"],
-      },
-    },
-    elements: [["move", ["MOVE"]]],
-  },
   ot: {
     title: "OT Satellite Orbit Visualization",
     config: {
@@ -77,7 +68,6 @@ export const presets: Record<string, Preset> = {
     elements: [
       ["ot", ["OT"]],
       ["wfs", ["WFS"]],
-      ["otc", ["OTC"]],
     ],
   },
 };
@@ -90,8 +80,6 @@ export function getConfigPreset(path: string = window.location.pathname): Preset
   const routeName = (path.split("/").pop() ?? "").replace(/\.html$/, "");
 
   switch (routeName) {
-    case "move":
-      return presets.move as Preset;
     case "ot":
       return presets.ot as Preset;
     default:

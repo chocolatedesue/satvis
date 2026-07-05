@@ -11,12 +11,13 @@ export const router: Router = createRouter({
   history: createWebHistory(base),
   routes: [
     { path: "/", component: Satvis, name: "default" },
-    { path: "/move", component: Satvis, name: "move" },
     { path: "/ot", component: Satvis, name: "ot" },
     // Legacy routes for backward compatibility
     { path: "/index.html", redirect: "/" },
-    { path: "/move.html", redirect: "/move" },
     { path: "/ot.html", redirect: "/ot" },
+    // Unknown paths (e.g. the retired /move route) render the default preset
+    // rather than an empty router-view; getConfigPreset falls back to `default`.
+    { path: "/:pathMatch(.*)*", component: Satvis, name: "fallback" },
   ],
 });
 

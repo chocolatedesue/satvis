@@ -136,16 +136,15 @@ describe("scheduled() refresh", () => {
     const weatherStatus = index.groups.find((g) => g.name === "weather");
     expect(weatherStatus?.count).toBeGreaterThan(0);
     expect(weatherStatus?.lastError).toBeUndefined();
-    // The derived `move` group selects FIRST-MOVE/MOVE-II from `active`; our
-    // synthetic ACTIVE-1 record matches neither, so it is empty but successful.
-    expect(index.groups.some((g) => g.name === "move")).toBe(true);
-    // `move-sats` documents FIRST-MOVE/MOVE-II as satellites rows with noradIds;
-    // the synthetic ACTIVE-1 matches neither id, so both rows raise a
-    // matched-no-record warning that must surface in the index.
-    const moveSatsStatus = index.groups.find((g) => g.name === "move-sats");
-    expect(moveSatsStatus).toBeDefined();
-    expect(moveSatsStatus?.lastError).toBeUndefined();
-    expect(moveSatsStatus?.warnings).toEqual(expect.arrayContaining([expect.stringContaining("matched no record")]));
+    // The example `iss` plugin group documents ISS (ZARYA) as a satellites row
+    // with noradId 25544; our synthetic STATIONS-1 record (id 10008) matches
+    // neither the id nor the upstreamName, so the row raises a matched-no-record
+    // warning that must surface in the index. This exercises the warning path
+    // end-to-end through the real generated config.
+    const issStatus = index.groups.find((g) => g.name === "iss");
+    expect(issStatus).toBeDefined();
+    expect(issStatus?.lastError).toBeUndefined();
+    expect(issStatus?.warnings).toEqual(expect.arrayContaining([expect.stringContaining("matched no record")]));
   });
 
   it("preserves last-known-good on failure", async () => {

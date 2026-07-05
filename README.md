@@ -94,9 +94,9 @@ Groups are **declarative**, not shell scripts:
   {
     "groups": [
       {
-        "name": "move",
-        "sources": [{ "celestrak": "active" }],
-        "select": { "namePattern": "^(FIRST-MOVE|MOVE-II)" }
+        "name": "iss",
+        "sources": [{ "celestrak": "stations" }],
+        "satellites": [{ "noradId": 25544, "upstreamName": "ISS (ZARYA)", "name": "ISS" }]
       }
     ]
   }

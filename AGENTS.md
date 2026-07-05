@@ -95,7 +95,7 @@ before — never commit private plugin data):
   `namePattern` regex, ORed together. Prefer `noradIds` over `names` — CelesTrak
   `OBJECT_NAME` values are matched exactly and lose the old fixed-width TLE
   padding, so name matches are brittle. Use `namePattern` for whole
-  constellations (`^(FIRST-MOVE|MOVE-II)`).
+  constellations (`^STARLINK`).
 - **`rename`**: `{ "<OBJECT_NAME>": "<new name>" }`, applied after select to any
   record a `satellites` row did not already rename. Use for bulk/pattern renames;
   for a single known satellite prefer a `satellites` row.
