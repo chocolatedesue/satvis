@@ -133,11 +133,6 @@ export class SatelliteCatalog {
     }
   }
 
-  async loadGroup(url: string, tags: string[]): Promise<void> {
-    const base = await resolveGpBase();
-    await this.#loadGroupWithBase(url, tags, base);
-  }
-
   async #loadGroupWithBase(source: string, tags: string[], base: string): Promise<void> {
     const url = resolveGroupUrl(source, base);
     try {

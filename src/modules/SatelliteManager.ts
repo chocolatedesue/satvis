@@ -175,11 +175,6 @@ export class SatelliteManager {
     return [...this.#active.values()].filter((sat) => sat.created);
   }
 
-  // Now catalog-backed: all known satellite names, not just active ones.
-  get satelliteNames(): string[] {
-    return this.catalog.entries.map((entry) => entry.name);
-  }
-
   // Active-only lookup. In-repo callers (InfoBoxController, CesiumController,
   // GroundStationEntity) only pass selected/tracked/active names; console users
   // wanting arbitrary lookups should use `cc.sats.catalog.getByName`.
@@ -203,12 +198,6 @@ export class SatelliteManager {
     satStore.enabledSatellites = newSats;
 
     this.#reconcileActive();
-  }
-
-  // Active-only. For name lists across the whole catalog use
-  // `catalog.entriesWithTag(tag)`.
-  getSatellitesWithTag(tag: string): SatelliteComponentCollection[] {
-    return [...this.#active.values()].filter((sat) => sat.props.hasTag(tag));
   }
 
   get activeSatellites(): SatelliteComponentCollection[] {

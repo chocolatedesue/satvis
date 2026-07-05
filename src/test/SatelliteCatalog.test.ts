@@ -73,8 +73,8 @@ describe("SatelliteCatalog", () => {
     const catalog = new SatelliteCatalog();
     const batches: number[] = [];
     catalog.onChange((entries) => batches.push(entries.length));
-    // addRecords does not fire onChange directly; only loadGroup does. Emulate
-    // by checking the returned changed set instead.
+    // addRecords does not fire onChange directly; only #loadGroupWithBase
+    // (via loadGroups) does. Emulate by checking the returned changed set instead.
     const changed1 = catalog.addRecords([ommRecord("A", 1)], ["G1"]);
     expect(changed1).toHaveLength(1);
     // Re-adding with a new tag returns the merged entry.
