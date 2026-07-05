@@ -115,6 +115,18 @@ describe("evaluateGroups: satellites rows", () => {
     expect(names(evaluateGroups(defs, records).get("ot"))).toEqual(["GENA-OT"]);
   });
 
+  it("applies the group rename map to a row-selected record with no row `name`", () => {
+    const defs: GroupDefinition[] = [
+      {
+        name: "ot",
+        sources: [{ celestrak: "active" }],
+        satellites: [{ noradId: 66774, upstreamName: "GENA-OT" }],
+        rename: { "GENA-OT": "GENA-1" },
+      },
+    ];
+    expect(names(evaluateGroups(defs, records).get("ot"))).toEqual(["GENA-1"]);
+  });
+
   it("unions satellites rows with `select`", () => {
     const defs: GroupDefinition[] = [
       {

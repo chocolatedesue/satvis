@@ -174,7 +174,8 @@ function applySelectAndRename(records: OmmRecord[], def: GroupDefinition): Selec
   const passAll = rows.length === 0 && !def.select;
 
   for (const record of records) {
-    let renamedByRow: OmmRecord | undefined;
+    let matchedRow = false;
+    let rowName: string | undefined;
     for (let r = 0; r < rows.length; r++) {
       const row = rows[r]!;
       if (!rowMatches(record, row)) {
@@ -187,12 +188,16 @@ function applySelectAndRename(records: OmmRecord[], def: GroupDefinition): Selec
       }
       // First matching row with a `name` wins the rename; keep scanning only to
       // mark later rows as matched (harmless, but rare — usually one row/record).
-      if (renamedByRow === undefined) {
-        renamedByRow = row.name !== undefined ? { ...record, OBJECT_NAME: row.name } : record;
+      if (rowName === undefined && row.name !== undefined) {
+        rowName = row.name;
       }
+      matchedRow = true;
     }
-    if (renamedByRow !== undefined) {
-      out.push(renamedByRow);
+    if (matchedRow) {
+      // A row with a `name` takes absolute precedence (the group `rename` map is
+      // not consulted). A row without a `name` still leaves the group `rename`
+      // map as the remaining authority for this record.
+      out.push(rowName !== undefined ? { ...record, OBJECT_NAME: rowName } : applyGroupRename(record, def.rename));
       continue;
     }
     if (passAll || selectMatches(record, def.select)) {
