@@ -2,6 +2,7 @@
 
 import config from "../config/groups.generated.json" with { type: "json" };
 import { GP_INDEX_KEY, GP_KEY_PREFIX } from "./refresh.ts";
+import type { KvValueMetadata } from "./refresh.ts";
 import type { GroupsConfig, MetadataRule } from "./types.ts";
 
 const groupsConfig = config as GroupsConfig;
@@ -24,7 +25,7 @@ async function handleGroup(name: string, request: Request, env: Env): Promise<Re
   if (!GROUP_NAME_RE.test(name)) {
     return notFound();
   }
-  const { value, metadata } = await env.GP_KV.getWithMetadata<{ updated: string; count: number }>(GP_KEY_PREFIX + name, {
+  const { value, metadata } = await env.GP_KV.getWithMetadata<KvValueMetadata>(GP_KEY_PREFIX + name, {
     type: "text",
     cacheTtl: 300,
   });
@@ -76,7 +77,16 @@ export async function handleApi(request: Request, env: Env): Promise<Response | 
 
   const groupMatch = /^\/api\/gp\/([^/]+)\.json$/.exec(path);
   if (groupMatch) {
-    return handleGroup(decodeURIComponent(groupMatch[1]!), request, env);
+    // Malformed percent-encoding (e.g. /api/gp/%zz.json) throws URIError; treat
+    // it as an unknown group rather than a 500 (handleGroup's name check rejects
+    // anything exotic that does decode anyway).
+    let name: string;
+    try {
+      name = decodeURIComponent(groupMatch[1]!);
+    } catch {
+      return notFound();
+    }
+    return handleGroup(name, request, env);
   }
   if (path === "/api/groups.json") {
     return handleIndex(env);

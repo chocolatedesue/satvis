@@ -10,7 +10,9 @@ const groupsConfig = config as GroupsConfig;
 export const GP_KEY_PREFIX = "gp:";
 export const GP_INDEX_KEY = "gp:index";
 
-interface KvValueMetadata {
+// Per-group KV value metadata (stored alongside each gp:<name> entry and read
+// back by the API to build ETag / Last-Modified headers).
+export interface KvValueMetadata {
   updated: string;
   count: number;
 }

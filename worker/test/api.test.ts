@@ -61,6 +61,11 @@ describe("GET /api/gp/<group>.json", () => {
     const res = await SELF.fetch("https://satvis.space/api/gp/..%2Fsecret.json");
     expect(res.status).toBe(404);
   });
+
+  it("404s malformed percent-encoding (not 500)", async () => {
+    const res = await SELF.fetch("https://satvis.space/api/gp/%zz.json");
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("index and metadata routes", () => {
