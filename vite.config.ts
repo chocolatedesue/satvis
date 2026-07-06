@@ -37,6 +37,11 @@ const config: ViteConfigWithTest = {
         embedded: fileURLToPath(new URL("embedded.html", import.meta.url)),
         test: fileURLToPath(new URL("test.html", import.meta.url)),
       },
+      // Silence @vueuse/core's misplaced /* #__PURE__ */ annotation warning
+      onLog(level, log, handler) {
+        if (log.code === "INVALID_ANNOTATION" && log.id?.includes("@vueuse/core")) return;
+        handler(level, log);
+      },
       output: {
         // Separate vendor chunks for better caching
         codeSplitting: {
