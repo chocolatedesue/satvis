@@ -2,27 +2,45 @@
   <div class="cesium">
     <div v-show="showUI" id="toolbarLeft">
       <div class="toolbarButtons">
-        <button v-tooltip="'Satellite selection'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('cat')">
-          <i class="icon svg-sat"></i>
-        </button>
-        <button v-tooltip="'Satellite elements'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('sat')">
-          <font-awesome-icon icon="fas fa-layer-group" />
-        </button>
-        <button v-tooltip="'Ground station'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('gs')">
-          <i class="icon svg-groundstation"></i>
-        </button>
-        <button v-tooltip="'Map'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('map')">
-          <font-awesome-icon icon="fas fa-globe-africa" />
-        </button>
-        <button v-if="cc.minimalUI" v-tooltip="'Mobile'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('ios')">
-          <font-awesome-icon icon="fas fa-mobile-alt" />
-        </button>
-        <button v-tooltip="'Debug'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('dbg')">
-          <font-awesome-icon icon="fas fa-hammer" />
-        </button>
+        <UTooltip text="Satellite selection">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('cat')">
+            <i class="icon svg-sat"></i>
+          </button>
+        </UTooltip>
+        <UTooltip text="Satellite elements">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('sat')">
+            <font-awesome-icon icon="fas fa-layer-group" />
+          </button>
+        </UTooltip>
+        <UTooltip text="Ground station">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('gs')">
+            <i class="icon svg-groundstation"></i>
+          </button>
+        </UTooltip>
+        <UTooltip text="Map">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('map')">
+            <font-awesome-icon icon="fas fa-globe-africa" />
+          </button>
+        </UTooltip>
+        <UTooltip v-if="cc.minimalUI" text="Mobile">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('ios')">
+            <font-awesome-icon icon="fas fa-mobile-alt" />
+          </button>
+        </UTooltip>
+        <UTooltip text="Debug">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('dbg')">
+            <font-awesome-icon icon="fas fa-hammer" />
+          </button>
+        </UTooltip>
       </div>
-      <div v-show="menu.cat" class="toolbarSwitches">
-        <satellite-select />
+      <!-- v-if (not v-show like the other panels): the virtualized list inside
+           measures its scroll element on mount, and mounting hidden (display:none)
+           yields a 0-height measurement that only a later ResizeObserver tick would
+           fix. Mounting on open guarantees a correct first paint; browser state
+           (search, expansion) is module-scoped in useSatelliteBrowser and survives
+           remounts. -->
+      <div v-if="menu.cat" class="toolbarSwitches toolbarSwitches--catalog">
+        <satellite-browser />
       </div>
       <div v-show="menu.sat" class="toolbarSwitches">
         <div class="toolbarTitle">Satellite elements</div>
@@ -164,12 +182,16 @@
       </div>
     </div>
     <div id="toolbarRight">
-      <a v-if="showUI" v-tooltip="'Github'" class="cesium-button cesium-toolbar-button" href="https://github.com/Flowm/satvis/" target="_blank" rel="noopener">
-        <font-awesome-icon icon="fab fa-github" />
-      </a>
-      <button v-tooltip="'Toggle UI'" type="button" class="cesium-button cesium-toolbar-button" @click="toggleUI">
-        <font-awesome-icon icon="fas fa-eye" />
-      </button>
+      <UTooltip v-if="showUI" text="Github">
+        <a class="cesium-button cesium-toolbar-button" href="https://github.com/Flowm/satvis/" target="_blank" rel="noopener">
+          <font-awesome-icon icon="fab fa-github" />
+        </a>
+      </UTooltip>
+      <UTooltip text="Toggle UI">
+        <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleUI">
+          <font-awesome-icon icon="fas fa-eye" />
+        </button>
+      </UTooltip>
     </div>
   </div>
 </template>
@@ -183,7 +205,7 @@ import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
 import type { SerializedGroundStation } from "../stores/sat";
 import { useSatStore } from "../stores/sat";
-import SatelliteSelect from "./SatelliteSelect.vue";
+import SatelliteBrowser from "./SatelliteBrowser.vue";
 
 type MenuKey = "cat" | "sat" | "gs" | "map" | "ios" | "dbg";
 
@@ -204,7 +226,7 @@ const cesiumStore = useCesiumStore();
 const { layers, terrainProvider, sceneMode, cameraMode, qualityPreset, showFps, background, pickMode } = storeToRefs(cesiumStore);
 
 const satStore = useSatStore();
-const { enabledComponents, groundStations, overpassMode } = storeToRefs(satStore);
+const { enabledComponents, enabledSatellites, enabledTags, disabledSatellites, groundStations, overpassMode, trackedSatellite } = storeToRefs(satStore);
 
 watch(
   layers,
@@ -260,6 +282,27 @@ watch(groundStations, (newGroundStations: SerializedGroundStation[], oldGroundSt
 });
 watch(overpassMode, (newMode: string) => {
   cc.sats.overpassMode = newMode;
+});
+// Carry the store's satellite activation state into the SatelliteManager. These
+// live here (an always-mounted component) rather than in the catalog panel
+// (SatelliteBrowser, mounted with a v-if and thus unmounted whenever the panel
+// is closed) so that URL-hydrated state (applied by the url-sync plugin after
+// mount, as a store change) reaches Cesium even when the catalog panel is never
+// opened.
+// Non-immediate on purpose: the url-sync plugin writes the hydrated values into
+// the store after mount, which fires these watchers; the manager starts from
+// its own matching defaults.
+watch(enabledSatellites, (sats: string[]) => {
+  cc.sats.enabledSatellites = sats;
+});
+watch(enabledTags, (tags: string[]) => {
+  cc.sats.enabledTags = tags;
+});
+watch(disabledSatellites, (sats: string[]) => {
+  cc.sats.disabledSatellites = sats;
+});
+watch(trackedSatellite, (satellite: string) => {
+  cc.sats.trackedSatellite = satellite;
 });
 
 onMounted(() => {

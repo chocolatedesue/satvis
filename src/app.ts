@@ -1,12 +1,9 @@
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { faGithub } from "@fortawesome/free-brands-svg-icons";
-import { faLayerGroup, faGlobeAfrica, faMobileAlt, faHammer, faEye } from "@fortawesome/free-solid-svg-icons";
+import { faLayerGroup, faGlobeAfrica, faMobileAlt, faHammer, faEye, faChevronDown, faChevronRight, faXmark } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
-import Aura from "@primeuix/themes/aura";
+import ui from "@nuxt/ui/vue-plugin";
 import { createPinia } from "pinia";
-import PrimeVue from "primevue/config";
-import ToastService from "primevue/toastservice";
-import Tooltip from "primevue/tooltip";
 import { createApp, markRaw, type Component } from "vue";
 
 import App from "./App.vue";
@@ -43,16 +40,10 @@ app.use(pinia);
 setupRouterGuards(router, cc);
 app.use(router);
 
-app.use(PrimeVue, {
-  theme: {
-    preset: Aura,
-  },
-});
+app.use(ui);
 
 // Setup directives and components
-app.directive("tooltip", Tooltip);
-app.use(ToastService);
-library.add(faLayerGroup, faGlobeAfrica, faMobileAlt, faHammer, faEye, faGithub);
+library.add(faLayerGroup, faGlobeAfrica, faMobileAlt, faHammer, faEye, faChevronDown, faChevronRight, faXmark, faGithub);
 // Cast to the generic Component type to avoid TS2590 (union too complex):
 // vue-fontawesome's DefineComponent props are large enough that app.component()
 // overflows TypeScript's union-complexity limit on some platforms.

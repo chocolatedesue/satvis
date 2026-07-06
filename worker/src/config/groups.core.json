@@ -1,0 +1,19 @@
+{
+  "groups": [
+    { "name": "cubesat", "sources": [{ "celestrak": "cubesat" }] },
+    { "name": "globalstar", "sources": [{ "celestrak": "globalstar" }] },
+    { "name": "gnss", "sources": [{ "celestrak": "gnss" }] },
+    { "name": "iridium-NEXT", "sources": [{ "celestrak": "iridium-NEXT" }] },
+    { "name": "last-30-days", "sources": [{ "celestrak": "last-30-days" }] },
+    { "name": "oneweb", "sources": [{ "celestrak": "oneweb" }] },
+    { "name": "planet", "sources": [{ "celestrak": "planet" }] },
+    { "name": "resource", "sources": [{ "celestrak": "resource" }] },
+    { "name": "science", "sources": [{ "celestrak": "science" }] },
+    { "name": "spire", "sources": [{ "celestrak": "spire" }] },
+    { "name": "starlink", "sources": [{ "celestrak": "starlink" }] },
+    { "name": "stations", "sources": [{ "celestrak": "stations" }] },
+    { "name": "weather", "sources": [{ "celestrak": "weather" }] },
+    { "name": "eutelsat", "sources": [{ "celestrak": "eutelsat" }] }
+  ],
+  "metadata": []
+}

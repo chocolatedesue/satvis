@@ -8,10 +8,12 @@ export interface SerializedGroundStation {
 
 export interface SatStoreState {
   enabledComponents: string[];
-  availableSatellitesByTag: Record<string, string[]>;
-  availableTags: string[];
+  catalogRevision: number;
   enabledSatellites: string[];
   enabledTags: string[];
+  // Names opted out of tag-activation (a satellite unchecked inside an
+  // enabled group). Only meaningful while a covering group is enabled.
+  disabledSatellites: string[];
   groundStations: SerializedGroundStation[];
   trackedSatellite: string;
   overpassMode: string;
@@ -20,10 +22,12 @@ export interface SatStoreState {
 export const useSatStore = defineStore("sat", {
   state: (): SatStoreState => ({
     enabledComponents: ["Point", "Label"],
-    availableSatellitesByTag: {},
-    availableTags: [],
+    // Bumped whenever the catalog changes so the UI can recompute catalog
+    // queries reactively without putting the ~10k entries into Pinia. Not URL-synced.
+    catalogRevision: 0,
     enabledSatellites: [],
     enabledTags: [],
+    disabledSatellites: [],
     groundStations: [],
     trackedSatellite: "",
     overpassMode: "elevation",
@@ -45,6 +49,17 @@ export const useSatStore = defineStore("sat", {
       {
         name: "enabledSatellites",
         url: "sats",
+        serialize: (v) => (v as string[]).join(",").replaceAll(" ", "~"),
+        deserialize: (v) =>
+          v
+            .replaceAll("~", " ")
+            .split(",")
+            .filter((e) => e),
+        default: [],
+      },
+      {
+        name: "disabledSatellites",
+        url: "xsats",
         serialize: (v) => (v as string[]).join(",").replaceAll(" ", "~"),
         deserialize: (v) =>
           v

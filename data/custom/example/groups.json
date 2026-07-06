@@ -1,0 +1,9 @@
+{
+  "groups": [
+    {
+      "name": "iss",
+      "sources": [{ "celestrak": "stations" }],
+      "satellites": [{ "noradId": 25544, "upstreamName": "ISS (ZARYA)", "name": "ISS" }]
+    }
+  ]
+}

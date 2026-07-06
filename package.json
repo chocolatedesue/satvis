@@ -12,6 +12,7 @@
     "dev:worker": "pnpm --filter satvis-worker dev",
     "build": "vite build",
     "preview": "vite preview",
+    "test": "vitest run",
     "type-check": "vue-tsc --noEmit",
     "lint": "pnpm lint:web && pnpm lint:worker",
     "lint:web": "oxlint && oxfmt --check && vue-tsc",
@@ -19,8 +20,8 @@
     "lint:fix": "pnpm lint:fix:web && pnpm lint:fix:worker",
     "lint:fix:web": "oxlint --fix && oxfmt --write",
     "lint:fix:worker": "pnpm --filter satvis-worker lint:fix",
-    "update-tle": "node data/tle/update-tle.js",
-    "update-custom-data": "pnpm update-tle && bash data/custom/update-custom-data.sh",
+    "update-gp": "pnpm --filter satvis-worker generate-groups && node worker/scripts/update-static-gp.mjs",
+    "update-custom-data": "bash data/custom/update-custom-data.sh",
     "deploy": "pnpm build && pnpm --filter satvis-worker deploy"
   },
   "dependencies": {
@@ -30,16 +31,16 @@
     "@fortawesome/free-brands-svg-icons": "^7.3.0",
     "@fortawesome/free-solid-svg-icons": "^7.3.0",
     "@fortawesome/vue-fontawesome": "^3.3.0",
-    "@primeuix/themes": "^2.0.3",
+    "@nuxt/ui": "^4.9.0",
+    "@tanstack/vue-virtual": "^3.13.31",
     "cesium": "^1.142.0",
     "cesium-sensor-volumes": "github:Flowm/cesium-sensor-volumes#1.140.0",
     "dayjs": "^1.11.21",
     "pinia": "^3.0.4",
     "posthog-js": "^1.396.3",
-    "primevue": "^4.5.5",
     "satellite.js": "^7.0.1",
+    "tailwindcss": "^4.3.2",
     "vue": "^3.5.39",
-    "vue-multiselect": "^3.5.0",
     "vue-router": "^5.1.0"
   },
   "devDependencies": {
@@ -53,6 +54,7 @@
     "vite": "^8.1.2",
     "vite-plugin-pwa": "^1.3.0",
     "vite-plugin-static-copy": "^4.1.1",
+    "vitest": "^3.2.6",
     "vue-tsc": "^3.3.6"
   },
   "packageManager": "pnpm@11.9.0"

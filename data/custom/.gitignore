@@ -1,1 +1,6 @@
 */
+
+# Keep the committed example plugin (declarative group definition).
+!example/
+example/*
+!example/groups.json

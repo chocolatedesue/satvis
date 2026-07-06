@@ -68,10 +68,10 @@ export class InfoBoxController {
       const toast = useToastProxy();
       if (!this.sats.groundStationAvailable) {
         toast.add({
-          severity: "warn",
-          summary: "Warning",
-          detail: "Ground station required to notify for passes",
-          life: 3000,
+          color: "warning",
+          title: "Warning",
+          description: "Ground station required to notify for passes",
+          duration: 3000,
         });
         return;
       }
@@ -84,19 +84,19 @@ export class InfoBoxController {
       }
       if (passes.length === 0) {
         toast.add({
-          severity: "info",
-          summary: "Info",
-          detail: `No passes available`,
-          life: 3000,
+          color: "info",
+          title: "Info",
+          description: `No passes available`,
+          duration: 3000,
         });
         return;
       }
       passes.forEach((pass) => this.notifyForPass(pass));
       toast.add({
-        severity: "success",
-        summary: "Success",
-        detail: `Notifying for ${passes.length} passes`,
-        life: 3000,
+        color: "success",
+        title: "Success",
+        description: `Notifying for ${passes.length} passes`,
+        duration: 3000,
       });
     });
     return notifyButton;

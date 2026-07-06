@@ -3,6 +3,7 @@
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import ui from "@nuxt/ui/vite";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
@@ -31,7 +32,7 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             { name: "vue", test: /@vue|vue-router|pinia|@vueuse/, priority: 60 },
-            { name: "primevue", test: /primevue|@primeuix/, priority: 50 },
+            { name: "ui", test: /@nuxt\/ui|reka-ui|tailwindcss|@tanstack/, priority: 50 },
             { name: "icons", test: /@fortawesome/, priority: 40 },
             { name: "cesium", test: /@?cesium/, priority: 30 },
             { name: "analytics", test: /posthog/, priority: 20 },
@@ -50,6 +51,9 @@ export default defineConfig({
   },
   plugins: [
     vue(),
+    // Neutral gray palette (default `slate` is blue-tinted and clashes with the
+    // app's pure-dark toolbar surfaces).
+    ui({ ui: { colors: { neutral: "neutral" } } }),
     viteStaticCopy({
       targets: [
         // Copy Cesium Assets, Widgets, and Workers to a static directory
@@ -57,8 +61,10 @@ export default defineConfig({
         { src: `${cesiumEngineSource}/Build/Workers`, dest: cesiumBaseUrl, rename: { stripBase: 4 } },
         { src: `${cesiumEngineSource}/Source/Assets`, dest: cesiumBaseUrl, rename: { stripBase: 4 } },
         { src: `${cesiumWidgetsSource}/Source`, dest: `${cesiumBaseUrl}/Widgets`, rename: { stripBase: 4 } },
-        // Copy data files
-        { src: ["data/**", "!data/custom/**"], dest: "data", rename: { stripBase: 1 } },
+        // Copy data files (data/gp snapshot flows through here → dist/data/gp/...).
+        // data/tle is excluded: the legacy TLE pipeline is gone, but the exclusion
+        // stays so stale local files from an old checkout never ship.
+        { src: ["data/**", "!data/custom/**", "!data/tle/**"], dest: "data", rename: { stripBase: 1 } },
         { src: ["data/custom/dist/**"], dest: "data", rename: { stripBase: 3 } },
       ],
     }),
@@ -107,7 +113,10 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: /data\/tle\/.*\.txt$/,
+            // GP element sets: worker mode (/api/gp/<group>.json, groups, metadata),
+            // static-snapshot mode (data/gp/<group>.json), and the worker probe —
+            // so offline keeps working in every deployment mode.
+            urlPattern: /(\/api\/(gp\/[^/]+|groups|metadata)|data\/gp\/[^/]+)\.json$/,
             handler: "NetworkFirst",
             options: {
               cacheName: "satellite-data-cache",
@@ -156,6 +165,16 @@ export default defineConfig({
     }),
   ],
   resolve: { tsconfigPaths: true },
+  server: {
+    proxy: {
+      // Proxy /api to production by default so `pnpm dev` works out of the box.
+      // Point at a local worker with SATVIS_API_PROXY=http://localhost:8080.
+      "/api": {
+        target: process.env.SATVIS_API_PROXY ?? "https://satvis.space",
+        changeOrigin: true,
+      },
+    },
+  },
   worker: {
     format: "es",
   },

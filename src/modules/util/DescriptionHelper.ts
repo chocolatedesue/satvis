@@ -4,8 +4,10 @@ import relativeTime from "dayjs/plugin/relativeTime";
 import utc from "dayjs/plugin/utc";
 
 import type { GroundStationPositionData } from "../GroundStationEntity";
+import type Orbit from "../Orbit";
 import type { GeodeticPosition } from "../Orbit";
 import type { Pass, SatelliteProperties } from "../SatelliteProperties";
+import { recordTleLines } from "./gp";
 
 dayjs.extend(relativeTime);
 dayjs.extend(utc);
@@ -38,7 +40,6 @@ export class DescriptionHelper {
 
   static renderSatelliteDescription(time: JulianDate, position: GeodeticPosition, props: SatelliteProperties): string {
     const { name, passes, orbit, overpassMode } = props;
-    const { tle, julianDate } = orbit;
     const description = `
       <div class="ib">
         <h3>Position</h3>
@@ -63,7 +64,7 @@ export class DescriptionHelper {
           </tbody>
         </table>
         ${this.renderPasses(passes, time, false, overpassMode)}
-        ${this.renderTLE(tle, julianDate)}
+        ${this.renderElements(orbit)}
       </div>
     `;
     return description;
@@ -177,14 +178,45 @@ export class DescriptionHelper {
     return html;
   }
 
-  static renderTLE(tle: string[], julianDate: number): string {
-    const julianDayNumber = Math.floor(julianDate);
-    const secondsOfDay = (julianDate - julianDayNumber) * 60 * 60 * 24;
-    const tleDate = new JulianDate(julianDayNumber, secondsOfDay);
-    const formattedDate = dayjs.utc(tleDate as unknown as Date).format("YYYY-MM-DD HH:mm:ss");
-    const html = `
+  static renderElements(orbit: Orbit): string {
+    const formattedDate = this.formatEpoch(orbit.julianDate);
+    if (orbit.record.kind === "tle") {
+      // TLE-sourced: render the two element-set lines as today.
+      const tle = orbit.tle ?? recordTleLines(orbit.record)!;
+      return `
       <h3>TLE (Epoch ${formattedDate})</h3>
       <div class="ib-code"><code>${tle.slice(1, 3).join("\n")}</code></div>`;
-    return html;
+    }
+    // OMM-sourced: render a compact element table.
+    const { omm } = orbit.record;
+    const rows: [string, unknown][] = [
+      ["OBJECT_ID", omm.OBJECT_ID],
+      ["NORAD_CAT_ID", omm.NORAD_CAT_ID],
+      ["INCLINATION", omm.INCLINATION],
+      ["RA_OF_ASC_NODE", omm.RA_OF_ASC_NODE],
+      ["ECCENTRICITY", omm.ECCENTRICITY],
+      ["ARG_OF_PERICENTER", omm.ARG_OF_PERICENTER],
+      ["MEAN_ANOMALY", omm.MEAN_ANOMALY],
+      ["MEAN_MOTION", omm.MEAN_MOTION],
+      ["BSTAR", omm.BSTAR],
+    ];
+    const body = rows
+      .filter(([, value]) => value !== undefined && value !== null)
+      .map(([label, value]) => `<tr><td>${label}</td><td class="ibt-right">${value}</td></tr>`)
+      .join("");
+    return `
+      <h3>Elements (Epoch ${formattedDate})</h3>
+      <table class="ibt">
+        <tbody>
+          ${body}
+        </tbody>
+      </table>`;
+  }
+
+  static formatEpoch(julianDate: number): string {
+    const julianDayNumber = Math.floor(julianDate);
+    const secondsOfDay = (julianDate - julianDayNumber) * 60 * 60 * 24;
+    const epochDate = new JulianDate(julianDayNumber, secondsOfDay);
+    return dayjs.utc(epochDate as unknown as Date).format("YYYY-MM-DD HH:mm:ss");
   }
 }

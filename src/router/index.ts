@@ -11,12 +11,13 @@ export const router: Router = createRouter({
   history: createWebHistory(base),
   routes: [
     { path: "/", component: Satvis, name: "default" },
-    { path: "/move", component: Satvis, name: "move" },
     { path: "/ot", component: Satvis, name: "ot" },
     // Legacy routes for backward compatibility
     { path: "/index.html", redirect: "/" },
-    { path: "/move.html", redirect: "/move" },
     { path: "/ot.html", redirect: "/ot" },
+    // Unknown paths (e.g. the retired /move route) render the default preset
+    // rather than an empty router-view; getConfigPreset falls back to `default`.
+    { path: "/:pathMatch(.*)*", component: Satvis, name: "fallback" },
   ],
 });
 
@@ -34,8 +35,8 @@ export function setupRouterGuards(routerInstance: Router, cc: CesiumController):
     // Update document title and meta description
     updateMetadata(preset);
 
-    // Load new TLE data (with delay to allow cleanup to complete)
-    cc.sats.addFromTleUrls(preset.tleData);
+    // Load new element sets via the satellite catalog
+    cc.sats.loadElementSets(preset.elements);
 
     next();
   });

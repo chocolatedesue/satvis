@@ -8,7 +8,7 @@ class satvisUITests: XCTestCase {
         SpringboardHelper.deleteMyApp()
 
         setupSnapshot(app)
-        app.launchEnvironment["URL"] = "https://satvis.space/?time=2019-07-15T15:52&layers=ArcGis&tags=MOVE&elements=Point,Label,Orbit"
+        app.launchEnvironment["URL"] = "https://satvis.space/?time=2019-07-15T15:52&layers=ArcGis&tags=Weather&elements=Point,Label,Orbit"
         app.launch()
 
         addUIInterruptionMonitor(withDescription: "Alert") {

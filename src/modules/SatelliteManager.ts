@@ -2,8 +2,11 @@ import type { Viewer } from "@cesium/widgets";
 
 import { type SerializedGroundStation, useSatStore } from "../stores/sat";
 import { GroundStationEntity, type GroundStationPositionData } from "./GroundStationEntity";
+import { activeTargetEntries } from "./satelliteActivation";
+import { type CatalogEntry, SatelliteCatalog } from "./SatelliteCatalog";
 import { SatelliteComponentCollection } from "./SatelliteComponentCollection";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
+import type { GpRecord } from "./util/gp";
 
 export class SatelliteManager {
   #enabledComponents: string[] = ["Point", "Label"];
@@ -12,13 +15,20 @@ export class SatelliteManager {
 
   #enabledSatellites: string[] = [];
 
+  #disabledSatellites: string[] = [];
+
   #groundStations: GroundStationEntity[] = [];
 
   #overpassMode: string = "elevation";
 
   viewer: Viewer;
 
-  satellites: SatelliteComponentCollection[] = [];
+  readonly catalog = new SatelliteCatalog();
+
+  // Live collections keyed by catalog entry key. Satellites are instantiated
+  // lazily: only entries in the current activation target (see #reconcileActive)
+  // have a collection here; everything else stays a plain catalog entry.
+  #active = new Map<string, SatelliteComponentCollection>();
 
   availableComponents: string[] = ["Point", "Label", "Orbit", "Orbit track", "Ground track", "Sensor cone", "3D model"];
 
@@ -33,99 +43,114 @@ export class SatelliteManager {
       }
       useSatStore().trackedSatellite = this.trackedSatellite;
     });
-  }
 
-  addFromTleUrls(urlTagList: ReadonlyArray<readonly [string, string[]]>): void {
-    // Initiate async download of all TLE URLs and update store afterwards
-    const promises = urlTagList.map(([url, tags]) => this.addFromTleUrl(url, tags, false));
-    Promise.all(promises).then(() => this.updateStore());
-  }
-
-  addFromTleUrl(url: string, tags: string[], updateStore = true): Promise<void> {
-    return fetch(url, {
-      mode: "no-cors",
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw Error(response.statusText);
-        }
-        return response;
-      })
-      .then((response) => response.text())
-      .then((data) => {
-        const lines = data.split(/\r?\n/);
-        // TLE entries are 3 lines each: name, line 1, line 2.
-        for (let i = 0; i + 3 <= lines.length; i += 3) {
-          const tle = lines.slice(i, i + 3).join("\n");
-          if (tle.trim()) {
-            this.addFromTle(tle, tags, updateStore);
-          }
-        }
-      })
-      .catch((error) => {
-        console.log(error);
-      });
-  }
-
-  addFromTle(tle: string, tags: string[], updateStore = true): void {
-    const sat = new SatelliteComponentCollection(this.viewer, tle, tags);
-    this.#add(sat);
-    if (updateStore) {
-      this.updateStore();
-    }
-  }
-
-  #add(newSat: SatelliteComponentCollection): void {
-    const existingSat = this.satellites.find((sat) => sat.props.satnum === newSat.props.satnum && sat.props.name === newSat.props.name);
-    if (existingSat) {
-      existingSat.props.addTags(newSat.props.tags);
-      if (newSat.props.tags.some((tag) => this.#enabledTags.includes(tag))) {
-        existingSat.show(this.#enabledComponents);
-      }
-      return;
-    }
-    if (this.groundStationAvailable) {
-      newSat.groundStations = this.#groundStations;
-    }
-    // Set overpass mode for newly added satellite
-    newSat.props.overpassMode = this.#overpassMode;
-    this.satellites.push(newSat);
-
-    if (this.satIsActive(newSat)) {
-      newSat.show(this.#enabledComponents);
-      if (this.pendingTrackedSatellite === newSat.props.name) {
-        this.trackedSatellite = newSat.props.name;
-      }
-    }
-  }
-
-  updateStore(): void {
-    const satStore = useSatStore();
-    satStore.availableTags = this.tags;
-    satStore.availableSatellitesByTag = this.taglist;
-  }
-
-  get taglist(): Record<string, string[]> {
-    const taglist: Record<string, string[]> = {};
-    this.satellites.forEach((sat) => {
-      sat.props.tags.forEach((tag) => {
-        (taglist[tag] = taglist[tag] || []).push(sat.props.name);
-      });
+    // New/changed catalog entries may fall into the current activation target
+    // (e.g. URL-enabled names or a pendingTrackedSatellite that arrives once the
+    // catalog finishes loading), so bump the revision and reconcile.
+    this.catalog.onChange(() => {
+      this.#bumpCatalogRevision();
+      this.#reconcileActive();
     });
-    Object.values(taglist).forEach((tag) => {
-      tag.sort();
+  }
+
+  // Load element sets for all preset sources via the catalog (resolves the GP
+  // base once, fetches all in parallel, per-URL errors logged and skipped).
+  loadElementSets(sourceTagList: ReadonlyArray<readonly [string, string[]]>): Promise<void> {
+    return this.catalog.loadGroups(sourceTagList);
+  }
+
+  // Passthrough for custom inline records (e.g. console/testing usage).
+  addCustomRecords(records: GpRecord[], tags: string[]): void {
+    this.catalog.addRecords(records, tags);
+    this.#bumpCatalogRevision();
+    this.#reconcileActive();
+  }
+
+  // Catalog entries that should currently be instantiated: enabled by tag
+  // (minus per-member opt-outs), enabled by name, or the tracked /
+  // pending-tracked satellite.
+  #activeTargetEntries(): Map<string, CatalogEntry> {
+    return activeTargetEntries({
+      entries: this.catalog.entries,
+      enabledTags: this.#enabledTags,
+      enabledSatellites: this.#enabledSatellites,
+      disabledSatellites: this.#disabledSatellites,
+      trackedName: this.trackedSatellite || undefined,
+      pendingTrackedName: this.pendingTrackedSatellite,
     });
-    return taglist;
+  }
+
+  // Reconcile the live #active map against the activation target: dispose
+  // collections that are no longer targeted, instantiate the ones that are
+  // newly targeted, and resolve a pending track once its satellite exists.
+  #reconcileActive(): void {
+    const target = this.#activeTargetEntries();
+
+    // Dispose collections no longer in the target.
+    for (const [key, sat] of this.#active) {
+      if (target.has(key)) {
+        continue;
+      }
+      if (sat.isTracked) {
+        // Clear the tracked entity before tearing down its components so Cesium
+        // does not keep a dangling trackedEntity reference.
+        this.viewer.trackedEntity = undefined;
+      }
+      sat.dispose();
+      this.#active.delete(key);
+    }
+
+    // Instantiate collections newly in the target.
+    for (const [key, entry] of target) {
+      if (this.#active.has(key)) {
+        continue;
+      }
+      const sat = new SatelliteComponentCollection(this.viewer, entry);
+      if (this.groundStationAvailable) {
+        sat.groundStations = this.#groundStations;
+      }
+      sat.props.overpassMode = this.#overpassMode;
+      sat.show(this.#enabledComponents);
+      this.#active.set(key, sat);
+    }
+
+    // Resolve a pending track now that the satellite is guaranteed active
+    // (whether it was just created above or was already live).
+    if (this.pendingTrackedSatellite) {
+      const sat = this.getSatellite(this.pendingTrackedSatellite);
+      if (sat) {
+        sat.track();
+        this.pendingTrackedSatellite = undefined;
+      }
+    }
+
+    if (this.visibleSatellites.length === 0) {
+      CesiumCleanupHelper.cleanup(this.viewer);
+    }
+  }
+
+  // The catalog is deliberately non-reactive; bumping this revision lets the UI
+  // recompute catalog-derived views without mirroring entries into Pinia.
+  #bumpCatalogRevision(): void {
+    useSatStore().catalogRevision += 1;
   }
 
   get selectedSatellite(): string {
-    const satellite = this.satellites.find((sat) => sat.isSelected);
-    return satellite ? satellite.props.name : "";
+    for (const sat of this.#active.values()) {
+      if (sat.isSelected) {
+        return sat.props.name;
+      }
+    }
+    return "";
   }
 
   get trackedSatellite(): string {
-    const satellite = this.satellites.find((sat) => sat.isTracked);
-    return satellite ? satellite.props.name : "";
+    for (const sat of this.#active.values()) {
+      if (sat.isTracked) {
+        return sat.props.name;
+      }
+    }
+    return "";
   }
 
   set trackedSatellite(name: string | undefined) {
@@ -133,32 +158,37 @@ export class SatelliteManager {
       if (this.trackedSatellite) {
         this.viewer.trackedEntity = undefined;
       }
+      this.pendingTrackedSatellite = undefined;
+      // Dispose a satellite that was kept alive only by tracking.
+      this.#reconcileActive();
       return;
     }
     if (name === this.trackedSatellite) {
       return;
     }
 
-    const sat = this.getSatellite(name);
-    if (sat) {
-      sat.track();
-      this.pendingTrackedSatellite = undefined;
-    } else {
-      // Satellite does not exist (yet?)
-      this.pendingTrackedSatellite = name;
-    }
+    // Ensure the satellite is instantiated (tracking alone keeps it alive) and
+    // track it. If the name is unknown to the catalog (yet?), reconciling is a
+    // no-op and the pending name survives until a matching entry is loaded.
+    this.pendingTrackedSatellite = name;
+    this.#reconcileActive();
   }
 
+  // Active collections that have created components (i.e. are visible).
   get visibleSatellites(): SatelliteComponentCollection[] {
-    return this.satellites.filter((sat) => sat.created);
+    return [...this.#active.values()].filter((sat) => sat.created);
   }
 
-  get satelliteNames(): string[] {
-    return this.satellites.map((sat) => sat.props.name);
-  }
-
+  // Active-only lookup. In-repo callers (InfoBoxController, CesiumController,
+  // GroundStationEntity) only pass selected/tracked/active names; console users
+  // wanting arbitrary lookups should use `cc.sats.catalog.getByName`.
   getSatellite(name: string): SatelliteComponentCollection | undefined {
-    return this.satellites.find((sat) => sat.props.name === name);
+    for (const sat of this.#active.values()) {
+      if (sat.props.name === name) {
+        return sat;
+      }
+    }
+    return undefined;
   }
 
   get enabledSatellites(): string[] {
@@ -167,45 +197,29 @@ export class SatelliteManager {
 
   set enabledSatellites(newSats: string[]) {
     this.#enabledSatellites = newSats;
-    this.showEnabledSatellites();
 
     const satStore = useSatStore();
     satStore.enabledSatellites = newSats;
+
+    this.#reconcileActive();
   }
 
-  get tags(): string[] {
-    const tags = this.satellites.map((sat) => sat.props.tags);
-    return [...new Set<string>(([] as string[]).concat(...tags))];
+  get disabledSatellites(): string[] {
+    return this.#disabledSatellites;
   }
 
-  getSatellitesWithTag(tag: string): SatelliteComponentCollection[] {
-    return this.satellites.filter((sat) => sat.props.hasTag(tag));
-  }
+  // Names opted out of tag-activation (see satelliteActivation.ts).
+  set disabledSatellites(newSats: string[]) {
+    this.#disabledSatellites = newSats;
 
-  /**
-   * Returns true if the satellite is enabled by tag or name
-   */
-  satIsActive(sat: SatelliteComponentCollection): boolean {
-    const enabledByTag = this.#enabledTags.some((tag) => sat.props.hasTag(tag));
-    const enabledByName = this.#enabledSatellites.includes(sat.props.name);
-    return enabledByTag || enabledByName;
+    const satStore = useSatStore();
+    satStore.disabledSatellites = newSats;
+
+    this.#reconcileActive();
   }
 
   get activeSatellites(): SatelliteComponentCollection[] {
-    return this.satellites.filter((sat) => this.satIsActive(sat));
-  }
-
-  showEnabledSatellites(): void {
-    this.satellites.forEach((sat) => {
-      if (this.satIsActive(sat)) {
-        sat.show(this.#enabledComponents);
-      } else {
-        sat.hide();
-      }
-    });
-    if (this.visibleSatellites.length === 0) {
-      CesiumCleanupHelper.cleanup(this.viewer);
-    }
+    return [...this.#active.values()];
   }
 
   get enabledTags(): string[] {
@@ -214,15 +228,11 @@ export class SatelliteManager {
 
   set enabledTags(newTags: string[]) {
     this.#enabledTags = newTags;
-    this.showEnabledSatellites();
 
     const satStore = useSatStore();
     satStore.enabledTags = newTags;
-  }
 
-  get components(): unknown[] {
-    const components = this.satellites.map((sat) => sat.components);
-    return [...new Set<unknown>(([] as unknown[]).concat(...(components as unknown as unknown[][])))];
+    this.#reconcileActive();
   }
 
   get enabledComponents(): string[] {
@@ -290,8 +300,8 @@ export class SatelliteManager {
   set groundStations(newGroundStations: GroundStationEntity[]) {
     this.#groundStations = newGroundStations;
 
-    // Set groundstation for all satellites
-    this.satellites.forEach((sat) => {
+    // Set groundstation for all active satellites
+    this.activeSatellites.forEach((sat) => {
       sat.groundStations = this.#groundStations;
     });
 
@@ -311,12 +321,9 @@ export class SatelliteManager {
 
   set overpassMode(newMode: string) {
     this.#overpassMode = newMode;
-    // Update overpass mode for all satellites
-    this.satellites.forEach((sat) => {
+    this.activeSatellites.forEach((sat) => {
       sat.props.overpassMode = newMode;
-    });
-    // Clear and update passes for all satellites with ground stations to force recalculation
-    this.satellites.forEach((sat) => {
+      // Clear and update passes when a ground station is set to force recalculation
       if (sat.props.groundStationAvailable) {
         sat.props.clearPasses();
         sat.props.updatePasses(this.viewer.clock.currentTime);

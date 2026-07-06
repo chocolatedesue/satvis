@@ -1,3 +1,6 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
 html,
 body,
 #cesiumContainer {
@@ -39,6 +42,12 @@ body {
   margin: 2px 3px;
   background-color: #30333680;
   border-radius: 8px;
+}
+
+/* The satellite catalog panel is a dense text list; a more opaque surface
+   keeps globe labels from bleeding through the rows. */
+.toolbarSwitches--catalog {
+  background-color: #303336e6;
 }
 
 .toolbarTitle {

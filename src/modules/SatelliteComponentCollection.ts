@@ -36,6 +36,7 @@ import {
 import type { Viewer } from "@cesium/widgets";
 import CesiumSensorVolumes from "cesium-sensor-volumes";
 
+import type { CatalogEntry } from "./SatelliteCatalog";
 import { SatelliteProperties, type GroundStation } from "./SatelliteProperties";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
@@ -55,9 +56,9 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
 
   description: CallbackProperty | undefined;
 
-  constructor(viewer: Viewer, tle: string, tags: string[]) {
+  constructor(viewer: Viewer, entry: CatalogEntry) {
     super(viewer);
-    this.props = new SatelliteProperties(tle, tags);
+    this.props = new SatelliteProperties(entry);
   }
 
   override enableComponent(name: SatelliteComponentName): void {
@@ -167,6 +168,20 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
     this.eventListeners.sampledPosition?.();
     this.eventListeners.selectedEntity?.();
     this.eventListeners.trackedEntity?.();
+    this.eventListeners = {};
+  }
+
+  /**
+   * Fully tear down this collection so it can be dropped from the active set.
+   *
+   * `hide()` disables every created component; removing the last one triggers
+   * `deinit()` (see disableComponent), which detaches the sampledPosition and
+   * viewer listeners and tears down the sampledPosition. For a collection whose
+   * components were never created this is a no-op (empty componentNames), so
+   * dispose is safe to call unconditionally and is idempotent.
+   */
+  dispose(): void {
+    this.hide();
   }
 
   updatedSampledPositionForComponents(update = false): void {
@@ -271,8 +286,11 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
   }
 
   createModel(): void {
+    // Prefer an explicit model URL from catalog metadata; otherwise fall back to
+    // the name-convention path (./data/models/<NAME>.glb).
+    const uri = this.props.entry.metadata.modelUrl ?? `./data/models/${this.props.name.split(" ").join("-")}.glb`;
     const model = new ModelGraphics({
-      uri: `./data/models/${this.props.name.split(" ").join("-")}.glb`,
+      uri,
       minimumPixelSize: 50,
       maximumScale: 10000,
     });
@@ -400,7 +418,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
     this.createCesiumSatelliteEntity("Ground track", "corridor", corridor);
   }
 
-  createCone(fov = 10): void {
+  createCone(fov = this.props.coneFovDeg): void {
     if (this.props.orbit.orbitalPeriod > 60 * 2) {
       // Cone graphic unavailable for non-LEO satellites
       return;
