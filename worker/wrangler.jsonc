@@ -3,6 +3,13 @@
   "name": "satvis",
   "main": "src/index.ts",
   "compatibility_date": "2026-03-10",
+  // celestrak.org is itself behind Cloudflare. Without this flag a Worker's
+  // fetch() to another Cloudflare-proxied host is routed internally
+  // ("orange-to-orange"), which times out with HTTP 522 — even though the same
+  // URL fetches fine from the public internet. This flag forces fetch() out to
+  // Cloudflare's public front door, matching a normal client. It is not on by
+  // default at any compatibility_date, so it must be set explicitly.
+  "compatibility_flags": ["global_fetch_strictly_public"],
   "send_metrics": false,
   "routes": [
     {
