@@ -18,3 +18,6 @@ discussion; sharpen them here when they drift.
   ground stations, overpass mode, the recompute window guard, the computed
   pass list, and its Cesium time intervals (`PassPredictor`).
 - **Overpass mode**: how passes are computed — "elevation" or "swath".
+- **Sampled trajectory**: the sliding sample window of a satellite's position
+  (half an orbit back, 1.5 forward) in both the fixed and inertial frames,
+  kept fresh as time advances (`SampledTrajectory`).

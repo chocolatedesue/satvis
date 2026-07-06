@@ -63,7 +63,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
     if (!this.created) {
       this.init();
     }
-    if (!this.props.sampledPosition?.valid) {
+    if (!this.props.trajectory.valid) {
       console.error(`No valid position data available for ${this.props.name}`);
       return;
     }
@@ -130,7 +130,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
   }
 
   init(): void {
-    this.eventListeners.sampledPosition = this.props.createSampledPosition(this.viewer, () => {
+    this.eventListeners.sampledPosition = this.props.trajectory.start(this.viewer, () => {
       this.updatedSampledPositionForComponents(true);
     });
 
@@ -181,29 +181,30 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
   }
 
   updatedSampledPositionForComponents(update = false): void {
-    if (!this.props.sampledPosition) return;
-    const { fixed, inertial } = this.props.sampledPosition;
+    const { fixed, inertial } = this.props.trajectory;
+    if (!fixed || !inertial) return;
 
     Object.entries(this.components).forEach(([type, component]) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const c = component as any;
       if (type === "Orbit") {
-        c.position = inertial;
-        if (update && (component instanceof Primitive || component instanceof GeometryInstance)) {
+        if (component instanceof Entity) {
+          component.position = inertial;
+        } else if (update && (component instanceof Primitive || component instanceof GeometryInstance)) {
           // Primitives need to be recreated to update the geometry
           this.disableComponent("Orbit");
           this.enableComponent("Orbit");
         }
-      } else if (type === "Sensor cone") {
-        c.position = fixed;
-        c.orientation = new CallbackProperty((time?: JulianDate) => {
-          const position = this.props.position(time as JulianDate);
-          const hpr = new HeadingPitchRoll(0, CesiumMath.toRadians(180), 0);
-          return Transforms.headingPitchRollQuaternion(position as Cartesian3, hpr);
-        }, false);
-      } else {
-        c.position = fixed;
-        c.orientation = new VelocityOrientationProperty(fixed);
+      } else if (component instanceof Entity) {
+        if (type === "Sensor cone") {
+          component.position = fixed;
+          component.orientation = new CallbackProperty((time?: JulianDate) => {
+            const position = this.props.trajectory.position(time as JulianDate);
+            const hpr = new HeadingPitchRoll(0, CesiumMath.toRadians(180), 0);
+            return Transforms.headingPitchRollQuaternion(position as Cartesian3, hpr);
+          }, false);
+        } else {
+          component.position = fixed;
+          component.orientation = new VelocityOrientationProperty(fixed);
+        }
       }
     });
     // Request a single frame after satellite position updates when the clock is paused
@@ -248,7 +249,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createCesiumSatelliteEntity(entityName: string, entityKey: string, entityValue: any): void {
-    this.createCesiumEntity(entityName, entityKey, entityValue, this.props.name, this.props.sampledPosition?.fixed, true);
+    this.createCesiumEntity(entityName, entityKey, entityValue, this.props.name, this.props.trajectory.fixed, true);
   }
 
   createPoint(): void {
@@ -329,7 +330,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       resolution: 600,
       width: 2,
     });
-    this.createCesiumEntity("Orbit", "path", path, this.props.name, this.props.sampledPosition?.inertial, true);
+    this.createCesiumEntity("Orbit", "path", path, this.props.name, this.props.trajectory.inertial, true);
   }
 
   createOrbitPolylinePrimitive(): void {
@@ -337,7 +338,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       geometryInstances: new GeometryInstance({
         geometry: new PolylineGeometry({
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          positions: this.props.getSampledPositionsForNextOrbit(this.viewer.clock.currentTime) as any,
+          positions: this.props.trajectory.positionsForNextOrbit(this.viewer.clock.currentTime) as any,
           width: 2,
           arcType: ArcType.NONE,
           vertexFormat: PolylineColorAppearance.VERTEX_FORMAT,
@@ -362,7 +363,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
     const geometryInstance = new GeometryInstance({
       geometry: new PolylineGeometry({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        positions: this.props.getSampledPositionsForNextOrbit(this.viewer.clock.currentTime) as any,
+        positions: this.props.trajectory.positionsForNextOrbit(this.viewer.clock.currentTime) as any,
         width: 2,
         arcType: ArcType.NONE,
         vertexFormat: PolylineColorAppearance.VERTEX_FORMAT,
@@ -397,7 +398,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       heightReference: HeightReference.CLAMP_TO_GROUND,
       material: Color.DARKRED.withAlpha(0.25),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      positions: new CallbackProperty((time?: JulianDate) => this.props.groundTrack(time as JulianDate) as any, false),
+      positions: new CallbackProperty((time?: JulianDate) => this.props.trajectory.groundTrack(time as JulianDate) as any, false),
       width: this.props.swath * 1000,
     });
     this.createCesiumSatelliteEntity("Ground track", "corridor", corridor);
@@ -432,7 +433,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
         color: Color.FORESTGREEN,
       }),
       positions: new CallbackProperty((time?: JulianDate) => {
-        const satPosition = this.props.position(time as JulianDate);
+        const satPosition = this.props.trajectory.position(time as JulianDate);
         const groundPosition = this.activeGroundStationCartesian(time as JulianDate);
         return [satPosition, groundPosition];
       }, false),
