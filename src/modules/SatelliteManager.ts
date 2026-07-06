@@ -132,7 +132,7 @@ export class SatelliteManager {
       if (this.groundStationAvailable) {
         sat.groundStations = this.#groundStations;
       }
-      sat.props.overpassMode = this.#overpassMode;
+      sat.props.passPredictor.mode = this.#overpassMode;
       sat.show(this.#enabledComponents);
       this.#active.set(key, sat);
     }
@@ -355,11 +355,11 @@ export class SatelliteManager {
   set overpassMode(newMode: string) {
     this.#overpassMode = newMode;
     this.activeSatellites.forEach((sat) => {
-      sat.props.overpassMode = newMode;
-      // Clear and update passes when a ground station is set to force recalculation
-      if (sat.props.groundStationAvailable) {
-        sat.props.clearPasses();
-        sat.props.updatePasses(this.viewer.clock.currentTime);
+      // The mode setter clears the predictor's window on change; recompute
+      // eagerly so pass-dependent visuals update without waiting for a read.
+      sat.props.passPredictor.mode = newMode;
+      if (sat.props.passPredictor.groundStationAvailable) {
+        sat.props.passPredictor.passes(this.viewer.clock.currentTime);
       }
     });
   }

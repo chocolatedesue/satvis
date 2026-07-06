@@ -7,35 +7,22 @@ import {
   ReferenceFrame,
   SampledPositionProperty,
   TimeInterval,
-  TimeIntervalCollection,
   Transforms,
   defined,
 } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 
-import Orbit, { type ElevationPass, type GroundStationPosition, type SwathPass } from "./Orbit";
+import Orbit from "./Orbit";
+import { PassPredictor } from "./PassPredictor";
 import type { CatalogEntry } from "./SatelliteCatalog";
 import "./util/CesiumSampledPositionRawValueAccess";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
-
-export type Pass = (ElevationPass | SwathPass) & { groundStationName?: string };
-
-export interface GroundStation {
-  name: string;
-  position: GroundStationPosition;
-}
 
 export interface SampledPositionData {
   interval: TimeInterval;
   fixed: SampledPositionProperty;
   inertial: SampledPositionProperty;
   valid: boolean;
-}
-
-interface PassInterval {
-  start: JulianDate;
-  stop: JulianDate;
-  stopPrediction: JulianDate;
 }
 
 export class SatelliteProperties {
@@ -48,15 +35,8 @@ export class SatelliteProperties {
 
   satnum: string;
 
-  overpassMode: string;
-
-  groundStations: GroundStation[];
-
-  passes: Pass[];
-
-  passInterval: PassInterval | undefined;
-
-  passIntervals: TimeIntervalCollection;
+  // Owns all pass prediction state (ground stations, mode, computed passes).
+  readonly passPredictor: PassPredictor;
 
   sampledPosition: SampledPositionData | undefined;
 
@@ -65,12 +45,7 @@ export class SatelliteProperties {
     this.name = entry.name;
     this.satnum = entry.satnum;
     this.orbit = new Orbit(entry.name, entry.record);
-    this.overpassMode = "elevation";
-
-    this.groundStations = [];
-    this.passes = [];
-    this.passInterval = undefined;
-    this.passIntervals = new TimeIntervalCollection();
+    this.passPredictor = new PassPredictor(this.orbit, () => this.swath);
   }
 
   // Tags are owned by the catalog entry; this getter reflects live merges.
@@ -249,69 +224,6 @@ export class SatelliteProperties {
       groundTrack.push(this.position(timestamp));
     }
     return groundTrack;
-  }
-
-  get groundStationAvailable(): boolean {
-    return this.groundStations.length > 0;
-  }
-
-  updatePasses(time: JulianDate): boolean {
-    if (!this.groundStationAvailable) {
-      return false;
-    }
-    // Check if still inside of current pass interval
-    if (typeof this.passInterval !== "undefined" && TimeInterval.contains(new TimeInterval({ start: this.passInterval.start, stop: this.passInterval.stop }), time)) {
-      return false;
-    }
-    this.passInterval = {
-      start: JulianDate.addDays(time, -1, JulianDate.clone(time)),
-      stop: JulianDate.addDays(time, 1, JulianDate.clone(time)),
-      stopPrediction: JulianDate.addDays(time, 4, JulianDate.clone(time)),
-    };
-
-    const allPasses: Pass[] = [];
-    this.groundStations.forEach((groundStation) => {
-      let passes: Pass[];
-      if (this.overpassMode === "swath") {
-        passes = this.orbit.computePassesSwath(
-          groundStation.position,
-          this.swath,
-          JulianDate.toDate(this.passInterval!.start),
-          JulianDate.toDate(this.passInterval!.stopPrediction),
-        );
-      } else {
-        passes = this.orbit.computePassesElevation(groundStation.position, JulianDate.toDate(this.passInterval!.start), JulianDate.toDate(this.passInterval!.stopPrediction));
-      }
-      passes.forEach((pass) => {
-        pass.groundStationName = groundStation.name;
-      });
-      allPasses.push(...passes);
-    });
-
-    // Sort passes by time
-    allPasses.sort((a, b) => a.start - b.start);
-
-    this.passes = allPasses;
-    this.computePassIntervals();
-    return true;
-  }
-
-  clearPasses(): void {
-    this.passInterval = undefined;
-    this.passes = [];
-    this.passIntervals = new TimeIntervalCollection();
-  }
-
-  computePassIntervals(): void {
-    const passIntervalArray = this.passes.map((pass) => {
-      const startJulian = JulianDate.fromDate(new Date(pass.start));
-      const endJulian = JulianDate.fromDate(new Date(pass.end));
-      return new TimeInterval({
-        start: startJulian,
-        stop: endJulian,
-      });
-    });
-    this.passIntervals = new TimeIntervalCollection(passIntervalArray);
   }
 
   // Swath width (km), resolved from catalog metadata rules (see

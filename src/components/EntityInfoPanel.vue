@@ -96,7 +96,7 @@ import { storeToRefs } from "pinia";
 import { computed } from "vue";
 
 import { useSelectedEntity } from "../composables/useSelectedEntity";
-import type { Pass } from "../modules/SatelliteProperties";
+import type { Pass } from "../modules/PassPredictor";
 import { useSatStore } from "../stores/sat";
 
 const cc = globalThis.cc;
@@ -125,7 +125,7 @@ function notifyPasses(): void {
   }
   let passes: Pass[] = [];
   if (selection.value?.kind === "satellite") {
-    passes = selection.value.sat.props.passes;
+    passes = selection.value.sat.props.passPredictor.passes(cc.viewer.clock.currentTime);
   } else if (selection.value?.kind === "groundstation") {
     passes = selection.value.gs.passes(cc.viewer.clock.currentTime);
   }

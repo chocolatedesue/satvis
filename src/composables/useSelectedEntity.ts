@@ -22,9 +22,10 @@ import { storeToRefs } from "pinia";
 import { markRaw, ref, shallowRef, watch, type Ref, type ShallowRef } from "vue";
 
 import type { GroundStationEntity } from "../modules/GroundStationEntity";
+import { filterPasses, toPassRows, type PassRow } from "../modules/PassPredictor";
 import type { SatelliteComponentCollection } from "../modules/SatelliteComponentCollection";
 import { CesiumCallbackHelper } from "../modules/util/CesiumCallbackHelper";
-import { filterPasses, getElementsInfo, toPassRows, type ElementsInfo, type PassRow } from "../modules/util/entityInfo";
+import { getElementsInfo, type ElementsInfo } from "../modules/util/entityInfo";
 import { useSatStore } from "../stores/sat";
 
 export type Selection = { kind: "satellite"; sat: SatelliteComponentCollection } | { kind: "groundstation"; gs: GroundStationEntity };
@@ -87,9 +88,9 @@ function refreshData(sel: Selection, time: JulianDate): void {
   if (sel.kind === "satellite") {
     const { props } = sel.sat;
     name.value = props.name;
-    // Interval-guarded: recomputes only when outside the current pass window,
+    // Window-guarded: recomputes only when outside the current pass window,
     // which keeps the list valid after large time jumps.
-    props.updatePasses(time);
+    const passes = props.passPredictor.passes(time);
     const cartographic = props.orbit.positionGeodetic(JulianDate.toDate(time), true);
     position.value = cartographic
       ? [
@@ -100,8 +101,8 @@ function refreshData(sel: Selection, time: JulianDate): void {
           { label: "Velocity", value: `${(cartographic.velocity ?? 0).toFixed(2)} km/s` },
         ]
       : [];
-    hasAnyPasses.value = props.passes.length > 0;
-    passRows.value = toPassRows(filterPasses(props.passes, time, showPastPasses.value), time, "groundStationName", mode);
+    hasAnyPasses.value = passes.length > 0;
+    passRows.value = toPassRows(filterPasses(passes, time, showPastPasses.value), time, "groundStationName", mode);
   } else {
     const { gs } = sel;
     name.value = gs.name;

@@ -36,8 +36,9 @@ import {
 import type { Viewer } from "@cesium/widgets";
 import CesiumSensorVolumes from "cesium-sensor-volumes";
 
+import type { GroundStation } from "./PassPredictor";
 import type { CatalogEntry } from "./SatelliteCatalog";
-import { SatelliteProperties, type GroundStation } from "./SatelliteProperties";
+import { SatelliteProperties } from "./SatelliteProperties";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
 import { CesiumTimelineHelper } from "./util/CesiumTimelineHelper";
@@ -141,8 +142,8 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
         return;
       }
       if (this.isSelected) {
-        this.props.updatePasses(this.viewer.clock.currentTime);
-        CesiumTimelineHelper.updateHighlightRanges(this.viewer, this.props.passes);
+        const passes = this.props.passPredictor.passes(this.viewer.clock.currentTime);
+        CesiumTimelineHelper.updateHighlightRanges(this.viewer, passes);
       }
     });
 
@@ -422,7 +423,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
   }
 
   createGroundStationLink(): void {
-    if (!this.props.groundStationAvailable) {
+    if (!this.props.passPredictor.groundStationAvailable) {
       return;
     }
     const polyline = new PolylineGraphics({
@@ -435,7 +436,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
         const groundPosition = this.activeGroundStationCartesian(time as JulianDate);
         return [satPosition, groundPosition];
       }, false),
-      show: new CallbackProperty((time?: JulianDate) => this.props.passIntervals.contains(time as JulianDate), false),
+      show: new CallbackProperty((time?: JulianDate) => this.props.passPredictor.passIntervals.contains(time as JulianDate), false),
       width: 5,
     });
     this.createCesiumSatelliteEntity("Ground station link", "polyline", polyline);
@@ -450,12 +451,12 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
    * Cesium evaluates the positions callback outside of any pass interval).
    */
   private activeGroundStationCartesian(time: JulianDate): Cartesian3 | undefined {
-    const groundStations = this.props.groundStations;
+    const groundStations = this.props.passPredictor.groundStations;
     if (groundStations.length === 0) {
       return undefined;
     }
     const timeMs = JulianDate.toDate(time).getTime();
-    const activePass = this.props.passes.find((pass) => timeMs >= pass.start && timeMs <= pass.end);
+    const activePass = this.props.passPredictor.passes(time).find((pass) => timeMs >= pass.start && timeMs <= pass.end);
     const target = (activePass && groundStations.find((gs) => gs.name === activePass.groundStationName)) ?? groundStations[0];
     if (!target) {
       return undefined;
@@ -469,12 +470,13 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       return;
     }
 
-    this.props.groundStations = groundStations;
-    this.props.clearPasses();
+    // The setter clears the predictor's window; recompute eagerly for the
+    // selected/tracked satellite so pass-dependent visuals update immediately.
+    this.props.passPredictor.groundStations = groundStations;
     if (this.isSelected || this.isTracked) {
-      this.props.updatePasses(this.viewer.clock.currentTime);
+      const passes = this.props.passPredictor.passes(this.viewer.clock.currentTime);
       if (this.isSelected) {
-        CesiumTimelineHelper.updateHighlightRanges(this.viewer, this.props.passes);
+        CesiumTimelineHelper.updateHighlightRanges(this.viewer, passes);
       }
     }
     if (this.created) {

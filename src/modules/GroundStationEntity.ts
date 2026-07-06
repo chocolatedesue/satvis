@@ -1,10 +1,9 @@
 import { BillboardGraphics, type Cartesian3, HorizontalOrigin, JulianDate, NearFarScalar, VerticalOrigin } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
-import dayjs from "dayjs";
 
 import icon from "../images/icons/dish.svg";
+import { stationPasses, type Pass } from "./PassPredictor";
 import type { SatelliteManager } from "./SatelliteManager";
-import type { Pass } from "./SatelliteProperties";
 import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
 
 export interface GroundStationPositionData {
@@ -56,22 +55,12 @@ export class GroundStationEntity extends CesiumComponentCollection {
   }
 
   passes(time: JulianDate, deltaHours = 48): Pass[] {
-    let passes: Pass[] = [];
-    // Aggregate passes from all visible satellites
-    this.sats.visibleSatellites.forEach((sat) => {
-      sat.props.updatePasses(this.viewer.clock.currentTime);
-      passes.push(...sat.props.passes);
-    });
-
-    // Filter passes based on time
-    const timeDate = JulianDate.toDate(time);
-    passes = passes.filter((pass) => dayjs(pass.start).diff(timeDate, "hours") < deltaHours);
-
-    // Filter passes based on groundstation
-    passes = passes.filter((pass) => pass.groundStationName === this.name);
-
-    // Sort passes by time
-    passes.sort((a, b) => a.start - b.start);
-    return passes;
+    // Aggregate passes over this station from all visible satellites
+    return stationPasses(
+      this.sats.visibleSatellites.map((sat) => sat.props.passPredictor),
+      time,
+      this.name,
+      deltaHours,
+    );
   }
 }

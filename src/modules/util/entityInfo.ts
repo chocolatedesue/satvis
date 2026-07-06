@@ -3,80 +3,9 @@ import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
 import type Orbit from "../Orbit";
-import type { Pass } from "../SatelliteProperties";
 import { recordTleLines } from "./gp";
 
 dayjs.extend(utc);
-
-function pad2(num: number | string): string {
-  return String(num).padStart(2, "0");
-}
-
-/** One rendered row of the passes table in the entity info panel. */
-export interface PassRow {
-  key: string;
-  name: string;
-  countdown: string;
-  startLabel: string;
-  endLabel: string;
-  /** Max elevation (elevation mode) or min distance (swath mode). */
-  primary: string;
-  /** Azimuth at apex (elevation mode) or swath width (swath mode). */
-  secondary: string;
-  /** Pass start in epoch milliseconds, for time jumps on click. */
-  startMs: number;
-}
-
-/**
- * Filter passes for display: by default only ongoing and upcoming passes are
- * kept; with showPast the full list (including finished passes) is returned.
- */
-export function filterPasses(passes: Pass[], time: JulianDate, showPast: boolean): Pass[] {
-  if (showPast) {
-    return passes;
-  }
-  const start = dayjs(JulianDate.toDate(time));
-  return passes.filter((pass) => dayjs(pass.end).isAfter(start));
-}
-
-export function formatCountdown(time: JulianDate, pass: Pass): string {
-  const t = dayjs(JulianDate.toDate(time));
-  if (dayjs(pass.end).diff(t) < 0) {
-    return "PREVIOUS";
-  }
-  if (dayjs(pass.start).diff(t) > 0) {
-    return `${pad2(dayjs(pass.start).diff(t, "days"))}:${pad2(dayjs(pass.start).diff(t, "hours") % 24)}:${pad2(dayjs(pass.start).diff(t, "minutes") % 60)}:${pad2(dayjs(pass.start).diff(t, "seconds") % 60)}`;
-  }
-  return "ONGOING";
-}
-
-export function toPassRows(passes: Pass[], time: JulianDate, nameField: "name" | "groundStationName", mode: string): PassRow[] {
-  return passes.map((pass) => {
-    let primary: string;
-    let secondary: string;
-    if (mode === "swath" && "minDistance" in pass) {
-      primary = `${pass.minDistance.toFixed(1)}km`;
-      secondary = `${pass.swathWidth.toFixed(0)}km`;
-    } else if ("maxElevation" in pass) {
-      primary = `${pass.maxElevation.toFixed(0)}°`;
-      secondary = `${pass.azimuthApex.toFixed(2)}°`;
-    } else {
-      primary = "";
-      secondary = "";
-    }
-    const name = pass[nameField] ?? "";
-    return {
-      key: `${name}-${pass.start}-${pass.end}`,
-      name,
-      countdown: formatCountdown(time, pass),
-      startLabel: dayjs.utc(pass.start).format("DD.MM HH:mm:ss"),
-      endLabel: dayjs.utc(pass.end).format("HH:mm:ss"),
-      primary,
-      secondary,
-      startMs: pass.start,
-    };
-  });
-}
 
 export type ElementsInfo = { kind: "tle"; epoch: string; lines: string } | { kind: "omm"; epoch: string; rows: [string, string][] };
 
