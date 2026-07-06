@@ -9,6 +9,7 @@
 <script setup lang="ts">
 import "@cesium/widgets/Source/widgets.css";
 import "./css/main.css";
+import { useToast } from "@nuxt/ui/composables/useToast";
 import { onMounted } from "vue";
 
 import { initToastProxy } from "./composables/useToastProxy";
