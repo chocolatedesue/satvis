@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { SatelliteCatalog } from "../modules/SatelliteCatalog";
-import { parseGpPayload, type GpRecord } from "../modules/util/gp";
-import { resetGpBase } from "../modules/util/gpSource";
+import { SatelliteCatalog } from "./SatelliteCatalog";
+import { parseGpPayload, type GpRecord } from "./util/gp";
+import { resetGpBase } from "./util/gpSource";
 
 // Two OMM records; ALPHA appears in both groups (same satnum + name) to
 // exercise cross-group dedup and tag union.

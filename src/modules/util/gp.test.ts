@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { createSatrec, parseGpPayload, recordName, recordSatnum, recordTleLines, type GpRecord } from "../modules/util/gp";
+import { createSatrec, parseGpPayload, recordName, recordSatnum, recordTleLines, type GpRecord } from "./gp";
 
 const OMM_ARRAY = JSON.stringify([
   {

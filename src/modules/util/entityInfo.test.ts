@@ -1,8 +1,8 @@
 import { JulianDate } from "@cesium/engine";
 import { describe, expect, test } from "vitest";
 
-import type { Pass } from "../modules/SatelliteProperties";
-import { filterPasses, formatCountdown, formatEpoch, toPassRows } from "../modules/util/entityInfo";
+import type { Pass } from "../SatelliteProperties";
+import { filterPasses, formatCountdown, formatEpoch, toPassRows } from "./entityInfo";
 
 const T0 = Date.UTC(2026, 6, 1, 12, 0, 0); // 2026-07-01T12:00:00Z
 const NOW = JulianDate.fromDate(new Date(T0));

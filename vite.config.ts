@@ -1,13 +1,23 @@
 /// <reference types="node" />
+/// <reference types="vitest/config" />
 
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import ui from "@nuxt/ui/vite";
 import vue from "@vitejs/plugin-vue";
-import { defineConfig } from "vite";
+import { defineConfig, type UserConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import { viteStaticCopy } from "vite-plugin-static-copy";
+import type { InlineConfig as VitestInlineConfig } from "vitest/node";
+
+// vitest reads its config from the `test` key here (no separate vitest.config.ts).
+// On vitest 3 + vite 8 the `/// <reference types="vitest/config" />` module
+// augmentation doesn't reach vite's own UserConfig, so type the config through a
+// const carrying the `test` field explicitly (excess-property checks skip a
+// variable). Drop the const/type once vitest is on v4, where the augmentation
+// applies and the object literal can be passed to defineConfig directly.
+type ViteConfigWithTest = UserConfig & { test?: VitestInlineConfig };
 
 const cesiumEngineSource = "node_modules/@cesium/engine";
 const cesiumWidgetsSource = "node_modules/@cesium/widgets";
@@ -16,7 +26,7 @@ const cesiumBaseUrl = "cesium";
 const buildDate = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 const buildSha = execSync("git rev-parse --short HEAD").toString().trim();
 
-export default defineConfig({
+const config: ViteConfigWithTest = {
   base: "",
   build: {
     sourcemap: true,
@@ -165,6 +175,11 @@ export default defineConfig({
     }),
   ],
   resolve: { tsconfigPaths: true },
+  test: {
+    // Modules under test are Cesium-free; run in the node environment.
+    environment: "node",
+    include: ["src/**/*.test.ts"],
+  },
   server: {
     proxy: {
       // Proxy /api to production by default so `pnpm dev` works out of the box.
@@ -178,4 +193,6 @@ export default defineConfig({
   worker: {
     format: "es",
   },
-});
+};
+
+export default defineConfig(config);

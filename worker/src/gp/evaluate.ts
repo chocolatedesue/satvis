@@ -151,10 +151,15 @@ export async function fetchSources(defs: GroupDefinition[], fetchImpl: FetchImpl
   for (let i = 0; i < specs.length; i++) {
     const spec = specs[i]!;
     if (i > 0) {
+      // Intentionally sequential: sources are fetched one at a time, spaced
+      // REQUEST_SPACING_MS apart, to avoid hammering the origin. Cannot be
+      // parallelized with Promise.all.
+      // eslint-disable-next-line no-await-in-loop
       await delay(REQUEST_SPACING_MS);
     }
     const label = `[${i + 1}/${specs.length}]`;
     console.log(`gp fetch ${label} ${sourceKey(spec)}: GET ${sourceUrl(spec)}`);
+    // eslint-disable-next-line no-await-in-loop -- sequential, rate-limited fetch (see above)
     const r = await fetchSource(spec, fetchImpl);
     if (r.records !== undefined) {
       console.log(`gp fetch ${label} ${r.key}: OK HTTP ${r.status}, ${r.records.length} records, ${r.bytes} bytes, ${r.ms}ms`);

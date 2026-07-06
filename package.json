@@ -13,6 +13,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:watch": "vitest",
     "type-check": "vue-tsc --noEmit",
     "lint": "pnpm lint:web && pnpm lint:worker",
     "lint:web": "oxlint && oxfmt --check && vue-tsc",
@@ -22,7 +23,8 @@
     "lint:fix:worker": "pnpm --filter satvis-worker lint:fix",
     "update-gp": "pnpm --filter satvis-worker generate-groups && node worker/scripts/update-static-gp.mjs",
     "update-custom-data": "bash data/custom/update-custom-data.sh",
-    "deploy": "pnpm build && pnpm --filter satvis-worker deploy"
+    "deploy": "pnpm build && pnpm --filter satvis-worker deploy",
+    "deploy:preview": "pnpm build && pnpm --filter satvis-worker deploy:preview"
   },
   "dependencies": {
     "@cesium/engine": "^26.0.0",
