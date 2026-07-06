@@ -12,7 +12,6 @@
         multiple
         :search-input="{ placeholder: 'Filter groups' }"
         placeholder="Select groups"
-        :ui="selectMenuUi"
         class="w-full"
       />
     </div>
@@ -82,14 +81,9 @@ const {
 // Quick-select items: label "<tag> (<count>)", value the tag string.
 const groupItems = computed(() => availableGroups.value.toSorted((a, b) => a.tag.localeCompare(b.tag)).map((g) => ({ label: `${g.tag} (${g.count})`, value: g.tag })));
 
-// Force the SelectMenu popover onto dark-appropriate surfaces. The app has no
-// global color-mode class, so Nuxt UI defaults to its light palette; these
-// overrides keep the dropdown coherent with the translucent dark toolbar.
-const selectMenuUi = {
-  content: "bg-[#25282b] text-[#edffff] ring-1 ring-white/10",
-  item: "text-[#edffff] data-highlighted:bg-white/10",
-  input: "text-[#edffff]",
-};
+// Surfaces come from Nuxt UI's dark palette (`dark` class on #app) with the
+// neutral-gray alias set in vite.config.ts, so no per-component color
+// overrides are needed here.
 
 // Scroll container height: min(rows * ROW_HEIGHT, 60dvh) so short lists hug
 // their content and long ones cap out and scroll internally.

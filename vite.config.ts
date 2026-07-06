@@ -51,7 +51,9 @@ export default defineConfig({
   },
   plugins: [
     vue(),
-    ui(),
+    // Neutral gray palette (default `slate` is blue-tinted and clashes with the
+    // app's pure-dark toolbar surfaces).
+    ui({ ui: { colors: { neutral: "neutral" } } }),
     viteStaticCopy({
       targets: [
         // Copy Cesium Assets, Widgets, and Workers to a static directory
