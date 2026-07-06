@@ -2,8 +2,8 @@
 
 import config from "../config/groups.generated.json" with { type: "json" };
 import { coerceIndex } from "./evaluate.ts";
-import { GP_INDEX_KEY, GP_KEY_PREFIX, refreshAll } from "./refresh.ts";
-import type { KvValueMetadata } from "./refresh.ts";
+import { refreshAll } from "./refresh.ts";
+import { GP_INDEX_KEY, GP_KEY_PREFIX, type GroupWriteMetadata } from "./store.ts";
 import type { GroupsConfig, MetadataRule } from "./types.ts";
 
 const groupsConfig = config as GroupsConfig;
@@ -31,7 +31,7 @@ async function handleGroup(name: string, request: Request, env: Env): Promise<Re
   if (!GROUP_NAME_RE.test(name)) {
     return notFound();
   }
-  const { value, metadata } = await env.GP_KV.getWithMetadata<KvValueMetadata>(GP_KEY_PREFIX + name, {
+  const { value, metadata } = await env.GP_KV.getWithMetadata<GroupWriteMetadata>(GP_KEY_PREFIX + name, {
     type: "text",
     cacheTtl: 300,
   });

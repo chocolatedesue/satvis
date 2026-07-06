@@ -21,3 +21,6 @@ discussion; sharpen them here when they drift.
 - **Sampled trajectory**: the sliding sample window of a satellite's position
   (half an orbit back, 1.5 forward) in both the fixed and inertial frames,
   kept fresh as time advances (`SampledTrajectory`).
+- **Group store**: the persistence seam of the GP refresh pipeline —
+  readIndex/writeGroup/writeIndex — with a Workers KV adapter (cron/API) and
+  a disk adapter (static `data/gp/` snapshot) (`worker/src/gp/store.ts`).

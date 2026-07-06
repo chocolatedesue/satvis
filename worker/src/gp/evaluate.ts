@@ -55,7 +55,7 @@ export function collectSources(defs: GroupDefinition[]): SourceSpec[] {
 // that depend on it.
 export type RecordsBySource = Map<string, OmmRecord[] | Error>;
 
-type FetchImpl = (
+export type FetchImpl = (
   url: string,
   init?: { headers?: Record<string, string>; signal?: AbortSignal },
 ) => Promise<{
