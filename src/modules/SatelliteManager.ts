@@ -324,6 +324,13 @@ export class SatelliteManager {
   }
 
   set groundStations(newGroundStations: GroundStationEntity[]) {
+    // Remove replaced ground-station entities from the globe. Instances are
+    // recreated on every set (addGroundStation triggers a second one through
+    // the store round-trip via the Satvis.vue watcher); without this the old
+    // billboards linger, and a click picks the stale entity instead of the
+    // one owned by this manager.
+    const retained = new Set(newGroundStations);
+    this.#groundStations.filter((gs) => !retained.has(gs)).forEach((gs) => gs.hide());
     this.#groundStations = newGroundStations;
 
     // Set groundstation for all active satellites
