@@ -1,11 +1,15 @@
-// GP base resolution for worker vs. worker-less (static snapshot) deployments.
+// GpSource — the single place that knows where GP data comes from. Hides the
+// worker probe, its memoization, the two URL schemes, and the API→static
+// fallback behind three fetch-shaped functions: fetchGpIndex, fetchGpGroup,
+// and fetchGpMetadata.
 //
-// On the first call we probe `/api/groups.json`. If a worker answers with a
+// On first use we probe `/api/groups.json`. If a worker answers with a
 // parseable JSON body we use the API base `/api/gp/` and keep the returned
 // group index (names + counts); otherwise we fall back to the static snapshot
 // under `data/gp/` (written by `pnpm update-gp`, served as part of the static
 // build) and read its `index.json` instead. The probe runs once per session
-// (memoized promise).
+// (memoized promise). When the worker API fails for a single group
+// mid-session, that request is retried once against the static snapshot.
 
 const API_BASE = "/api/gp/";
 const STATIC_BASE = "data/gp/";
@@ -23,7 +27,7 @@ export interface GpIndexEntry {
   count?: number;
 }
 
-export interface GpSourceInfo {
+interface GpSourceInfo {
   base: string;
   index: GpIndexEntry[];
 }
@@ -68,26 +72,16 @@ async function probeGpSource(): Promise<GpSourceInfo> {
   }
 }
 
-// Base plus the group index (names + counts) from the same probe request.
-export function resolveGpSource(): Promise<GpSourceInfo> {
+function resolveGpSource(): Promise<GpSourceInfo> {
   infoPromise ??= probeGpSource();
   return infoPromise;
-}
-
-export async function resolveGpBase(): Promise<string> {
-  return (await resolveGpSource()).base;
-}
-
-// For tests: reset the memoized probe.
-export function resetGpBase(): void {
-  infoPromise = undefined;
 }
 
 // Resolve a preset source into a fetchable URL. Bare group names
 // (^[a-zA-Z0-9_-]+$) are resolved against the probed base; anything containing
 // "/" or "." (legacy .txt URLs, absolute/relative paths) passes through
 // unchanged so it can still be parsed via payload sniffing.
-export function resolveGroupUrl(source: string, base: string): string {
+function resolveGroupUrl(source: string, base: string): string {
   if (/^[a-zA-Z0-9_-]+$/.test(source)) {
     return `${base}${source}.json`;
   }
@@ -97,17 +91,62 @@ export function resolveGroupUrl(source: string, base: string): string {
 // Static-snapshot URL for a bare group name, used as a per-request fallback
 // when the worker API fails mid-session. Explicit URL sources have no static
 // counterpart and return undefined.
-export function staticGroupUrl(source: string): string | undefined {
+function staticGroupUrl(source: string): string | undefined {
   if (/^[a-zA-Z0-9_-]+$/.test(source)) {
     return `${STATIC_BASE}${source}.json`;
   }
   return undefined;
 }
 
-// The metadata endpoint for the resolved base: the worker serves it at
-// `/api/metadata.json`; the static snapshot writes `data/gp/metadata.json`.
-export function resolveMetadataUrl(base: string): string {
-  return base === API_BASE ? API_METADATA_URL : STATIC_METADATA_URL;
+// The group index (names + counts) from the probe. Best-effort: empty when
+// neither the worker nor the static snapshot answers; never rejects.
+export async function fetchGpIndex(): Promise<GpIndexEntry[]> {
+  return (await resolveGpSource()).index;
 }
 
-export { API_BASE, STATIC_BASE };
+// The payload text for a preset source. Bare group names resolve against the
+// probed base; when the worker API fails mid-session (network error or
+// non-2xx), the request is retried once against the static snapshot bundled
+// with the build. Explicit URL sources pass through without a fallback.
+export async function fetchGpGroup(source: string): Promise<string> {
+  const { base } = await resolveGpSource();
+  const url = resolveGroupUrl(source, base);
+  try {
+    // Plain fetch (NOT mode:"no-cors") — the API is same-origin; an opaque
+    // response would have an unreadable body and break parsing.
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(response.statusText);
+    }
+    return await response.text();
+  } catch (error) {
+    const fallback = staticGroupUrl(source);
+    if (fallback === undefined || fallback === url) {
+      throw error;
+    }
+    console.log(`GP fetch failed for ${url}, retrying static snapshot ${fallback}`, error);
+    const response = await fetch(fallback);
+    if (!response.ok) {
+      throw new Error(response.statusText, { cause: error });
+    }
+    return await response.text();
+  }
+}
+
+// Parsed remote metadata rules from the endpoint matching the probed base:
+// the worker serves `/api/metadata.json`; the static snapshot writes
+// `data/gp/metadata.json`. Throws on failure — the caller decides tolerance.
+export async function fetchGpMetadata(): Promise<unknown> {
+  const { base } = await resolveGpSource();
+  const url = base === API_BASE ? API_METADATA_URL : STATIC_METADATA_URL;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(response.statusText);
+  }
+  return await response.json();
+}
+
+// For tests: reset the memoized probe.
+export function resetGpSource(): void {
+  infoPromise = undefined;
+}

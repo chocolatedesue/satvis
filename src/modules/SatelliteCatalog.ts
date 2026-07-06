@@ -6,7 +6,7 @@
 
 import { appMetadataConfig, type MetadataRule, type ResolvedMetadata } from "../config/satelliteMetadata";
 import { parseGpPayload, recordName, recordSatnum, type GpRecord } from "./util/gp";
-import { resolveGpBase, resolveGpSource, resolveGroupUrl, resolveMetadataUrl, staticGroupUrl } from "./util/gpSource";
+import { fetchGpGroup, fetchGpIndex, fetchGpMetadata } from "./util/gpSource";
 
 // A single known satellite. Created by SatelliteCatalog.addRecords, which owns
 // the identity/tag indices; the entry keeps a back-reference to its catalog so
@@ -142,8 +142,8 @@ export class SatelliteCatalog {
   // an estimated count in the UI. Best-effort: an unavailable index just leaves
   // the estimates at 0.
   ensureIndex(): Promise<void> {
-    this.#indexLoad ??= resolveGpSource().then((info) => {
-      for (const group of info.index) {
+    this.#indexLoad ??= fetchGpIndex().then((index) => {
+      for (const group of index) {
         if (typeof group.count === "number") {
           this.#indexCounts.set(group.name, group.count);
         }
@@ -184,12 +184,11 @@ export class SatelliteCatalog {
   }
 
   async #loadRegisteredGroup(group: RegisteredGroup): Promise<void> {
-    const base = await resolveGpBase();
     // Fetch metadata (once) BEFORE the first group file so ground tracks /
     // cones aren't created with stale widths.
-    await (this.#metadataLoad ??= this.#loadMetadata(base));
+    await (this.#metadataLoad ??= this.#loadMetadata());
     try {
-      const text = await this.#fetchGroupPayload(group.source, base);
+      const text = await fetchGpGroup(group.source);
       const records = parseGpPayload(text);
       const changed = this.addRecords(records, group.tags);
       group.loaded = true;
@@ -201,44 +200,12 @@ export class SatelliteCatalog {
     }
   }
 
-  // Fetch a group payload from the resolved base; when the worker API fails
-  // mid-session (network error or non-2xx), retry once against the static
-  // snapshot bundled with the build.
-  async #fetchGroupPayload(source: string, base: string): Promise<string> {
-    const url = resolveGroupUrl(source, base);
-    try {
-      // Plain fetch (NOT mode:"no-cors") — the API is same-origin; an opaque
-      // response would have an unreadable body and break parsing.
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(response.statusText);
-      }
-      return await response.text();
-    } catch (error) {
-      const fallback = staticGroupUrl(source);
-      if (fallback === undefined || fallback === url) {
-        throw error;
-      }
-      console.log(`GP fetch failed for ${url}, retrying static snapshot ${fallback}`, error);
-      const response = await fetch(fallback);
-      if (!response.ok) {
-        throw new Error(response.statusText, { cause: error });
-      }
-      return await response.text();
-    }
-  }
-
   // Fetch and merge remote metadata rules. Tolerant of worker-less / older
   // deployments: any failure (404, network, invalid body) logs and continues
   // with the built-in app defaults.
-  async #loadMetadata(base: string): Promise<void> {
-    const url = resolveMetadataUrl(base);
+  async #loadMetadata(): Promise<void> {
     try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(response.statusText);
-      }
-      const remote = (await response.json()) as unknown;
+      const remote = await fetchGpMetadata();
       if (!Array.isArray(remote)) {
         throw new Error("metadata payload is not an array");
       }

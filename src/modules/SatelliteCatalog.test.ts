@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { SatelliteCatalog } from "./SatelliteCatalog";
 import { parseGpPayload, type GpRecord } from "./util/gp";
-import { resetGpBase } from "./util/gpSource";
+import { resetGpSource } from "./util/gpSource";
 
 // Two OMM records; ALPHA appears in both groups (same satnum + name) to
 // exercise cross-group dedup and tag union.
@@ -139,7 +139,7 @@ const PROBE_ROUTES: RouteMap = {
 
 describe("SatelliteCatalog lazy loading", () => {
   afterEach(() => {
-    resetGpBase();
+    resetGpSource();
     vi.unstubAllGlobals();
   });
 
