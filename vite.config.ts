@@ -26,6 +26,8 @@ const cesiumBaseUrl = "cesium";
 const buildDate = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 const buildSha = execSync("git rev-parse --short HEAD").toString().trim();
 
+const port = process.env.PORT ? Number(process.env.PORT) : undefined;
+
 const config: ViteConfigWithTest = {
   base: "",
   build: {
@@ -186,6 +188,8 @@ const config: ViteConfigWithTest = {
     include: ["src/**/*.test.ts"],
   },
   server: {
+    port,
+    strictPort: port !== undefined,
     proxy: {
       // Proxy /api to production by default so `pnpm dev` works out of the box.
       // Point at a local worker with SATVIS_API_PROXY=http://localhost:8080.
@@ -194,6 +198,10 @@ const config: ViteConfigWithTest = {
         changeOrigin: true,
       },
     },
+  },
+  preview: {
+    port,
+    strictPort: port !== undefined,
   },
   worker: {
     format: "es",

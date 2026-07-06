@@ -20,3 +20,7 @@ report/
 .env.local
 .env.development
 .env.production
+
+# Claude Code: track only the launch.json blueprint (worktrees/ stays ignored)
+.claude/*
+!.claude/launch.json
