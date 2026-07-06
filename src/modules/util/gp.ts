@@ -152,7 +152,7 @@ export function createSatrec(r: GpRecord): SatRec {
 }
 
 // Build the 3 TLE lines (name, line 1, line 2) for a TLE-sourced record so the
-// InfoBox can display them as today.
+// entity info panel can display them as today.
 export function recordTleLines(r: GpRecord): string[] | undefined {
   if (r.kind === "tle") {
     return [r.name, r.line1, r.line2];

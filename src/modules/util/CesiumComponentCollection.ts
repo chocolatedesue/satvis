@@ -260,14 +260,11 @@ export class CesiumComponentCollection {
     entityValue: any,
     name: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    description: any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     position: any,
     moving: boolean,
   ): void {
     const entity = new Entity({
       name,
-      description,
       position,
       viewFrom: new Cartesian3(0, -3600000, 4200000),
     });

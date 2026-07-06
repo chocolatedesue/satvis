@@ -1,4 +1,4 @@
-import { BillboardGraphics, type CallbackProperty, type Cartesian3, HorizontalOrigin, JulianDate, NearFarScalar, VerticalOrigin } from "@cesium/engine";
+import { BillboardGraphics, type Cartesian3, HorizontalOrigin, JulianDate, NearFarScalar, VerticalOrigin } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 import dayjs from "dayjs";
 
@@ -6,7 +6,6 @@ import icon from "../images/icons/dish.svg";
 import type { SatelliteManager } from "./SatelliteManager";
 import type { Pass } from "./SatelliteProperties";
 import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
-import { DescriptionHelper } from "./util/DescriptionHelper";
 
 export interface GroundStationPositionData {
   latitude: number;
@@ -22,8 +21,6 @@ export class GroundStationEntity extends CesiumComponentCollection {
 
   givenName: string;
 
-  description: CallbackProperty | undefined;
-
   constructor(viewer: Viewer, sats: SatelliteManager, position: GroundStationPositionData, givenName: string = "") {
     super(viewer);
     this.sats = sats;
@@ -34,7 +31,6 @@ export class GroundStationEntity extends CesiumComponentCollection {
   }
 
   createEntities(): void {
-    this.createDescription();
     this.createGroundStation();
   }
 
@@ -45,15 +41,7 @@ export class GroundStationEntity extends CesiumComponentCollection {
       verticalOrigin: VerticalOrigin.BOTTOM,
       scaleByDistance: new NearFarScalar(1e2, 0.2, 4e7, 0.1),
     });
-    this.createCesiumEntity("Groundstation", "billboard", billboard, this.name, this.description, this.position.cartesian, false);
-  }
-
-  createDescription(): void {
-    this.description = DescriptionHelper.cachedCallbackProperty((time: JulianDate) => {
-      const passes = this.passes(time);
-      const content = DescriptionHelper.renderGroundstationDescription(time, this.name, this.position, passes, this.sats.overpassMode);
-      return content;
-    });
+    this.createCesiumEntity("Groundstation", "billboard", billboard, this.name, this.position.cartesian, false);
   }
 
   get hasName(): boolean {

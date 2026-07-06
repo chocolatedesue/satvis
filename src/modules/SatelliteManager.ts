@@ -204,8 +204,7 @@ export class SatelliteManager {
     return [...this.#active.values()].filter((sat) => sat.created);
   }
 
-  // Active-only lookup. In-repo callers (InfoBoxController, CesiumController,
-  // GroundStationEntity) only pass selected/tracked/active names; console users
+  // Active-only lookup for selected/tracked/active names; console users
   // wanting arbitrary lookups should use `cc.sats.catalog.getByName`.
   getSatellite(name: string): SatelliteComponentCollection | undefined {
     for (const sat of this.#active.values()) {

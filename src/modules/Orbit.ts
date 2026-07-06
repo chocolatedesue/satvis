@@ -47,8 +47,8 @@ export default class Orbit {
   // The element set this orbit was built from; always present.
   record: GpRecord;
 
-  // The three TLE lines, present only for kind:"tle" records so the InfoBox can
-  // render them. Undefined for OMM-sourced orbits.
+  // The three TLE lines, present only for kind:"tle" records so the entity info
+  // panel can render them. Undefined for OMM-sourced orbits.
   tle?: string[];
 
   satrec: satellitejs.SatRec;

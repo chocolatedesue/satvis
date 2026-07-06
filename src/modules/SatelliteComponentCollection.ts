@@ -41,7 +41,6 @@ import { SatelliteProperties, type GroundStation } from "./SatelliteProperties";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
 import { CesiumTimelineHelper } from "./util/CesiumTimelineHelper";
-import { DescriptionHelper } from "./util/DescriptionHelper";
 
 type SatelliteComponentName = string;
 
@@ -53,8 +52,6 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
   orbitPrimitiveUpdater: (() => void) | undefined;
 
   static geometryPrimitiveUpdater: (() => void) | undefined;
-
-  description: CallbackProperty | undefined;
 
   constructor(viewer: Viewer, entry: CatalogEntry) {
     super(viewer);
@@ -132,8 +129,6 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
   }
 
   init(): void {
-    this.createDescription();
-
     this.eventListeners.sampledPosition = this.props.createSampledPosition(this.viewer, () => {
       this.updatedSampledPositionForComponents(true);
     });
@@ -250,20 +245,9 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
     }
   }
 
-  createDescription(): void {
-    this.description = DescriptionHelper.cachedCallbackProperty((time: JulianDate) => {
-      const cartographic = this.props.orbit.positionGeodetic(JulianDate.toDate(time), true);
-      if (!cartographic) {
-        return "";
-      }
-      const content = DescriptionHelper.renderSatelliteDescription(time, cartographic, this.props);
-      return content;
-    });
-  }
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createCesiumSatelliteEntity(entityName: string, entityKey: string, entityValue: any): void {
-    this.createCesiumEntity(entityName, entityKey, entityValue, this.props.name, this.description, this.props.sampledPosition?.fixed, true);
+    this.createCesiumEntity(entityName, entityKey, entityValue, this.props.name, this.props.sampledPosition?.fixed, true);
   }
 
   createPoint(): void {
@@ -344,7 +328,7 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       resolution: 600,
       width: 2,
     });
-    this.createCesiumEntity("Orbit", "path", path, this.props.name, this.description, this.props.sampledPosition?.inertial, true);
+    this.createCesiumEntity("Orbit", "path", path, this.props.name, this.props.sampledPosition?.inertial, true);
   }
 
   createOrbitPolylinePrimitive(): void {

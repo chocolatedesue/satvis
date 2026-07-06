@@ -193,6 +193,9 @@
         </button>
       </UTooltip>
     </div>
+    <!-- Deliberately outside the showUI toggle: the entity info replaces the
+         Cesium InfoBox, which was visible with hidden UI and in minimalUI. -->
+    <entity-info-panel />
   </div>
 </template>
 
@@ -205,6 +208,7 @@ import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
 import type { SerializedGroundStation } from "../stores/sat";
 import { useSatStore } from "../stores/sat";
+import EntityInfoPanel from "./EntityInfoPanel.vue";
 import SatelliteBrowser from "./SatelliteBrowser.vue";
 
 type MenuKey = "cat" | "sat" | "gs" | "map" | "ios" | "dbg";
