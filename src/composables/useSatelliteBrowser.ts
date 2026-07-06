@@ -77,6 +77,11 @@ export function useSatelliteBrowser() {
 
   function setSearchQuery(value: string): void {
     searchQuery.value = value;
+    // Search spans every group, so make sure the lazily-loaded ones arrive.
+    // Memoized per group in the catalog — repeat keystrokes are no-ops.
+    if (value.trim() !== "") {
+      void catalog.ensureAll();
+    }
     scheduleDebounce();
   }
 
@@ -125,20 +130,25 @@ export function useSatelliteBrowser() {
   const activeSatCount = computed(() => activeSatNames.value.size);
 
   // Per-tag stats: total member count and how many are active (member of
-  // activeSatNames — enabled via any tag or individually selected).
+  // activeSatNames — enabled via any tag or individually selected). The count
+  // comes from availableGroups so a not-yet-loaded group shows its index
+  // estimate instead of 0; an enabled-but-unloaded group is displayed as fully
+  // active (optimistic — entries and exact counts follow when the load lands).
   const groupStats = computed<Map<string, { count: number; activeCount: number }>>(() => {
     void catalogRevision.value;
     const active = activeSatNames.value;
     const stats = new Map<string, { count: number; activeCount: number }>();
-    for (const { tag } of availableGroups.value) {
-      const members = catalog.entriesWithTag(tag);
+    for (const { tag, count } of availableGroups.value) {
       let activeCount = 0;
-      for (const member of members) {
+      for (const member of catalog.entriesWithTag(tag)) {
         if (active.has(member.name)) {
           activeCount += 1;
         }
       }
-      stats.set(tag, { count: members.length, activeCount });
+      if (enabledTagSet.value.has(tag) && !catalog.isTagLoaded(tag)) {
+        activeCount = count;
+      }
+      stats.set(tag, { count, activeCount });
     }
     return stats;
   });
@@ -305,6 +315,8 @@ export function useSatelliteBrowser() {
       next.delete(tag);
     } else {
       next.add(tag);
+      // Expanding lists the members, so load the group if it hasn't been yet.
+      void catalog.ensureTags([tag]);
     }
     expandedGroups.value = next;
   }

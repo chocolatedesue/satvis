@@ -1,7 +1,8 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { SatelliteCatalog } from "../modules/SatelliteCatalog";
 import { parseGpPayload, type GpRecord } from "../modules/util/gp";
+import { resetGpBase } from "../modules/util/gpSource";
 
 // Two OMM records; ALPHA appears in both groups (same satnum + name) to
 // exercise cross-group dedup and tag union.
@@ -92,5 +93,145 @@ describe("SatelliteCatalog", () => {
     const records = parseGpPayload(payload);
     catalog.addRecords(records, ["Stations"]);
     expect(catalog.getByName("ISS (ZARYA)")?.satnum).toBe("25544");
+  });
+});
+
+// Lazy group loading: registered groups fetch only on demand (ensureTags /
+// ensureAll), with per-request fallback to the static snapshot.
+
+function ommPayload(...records: GpRecord[]): string {
+  return JSON.stringify(records.map((record) => (record as { omm: unknown }).omm));
+}
+
+type RouteMap = Record<string, () => Response>;
+
+function json(body: unknown): () => Response {
+  return () => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+}
+
+function installFetch(routes: RouteMap): string[] {
+  const requested: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requested.push(url);
+      const route = routes[url];
+      if (!route) {
+        return new Response("Not Found", { status: 404 });
+      }
+      return route();
+    }),
+  );
+  return requested;
+}
+
+const PROBE_ROUTES: RouteMap = {
+  "/api/groups.json": json({
+    updated: "",
+    groups: [
+      { name: "weather", count: 2 },
+      { name: "stations", count: 1 },
+    ],
+  }),
+  "/api/metadata.json": json([]),
+};
+
+describe("SatelliteCatalog lazy loading", () => {
+  afterEach(() => {
+    resetGpBase();
+    vi.unstubAllGlobals();
+  });
+
+  test("registerGroups lists tags without fetching; ensureIndex fills estimated counts", async () => {
+    const requested = installFetch(PROBE_ROUTES);
+    const catalog = new SatelliteCatalog();
+    catalog.registerGroups([
+      ["weather", ["Weather"]],
+      ["stations", ["Stations"]],
+    ]);
+    expect(catalog.groups.toSorted((a, b) => a.tag.localeCompare(b.tag))).toEqual([
+      { tag: "Stations", count: 0 },
+      { tag: "Weather", count: 0 },
+    ]);
+    await catalog.ensureIndex();
+    expect(catalog.groups.toSorted((a, b) => a.tag.localeCompare(b.tag))).toEqual([
+      { tag: "Stations", count: 1 },
+      { tag: "Weather", count: 2 },
+    ]);
+    // Only the probe ran — no group payload was fetched.
+    expect(requested.filter((url) => url.startsWith("/api/gp/"))).toEqual([]);
+  });
+
+  test("ensureTags fetches only matching groups and memoizes", async () => {
+    const requested = installFetch({
+      ...PROBE_ROUTES,
+      "/api/gp/weather.json": json(JSON.parse(ommPayload(ommRecord("METEO-1", 1), ommRecord("METEO-2", 2)))),
+    });
+    const catalog = new SatelliteCatalog();
+    catalog.registerGroups([
+      ["weather", ["Weather"]],
+      ["stations", ["Stations"]],
+    ]);
+    expect(catalog.isTagLoaded("Weather")).toBe(false);
+    await catalog.ensureTags(["Weather"]);
+    await catalog.ensureTags(["Weather"]);
+    expect(catalog.isTagLoaded("Weather")).toBe(true);
+    expect(catalog.entriesWithTag("Weather")).toHaveLength(2);
+    expect(requested.filter((url) => url === "/api/gp/weather.json")).toHaveLength(1);
+    expect(requested).not.toContain("/api/gp/stations.json");
+  });
+
+  test("ensureAll fetches every registered group", async () => {
+    const requested = installFetch({
+      ...PROBE_ROUTES,
+      "/api/gp/weather.json": json(JSON.parse(ommPayload(ommRecord("METEO-1", 1)))),
+      "/api/gp/stations.json": json(JSON.parse(ommPayload(ommRecord("ISS", 25544)))),
+    });
+    const catalog = new SatelliteCatalog();
+    catalog.registerGroups([
+      ["weather", ["Weather"]],
+      ["stations", ["Stations"]],
+    ]);
+    await catalog.ensureAll();
+    expect(catalog.size).toBe(2);
+    expect(requested).toContain("/api/gp/weather.json");
+    expect(requested).toContain("/api/gp/stations.json");
+  });
+
+  test("falls back to the static snapshot when the worker group fetch fails", async () => {
+    installFetch({
+      ...PROBE_ROUTES,
+      "/api/gp/weather.json": () => new Response("KV miss", { status: 404 }),
+      "data/gp/weather.json": json(JSON.parse(ommPayload(ommRecord("METEO-1", 1)))),
+    });
+    const catalog = new SatelliteCatalog();
+    catalog.registerGroups([["weather", ["Weather"]]]);
+    await catalog.ensureTags(["Weather"]);
+    expect(catalog.isTagLoaded("Weather")).toBe(true);
+    expect(catalog.getByName("METEO-1")).toBeDefined();
+  });
+
+  test("a failed load is retried on the next ensure call", async () => {
+    let attempts = 0;
+    installFetch({
+      ...PROBE_ROUTES,
+      "/api/gp/weather.json": () => {
+        attempts += 1;
+        if (attempts === 1) {
+          return new Response("boom", { status: 500 });
+        }
+        return json(JSON.parse(ommPayload(ommRecord("METEO-1", 1))))();
+      },
+      // Static fallback also fails on the first round.
+      "data/gp/weather.json": () => new Response("missing", { status: 404 }),
+    });
+    const catalog = new SatelliteCatalog();
+    catalog.registerGroups([["weather", ["Weather"]]]);
+    await catalog.ensureTags(["Weather"]);
+    expect(catalog.isTagLoaded("Weather")).toBe(false);
+    await catalog.ensureTags(["Weather"]);
+    expect(catalog.isTagLoaded("Weather")).toBe(true);
+    expect(catalog.getByName("METEO-1")).toBeDefined();
   });
 });

@@ -35,7 +35,8 @@ export function setupRouterGuards(routerInstance: Router, cc: CesiumController):
     // Update document title and meta description
     updateMetadata(preset);
 
-    // Load new element sets via the satellite catalog
+    // Register the preset's element sets with the satellite catalog; only the
+    // groups required by the current activation state are actually fetched.
     cc.sats.loadElementSets(preset.elements);
 
     next();
