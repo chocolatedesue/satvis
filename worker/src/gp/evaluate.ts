@@ -8,6 +8,11 @@ const USER_AGENT = "satvis.space (https://github.com/Flowm/satvis)";
 // CelesTrak asks clients to space out requests; keep sources sequential and
 // gentle.
 const REQUEST_SPACING_MS = 250;
+// Abort a single source fetch that stalls, so one slow/hanging upstream cannot
+// block the whole sequential refresh (which would silently trip the cron / the
+// 120s /__scheduled limit and leave no clue which source hung). 30s is generous
+// for CelesTrak's largest groups over a healthy link yet clearly flags a stall.
+const REQUEST_TIMEOUT_MS = 30_000;
 
 // A stable, dedupable key for a source spec.
 export function sourceKey(spec: SourceSpec): string {
@@ -52,7 +57,7 @@ export type RecordsBySource = Map<string, OmmRecord[] | Error>;
 
 type FetchImpl = (
   url: string,
-  init?: { headers?: Record<string, string> },
+  init?: { headers?: Record<string, string>; signal?: AbortSignal },
 ) => Promise<{
   status: number;
   text: () => Promise<string>;
@@ -89,25 +94,122 @@ function parseOmmArray(status: number, body: string): OmmRecord[] {
   return parsed as OmmRecord[];
 }
 
-// Fetch every collected source sequentially, spaced ~250 ms apart. Never
-// throws: failed sources are recorded as Error values.
-export async function fetchSources(defs: GroupDefinition[], fetchImpl: FetchImpl): Promise<RecordsBySource> {
+// Outcome of fetching one source. Always resolves (never throws) so callers can
+// log and aggregate uniformly: `records` is set on success; otherwise `error`
+// holds the reason, with `status` / `bytes` / `bodySample` kept whenever we got
+// far enough to have them (they distinguish a bad body from a dead connection).
+export interface SourceFetch {
+  key: string;
+  url: string;
+  // Wall-clock duration of this fetch in ms.
+  ms: number;
+  status?: number;
+  bytes?: number;
+  records?: OmmRecord[];
+  error?: string;
+  bodySample?: string;
+}
+
+// Fetch and validate a single source, bounded by REQUEST_TIMEOUT_MS. The abort
+// timer is always cleared (finally) so no stray timer outlives the call. Never
+// throws — every failure mode is captured in the returned SourceFetch.
+async function fetchSource(spec: SourceSpec, fetchImpl: FetchImpl): Promise<SourceFetch> {
+  const key = sourceKey(spec);
+  const url = sourceUrl(spec);
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error(`timed out after ${REQUEST_TIMEOUT_MS}ms`)), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetchImpl(url, { headers: { "User-Agent": USER_AGENT }, signal: controller.signal });
+    const body = await res.text();
+    const ms = Date.now() - started;
+    try {
+      return { key, url, ms, status: res.status, bytes: body.length, records: parseOmmArray(res.status, body) };
+    } catch (parseErr) {
+      // Reached the origin but the body was not valid OMM (HTTP error page, HTML
+      // challenge, empty array, ...). Keep the status and a short body sample so
+      // the failure is diagnosable from the logs / debug endpoint alone.
+      return { key, url, ms, status: res.status, bytes: body.length, error: parseErr instanceof Error ? parseErr.message : String(parseErr), bodySample: body.slice(0, 120) };
+    }
+  } catch (err) {
+    // Never reached the origin: DNS/TLS/connection failure, or our abort timer
+    // firing (HTTP 522-class stalls and hangs land here).
+    return { key, url, ms: Date.now() - started, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Fetch every collected source sequentially, spaced ~250 ms apart. Never throws.
+// Logs one line before each fetch (so a stall's culprit is the last line
+// printed) and one after with the outcome, timing and size. Returns the rich
+// per-source results; derive the evaluator input with toRecordsBySource() and a
+// serializable report with toProbe().
+export async function fetchSources(defs: GroupDefinition[], fetchImpl: FetchImpl): Promise<SourceFetch[]> {
   const specs = collectSources(defs);
-  const result: RecordsBySource = new Map();
+  const results: SourceFetch[] = [];
   for (let i = 0; i < specs.length; i++) {
     const spec = specs[i]!;
-    const key = sourceKey(spec);
     if (i > 0) {
       await delay(REQUEST_SPACING_MS);
     }
-    try {
-      const res = await fetchImpl(sourceUrl(spec), { headers: { "User-Agent": USER_AGENT } });
-      result.set(key, parseOmmArray(res.status, await res.text()));
-    } catch (err) {
-      result.set(key, err instanceof Error ? err : new Error(String(err)));
+    const label = `[${i + 1}/${specs.length}]`;
+    console.log(`gp fetch ${label} ${sourceKey(spec)}: GET ${sourceUrl(spec)}`);
+    const r = await fetchSource(spec, fetchImpl);
+    if (r.records !== undefined) {
+      console.log(`gp fetch ${label} ${r.key}: OK HTTP ${r.status}, ${r.records.length} records, ${r.bytes} bytes, ${r.ms}ms`);
+    } else {
+      // r.error already carries the HTTP status for status failures ("HTTP 522")
+      // and a description for bad bodies; the sample shows what came back.
+      const sample = r.bodySample ? ` body=${JSON.stringify(r.bodySample.replace(/\s+/g, " ").trim())}` : "";
+      console.warn(`gp fetch ${label} ${r.key}: FAILED after ${r.ms}ms — ${r.error}${sample}`);
     }
+    results.push(r);
   }
-  return result;
+  return results;
+}
+
+// Reduce raw per-source fetches to the map the evaluator consumes: the records
+// on success, an Error carrying the failure message otherwise.
+export function toRecordsBySource(fetched: SourceFetch[]): RecordsBySource {
+  const map: RecordsBySource = new Map();
+  for (const r of fetched) {
+    map.set(r.key, r.records ?? new Error(r.error ?? "fetch failed"));
+  }
+  return map;
+}
+
+// A single source's fetch diagnostics, safe to serialize to JSON (the record
+// array is reduced to a count + sample name). Surfaced by the /api/refresh
+// report so a caller sees exactly what each upstream returned — which matters
+// because failures like Cloudflare 522s only reproduce from the Worker's egress.
+export interface SourceProbe {
+  key: string;
+  url: string;
+  ok: boolean;
+  ms: number;
+  status?: number;
+  bytes?: number;
+  records?: number;
+  sample?: string;
+  error?: string;
+  bodySample?: string;
+}
+
+// Project a raw SourceFetch to its serializable diagnostic form.
+export function toProbe(r: SourceFetch): SourceProbe {
+  return {
+    key: r.key,
+    url: r.url,
+    ok: r.records !== undefined,
+    ms: r.ms,
+    status: r.status,
+    bytes: r.bytes,
+    records: r.records?.length,
+    sample: r.records?.[0]?.OBJECT_NAME,
+    error: r.error,
+    bodySample: r.bodySample,
+  };
 }
 
 function recordName(record: GpRecord): string {

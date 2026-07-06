@@ -179,4 +179,53 @@ describe("scheduled() refresh", () => {
     expect(weatherStatus?.lastError).toBeTruthy();
     expect(weatherStatus?.lastErrorAt).toBeTruthy();
   });
+
+  it("runs the refresh and reports per-source diagnostics on POST /api/refresh", async () => {
+    // An old index means we are past the cooldown, so the refresh runs.
+    await env.GP_KV.put("gp:index", JSON.stringify({ updated: "2020-01-01T00:00:00.000Z", groups: [] } satisfies GroupsIndex));
+    interceptCelestrak((group) => [{ OBJECT_NAME: `${group.toUpperCase()}-1`, NORAD_CAT_ID: 42 }]);
+
+    const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+
+    const body = (await res.json()) as {
+      refreshed: boolean;
+      written: number;
+      sources: { key: string; ok: boolean; status?: number; records?: number }[];
+      groups: { name: string }[];
+    };
+    expect(body.refreshed).toBe(true);
+    expect(body.written).toBeGreaterThan(0);
+    expect(body.sources).toHaveLength(SOURCE_COUNT);
+    expect(body.sources.every((s) => s.ok && s.status === 200 && (s.records ?? 0) > 0)).toBe(true);
+    // Whatever it fetched was persisted (unlike a read-only probe).
+    expect(Array.isArray(await env.GP_KV.get("gp:weather", "json"))).toBe(true);
+  });
+
+  it("rate-limits POST /api/refresh within the cooldown and returns the cached index", async () => {
+    // A very recent index puts us inside the cooldown window. No interceptors are
+    // registered, so the afterEach assertion proves no upstream fetch was made.
+    const recent = new Date().toISOString();
+    await env.GP_KV.put(
+      "gp:index",
+      JSON.stringify({ updated: recent, groups: [{ name: "weather", updated: recent, count: 2, lastError: "source celestrak:weather failed: HTTP 522" }] } satisfies GroupsIndex),
+    );
+
+    const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST" });
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
+    const body = (await res.json()) as { refreshed: boolean; reason: string; retryAfterMs: number; groups: { name: string; lastError?: string }[] };
+    expect(body.refreshed).toBe(false);
+    expect(body.reason).toBe("cooldown");
+    expect(body.retryAfterMs).toBeGreaterThan(0);
+    // The cached index (with its errors) is still returned for visibility.
+    expect(body.groups.find((g) => g.name === "weather")?.lastError).toContain("HTTP 522");
+  });
+
+  it("rejects a non-POST /api/refresh with 405", async () => {
+    const res = await SELF.fetch("https://satvis.space/api/refresh");
+    expect(res.status).toBe(405);
+    expect(res.headers.get("Allow")).toBe("POST");
+  });
 });

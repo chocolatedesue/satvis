@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildStatuses, coerceIndex, evaluateGroups, fetchSources } from "../src/gp/evaluate.ts";
+import { buildStatuses, coerceIndex, evaluateGroups, fetchSources, toRecordsBySource } from "../src/gp/evaluate.ts";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const workerDir = path.resolve(scriptDir, "..");
@@ -40,8 +40,8 @@ async function main() {
   const defs = config.groups;
 
   process.stdout.write(`Fetching sources for ${defs.length} groups...\n`);
-  const recordsBySource = await fetchSources(defs, (url, init) => fetch(url, init));
-  const evaluated = evaluateGroups(defs, recordsBySource);
+  const fetched = await fetchSources(defs, (url, init) => fetch(url, init));
+  const evaluated = evaluateGroups(defs, toRecordsBySource(fetched));
 
   fs.mkdirSync(outDir, { recursive: true });
   const now = new Date().toISOString();
