@@ -38,6 +38,7 @@ import CesiumSensorVolumes from "cesium-sensor-volumes";
 
 import type { GroundStation } from "./PassPredictor";
 import type { CatalogEntry } from "./SatelliteCatalog";
+import { coneDescription, groundTrackDescription, modelUri, orbitPathTimes, orbitTrackTimes, orbitUsesPathGraphic } from "./satelliteGraphics";
 import { SatelliteProperties } from "./SatelliteProperties";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
@@ -272,11 +273,8 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
   }
 
   createModel(): void {
-    // Prefer an explicit model URL from catalog metadata; otherwise fall back to
-    // the name-convention path (./data/models/<NAME>.glb).
-    const uri = this.props.entry.metadata.modelUrl ?? `./data/models/${this.props.name.split(" ").join("-")}.glb`;
     const model = new ModelGraphics({
-      uri,
+      uri: modelUri(this.props.name, this.props.entry.metadata.modelUrl),
       minimumPixelSize: 50,
       maximumScale: 10000,
     });
@@ -311,21 +309,12 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
   }
 
   get usePathGraphicForOrbit(): boolean {
-    const sceneModeSupportsPrimitive = this.viewer.scene.mode === SceneMode.SCENE3D;
-    if (this.isTracked || !sceneModeSupportsPrimitive) {
-      // Use a path graphic to visualize the currently tracked satellite's orbit or when the scene mode doesn't support primitive modelmatrix updates
-      return true;
-    }
-    // For all other satellites use a polyline geometry to visualize the orbit for significantly improved performance.
-    // A polyline geometry is used instead of a polyline graphic as entities don't support adjusting the model matrix
-    // in order to display the orbit in the inertial frame.
-    return false;
+    return orbitUsesPathGraphic(this.isTracked, this.viewer.scene.mode === SceneMode.SCENE3D);
   }
 
   createOrbitPath(): void {
     const path = new PathGraphics({
-      leadTime: (this.props.orbit.orbitalPeriod * 60) / 2 + 5,
-      trailTime: (this.props.orbit.orbitalPeriod * 60) / 2 + 5,
+      ...orbitPathTimes(this.props.orbit.orbitalPeriod),
       material: Color.WHITE.withAlpha(0.15),
       resolution: 600,
       width: 2,
@@ -376,10 +365,9 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
     this.components.Orbit = geometryInstance;
   }
 
-  createOrbitTrack(leadTime: number = this.props.orbit.orbitalPeriod * 60, trailTime = 0): void {
+  createOrbitTrack(): void {
     const path = new PathGraphics({
-      leadTime,
-      trailTime,
+      ...orbitTrackTimes(this.props.orbit.orbitalPeriod),
       material: Color.GOLD.withAlpha(0.15),
       resolution: 600,
       width: 2,
@@ -388,7 +376,8 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
   }
 
   createGroundTrack(): void {
-    if (this.props.orbit.orbitalPeriod > 60 * 2) {
+    const description = groundTrackDescription(this.props.orbit.orbitalPeriod, this.props.swath);
+    if (!description) {
       // Ground track unavailable for non-LEO satellites
       return;
     }
@@ -399,13 +388,14 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       material: Color.DARKRED.withAlpha(0.25),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       positions: new CallbackProperty((time?: JulianDate) => this.props.trajectory.groundTrack(time as JulianDate) as any, false),
-      width: this.props.swath * 1000,
+      width: description.widthMeters,
     });
     this.createCesiumSatelliteEntity("Ground track", "corridor", corridor);
   }
 
   createCone(fov = this.props.coneFovDeg): void {
-    if (this.props.orbit.orbitalPeriod > 60 * 2) {
+    const description = coneDescription(this.props.orbit.orbitalPeriod, fov);
+    if (!description) {
       // Cone graphic unavailable for non-LEO satellites
       return;
     }
@@ -413,9 +403,9 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
     entity.addProperty("conicSensor");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (entity as any).conicSensor = new CesiumSensorVolumes.ConicSensorGraphics({
-      radius: 1000000,
-      innerHalfAngle: CesiumMath.toRadians(0),
-      outerHalfAngle: CesiumMath.toRadians(fov),
+      radius: description.radiusMeters,
+      innerHalfAngle: description.innerHalfAngleRad,
+      outerHalfAngle: description.outerHalfAngleRad,
       lateralSurfaceMaterial: Color.GOLD.withAlpha(0.15),
       intersectionColor: Color.GOLD.withAlpha(0.3),
       intersectionWidth: 1,
