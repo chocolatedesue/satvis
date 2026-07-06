@@ -15,6 +15,8 @@ export class SatelliteManager {
 
   #enabledSatellites: string[] = [];
 
+  #disabledSatellites: string[] = [];
+
   #groundStations: GroundStationEntity[] = [];
 
   #overpassMode: string = "elevation";
@@ -64,13 +66,15 @@ export class SatelliteManager {
     this.#reconcileActive();
   }
 
-  // Catalog entries that should currently be instantiated: enabled by tag,
-  // enabled by name, or the tracked / pending-tracked satellite.
+  // Catalog entries that should currently be instantiated: enabled by tag
+  // (minus per-member opt-outs), enabled by name, or the tracked /
+  // pending-tracked satellite.
   #activeTargetEntries(): Map<string, CatalogEntry> {
     return activeTargetEntries({
       entries: this.catalog.entries,
       enabledTags: this.#enabledTags,
       enabledSatellites: this.#enabledSatellites,
+      disabledSatellites: this.#disabledSatellites,
       trackedName: this.trackedSatellite || undefined,
       pendingTrackedName: this.pendingTrackedSatellite,
     });
@@ -196,6 +200,20 @@ export class SatelliteManager {
 
     const satStore = useSatStore();
     satStore.enabledSatellites = newSats;
+
+    this.#reconcileActive();
+  }
+
+  get disabledSatellites(): string[] {
+    return this.#disabledSatellites;
+  }
+
+  // Names opted out of tag-activation (see satelliteActivation.ts).
+  set disabledSatellites(newSats: string[]) {
+    this.#disabledSatellites = newSats;
+
+    const satStore = useSatStore();
+    satStore.disabledSatellites = newSats;
 
     this.#reconcileActive();
   }

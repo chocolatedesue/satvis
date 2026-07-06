@@ -38,7 +38,6 @@ export type BrowserRow =
       name: string;
       satnum: string;
       checked: boolean;
-      viaGroup: boolean;
       // Only populated in search mode (tree-mode rows sit under their group).
       groupsLabel?: string;
     };
@@ -65,7 +64,7 @@ function scheduleDebounce(): void {
 
 export function useSatelliteBrowser() {
   const satStore = useSatStore();
-  const { catalogRevision, enabledSatellites, enabledTags } = storeToRefs(satStore);
+  const { catalogRevision, enabledSatellites, enabledTags, disabledSatellites } = storeToRefs(satStore);
   // The catalog reference is stable for the lifetime of the app; grab it once.
   const { catalog } = globalThis.cc.sats;
 
@@ -101,18 +100,23 @@ export function useSatelliteBrowser() {
     }));
   });
 
-  // Set of currently enabled tags, for fast membership tests.
+  // Sets of the current selection state, for fast membership tests.
   const enabledTagSet = computed(() => new Set(enabledTags.value));
   const enabledSatSet = computed(() => new Set(enabledSatellites.value));
+  const disabledSatSet = computed(() => new Set(disabledSatellites.value));
 
-  // Union of all active satellite names (via tag membership OR individual
-  // selection). Also drives group activeCount and the summary bar.
+  // Union of all active satellite names: individually selected, plus tag
+  // members that are not opted out. Also drives group activeCount and the
+  // summary bar. Mirrors activeTargetEntries (minus tracking).
   const activeSatNames = computed<Set<string>>(() => {
     void catalogRevision.value;
+    const disabled = disabledSatSet.value;
     const active = new Set(enabledSatellites.value);
     for (const tag of enabledTags.value) {
       for (const entry of catalog.entriesWithTag(tag)) {
-        active.add(entry.name);
+        if (!disabled.has(entry.name)) {
+          active.add(entry.name);
+        }
       }
     }
     return active;
@@ -139,8 +143,10 @@ export function useSatelliteBrowser() {
     return stats;
   });
 
-  function groupState(tag: string, count: number, activeCount: number): "all" | "some" | "none" {
-    if (enabledTagSet.value.has(tag) || (count > 0 && activeCount === count)) {
+  // Purely count-based: an enabled group with opted-out members shows "some"
+  // (indeterminate), so exclusions are visible at the group level.
+  function groupState(count: number, activeCount: number): "all" | "some" | "none" {
+    if (count > 0 && activeCount === count) {
       return "all";
     }
     return activeCount > 0 ? "some" : "none";
@@ -169,20 +175,18 @@ export function useSatelliteBrowser() {
           tag,
           count: stat.count,
           activeCount: stat.activeCount,
-          state: groupState(tag, stat.count, stat.activeCount),
+          state: groupState(stat.count, stat.activeCount),
           expanded,
         });
         if (expanded) {
           const members = catalog.entriesWithTag(tag).toSorted((a, b) => a.name.localeCompare(b.name));
           for (const member of members) {
-            const viaGroup = isEnabledByTag(member, enabledTagSet.value);
             result.push({
               kind: "sat",
               id: `s:${tag}:${member.name}`,
               name: member.name,
               satnum: member.satnum,
               checked: active.has(member.name),
-              viaGroup,
             });
           }
         }
@@ -203,7 +207,7 @@ export function useSatelliteBrowser() {
         tag,
         count: stat.count,
         activeCount: stat.activeCount,
-        state: groupState(tag, stat.count, stat.activeCount),
+        state: groupState(stat.count, stat.activeCount),
         expanded: false,
       });
     }
@@ -213,14 +217,12 @@ export function useSatelliteBrowser() {
         continue;
       }
       seen.add(entry.name);
-      const viaGroup = isEnabledByTag(entry, enabledTagSet.value);
       result.push({
         kind: "sat",
         id: `s:${entry.name}`,
         name: entry.name,
         satnum: entry.satnum,
         checked: active.has(entry.name),
-        viaGroup,
         groupsLabel: entry.tags.length > 0 ? entry.tags.join(", ") : undefined,
       });
     }
@@ -229,30 +231,71 @@ export function useSatelliteBrowser() {
 
   // --- Actions (whole-array writes to the store only) ---
 
-  // Toggle a whole group. Never touches enabledSatellites — the old "promote
-  // full individual selection to a tag" behavior is deliberately dropped, and
-  // group ops never bulk-write sats= so the URL can't explode.
-  function toggleGroup(tag: string): void {
-    if (enabledTagSet.value.has(tag)) {
-      enabledTags.value = enabledTags.value.filter((t) => t !== tag);
-    } else {
-      enabledTags.value = [...enabledTags.value, tag];
+  // Drop exclusions no longer covered by any enabled group, so re-enabling a
+  // group later starts from the full group instead of resurrecting stale
+  // opt-outs. Names unknown to the catalog are kept (they may belong to a
+  // group that has not loaded yet — never destroy URL-hydrated state).
+  function pruneExclusions(remainingTags: string[]): void {
+    if (disabledSatellites.value.length === 0) {
+      return;
+    }
+    const tagSet = new Set(remainingTags);
+    const next = disabledSatellites.value.filter((name) => {
+      const entry = catalog.getByName(name);
+      return entry === undefined || isEnabledByTag(entry, tagSet);
+    });
+    if (next.length !== disabledSatellites.value.length) {
+      disabledSatellites.value = next;
     }
   }
 
-  // Toggle an individual satellite. No-op if the satellite is already active
-  // via an enabled group (OR activation semantics; the only way to deselect it
-  // would be to disable the group). A future `xsats=` exclusion URL param is
-  // the intended path to real per-member opt-out.
+  // Toggle a whole group. Never touches enabledSatellites — the old "promote
+  // full individual selection to a tag" behavior is deliberately dropped, and
+  // group ops never bulk-write sats= so the URL can't explode.
+  // Tri-state click cycle: off -> all on; "some" (opted-out members) -> all on
+  // (clear the members' exclusions); all on -> off.
+  function toggleGroup(tag: string): void {
+    if (!enabledTagSet.value.has(tag)) {
+      enabledTags.value = [...enabledTags.value, tag];
+      return;
+    }
+    const memberNames = new Set(catalog.entriesWithTag(tag).map((entry) => entry.name));
+    const hasExcludedMember = disabledSatellites.value.some((name) => memberNames.has(name));
+    if (hasExcludedMember) {
+      disabledSatellites.value = disabledSatellites.value.filter((name) => !memberNames.has(name));
+      return;
+    }
+    const remainingTags = enabledTags.value.filter((t) => t !== tag);
+    enabledTags.value = remainingTags;
+    pruneExclusions(remainingTags);
+  }
+
+  // Toggle an individual satellite. A satellite covered by an enabled group
+  // toggles via the exclusion list (xsats=), so unchecking it inside an active
+  // group really disables it; anything else toggles the individual selection
+  // (sats=). The two lists are kept disjoint per name.
   function toggleSat(name: string): void {
     const entry = catalog.getByName(name);
     if (entry && isEnabledByTag(entry, enabledTagSet.value)) {
+      if (disabledSatSet.value.has(name)) {
+        disabledSatellites.value = disabledSatellites.value.filter((s) => s !== name);
+      } else {
+        disabledSatellites.value = [...disabledSatellites.value, name];
+        // Drop a redundant individual enable, which would beat the exclusion.
+        if (enabledSatSet.value.has(name)) {
+          enabledSatellites.value = enabledSatellites.value.filter((s) => s !== name);
+        }
+      }
       return;
     }
     if (enabledSatSet.value.has(name)) {
       enabledSatellites.value = enabledSatellites.value.filter((s) => s !== name);
     } else {
       enabledSatellites.value = [...enabledSatellites.value, name];
+      // An explicit enable overrides a stale exclusion.
+      if (disabledSatSet.value.has(name)) {
+        disabledSatellites.value = disabledSatellites.value.filter((s) => s !== name);
+      }
     }
   }
 
@@ -269,6 +312,7 @@ export function useSatelliteBrowser() {
   function clearAll(): void {
     enabledTags.value = [];
     enabledSatellites.value = [];
+    disabledSatellites.value = [];
   }
 
   const hasActiveSelection = computed(() => enabledTags.value.length > 0 || enabledSatellites.value.length > 0);

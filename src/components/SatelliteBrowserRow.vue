@@ -17,12 +17,9 @@
   </div>
 
   <!-- Satellite row: indent + checkbox + name + dimmed satnum (+ dimmed group labels in search mode). -->
-  <div v-else class="browser-row browser-row--sat" :class="{ 'browser-row--via-group': row.viaGroup }">
-    <UTooltip v-if="row.viaGroup" text="Enabled via group — uncheck the group to deselect">
-      <input class="browser-checkbox" type="checkbox" :checked="true" :aria-label="`${row.name} enabled via group`" @click.prevent />
-    </UTooltip>
-    <input v-else class="browser-checkbox" type="checkbox" :checked="row.checked" :aria-label="`Toggle ${row.name}`" @click.stop="emit('toggle-sat', row.name)" />
-    <span class="browser-label browser-label--sat" :class="{ 'browser-label--dimmed': row.viaGroup }" @click="!row.viaGroup && emit('toggle-sat', row.name)">{{ row.name }}</span>
+  <div v-else class="browser-row browser-row--sat">
+    <input class="browser-checkbox" type="checkbox" :checked="row.checked" :aria-label="`Toggle ${row.name}`" @click.stop="emit('toggle-sat', row.name)" />
+    <span class="browser-label browser-label--sat" @click="emit('toggle-sat', row.name)">{{ row.name }}</span>
     <span class="browser-satnum">{{ row.satnum }}</span>
     <span v-if="row.groupsLabel" class="browser-groups">{{ row.groupsLabel }}</span>
   </div>
@@ -112,11 +109,6 @@ watch(() => (props.row.kind === "group" ? props.row.state : undefined), syncInde
 
 .browser-label--sat {
   font-weight: 400;
-}
-
-.browser-label--dimmed {
-  opacity: 0.55;
-  cursor: default;
 }
 
 .browser-badge {

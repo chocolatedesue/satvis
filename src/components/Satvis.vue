@@ -226,7 +226,7 @@ const cesiumStore = useCesiumStore();
 const { layers, terrainProvider, sceneMode, cameraMode, qualityPreset, showFps, background, pickMode } = storeToRefs(cesiumStore);
 
 const satStore = useSatStore();
-const { enabledComponents, enabledSatellites, enabledTags, groundStations, overpassMode, trackedSatellite } = storeToRefs(satStore);
+const { enabledComponents, enabledSatellites, enabledTags, disabledSatellites, groundStations, overpassMode, trackedSatellite } = storeToRefs(satStore);
 
 watch(
   layers,
@@ -297,6 +297,9 @@ watch(enabledSatellites, (sats: string[]) => {
 });
 watch(enabledTags, (tags: string[]) => {
   cc.sats.enabledTags = tags;
+});
+watch(disabledSatellites, (sats: string[]) => {
+  cc.sats.disabledSatellites = sats;
 });
 watch(trackedSatellite, (satellite: string) => {
   cc.sats.trackedSatellite = satellite;

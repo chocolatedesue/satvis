@@ -5,10 +5,15 @@
 // catalog entry keys that should have a live SatelliteComponentCollection.
 //
 // A satellite is a target if ANY of the following holds (OR semantics):
-//   - one of its tags is in `enabledTags`
+//   - one of its tags is in `enabledTags` AND its name is not in
+//     `disabledSatellites` (per-member opt-out within an enabled group)
 //   - its name is in `enabledSatellites`
 //   - its name equals the currently tracked satellite name
 //   - its name equals the pending-tracked satellite name
+//
+// `disabledSatellites` only beats tag-activation: an explicit individual
+// enable or tracking still wins (the browser UI keeps a name out of both
+// lists at once, so that state only arises from hand-edited URLs).
 //
 // Tracking alone keeps a satellite alive even when its tag is disabled — this
 // is an intentional improvement over the previous behavior, which left a
@@ -23,6 +28,8 @@ export interface ActivationState {
   entries: Iterable<CatalogEntry>;
   enabledTags: readonly string[];
   enabledSatellites: readonly string[];
+  // Names opted out of tag-activation (does not beat enabledSatellites/tracking).
+  disabledSatellites?: readonly string[];
   trackedName?: string;
   pendingTrackedName?: string;
 }
@@ -40,10 +47,11 @@ export function isEnabledByTag(entry: CatalogEntry, tagSet: ReadonlySet<string>)
 export function activeTargetEntries(state: ActivationState): Map<string, CatalogEntry> {
   const enabledTags = new Set(state.enabledTags);
   const enabledSatellites = new Set(state.enabledSatellites);
+  const disabledSatellites = new Set(state.disabledSatellites ?? []);
   const target = new Map<string, CatalogEntry>();
 
   for (const entry of state.entries) {
-    const enabledByTag = isEnabledByTag(entry, enabledTags);
+    const enabledByTag = isEnabledByTag(entry, enabledTags) && !disabledSatellites.has(entry.name);
     const enabledByName = enabledSatellites.has(entry.name);
     const enabledByTrack = entry.name === state.trackedName || entry.name === state.pendingTrackedName;
     if (enabledByTag || enabledByName || enabledByTrack) {

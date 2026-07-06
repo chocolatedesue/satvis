@@ -11,6 +11,9 @@ export interface SatStoreState {
   catalogRevision: number;
   enabledSatellites: string[];
   enabledTags: string[];
+  // Names opted out of tag-activation (a satellite unchecked inside an
+  // enabled group). Only meaningful while a covering group is enabled.
+  disabledSatellites: string[];
   groundStations: SerializedGroundStation[];
   trackedSatellite: string;
   overpassMode: string;
@@ -24,6 +27,7 @@ export const useSatStore = defineStore("sat", {
     catalogRevision: 0,
     enabledSatellites: [],
     enabledTags: [],
+    disabledSatellites: [],
     groundStations: [],
     trackedSatellite: "",
     overpassMode: "elevation",
@@ -45,6 +49,17 @@ export const useSatStore = defineStore("sat", {
       {
         name: "enabledSatellites",
         url: "sats",
+        serialize: (v) => (v as string[]).join(",").replaceAll(" ", "~"),
+        deserialize: (v) =>
+          v
+            .replaceAll("~", " ")
+            .split(",")
+            .filter((e) => e),
+        default: [],
+      },
+      {
+        name: "disabledSatellites",
+        url: "xsats",
         serialize: (v) => (v as string[]).join(",").replaceAll(" ", "~"),
         deserialize: (v) =>
           v

@@ -64,6 +64,26 @@ describe("activeTargetEntries", () => {
     const target = activeTargetEntries({ entries: ALL, enabledTags: ["Weather"], enabledSatellites: [], trackedName: "ALPHA" });
     expect(keys(target)).toEqual([ALPHA.key, BETA.key]);
   });
+
+  test("disabledSatellites opts a member out of tag activation", () => {
+    const target = activeTargetEntries({ entries: ALL, enabledTags: ["Weather"], enabledSatellites: [], disabledSatellites: ["BETA"] });
+    expect(keys(target)).toEqual([ALPHA.key]);
+  });
+
+  test("disabledSatellites does not beat an explicit individual enable", () => {
+    const target = activeTargetEntries({ entries: ALL, enabledTags: ["Weather"], enabledSatellites: ["BETA"], disabledSatellites: ["BETA"] });
+    expect(keys(target)).toEqual([ALPHA.key, BETA.key]);
+  });
+
+  test("disabledSatellites does not beat tracking", () => {
+    const target = activeTargetEntries({ entries: ALL, enabledTags: ["Weather"], enabledSatellites: [], disabledSatellites: ["BETA"], trackedName: "BETA" });
+    expect(keys(target)).toEqual([ALPHA.key, BETA.key]);
+  });
+
+  test("disabledSatellites without a covering tag has no effect", () => {
+    const target = activeTargetEntries({ entries: ALL, enabledTags: ["Science"], enabledSatellites: [], disabledSatellites: ["ALPHA"] });
+    expect(keys(target)).toEqual([GAMMA.key]);
+  });
 });
 
 describe("isEnabledByTag", () => {
