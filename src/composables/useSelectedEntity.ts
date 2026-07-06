@@ -24,7 +24,7 @@ import { markRaw, ref, shallowRef, watch, type Ref, type ShallowRef } from "vue"
 import type { GroundStationEntity } from "../modules/GroundStationEntity";
 import type { SatelliteComponentCollection } from "../modules/SatelliteComponentCollection";
 import { CesiumCallbackHelper } from "../modules/util/CesiumCallbackHelper";
-import { getElementsInfo, toPassRows, upcomingPasses, type ElementsInfo, type PassRow } from "../modules/util/entityInfo";
+import { filterPasses, getElementsInfo, toPassRows, type ElementsInfo, type PassRow } from "../modules/util/entityInfo";
 import { useSatStore } from "../stores/sat";
 
 export type Selection = { kind: "satellite"; sat: SatelliteComponentCollection } | { kind: "groundstation"; gs: GroundStationEntity };
@@ -41,8 +41,11 @@ const name = ref("");
 const position: Ref<PositionRow[]> = ref([]);
 const passRows: Ref<PassRow[]> = ref([]);
 // Whether the entity has any computed passes at all (before dropping past
-// ones); distinguishes the empty-state texts from a hidden passes section.
+// ones); distinguishes the empty-state texts from an empty passes table.
 const hasAnyPasses = ref(false);
+// Include already-finished passes in the table. Off by default so the list
+// starts at the ongoing/next pass.
+const showPastPasses = ref(false);
 const groundStationAvailable = ref(false);
 const elements: ShallowRef<ElementsInfo | null> = shallowRef(null);
 
@@ -98,7 +101,7 @@ function refreshData(sel: Selection, time: JulianDate): void {
         ]
       : [];
     hasAnyPasses.value = props.passes.length > 0;
-    passRows.value = toPassRows(upcomingPasses(props.passes, time), time, "groundStationName", mode);
+    passRows.value = toPassRows(filterPasses(props.passes, time, showPastPasses.value), time, "groundStationName", mode);
   } else {
     const { gs } = sel;
     name.value = gs.name;
@@ -109,7 +112,7 @@ function refreshData(sel: Selection, time: JulianDate): void {
     ];
     const passes = gs.passes(time);
     hasAnyPasses.value = passes.length > 0;
-    passRows.value = toPassRows(upcomingPasses(passes, time), time, "name", mode);
+    passRows.value = toPassRows(filterPasses(passes, time, showPastPasses.value), time, "name", mode);
   }
 }
 
@@ -146,6 +149,9 @@ function init(): void {
   // (registered earlier), so reading the manager value in refreshData is safe.
   const { overpassMode } = storeToRefs(useSatStore());
   watch(overpassMode, () => update());
+  // Rebuild the table immediately when past passes are toggled instead of
+  // waiting for the next periodic refresh.
+  watch(showPastPasses, () => update());
   // Pick up a selection made before the first panel mount.
   update();
 }
@@ -179,6 +185,7 @@ export function useSelectedEntity() {
     position,
     passRows,
     hasAnyPasses,
+    showPastPasses,
     groundStationAvailable,
     elements,
     deselect,

@@ -37,9 +37,13 @@
         <h3>Passes</h3>
         <div class="text-center">{{ selection.kind === "groundstation" ? "No passes available" : "No ground station set" }}</div>
       </template>
-      <template v-else-if="passRows.length > 0">
+      <template v-else>
         <h3>Passes ({{ modeLabel }})</h3>
-        <table class="info-table">
+        <div class="mb-2 flex justify-end">
+          <USwitch v-model="showPastPasses" label="Show past passes" size="xs" />
+        </div>
+        <div v-if="passRows.length === 0" class="text-center">No upcoming passes</div>
+        <table v-else class="info-table">
           <thead>
             <tr>
               <th>Name</th>
@@ -98,7 +102,7 @@ import { useSatStore } from "../stores/sat";
 const cc = globalThis.cc;
 const toast = useToast();
 
-const { selection, isTracked, name, position, passRows, hasAnyPasses, elements, deselect, toggleTrack } = useSelectedEntity();
+const { selection, isTracked, name, position, passRows, hasAnyPasses, showPastPasses, elements, deselect, toggleTrack } = useSelectedEntity();
 
 const { overpassMode } = storeToRefs(useSatStore());
 const modeLabel = computed(() => overpassMode.value.charAt(0).toUpperCase() + overpassMode.value.slice(1));

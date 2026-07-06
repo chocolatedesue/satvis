@@ -2,7 +2,7 @@ import { JulianDate } from "@cesium/engine";
 import { describe, expect, test } from "vitest";
 
 import type { Pass } from "../modules/SatelliteProperties";
-import { formatCountdown, formatEpoch, toPassRows, upcomingPasses } from "../modules/util/entityInfo";
+import { filterPasses, formatCountdown, formatEpoch, toPassRows } from "../modules/util/entityInfo";
 
 const T0 = Date.UTC(2026, 6, 1, 12, 0, 0); // 2026-07-01T12:00:00Z
 const NOW = JulianDate.fromDate(new Date(T0));
@@ -38,17 +38,31 @@ const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
-describe("upcomingPasses", () => {
+describe("filterPasses", () => {
   test("drops passes that have already ended", () => {
     const passes = [elevationPass(-2 * HOUR, -1 * HOUR), elevationPass(-5 * MIN, 5 * MIN), elevationPass(1 * HOUR, 2 * HOUR)];
-    const upcoming = upcomingPasses(passes, NOW);
+    const upcoming = filterPasses(passes, NOW, false);
     expect(upcoming).toHaveLength(2);
     expect(upcoming[0]!.start).toBe(T0 - 5 * MIN);
   });
 
+  test("drops an ended pass interleaved after an ongoing one", () => {
+    // Aggregated ground-station lists are sorted by start, so a finished pass
+    // of one satellite can follow the ongoing pass of another.
+    const passes = [elevationPass(-2 * HOUR, 5 * MIN), elevationPass(-90 * MIN, -1 * HOUR), elevationPass(1 * HOUR, 2 * HOUR)];
+    const upcoming = filterPasses(passes, NOW, false);
+    expect(upcoming).toHaveLength(2);
+    expect(upcoming.every((pass) => pass.end > T0)).toBe(true);
+  });
+
   test("returns empty array when all passes are over", () => {
     const passes = [elevationPass(-2 * HOUR, -1 * HOUR)];
-    expect(upcomingPasses(passes, NOW)).toHaveLength(0);
+    expect(filterPasses(passes, NOW, false)).toHaveLength(0);
+  });
+
+  test("keeps every pass when past passes are shown", () => {
+    const passes = [elevationPass(-2 * HOUR, -1 * HOUR), elevationPass(-5 * MIN, 5 * MIN), elevationPass(1 * HOUR, 2 * HOUR)];
+    expect(filterPasses(passes, NOW, true)).toHaveLength(3);
   });
 });
 

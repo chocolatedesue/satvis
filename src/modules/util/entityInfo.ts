@@ -27,14 +27,16 @@ export interface PassRow {
   startMs: number;
 }
 
-/** Drop passes that have already ended relative to the given time. */
-export function upcomingPasses(passes: Pass[], time: JulianDate): Pass[] {
-  const start = dayjs(JulianDate.toDate(time));
-  const upcomingPassIdx = passes.findIndex((pass) => dayjs(pass.end).isAfter(start));
-  if (upcomingPassIdx < 0) {
-    return [];
+/**
+ * Filter passes for display: by default only ongoing and upcoming passes are
+ * kept; with showPast the full list (including finished passes) is returned.
+ */
+export function filterPasses(passes: Pass[], time: JulianDate, showPast: boolean): Pass[] {
+  if (showPast) {
+    return passes;
   }
-  return passes.slice(upcomingPassIdx);
+  const start = dayjs(JulianDate.toDate(time));
+  return passes.filter((pass) => dayjs(pass.end).isAfter(start));
 }
 
 export function formatCountdown(time: JulianDate, pass: Pass): string {
