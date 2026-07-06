@@ -39,7 +39,7 @@
            fix. Mounting on open guarantees a correct first paint; browser state
            (search, expansion) is module-scoped in useSatelliteBrowser and survives
            remounts. -->
-      <div v-if="menu.cat" class="toolbarSwitches">
+      <div v-if="menu.cat" class="toolbarSwitches toolbarSwitches--catalog">
         <satellite-browser />
       </div>
       <div v-show="menu.sat" class="toolbarSwitches">

@@ -44,6 +44,12 @@ body {
   border-radius: 8px;
 }
 
+/* The satellite catalog panel is a dense text list; a more opaque surface
+   keeps globe labels from bleeding through the rows. */
+.toolbarSwitches--catalog {
+  background-color: #303336e6;
+}
+
 .toolbarTitle {
   text-align: center;
   height: 24px;
