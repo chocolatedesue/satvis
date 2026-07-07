@@ -59,7 +59,6 @@ const config: ViteConfigWithTest = {
             { name: "cesium", test: /@?cesium/, priority: 30 },
             { name: "analytics", test: /posthog/, priority: 20 },
             { name: "vendor", test: /node_modules/, priority: 10 },
-            { name: "app", test: /src/, priority: 1 },
           ],
         },
       },
