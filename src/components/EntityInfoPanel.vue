@@ -91,6 +91,7 @@
 </template>
 
 <script setup lang="ts">
+import { useToast } from "@nuxt/ui/composables/useToast";
 import dayjs from "dayjs";
 import { storeToRefs } from "pinia";
 import { computed } from "vue";
