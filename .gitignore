@@ -9,10 +9,6 @@ node_modules/
 /auto-imports.d.ts
 /components.d.ts
 
-cypress/screenshots/
-cypress/videos/
-cypress/fixtures/
-cypress/support/
 report/
 
 # Environment variables

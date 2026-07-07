@@ -23,7 +23,7 @@ export const router: Router = createRouter({
 
 /**
  * Router guard to handle configuration changes when navigating between routes
- * Note: Initial load is handled in main.js before mounting
+ * Note: Initial load is handled in src/app.ts before mounting
  */
 export function setupRouterGuards(routerInstance: Router, cc: CesiumController): void {
   routerInstance.beforeEach((to, from, next) => {
