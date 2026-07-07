@@ -26,18 +26,6 @@ importers:
       '@cesium/widgets':
         specifier: ^16.0.0
         version: 16.0.0
-      '@fortawesome/fontawesome-svg-core':
-        specifier: ^7.3.0
-        version: 7.3.0
-      '@fortawesome/free-brands-svg-icons':
-        specifier: ^7.3.0
-        version: 7.3.0
-      '@fortawesome/free-solid-svg-icons':
-        specifier: ^7.3.0
-        version: 7.3.0
-      '@fortawesome/vue-fontawesome':
-        specifier: ^3.3.0
-        version: 3.3.0(@fortawesome/fontawesome-svg-core@7.3.0)(vue@3.5.39(typescript@6.0.3))
       '@nuxt/ui':
         specifier: ^4.9.0
         version: 4.9.0(675ea09d5a785a71e7ae6370ed08b9d9)
@@ -72,6 +60,12 @@ importers:
         specifier: ^5.1.0
         version: 5.1.0(@vue/compiler-sfc@3.5.39)(esbuild@0.28.1)(pinia@3.0.4(typescript@6.0.3)(vue@3.5.39(typescript@6.0.3)))(rolldown@1.1.4)(rollup@4.62.2)(vite@8.1.2(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))(vue@3.5.39(typescript@6.0.3))
     devDependencies:
+      '@iconify-json/fa6-brands':
+        specifier: ^1.2.6
+        version: 1.2.6
+      '@iconify-json/fa6-solid':
+        specifier: ^1.2.4
+        version: 1.2.4
       '@types/node':
         specifier: ^26.1.0
         version: 26.1.0
@@ -1265,27 +1259,11 @@ packages:
   '@floating-ui/vue@1.1.11':
     resolution: {integrity: sha512-HzHKCNVxnGS35r9fCHBc3+uCnjw9IWIlCPL683cGgM9Kgj2BiAl8x1mS7vtvP6F9S/e/q4O6MApwSHj8hNLGfw==}
 
-  '@fortawesome/fontawesome-common-types@7.3.0':
-    resolution: {integrity: sha512-X/vND0Y1l9fVJ9O79UgtZnXSpz4aNF3bXlDxiJAEAm6kgeSftp9wjjBPgqzazJV8YlmxfRoeXNfSCJ48sf/Hhw==}
-    engines: {node: '>=6'}
+  '@iconify-json/fa6-brands@1.2.6':
+    resolution: {integrity: sha512-twL3X4KWcxAhbc1vz/mIDsVr+CAItk1/EIfxKUVQtpv6O4eydk5KNYqTZWdvJNHGInUgd6vKg21aWfVgb5DXEg==}
 
-  '@fortawesome/fontawesome-svg-core@7.3.0':
-    resolution: {integrity: sha512-MFbTNLDWkLJwbozDvHOZ7hwyDjQcBMBattlcOQ6ZmV5YD9bBrqdl1rNtmVjQ/lzqveXXX3sMz2Ew6fAgXoxmkw==}
-    engines: {node: '>=6'}
-
-  '@fortawesome/free-brands-svg-icons@7.3.0':
-    resolution: {integrity: sha512-W6C9ZbPWpwcUycq6U90lVbvWTrEnr01Td2x5jlO8fOtvww4kqDBMSmZqXQCc6FIIJD4kTH6G1MBRExAaSXz3yg==}
-    engines: {node: '>=6'}
-
-  '@fortawesome/free-solid-svg-icons@7.3.0':
-    resolution: {integrity: sha512-YxI/CuwWeI3nPIoYU//vkDS+3ige/67DPZ6XwMATpYEFESzO9L8zfJOKllGRgIlpT/uebrZCcvAzp3peD7GmTw==}
-    engines: {node: '>=6'}
-
-  '@fortawesome/vue-fontawesome@3.3.0':
-    resolution: {integrity: sha512-xwHZ4fdm5rRefKTV+AfACE4piO2RTBGp6pASGdZOdRpA3+FgHje5VZD9i3dQeTejSClhAg9kodXybfs9K9d2jg==}
-    peerDependencies:
-      '@fortawesome/fontawesome-svg-core': ~1 || ~6 || ~7
-      vue: '>= 3.0.0 < 4'
+  '@iconify-json/fa6-solid@1.2.4':
+    resolution: {integrity: sha512-LmDNNdJVyvF5mPm1yxWvL8KjCc/E8LzoqnF1LNTVpyY2ZJRUlGOWuPIThdbuFBF2IovgttkIyumhyqfmlHdwKg==}
 
   '@iconify/collections@1.0.705':
     resolution: {integrity: sha512-JyUTM5/vqZfnUwtM18kh3nUB82A8QYHDLQj5zEZAvgR3hFdZvDhlH0LEdqOYKHWMTNW5l16EiiY2kstuw/EiTQ==}
@@ -6175,24 +6153,13 @@ snapshots:
       - '@vue/composition-api'
       - vue
 
-  '@fortawesome/fontawesome-common-types@7.3.0': {}
-
-  '@fortawesome/fontawesome-svg-core@7.3.0':
+  '@iconify-json/fa6-brands@1.2.6':
     dependencies:
-      '@fortawesome/fontawesome-common-types': 7.3.0
+      '@iconify/types': 2.0.0
 
-  '@fortawesome/free-brands-svg-icons@7.3.0':
+  '@iconify-json/fa6-solid@1.2.4':
     dependencies:
-      '@fortawesome/fontawesome-common-types': 7.3.0
-
-  '@fortawesome/free-solid-svg-icons@7.3.0':
-    dependencies:
-      '@fortawesome/fontawesome-common-types': 7.3.0
-
-  '@fortawesome/vue-fontawesome@3.3.0(@fortawesome/fontawesome-svg-core@7.3.0)(vue@3.5.39(typescript@6.0.3))':
-    dependencies:
-      '@fortawesome/fontawesome-svg-core': 7.3.0
-      vue: 3.5.39(typescript@6.0.3)
+      '@iconify/types': 2.0.0
 
   '@iconify/collections@1.0.705':
     dependencies:

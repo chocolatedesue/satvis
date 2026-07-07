@@ -55,7 +55,7 @@ const config: ViteConfigWithTest = {
           groups: [
             { name: "vue", test: /@vue|vue-router|pinia|@vueuse/, priority: 60 },
             { name: "ui", test: /@nuxt\/ui|reka-ui|tailwindcss|@tanstack/, priority: 50 },
-            { name: "icons", test: /@fortawesome/, priority: 40 },
+            { name: "icons", test: /@iconify/, priority: 40 },
             { name: "cesium", test: /@?cesium/, priority: 30 },
             { name: "analytics", test: /posthog/, priority: 20 },
             { name: "vendor", test: /node_modules/, priority: 10 },
