@@ -100,7 +100,11 @@ input:checked + .slider::before {
   color: #ffffff;
 }
 
-a.cesium-toolbar-button {
+/* Center the icon (custom <i> background icons or Nuxt UI <svg>) in every
+   app toolbar button. Applies to both <a> and <button>; without flex the
+   block-level Iconify SVGs hug the button's left edge. */
+#toolbarLeft .cesium-toolbar-button,
+#toolbarRight .cesium-toolbar-button {
   align-items: center;
   justify-content: center;
   display: inline-flex;
@@ -117,12 +121,9 @@ a.cesium-toolbar-button {
   background: url("../images/icons/sat/2.svg") no-repeat;
   filter: brightness(3.1);
   transform: rotate(-90deg);
-  margin-bottom: 2px;
 }
 
 .svg-groundstation {
   background: url("../images/icons/sat/9.svg") no-repeat;
   filter: brightness(3.1);
-  margin-bottom: 2px;
-  margin-left: 2px;
 }
