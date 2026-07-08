@@ -74,7 +74,10 @@ const config: ViteConfigWithTest = {
     vue(),
     // Neutral gray palette (default `slate` is blue-tinted and clashes with the
     // app's pure-dark toolbar surfaces).
-    ui({ ui: { colors: { neutral: "neutral" } } }),
+    ui({
+      ui: { colors: { neutral: "neutral" } },
+      icon: { clientBundle: { scan: true } },
+    }),
     viteStaticCopy({
       targets: [
         // Copy Cesium Assets, Widgets, and Workers to a static directory

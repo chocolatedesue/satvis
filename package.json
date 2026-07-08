@@ -29,7 +29,7 @@
   "dependencies": {
     "@cesium/engine": "^26.0.0",
     "@cesium/widgets": "^16.0.0",
-    "@nuxt/ui": "^4.9.0",
+    "@nuxt/ui": "https://pkg.pr.new/@nuxt/ui@6635",
     "@tanstack/vue-virtual": "^3.13.31",
     "cesium": "^1.142.0",
     "cesium-sensor-volumes": "github:Flowm/cesium-sensor-volumes#1.140.0",
@@ -44,6 +44,7 @@
   "devDependencies": {
     "@iconify-json/fa6-brands": "^1.2.6",
     "@iconify-json/fa6-solid": "^1.2.4",
+    "@iconify-json/lucide": "^1.2.116",
     "@types/node": "^26.1.0",
     "@vite-pwa/assets-generator": "^1.0.2",
     "@vitejs/plugin-vue": "^6.0.7",
