@@ -1,5 +1,5 @@
-import { createExecutionContext, createScheduledController, env, fetchMock, SELF, waitOnExecutionContext } from "cloudflare:test";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createExecutionContext, createScheduledController, env, SELF, waitOnExecutionContext } from "cloudflare:test";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import generatedConfig from "../src/config/groups.generated.json" with { type: "json" };
 import { collectSources } from "../src/gp/evaluate.ts";
@@ -7,8 +7,8 @@ import type { GroupsConfig, GroupsIndex, OmmRecord } from "../src/gp/types.ts";
 import worker from "../src/index.ts";
 
 // Number of distinct upstream requests one refresh makes (sources deduped
-// across all generated groups). Used to size the fetch-mock interceptors so
-// they are fully consumed and never leak between tests.
+// across all generated groups). Asserted against the fetch spy after each
+// refresh test so no upstream request goes missing or leaks between tests.
 const SOURCE_COUNT = collectSources((generatedConfig as GroupsConfig).groups).length;
 
 const UPDATED = "2026-07-04T00:00:00.000Z";
@@ -100,30 +100,41 @@ describe("index and metadata routes", () => {
 });
 
 describe("scheduled() refresh", () => {
+  // The refresh reaches upstream through the global fetch (see refreshAll), so
+  // stubbing globalThis.fetch intercepts it. The default stub rejects every
+  // request (the old disableNetConnect); interceptCelestrak() swaps in the
+  // celestrak reply and sets the number of upstream calls the test must make.
+  let fetchSpy: MockInstance<typeof fetch>;
+  let expectedFetches = 0;
+
   beforeEach(() => {
-    fetchMock.activate();
-    fetchMock.disableNetConnect();
+    expectedFetches = 0;
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      throw new Error(`unmocked fetch: ${new Request(input, init).url}`);
+    });
   });
-  // Assert every interceptor was consumed, so nothing leaks into the next test
-  // (the mock agent keeps interceptors across activate/deactivate cycles).
+  // Assert the exact upstream request count, so a missing or extra fetch fails
+  // the test that caused it instead of leaking into the next one.
   afterEach(() => {
-    fetchMock.assertNoPendingInterceptors();
+    expect(fetchSpy).toHaveBeenCalledTimes(expectedFetches);
+    vi.restoreAllMocks();
   });
 
   // Reply to every celestrak request (regular gp.php GROUP=<g> and supplemental
   // sup-gp.php FILE=<f>) — one per distinct source — with a synthetic response,
-  // so the refresh never hits the network. Sized to exactly SOURCE_COUNT so all
-  // interceptors are consumed within this test.
+  // so the refresh never hits the network. Anything else stays rejected.
   function interceptCelestrak(reply: (group: string) => unknown, opts?: { status?: number }): void {
-    fetchMock
-      .get("https://celestrak.org")
-      .intercept({ method: "GET", path: (p) => p.startsWith("/NORAD/elements/gp.php") || p.startsWith("/NORAD/elements/supplemental/sup-gp.php") })
-      .reply((options) => {
-        const params = new URL(`https://celestrak.org${options.path}`).searchParams;
-        const source = params.get("GROUP") ?? params.get("FILE") ?? "";
-        return { statusCode: opts?.status ?? 200, data: JSON.stringify(reply(source)) };
-      })
-      .times(SOURCE_COUNT);
+    expectedFetches = SOURCE_COUNT;
+    fetchSpy.mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      const isGp = url.pathname === "/NORAD/elements/gp.php" || url.pathname === "/NORAD/elements/supplemental/sup-gp.php";
+      if (request.method !== "GET" || url.origin !== "https://celestrak.org" || !isGp) {
+        throw new Error(`unmocked fetch: ${request.method} ${request.url}`);
+      }
+      const source = url.searchParams.get("GROUP") ?? url.searchParams.get("FILE") ?? "";
+      return new Response(JSON.stringify(reply(source)), { status: opts?.status ?? 200 });
+    });
   }
 
   it("writes evaluated groups to KV and builds the index", async () => {
@@ -204,8 +215,8 @@ describe("scheduled() refresh", () => {
   });
 
   it("rate-limits POST /api/refresh within the cooldown and returns the cached index", async () => {
-    // A very recent index puts us inside the cooldown window. No interceptors are
-    // registered, so the afterEach assertion proves no upstream fetch was made.
+    // A very recent index puts us inside the cooldown window. interceptCelestrak()
+    // is not called, so the afterEach assertion proves no upstream fetch was made.
     const recent = new Date().toISOString();
     await env.GP_KV.put(
       "gp:index",

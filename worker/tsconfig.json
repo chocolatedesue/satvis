@@ -21,6 +21,6 @@
     "noUncheckedIndexedAccess": true,
 
     /* Worker */
-    "types": ["./src/worker-configuration.d.ts", "@cloudflare/vitest-pool-workers"]
+    "types": ["./src/worker-configuration.d.ts", "@cloudflare/vitest-pool-workers/types"]
   }
 }
