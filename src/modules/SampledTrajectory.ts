@@ -10,11 +10,17 @@ import {
   Transforms,
   defined,
 } from "@cesium/engine";
+import type { InterpolationAlgorithm } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 
 import type Orbit from "./Orbit";
 import "./util/CesiumSampledPositionRawValueAccess";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
+
+// Cesium 1.143 widened the InterpolationAlgorithm interface (type/interpolate) without
+// updating the LagrangePolynomialApproximation namespace declaration; the runtime object
+// satisfies the interface, so bridge the upstream typings gap with a cast.
+const lagrangeInterpolation = LagrangePolynomialApproximation as unknown as InterpolationAlgorithm;
 
 interface SampledPositionData {
   interval: TimeInterval;
@@ -170,14 +176,14 @@ export class SampledTrajectory {
     fixed.forwardExtrapolationType = ExtrapolationType.HOLD;
     fixed.setInterpolationOptions({
       interpolationDegree: 5,
-      interpolationAlgorithm: LagrangePolynomialApproximation,
+      interpolationAlgorithm: lagrangeInterpolation,
     });
     const inertial = new SampledPositionProperty(ReferenceFrame.INERTIAL);
     inertial.backwardExtrapolationType = ExtrapolationType.HOLD;
     inertial.forwardExtrapolationType = ExtrapolationType.HOLD;
     inertial.setInterpolationOptions({
       interpolationDegree: 5,
-      interpolationAlgorithm: LagrangePolynomialApproximation,
+      interpolationAlgorithm: lagrangeInterpolation,
     });
     this.#data = {
       interval: new TimeInterval({
