@@ -90,9 +90,16 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
             this.orbitPrimitiveUpdater?.();
             return;
           }
+          const orbit = this.components.Orbit as Primitive;
+          if (this.viewer.scene.mode !== SceneMode.SCENE3D) {
+            // modelMatrix (inertial frame) is only supported in 3D; reset to identity so the
+            // primitive renders in 2D/Columbus instead of throwing inside Cesium's render loop.
+            orbit.modelMatrix = Matrix4.IDENTITY;
+            return;
+          }
           const icrfToFixed = Transforms.computeIcrfToFixedMatrix(time);
           if (defined(icrfToFixed)) {
-            (this.components.Orbit as Primitive).modelMatrix = Matrix4.fromRotationTranslation(icrfToFixed);
+            orbit.modelMatrix = Matrix4.fromRotationTranslation(icrfToFixed);
           }
         });
       }
@@ -105,8 +112,17 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
           return;
         }
         ctor.geometryPrimitiveUpdater = CesiumCallbackHelper.createPeriodicTimeCallback(this.viewer, 0.5, (time) => {
+          if (!ctor.primitive) {
+            return;
+          }
+          if (this.viewer.scene.mode !== SceneMode.SCENE3D) {
+            // modelMatrix (inertial frame) is only supported in 3D; reset to identity so the
+            // primitive renders in 2D/Columbus instead of throwing inside Cesium's render loop.
+            ctor.primitive.modelMatrix = Matrix4.IDENTITY;
+            return;
+          }
           const icrfToFixed = Transforms.computeIcrfToFixedMatrix(time);
-          if (defined(icrfToFixed) && ctor.primitive) {
+          if (defined(icrfToFixed)) {
             ctor.primitive.modelMatrix = Matrix4.fromRotationTranslation(icrfToFixed);
           }
         });
@@ -340,9 +356,13 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       appearance: new PolylineColorAppearance(),
       asynchronous: false,
     });
-    const icrfToFixed = Transforms.computeIcrfToFixedMatrix(this.viewer.clock.currentTime);
-    if (defined(icrfToFixed)) {
-      primitive.modelMatrix = Matrix4.fromRotationTranslation(icrfToFixed);
+    if (this.viewer.scene.mode === SceneMode.SCENE3D) {
+      // modelMatrix (inertial frame) is only supported in 3D; leave the default identity
+      // matrix in 2D/Columbus. The periodic updater applies the rotation once back in 3D.
+      const icrfToFixed = Transforms.computeIcrfToFixedMatrix(this.viewer.clock.currentTime);
+      if (defined(icrfToFixed)) {
+        primitive.modelMatrix = Matrix4.fromRotationTranslation(icrfToFixed);
+      }
     }
     this.components.Orbit = primitive;
   }
