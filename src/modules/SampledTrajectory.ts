@@ -227,16 +227,18 @@ export class SampledTrajectory {
     const positionInertialTEME = this.#computePositionInertialTEME(timestamp);
 
     const temeToFixed = Transforms.computeTemeToPseudoFixedMatrix(timestamp);
-    if (!defined(temeToFixed)) {
-      console.error("Reference frame transformation data failed to load");
-    }
-    const positionFixed = Matrix3.multiplyByVector(temeToFixed, positionInertialTEME, new Cartesian3());
-
     const fixedToIcrf = Transforms.computeFixedToIcrfMatrix(timestamp);
-    if (!defined(fixedToIcrf)) {
+    if (!defined(temeToFixed) || !defined(fixedToIcrf)) {
+      // Reference frame data is not available for this time (outside the preloaded ICRF window or
+      // before the async load resolves). Skip the sample instead of multiplying by an undefined
+      // matrix, which throws a DeveloperError inside Cesium's render loop.
       console.error("Reference frame transformation data failed to load");
+      if (this.#data) this.#data.valid = false;
+      return { positionFixed: Cartesian3.ZERO, positionInertial: Cartesian3.ZERO };
     }
-    const positionInertialICRF = Matrix3.multiplyByVector(fixedToIcrf as Matrix3, positionFixed, new Cartesian3());
+
+    const positionFixed = Matrix3.multiplyByVector(temeToFixed, positionInertialTEME, new Cartesian3());
+    const positionInertialICRF = Matrix3.multiplyByVector(fixedToIcrf, positionFixed, new Cartesian3());
 
     return { positionFixed, positionInertial: positionInertialICRF };
   }
