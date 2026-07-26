@@ -1,6 +1,9 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 
+import { imageryProviderNames, terrainProviderNames } from "../modules/CesiumLayerProviders";
+import { boolean, enumString, layerList } from "../modules/util/urlCodec";
+
 export const useCesiumStore = defineStore(
   "cesium",
   () => {
@@ -25,50 +28,17 @@ export const useCesiumStore = defineStore(
     };
   },
   {
+    // Wire format: docs/adr/0001-url-parameter-specification.md.
     urlsync: {
       enabled: true,
       config: [
-        {
-          name: "layers",
-          url: "layers",
-          serialize: (v) => (v as string[]).join(","),
-          deserialize: (v) => v.split(",").filter((e) => e),
-          valid: (v) =>
-            (v as string[]).every((l) => ["Offline", "OfflineHighres", "ArcGis", "OSM", "Topo", "BlackMarble", "Tiles", "GOES-IR", "Nextrad"].includes(l.split("_")[0] ?? "")),
-          default: ["OfflineHighres"],
-        },
-        {
-          name: "terrainProvider",
-          url: "terrain",
-          default: "None",
-        },
-        {
-          name: "sceneMode",
-          url: "scene",
-          default: "3D",
-        },
-        {
-          name: "cameraMode",
-          url: "camera",
-          default: "Fixed",
-        },
-        {
-          name: "qualityPreset",
-          url: "quality",
-          default: "high",
-        },
-        {
-          name: "showFps",
-          url: "fps",
-          default: "false",
-        },
-        {
-          name: "background",
-          url: "bg",
-          serialize: (v) => `${v}`,
-          deserialize: (v) => v === "true",
-          default: "true",
-        },
+        { name: "layers", url: "layers", kind: layerList(imageryProviderNames) },
+        { name: "terrainProvider", url: "terrain", kind: enumString(terrainProviderNames()) },
+        { name: "sceneMode", url: "scene", kind: enumString(["3D", "2D", "Columbus"]) },
+        { name: "cameraMode", url: "camera", kind: enumString(["Fixed", "Inertial"]) },
+        { name: "qualityPreset", url: "quality", kind: enumString(["low", "high"]) },
+        { name: "showFps", url: "fps", kind: boolean() },
+        { name: "background", url: "bg", kind: boolean() },
       ],
     },
   },

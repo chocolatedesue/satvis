@@ -1,5 +1,6 @@
 import type { Viewer } from "@cesium/widgets";
 
+import { SATELLITE_COMPONENTS } from "../config/components";
 import { type SerializedGroundStation, useSatStore } from "../stores/sat";
 import { GroundStationEntity, type GroundStationPositionData } from "./GroundStationEntity";
 import { activeTargetEntries } from "./satelliteActivation";
@@ -30,7 +31,7 @@ export class SatelliteManager {
   // have a collection here; everything else stays a plain catalog entry.
   #active = new Map<string, SatelliteComponentCollection>();
 
-  availableComponents: string[] = ["Point", "Label", "Orbit", "Orbit track", "Ground track", "Sensor cone", "3D model"];
+  availableComponents: string[] = [...SATELLITE_COMPONENTS];
 
   pendingTrackedSatellite: string | undefined;
 

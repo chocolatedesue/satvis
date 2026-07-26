@@ -22,7 +22,15 @@ import utc from "dayjs/plugin/utc";
 import { usePostHog } from "../composables/usePostHog";
 import { useCesiumStore } from "../stores/cesium";
 import type { SerializedGroundStation } from "../stores/sat";
-import { type ImageryProviderEntry, imageryProviders, type TerrainProviderEntry, terrainProviders } from "./CesiumLayerProviders";
+import {
+  baseLayerNames,
+  type ImageryProviderEntry,
+  imageryProviders,
+  overlayLayerNames,
+  type TerrainProviderEntry,
+  terrainProviders,
+  terrainProviderNames as visibleTerrainProviderNames,
+} from "./CesiumLayerProviders";
 import type { GroundStationPositionData } from "./GroundStationEntity";
 import { SatelliteManager } from "./SatelliteManager";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
@@ -136,15 +144,11 @@ export class CesiumController {
   }
 
   get baseLayers(): string[] {
-    return Object.entries(imageryProviders)
-      .filter(([, val]) => val.base)
-      .map(([key]) => key);
+    return baseLayerNames();
   }
 
   get overlayLayers(): string[] {
-    return Object.entries(imageryProviders)
-      .filter(([, val]) => !val.base)
-      .map(([key]) => key);
+    return overlayLayerNames();
   }
 
   set imageryLayers(newLayerNames: string[]) {
@@ -176,9 +180,7 @@ export class CesiumController {
   }
 
   get terrainProviderNames(): string[] {
-    return Object.entries(terrainProviders)
-      .filter(([, val]) => val.visible ?? true)
-      .map(([key]) => key);
+    return visibleTerrainProviderNames();
   }
 
   set terrainProvider(terrainProviderName: string) {

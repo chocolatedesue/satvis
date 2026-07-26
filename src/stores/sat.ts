@@ -1,6 +1,9 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 
+import { SATELLITE_COMPONENTS } from "../config/components";
+import { closedStringList, enumString, groundStationList, plainString, stringList, tildeEscapedStringList } from "../modules/util/urlCodec";
+
 export interface SerializedGroundStation {
   lat: number;
   lon: number;
@@ -35,79 +38,17 @@ export const useSatStore = defineStore(
     };
   },
   {
+    // Wire format: docs/adr/0001-url-parameter-specification.md.
     urlsync: {
       enabled: true,
       config: [
-        {
-          name: "enabledComponents",
-          url: "elements",
-          serialize: (v) => (v as string[]).join(",").replaceAll(" ", "-"),
-          deserialize: (v) =>
-            v
-              .replaceAll("-", " ")
-              .split(",")
-              .filter((e) => e),
-          default: ["Point", "Label"],
-        },
-        {
-          name: "enabledSatellites",
-          url: "sats",
-          serialize: (v) => (v as string[]).join(",").replaceAll(" ", "~"),
-          deserialize: (v) =>
-            v
-              .replaceAll("~", " ")
-              .split(",")
-              .filter((e) => e),
-          default: [],
-        },
-        {
-          name: "disabledSatellites",
-          url: "xsats",
-          serialize: (v) => (v as string[]).join(",").replaceAll(" ", "~"),
-          deserialize: (v) =>
-            v
-              .replaceAll("~", " ")
-              .split(",")
-              .filter((e) => e),
-          default: [],
-        },
-        {
-          name: "enabledTags",
-          url: "tags",
-          serialize: (v) => (v as string[]).join(",").replaceAll(" ", "-"),
-          deserialize: (v) =>
-            v
-              .replaceAll("-", " ")
-              .split(",")
-              .filter((e) => e),
-          default: [],
-        },
-        {
-          name: "groundStations",
-          url: "gs",
-          serialize: (v) => (v as SerializedGroundStation[]).map((gs) => `${gs.lat.toFixed(4)},${gs.lon.toFixed(4)}${gs.name ? `,${gs.name}` : ""}`).join("_"),
-          deserialize: (v) =>
-            v.split("_").map((gs) => {
-              const g = gs.split(",");
-              // Preserve NaN for missing components; downstream callers filter these out.
-              return {
-                lat: g[0] === undefined ? Number.NaN : parseFloat(g[0]),
-                lon: g[1] === undefined ? Number.NaN : parseFloat(g[1]),
-                name: g[2],
-              };
-            }),
-          default: [],
-        },
-        {
-          name: "trackedSatellite",
-          url: "track",
-          default: "",
-        },
-        {
-          name: "overpassMode",
-          url: "overpass",
-          default: "elevation",
-        },
+        { name: "enabledComponents", url: "elements", kind: closedStringList(() => SATELLITE_COMPONENTS) },
+        { name: "enabledSatellites", url: "sats", kind: tildeEscapedStringList() },
+        { name: "disabledSatellites", url: "xsats", kind: tildeEscapedStringList() },
+        { name: "enabledTags", url: "tags", kind: stringList() },
+        { name: "groundStations", url: "gs", kind: groundStationList() },
+        { name: "trackedSatellite", url: "track", kind: plainString() },
+        { name: "overpassMode", url: "overpass", kind: enumString(["elevation", "swath"]) },
       ],
     },
   },

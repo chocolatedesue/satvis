@@ -1,22 +1,22 @@
-import type { PiniaPluginContext } from "pinia";
+// Keeps the url in step with the stores that opt in via their `urlsync`
+// option. All the encoding lives in ./urlCodec; this module is the adapter
+// that owns the impure parts — reading location.search, waiting for the
+// router, and writing history.
+//
+// The contract is docs/adr/0001-url-parameter-specification.md.
+
+import type { PiniaPluginContext, Store as PiniaStore } from "pinia";
 import type { Router } from "vue-router";
 
-export interface SyncConfigEntry {
-  name: string; // Object name/path in pinia store
-  url?: string; // Alternative name of url param, defaults to name
-  serialize?: (value: unknown) => string; // Convert state to url string
-  deserialize?: (value: string) => unknown; // Convert url string to state
-  valid?: (value: unknown) => boolean; // Run validation function after deserialization to filter invalid values
-  default?: unknown; // Default value (removes this value from url)
-}
+import { decode, encode, type FieldSpec } from "./urlCodec";
 
-// Extend Pinia plugin options to include our custom urlsync config
+export type { FieldKind, FieldSpec } from "./urlCodec";
+
 interface UrlSyncConfig {
   enabled?: boolean;
-  config: SyncConfigEntry[];
+  config: FieldSpec[];
 }
 
-// Extend DefineStoreOptions to include urlsync
 declare module "pinia" {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   export interface DefineStoreOptionsBase<S, Store> {
@@ -24,110 +24,127 @@ declare module "pinia" {
   }
 }
 
-// Extended store type with our custom properties
-interface ExtendedStore {
+// Injected by the plugin registered ahead of this one in src/app.ts.
+interface ExtendedStore extends PiniaStore {
   router: Router;
   customConfig: Record<string, Record<string, unknown>>;
-  defaults: Record<string, unknown>;
-  $id: string;
   [key: string]: unknown;
 }
 
-const defaultSerialize = (v: unknown) => String(v);
-const defaultDeserialize = (v: string) => String(v);
-
-function resolve(path: string | string[], obj: Record<string, unknown>, separator = "."): unknown {
-  const properties = Array.isArray(path) ? path : path.split(separator);
-  return properties.reduce((prev: unknown, curr: string) => {
-    if (prev && typeof prev === "object" && curr in prev) {
-      return (prev as Record<string, unknown>)[curr];
-    }
-    return undefined;
-  }, obj);
+interface Registration {
+  store: ExtendedStore;
+  specs: FieldSpec[];
+  // Store keys are qualified with the store id so two stores can use the same
+  // key name without colliding in the shared rebuild below.
+  qualified: FieldSpec[];
+  // Preset-merged values, captured at hydration. Undefined until then, which
+  // is also how we know this store's parameters must not be rewritten yet.
+  defaults?: Record<string, unknown>;
 }
 
-function urlToState(store: ExtendedStore, syncConfig: SyncConfigEntry[]): void {
-  const { router, customConfig } = store;
-  const route = router.currentRoute.value;
-  store.defaults = {};
+// Every synced store, so one write can rebuild the whole query. Without this
+// the url is an integration channel between stores, each preserving the
+// other's parameters by reading them back out of location.search.
+const registry = new Map<string, Registration>();
 
-  // Override store default values with custom app config
-  const storeConfig = customConfig[store.$id];
-  if (storeConfig) {
-    Object.entries(storeConfig).forEach(([key, val]) => {
-      store[key] = val;
-    });
-  }
+const paramOf = (spec: FieldSpec) => spec.url ?? spec.name;
+const qualify = (storeId: string, specs: FieldSpec[]): FieldSpec[] => specs.map((spec) => ({ ...spec, name: `${storeId}.${spec.name}` }));
 
-  syncConfig.forEach((config: SyncConfigEntry) => {
-    const param = config.url || config.name;
-    const deserialize = config.deserialize || defaultDeserialize;
-
-    // Save default value of merged app config
-    store.defaults[config.name] = store[config.name];
-
-    const query = { ...route.query };
-    if (!(param in query)) {
-      return;
-    }
-    try {
-      console.info("Parse url param", param, route.query[param]);
-      const queryValue = query[param];
-      if (typeof queryValue !== "string") {
-        throw new TypeError("Query param is not a string");
-      }
-      const value = deserialize(queryValue);
-      if ("valid" in config && config.valid && !config.valid(value)) {
-        throw new TypeError("Validation failed");
-      }
-      // TODO: Resolve nested values
-      store[config.name] = value;
-    } catch (error) {
-      console.error(`Invalid url param ${param} ${route.query[param]}: ${error}`);
-      delete query[param];
-      router.replace({ query });
-    }
-  });
+function currentQuery(): Record<string, string> {
+  return Object.fromEntries(new URLSearchParams(window.location.search));
 }
 
-function stateToUrl(store: ExtendedStore, syncConfig: SyncConfigEntry[]): void {
-  // Defaults are set by urlToState() once the router is ready; skip until then
-  // to avoid `in undefined` and pushing state before the url has been read.
-  if (!store.defaults) {
+// Rebuild the entire query from every hydrated store. Parameters belonging to
+// stores that have not hydrated yet are treated as foreign and preserved, so a
+// store that is created late cannot have its url read out from under it.
+function writeQuery(history: "push" | "replace"): void {
+  const hydrated = [...registry.values()].filter((entry) => entry.defaults !== undefined);
+  if (hydrated.length === 0) {
     return;
   }
-  const params = new URLSearchParams(location.search);
-  syncConfig.forEach((config: SyncConfigEntry) => {
-    const value = resolve(config.name, store as Record<string, unknown>);
-    const param = config.url || config.name;
-    const serialize = config.serialize || defaultSerialize;
-    console.info("State update", config.name, value);
 
-    if (config.name in store.defaults && serialize(store.defaults[config.name]) === serialize(value)) {
-      params.delete(param);
-    } else {
-      params.set(param, serialize(value));
+  const owned = new Set(hydrated.flatMap((entry) => entry.specs.map(paramOf)));
+  const foreign = Object.fromEntries(Object.entries(currentQuery()).filter(([param]) => !owned.has(param)));
+
+  const state: Record<string, unknown> = {};
+  const defaults: Record<string, unknown> = {};
+  const schema: FieldSpec[] = [];
+  for (const entry of hydrated) {
+    for (const [index, spec] of entry.specs.entries()) {
+      const qualified = entry.qualified[index]!;
+      state[qualified.name] = entry.store[spec.name];
+      schema.push(qualified);
     }
-  });
-  window.history.pushState({}, "", `?${params.toString().replaceAll("%2C", ",")}`);
+    Object.assign(defaults, entry.defaults);
+  }
+
+  const next = encode(state, defaults, schema, foreign);
+  // A write that changes nothing is not a state change and must not become a
+  // history entry — catalogRevision and pickMode both fire $subscribe.
+  if (next === window.location.search) {
+    return;
+  }
+  const url = next === "" ? window.location.pathname : next;
+  if (history === "replace") {
+    window.history.replaceState({}, "", url);
+  } else {
+    window.history.pushState({}, "", url);
+  }
+}
+
+function hydrate(entry: Registration): void {
+  const { store, specs } = entry;
+
+  // The preset supplies this route's defaults, so it is applied before the
+  // defaults are captured and before the url is read.
+  const preset = store.customConfig[store.$id];
+  if (preset) {
+    for (const [key, value] of Object.entries(preset)) {
+      store[key] = value;
+    }
+  }
+
+  const defaults: Record<string, unknown> = {};
+  for (const [index, spec] of specs.entries()) {
+    defaults[entry.qualified[index]!.name] = store[spec.name];
+  }
+  entry.defaults = defaults;
+
+  const { patch, invalid } = decode(currentQuery(), entry.qualified, defaults);
+  for (const [index, spec] of specs.entries()) {
+    store[spec.name] = patch[entry.qualified[index]!.name];
+  }
+  for (const param of invalid) {
+    console.warn(`Ignoring invalid url parameter: ${param}`);
+  }
+
+  // Normalise the url to what the state actually is — dropping anything
+  // invalid and anything that turned out to equal a default. Replace rather
+  // than push: arriving at a page is not a state change.
+  writeQuery("replace");
 }
 
 function createUrlSync({ options, store }: PiniaPluginContext): void {
-  // console.info("createUrlSync", options);
-  if (!options.urlsync?.enabled && !options.urlsync?.config) {
+  const urlsync = options.urlsync;
+  if (!urlsync?.enabled && !urlsync?.config) {
     return;
   }
 
-  const extendedStore = store as unknown as ExtendedStore;
+  const extended = store as unknown as ExtendedStore;
+  const entry: Registration = {
+    store: extended,
+    specs: urlsync.config,
+    qualified: qualify(store.$id, urlsync.config),
+  };
+  registry.set(store.$id, entry);
 
-  // Set state from url params on page load
-  extendedStore.router.isReady().then(() => {
-    urlToState(extendedStore, options.urlsync!.config);
-  });
+  void extended.router.isReady().then(() => hydrate(entry));
 
-  // Subscribe to store updates and sync them to url params
   store.$subscribe(() => {
-    stateToUrl(extendedStore, options.urlsync!.config);
+    if (entry.defaults === undefined) {
+      return;
+    }
+    writeQuery("push");
   });
 }
 

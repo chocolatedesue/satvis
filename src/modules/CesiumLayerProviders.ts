@@ -130,3 +130,29 @@ export const terrainProviders: Record<string, TerrainProviderEntry> = {
     visible: false,
   },
 };
+
+// Name accessors, so the url schema and CesiumController share one source of
+// truth for what is selectable instead of restating the list.
+
+export function imageryProviderNames(): string[] {
+  return Object.keys(imageryProviders);
+}
+
+export function baseLayerNames(): string[] {
+  return Object.entries(imageryProviders)
+    .filter(([, entry]) => entry.base)
+    .map(([name]) => name);
+}
+
+export function overlayLayerNames(): string[] {
+  return Object.entries(imageryProviders)
+    .filter(([, entry]) => !entry.base)
+    .map(([name]) => name);
+}
+
+/** Terrain providers a user may select. `ArcGIS` is registered but hidden. */
+export function terrainProviderNames(): string[] {
+  return Object.entries(terrainProviders)
+    .filter(([, entry]) => entry.visible ?? true)
+    .map(([name]) => name);
+}
