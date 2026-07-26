@@ -306,6 +306,8 @@ export class SatelliteManager {
     return "";
   }
 
+  // Read-only: what the globe is tracking is derived from Cesium, and asking
+  // for a different one goes through reconcile like every other desire.
   get trackedSatellite(): string {
     for (const sat of this.#active.values()) {
       if (sat.isTracked) {
@@ -313,29 +315,6 @@ export class SatelliteManager {
       }
     }
     return "";
-  }
-
-  set trackedSatellite(name: string | undefined) {
-    if (!name) {
-      if (this.trackedSatellite) {
-        this.viewer.trackedEntity = undefined;
-      }
-      this.pendingTrackedSatellite = undefined;
-      // Dispose a satellite that was kept alive only by tracking.
-      this.#reconcileActive();
-      return;
-    }
-    if (name === this.trackedSatellite) {
-      return;
-    }
-
-    // Ensure the satellite is instantiated (tracking alone keeps it alive) and
-    // track it. If the name is unknown to the catalog (yet?), reconciling is a
-    // no-op and the pending name survives until a matching entry is loaded —
-    // coverage kicks off the group loads that can make it resolvable.
-    this.pendingTrackedSatellite = name;
-    void this.#ensureCatalogCoverage();
-    this.#reconcileActive();
   }
 
   // Active collections that have created components (i.e. are visible).
