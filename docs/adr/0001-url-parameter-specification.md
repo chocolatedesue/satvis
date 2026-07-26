@@ -15,14 +15,19 @@ The contract is **read-compatible**, not byte-frozen: every URL that works today
 working, but emitted output is allowed to differ where the old form bought nothing. The
 one place that applies is space escaping — see [String lists](#string-lists).
 
-**This describes the target contract, not the current code.** The implementation is
-`src/modules/util/pinia-plugin-url-sync.ts` plus the `urlsync` blocks in
-`src/stores/*.ts`; it does not yet conform. Known deviations at the time of writing:
-`fps` has no deserializer, nothing validates on serialize, invalid enum values are stored
-and diverge from the scene, list parameters still carry the two ad-hoc space escapes, the
-whole-query rebuild does not exist (foreign parameters survive only because `stateToUrl`
-reads them back out of `location.search`), `time` is input-only and never emitted, and no
-`popstate` path re-applies state.
+The implementation is `src/modules/util/urlCodec.ts` (the pure part) behind
+`src/modules/util/pinia-plugin-url-sync.ts` (the adapter), with the per-parameter schema
+declared in the `urlsync` blocks of `src/stores/*.ts`.
+
+**Not everything here is built yet.** Outstanding:
+
+- History still goes through raw `pushState` rather than vue-router, so
+  `router.currentRoute` goes stale after the first write and no `popstate` path re-applies
+  state — the back button changes the url without changing the scene.
+- `time` is input-only: read once at load, never emitted, and preserved across rebuilds
+  only by the foreign-parameter rule. Nothing implements live vs pinned.
+- The "at most one base layer" rule is unenforced; it belongs to the store action that
+  does not exist yet.
 
 ## Parameters
 
@@ -72,8 +77,8 @@ encode as `+` — but it must never be escaped as `-`.
 `layers` items are validated against the leading segment before `_`. Base layers:
 `Offline`, `OfflineHighres`, `ArcGis`, `OSM`, `Topo`, `BlackMarble`. Overlays: `Tiles`,
 `GOES-IR`, `Nextrad`. The optional `_<alpha>` suffix sets that layer's opacity and has no
-UI control. The accepted set is derived from the imagery-provider registry, not restated
-— the current hardcoded copy in `src/stores/cesium.ts` is a duplicate that will drift.
+UI control. The accepted set is derived from the imagery-provider registry
+(`imageryProviderNames`), not restated, so it cannot drift.
 
 At most one base layer may be active. When a URL supplies several, the **last in list
 order wins** and earlier base layers are dropped; all overlays are preserved regardless.
@@ -206,20 +211,21 @@ the parser.
 
 ## Consequences
 
-`?fps=false` changes meaning. Today it deserializes to the truthy string `"false"` and
-switches the counter **on**; with a boolean kind the link will do what it says. This is
-the one place an existing link changes behaviour rather than merely continuing to work.
+`?fps=false` changed meaning. It used to deserialize to the truthy string `"false"` and
+switch the counter **on**; the boolean kind makes the link do what it says. This is the
+one place an existing link changes behaviour rather than merely continuing to work.
 
-`?terrain=Garbage` and its siblings stop diverging. Today the store accepts the value,
-Cesium logs `Unknown terrain provider` and no-ops, and the store, URL and radio buttons
-all report a terrain that was never applied. Validation will reject it on the way in.
+`?terrain=Garbage` and its siblings stopped diverging. The store used to accept the
+value, Cesium logged `Unknown terrain provider` and no-opped, and the store, URL and radio
+buttons all reported a terrain that was never applied. Validation now rejects it on the
+way in.
 
-Ground stations stop being stored as `NaN`. The store currently preserves `NaN`
-coordinates for downstream callers to filter, and that filter
-(`CesiumController.setGroundStations`) tests `gs.lat && gs.lon`, which also discards `0` —
-silently dropping any station on the equator or the Greenwich meridian. Rejecting
-malformed stations at parse time makes that filter unnecessary rather than merely
-correct.
+Ground stations are no longer stored as `NaN`; malformed ones are dropped at parse time.
+That makes `CesiumController.setGroundStations`'s `gs.lat && gs.lon` filter unnecessary,
+but it is still in place and still discards `0`, so a station on the equator or the
+Greenwich meridian is erased — verified in the running app: `{lat: 0, lon: 11.5}` round
+trips to an empty store. Removing the filter belongs with the write-back it defends
+against.
 
 Emitted URLs change shape for `elements`, `sats` and `xsats`: `Sensor-cone` becomes
 `Sensor+cone`, `NOAA~19` becomes `NOAA+19`. Existing links keep working through the read
