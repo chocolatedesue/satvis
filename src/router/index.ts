@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory, type Router } from "vue-router";
+import { createRouter, createWebHistory, type Router, START_LOCATION } from "vue-router";
 
 import Satvis from "../components/Satvis.vue";
 import { usePostHog } from "../composables/usePostHog";
@@ -26,7 +26,14 @@ export const router: Router = createRouter({
  * Note: Initial load is handled in src/app.ts before mounting
  */
 export function setupRouterGuards(routerInstance: Router, cc: CesiumController): void {
-  routerInstance.beforeEach((to, from, next) => {
+  routerInstance.beforeEach((to, from) => {
+    // Every url-sync write is a same-path navigation, so without this the
+    // preset would be re-registered on every checkbox toggle. START_LOCATION
+    // also reports path "/", so the initial load has to be let through
+    // explicitly or the default route never registers its element sets.
+    if (from !== START_LOCATION && to.path === from.path) {
+      return true;
+    }
     console.log(`Navigating to ${to.path} from ${from.path}`);
 
     // Get the new configuration preset based on the target route
@@ -39,7 +46,7 @@ export function setupRouterGuards(routerInstance: Router, cc: CesiumController):
     // groups required by the current activation state are actually fetched.
     cc.sats.loadElementSets(preset.elements);
 
-    next();
+    return true;
   });
 }
 

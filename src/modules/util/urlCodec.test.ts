@@ -1,7 +1,20 @@
 import { describe, expect, test } from "vitest";
 
 import { SATELLITE_COMPONENTS } from "../../config/components";
-import { boolean, closedStringList, decode, encode, enumString, groundStationList, layerList, plainString, stringList, tildeEscapedStringList, type FieldSpec } from "./urlCodec";
+import {
+  boolean,
+  closedStringList,
+  decode,
+  encode,
+  enumString,
+  groundStationList,
+  layerList,
+  plainString,
+  queryString,
+  stringList,
+  tildeEscapedStringList,
+  type FieldSpec,
+} from "./urlCodec";
 
 const components = () => SATELLITE_COMPONENTS as readonly string[];
 const providers = () => ["Offline", "OfflineHighres", "ArcGis", "OSM", "Topo", "BlackMarble", "Tiles", "GOES-IR", "Nextrad"];
@@ -237,27 +250,28 @@ describe("decode", () => {
 
 describe("encode", () => {
   test("omits everything that matches the default", () => {
-    expect(encode(DEFAULTS, DEFAULTS, SCHEMA)).toBe("");
+    expect(encode(DEFAULTS, DEFAULTS, SCHEMA)).toEqual({});
   });
 
   test("emits only what deviates", () => {
-    expect(encode({ ...DEFAULTS, enabledTags: ["Weather", "Stations"] }, DEFAULTS, SCHEMA)).toBe("?tags=Weather,Stations");
+    expect(encode({ ...DEFAULTS, enabledTags: ["Weather", "Stations"] }, DEFAULTS, SCHEMA)).toEqual({ tags: "Weather,Stations" });
   });
 
   test("preserves parameters it does not own", () => {
-    const query = encode({ ...DEFAULTS, showFps: true }, DEFAULTS, SCHEMA, { time: "2026-07-26T20:46Z", utm_source: "x" });
-    expect(query).toContain("time=2026-07-26T20%3A46Z");
-    expect(query).toContain("utm_source=x");
-    expect(query).toContain("fps=true");
+    const params = encode({ ...DEFAULTS, showFps: true }, DEFAULTS, SCHEMA, { time: "2026-07-26T20:46Z", utm_source: "x" });
+    expect(params).toEqual({ time: "2026-07-26T20:46Z", utm_source: "x", fps: "true" });
   });
 
   test("omits a value it cannot represent rather than corrupting it", () => {
-    const query = encode({ ...DEFAULTS, enabledSatellites: ["FOO~BAR"] }, DEFAULTS, SCHEMA);
-    expect(query).toBe("");
+    expect(encode({ ...DEFAULTS, enabledSatellites: ["FOO~BAR"] }, DEFAULTS, SCHEMA)).toEqual({});
   });
 
-  test("leaves commas unescaped for readability", () => {
-    expect(encode({ ...DEFAULTS, enabledTags: ["a", "b"] }, DEFAULTS, SCHEMA)).toBe("?tags=a,b");
+  test("leaves commas unescaped in the wire form", () => {
+    expect(queryString(encode({ ...DEFAULTS, enabledTags: ["a", "b"] }, DEFAULTS, SCHEMA))).toBe("?tags=a,b");
+  });
+
+  test("the wire form is empty when nothing deviates", () => {
+    expect(queryString(encode(DEFAULTS, DEFAULTS, SCHEMA))).toBe("");
   });
 });
 
@@ -271,8 +285,9 @@ describe("round trip", () => {
       showFps: true,
       layers: ["ArcGis_0.5", "Nextrad"],
     };
-    const query = encode(state, DEFAULTS, SCHEMA);
-    const parsed = Object.fromEntries(new URLSearchParams(query));
+    const params = encode(state, DEFAULTS, SCHEMA);
+    // through the wire form and back, so the round trip covers encoding too
+    const parsed = Object.fromEntries(new URLSearchParams(queryString(params)));
     expect(decode(parsed, SCHEMA, DEFAULTS).patch).toEqual(state);
   });
 });

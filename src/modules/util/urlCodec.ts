@@ -267,15 +267,23 @@ export function decode(query: Query, schema: readonly FieldSpec[], defaults: Rea
 }
 
 /**
- * State -> query string, including the leading "?" (or "" when empty).
+ * State -> query parameters. Returns the parameter map rather than a string:
+ * turning that into a url is the router's job, and its serializer already
+ * matches the wire format this codec targets.
+ *
  * `foreign` carries parameters this codec does not own — they are preserved
  * verbatim rather than eaten by the rebuild.
  */
-export function encode(state: Readonly<Record<string, unknown>>, defaults: Readonly<Record<string, unknown>>, schema: readonly FieldSpec[], foreign: Query = {}): string {
-  const params = new URLSearchParams();
+export function encode(
+  state: Readonly<Record<string, unknown>>,
+  defaults: Readonly<Record<string, unknown>>,
+  schema: readonly FieldSpec[],
+  foreign: Query = {},
+): Record<string, string> {
+  const params: Record<string, string> = {};
   for (const [key, value] of Object.entries(foreign)) {
     if (value !== undefined) {
-      params.set(key, value);
+      params[key] = value;
     }
   }
 
@@ -286,19 +294,26 @@ export function encode(state: Readonly<Record<string, unknown>>, defaults: Reado
     if (!formatted.ok) {
       // Unrepresentable: leave the parameter out rather than emit something
       // that reads back as a different value.
-      params.delete(param);
+      delete params[param];
       continue;
     }
     const fallback = kind.format(defaults[spec.name]);
     if (fallback.ok && fallback.value === formatted.value) {
-      params.delete(param);
+      delete params[param];
       continue;
     }
-    params.set(param, formatted.value);
+    params[param] = formatted.value;
   }
 
-  // Commas are delimiters here and can never appear inside a value, so leaving
-  // them unescaped is safe and keeps urls readable.
-  const query = params.toString().replaceAll("%2C", ",");
+  return params;
+}
+
+/**
+ * The wire form of a parameter map, for tests and for anything that needs the
+ * string rather than the map. Commas are delimiters and can never appear
+ * inside a value, so leaving them unescaped is safe and keeps urls readable.
+ */
+export function queryString(params: Readonly<Record<string, string>>): string {
+  const query = new URLSearchParams(params).toString().replaceAll("%2C", ",");
   return query === "" ? "" : `?${query}`;
 }

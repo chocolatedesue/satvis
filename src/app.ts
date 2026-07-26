@@ -6,7 +6,7 @@ import App from "./App.vue";
 import { usePWAUpdate } from "./composables/usePWAUpdate";
 import { getConfigPreset } from "./config/presets";
 import { CesiumController } from "./modules/CesiumController";
-import piniaUrlSync from "./modules/util/pinia-plugin-url-sync";
+import piniaUrlSync from "./modules/util/urlSync";
 import { router, setupRouterGuards } from "./router";
 
 declare module "vue" {
