@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 
-import { activeTargetEntries, isEnabledByTag } from "../modules/satelliteActivation";
-import { CatalogEntry, SatelliteCatalog } from "../modules/SatelliteCatalog";
-import type { GpRecord } from "../modules/util/gp";
+import { activeTargetEntries, isEnabledByTag } from "./satelliteActivation";
+import { CatalogEntry, SatelliteCatalog } from "./SatelliteCatalog";
+import type { GpRecord } from "./util/gp";
 
 // Minimal CatalogEntry factory — activeTargetEntries only reads key/name/tags.
 // CatalogEntry needs a catalog back-reference for lazy metadata resolution, so

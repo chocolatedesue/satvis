@@ -9,10 +9,6 @@ node_modules/
 /auto-imports.d.ts
 /components.d.ts
 
-cypress/screenshots/
-cypress/videos/
-cypress/fixtures/
-cypress/support/
 report/
 
 # Environment variables
@@ -20,3 +16,7 @@ report/
 .env.local
 .env.development
 .env.production
+
+# Claude Code: track only the launch.json blueprint (worktrees/ stays ignored)
+.claude/*
+!.claude/launch.json

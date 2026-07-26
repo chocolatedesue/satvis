@@ -53,10 +53,33 @@ export class SatelliteManager {
     });
   }
 
-  // Load element sets for all preset sources via the catalog (resolves the GP
-  // base once, fetches all in parallel, per-URL errors logged and skipped).
+  // Register the preset's element sets with the catalog. Groups are NOT
+  // fetched here — only the ones required by the current activation state
+  // (enabled tags, URL-enabled/tracked names) load now; the rest load on
+  // demand when their tag is enabled or the catalog browser needs them.
   loadElementSets(sourceTagList: ReadonlyArray<readonly [string, string[]]>): Promise<void> {
-    return this.catalog.loadGroups(sourceTagList);
+    this.catalog.registerGroups(sourceTagList);
+    // Registered groups become visible in the browser immediately; their
+    // estimated counts follow once the group index arrives.
+    this.#bumpCatalogRevision();
+    void this.catalog.ensureIndex().then(() => this.#bumpCatalogRevision());
+    return this.#ensureCatalogCoverage();
+  }
+
+  // Load the catalog groups the current activation state depends on: groups
+  // carrying an enabled tag, plus everything if a name-based activation
+  // (URL-enabled sats, pending track) cannot be resolved yet — the group of an
+  // unknown name is unknowable without loading.
+  #ensureCatalogCoverage(): Promise<void> {
+    const loads = [this.catalog.ensureTags(this.#enabledTags)];
+    const names = [...this.#enabledSatellites];
+    if (this.pendingTrackedSatellite) {
+      names.push(this.pendingTrackedSatellite);
+    }
+    if (names.some((name) => this.catalog.getByName(name) === undefined)) {
+      loads.push(this.catalog.ensureAll());
+    }
+    return Promise.all(loads).then(() => undefined);
   }
 
   // Passthrough for custom inline records (e.g. console/testing usage).
@@ -109,7 +132,7 @@ export class SatelliteManager {
       if (this.groundStationAvailable) {
         sat.groundStations = this.#groundStations;
       }
-      sat.props.overpassMode = this.#overpassMode;
+      sat.props.passPredictor.mode = this.#overpassMode;
       sat.show(this.#enabledComponents);
       this.#active.set(key, sat);
     }
@@ -169,8 +192,10 @@ export class SatelliteManager {
 
     // Ensure the satellite is instantiated (tracking alone keeps it alive) and
     // track it. If the name is unknown to the catalog (yet?), reconciling is a
-    // no-op and the pending name survives until a matching entry is loaded.
+    // no-op and the pending name survives until a matching entry is loaded —
+    // coverage kicks off the group loads that can make it resolvable.
     this.pendingTrackedSatellite = name;
+    void this.#ensureCatalogCoverage();
     this.#reconcileActive();
   }
 
@@ -179,8 +204,7 @@ export class SatelliteManager {
     return [...this.#active.values()].filter((sat) => sat.created);
   }
 
-  // Active-only lookup. In-repo callers (InfoBoxController, CesiumController,
-  // GroundStationEntity) only pass selected/tracked/active names; console users
+  // Active-only lookup for selected/tracked/active names; console users
   // wanting arbitrary lookups should use `cc.sats.catalog.getByName`.
   getSatellite(name: string): SatelliteComponentCollection | undefined {
     for (const sat of this.#active.values()) {
@@ -201,6 +225,7 @@ export class SatelliteManager {
     const satStore = useSatStore();
     satStore.enabledSatellites = newSats;
 
+    void this.#ensureCatalogCoverage();
     this.#reconcileActive();
   }
 
@@ -232,6 +257,7 @@ export class SatelliteManager {
     const satStore = useSatStore();
     satStore.enabledTags = newTags;
 
+    void this.#ensureCatalogCoverage();
     this.#reconcileActive();
   }
 
@@ -298,6 +324,13 @@ export class SatelliteManager {
   }
 
   set groundStations(newGroundStations: GroundStationEntity[]) {
+    // Remove replaced ground-station entities from the globe. Instances are
+    // recreated on every set (addGroundStation triggers a second one through
+    // the store round-trip via the Satvis.vue watcher); without this the old
+    // billboards linger, and a click picks the stale entity instead of the
+    // one owned by this manager.
+    const retained = new Set(newGroundStations);
+    this.#groundStations.filter((gs) => !retained.has(gs)).forEach((gs) => gs.hide());
     this.#groundStations = newGroundStations;
 
     // Set groundstation for all active satellites
@@ -322,11 +355,11 @@ export class SatelliteManager {
   set overpassMode(newMode: string) {
     this.#overpassMode = newMode;
     this.activeSatellites.forEach((sat) => {
-      sat.props.overpassMode = newMode;
-      // Clear and update passes when a ground station is set to force recalculation
-      if (sat.props.groundStationAvailable) {
-        sat.props.clearPasses();
-        sat.props.updatePasses(this.viewer.clock.currentTime);
+      // The mode setter clears the predictor's window on change; recompute
+      // eagerly so pass-dependent visuals update without waiting for a read.
+      sat.props.passPredictor.mode = newMode;
+      if (sat.props.passPredictor.groundStationAvailable) {
+        sat.props.passPredictor.passes(this.viewer.clock.currentTime);
       }
     });
   }

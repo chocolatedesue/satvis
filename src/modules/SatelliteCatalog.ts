@@ -6,7 +6,7 @@
 
 import { appMetadataConfig, type MetadataRule, type ResolvedMetadata } from "../config/satelliteMetadata";
 import { parseGpPayload, recordName, recordSatnum, type GpRecord } from "./util/gp";
-import { resolveGpBase, resolveGroupUrl, resolveMetadataUrl } from "./util/gpSource";
+import { fetchGpGroup, fetchGpIndex, fetchGpMetadata } from "./util/gpSource";
 
 // A single known satellite. Created by SatelliteCatalog.addRecords, which owns
 // the identity/tag indices; the entry keeps a back-reference to its catalog so
@@ -64,6 +64,19 @@ interface CompiledRule {
   pattern: RegExp | undefined;
 }
 
+// A preset group source known to the catalog but fetched lazily: registered
+// up front (so the UI can list it), loaded only once one of its tags becomes
+// active, it is expanded/searched in the browser, or an unresolved satellite
+// name forces a full load.
+interface RegisteredGroup {
+  source: string;
+  tags: string[];
+  loaded: boolean;
+  // Memoized in-flight/completed load; cleared on failure so a later ensure
+  // call retries.
+  load: Promise<void> | undefined;
+}
+
 export type CatalogChangeCallback = (entries: CatalogEntry[]) => void;
 
 export class SatelliteCatalog {
@@ -102,50 +115,101 @@ export class SatelliteCatalog {
     this.#changeCallbacks.forEach((cb) => cb(entries));
   }
 
-  // Load all preset groups: resolve the base once, then fetch all groups in
-  // parallel. Per-URL errors are logged and skipped (log-and-continue, matching
-  // today's behavior). onChange fires once per group batch.
-  async loadGroups(sourceTagList: ReadonlyArray<readonly [string, string[]]>): Promise<void> {
-    const base = await resolveGpBase();
-    // Fetch metadata BEFORE the group files so ground tracks / cones aren't
-    // created with stale widths. 404/invalid is log-and-continue (app defaults).
-    await this.#loadMetadata(base);
-    await Promise.all(sourceTagList.map(([source, tags]) => this.#loadGroupWithBase(source, tags, base)));
+  // Lazily-loaded preset groups by source name, plus per-source record counts
+  // from the group index (display estimates for not-yet-loaded groups).
+  #registry = new Map<string, RegisteredGroup>();
+
+  #indexCounts = new Map<string, number>();
+
+  #indexLoad: Promise<void> | undefined;
+
+  #metadataLoad: Promise<void> | undefined;
+
+  // Register preset groups without fetching them. Repeated registration (e.g.
+  // navigating between presets) merges tags; already-loaded groups stay loaded.
+  registerGroups(sourceTagList: ReadonlyArray<readonly [string, string[]]>): void {
+    for (const [source, tags] of sourceTagList) {
+      const existing = this.#registry.get(source);
+      if (existing) {
+        existing.tags = mergeTags(existing.tags, tags);
+        continue;
+      }
+      this.#registry.set(source, { source, tags: [...tags], loaded: false, load: undefined });
+    }
+  }
+
+  // Fetch the group index (names + record counts) so unloaded groups can show
+  // an estimated count in the UI. Best-effort: an unavailable index just leaves
+  // the estimates at 0.
+  ensureIndex(): Promise<void> {
+    this.#indexLoad ??= fetchGpIndex().then((index) => {
+      for (const group of index) {
+        if (typeof group.count === "number") {
+          this.#indexCounts.set(group.name, group.count);
+        }
+      }
+    });
+    return this.#indexLoad;
+  }
+
+  // Load every registered group carrying one of the given tags. Loads are
+  // memoized per group; per-group errors are logged and skipped.
+  ensureTags(tags: readonly string[]): Promise<void> {
+    const wanted = new Set(tags);
+    const loads = [...this.#registry.values()].filter((group) => group.tags.some((tag) => wanted.has(tag))).map((group) => this.#ensureGroup(group));
+    return Promise.all(loads).then(() => undefined);
+  }
+
+  // Load every registered group (needed for cross-group search and for
+  // satellite names whose group is unknown, e.g. URL-enabled sats).
+  ensureAll(): Promise<void> {
+    const loads = [...this.#registry.values()].map((group) => this.#ensureGroup(group));
+    return Promise.all(loads).then(() => undefined);
+  }
+
+  // True once every registered group carrying the tag has loaded (trivially
+  // true for tags without a registered source, e.g. custom records).
+  isTagLoaded(tag: string): boolean {
+    for (const group of this.#registry.values()) {
+      if (!group.loaded && group.tags.includes(tag)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  #ensureGroup(group: RegisteredGroup): Promise<void> {
+    group.load ??= this.#loadRegisteredGroup(group);
+    return group.load;
+  }
+
+  async #loadRegisteredGroup(group: RegisteredGroup): Promise<void> {
+    // Fetch metadata (once) BEFORE the first group file so ground tracks /
+    // cones aren't created with stale widths.
+    await (this.#metadataLoad ??= this.#loadMetadata());
+    try {
+      const text = await fetchGpGroup(group.source);
+      const records = parseGpPayload(text);
+      const changed = this.addRecords(records, group.tags);
+      group.loaded = true;
+      this.#notifyChange(changed);
+    } catch (error) {
+      console.log(error);
+      // Clear the memoized load so a later ensure call retries.
+      group.load = undefined;
+    }
   }
 
   // Fetch and merge remote metadata rules. Tolerant of worker-less / older
   // deployments: any failure (404, network, invalid body) logs and continues
   // with the built-in app defaults.
-  async #loadMetadata(base: string): Promise<void> {
-    const url = resolveMetadataUrl(base);
+  async #loadMetadata(): Promise<void> {
     try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(response.statusText);
-      }
-      const remote = (await response.json()) as unknown;
+      const remote = await fetchGpMetadata();
       if (!Array.isArray(remote)) {
         throw new Error("metadata payload is not an array");
       }
       this.mergeMetadataConfig(remote as MetadataRule[]);
-    } catch (error) {
-      console.log(error);
-    }
-  }
-
-  async #loadGroupWithBase(source: string, tags: string[], base: string): Promise<void> {
-    const url = resolveGroupUrl(source, base);
-    try {
-      // Plain fetch (NOT mode:"no-cors") — the API is same-origin; an opaque
-      // response would have an unreadable body and break parsing.
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(response.statusText);
-      }
-      const text = await response.text();
-      const records = parseGpPayload(text);
-      const changed = this.addRecords(records, tags);
-      this.#notifyChange(changed);
     } catch (error) {
       console.log(error);
     }
@@ -243,8 +307,25 @@ export class SatelliteCatalog {
     return false;
   }
 
+  // All known groups: tags with loaded entries (exact counts) plus registered
+  // but not-yet-loaded sources (estimated counts from the group index, 0 until
+  // the index arrives). Estimates may double-count satellites shared with a
+  // loaded group; they are replaced by exact counts once the group loads.
   get groups(): { tag: string; count: number }[] {
-    return [...this.#byTag.entries()].map(([tag, entries]) => ({ tag, count: entries.size }));
+    const counts = new Map<string, number>();
+    for (const [tag, entries] of this.#byTag) {
+      counts.set(tag, entries.size);
+    }
+    for (const group of this.#registry.values()) {
+      if (group.loaded) {
+        continue;
+      }
+      const estimate = this.#indexCounts.get(group.source) ?? 0;
+      for (const tag of group.tags) {
+        counts.set(tag, (counts.get(tag) ?? 0) + estimate);
+      }
+    }
+    return [...counts.entries()].map(([tag, count]) => ({ tag, count }));
   }
 
   entriesWithTag(tag: string): CatalogEntry[] {

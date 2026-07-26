@@ -9,7 +9,7 @@
         </UTooltip>
         <UTooltip text="Satellite elements">
           <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('sat')">
-            <font-awesome-icon icon="fas fa-layer-group" />
+            <UIcon name="fa6-solid:layer-group" />
           </button>
         </UTooltip>
         <UTooltip text="Ground station">
@@ -19,17 +19,17 @@
         </UTooltip>
         <UTooltip text="Map">
           <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('map')">
-            <font-awesome-icon icon="fas fa-globe-africa" />
+            <UIcon name="fa6-solid:earth-africa" />
           </button>
         </UTooltip>
         <UTooltip v-if="cc.minimalUI" text="Mobile">
           <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('ios')">
-            <font-awesome-icon icon="fas fa-mobile-alt" />
+            <UIcon name="fa6-solid:mobile-screen-button" />
           </button>
         </UTooltip>
         <UTooltip text="Debug">
           <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('dbg')">
-            <font-awesome-icon icon="fas fa-hammer" />
+            <UIcon name="fa6-solid:hammer" />
           </button>
         </UTooltip>
       </div>
@@ -184,15 +184,18 @@
     <div id="toolbarRight">
       <UTooltip v-if="showUI" text="Github">
         <a class="cesium-button cesium-toolbar-button" href="https://github.com/Flowm/satvis/" target="_blank" rel="noopener">
-          <font-awesome-icon icon="fab fa-github" />
+          <UIcon name="fa6-brands:github" />
         </a>
       </UTooltip>
       <UTooltip text="Toggle UI">
         <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleUI">
-          <font-awesome-icon icon="fas fa-eye" />
+          <UIcon name="fa6-solid:eye" />
         </button>
       </UTooltip>
     </div>
+    <!-- Deliberately outside the showUI toggle: the entity info replaces the
+         Cesium InfoBox, which was visible with hidden UI and in minimalUI. -->
+    <entity-info-panel />
   </div>
 </template>
 
@@ -205,6 +208,7 @@ import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
 import type { SerializedGroundStation } from "../stores/sat";
 import { useSatStore } from "../stores/sat";
+import EntityInfoPanel from "./EntityInfoPanel.vue";
 import SatelliteBrowser from "./SatelliteBrowser.vue";
 
 type MenuKey = "cat" | "sat" | "gs" | "map" | "ios" | "dbg";

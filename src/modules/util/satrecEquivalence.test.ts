@@ -5,7 +5,7 @@ import { json2satrec, propagate, twoline2satrec, type OMMJsonObject } from "sate
 import { describe, expect, test } from "vitest";
 
 // ISS fixtures fetched once from CelesTrak (FORMAT=2LE + FORMAT=JSON) and
-// committed under src/test/fixtures/. We assert that satrecs built from each
+// committed under ./fixtures/. We assert that satrecs built from each
 // format propagate to the same ECI position (< 1 km per axis).
 const twoLe = readFileSync(fileURLToPath(new URL("./fixtures/iss.2le.txt", import.meta.url)), "utf8")
   .trim()

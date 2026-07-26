@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { buildStatuses, coerceIndex, collectSources, evaluateGroups, fetchSources, type GroupResult, type RecordsBySource, sourceKey, sourceUrl } from "../src/gp/evaluate.ts";
+import {
+  buildStatuses,
+  coerceIndex,
+  collectSources,
+  evaluateGroups,
+  fetchSources,
+  type GroupResult,
+  type RecordsBySource,
+  sourceKey,
+  sourceUrl,
+  toProbe,
+  toRecordsBySource,
+} from "../src/gp/evaluate.ts";
 import type { GroupDefinition, GroupsIndex, OmmRecord } from "../src/gp/types.ts";
 
 function omm(name: string, id: number): OmmRecord {
@@ -292,30 +304,53 @@ describe("evaluateGroups: failure propagation", () => {
 describe("fetchSources validation", () => {
   const defs: GroupDefinition[] = [{ name: "g", sources: [{ celestrak: "active" }] }];
 
+  // fetchSources returns raw per-source results; toRecordsBySource reduces them
+  // to the records-or-Error map the evaluator consumes — the shape these cases
+  // assert on.
+  async function records(fetchImpl: Parameters<typeof fetchSources>[1]): Promise<OmmRecord[] | Error | undefined> {
+    return toRecordsBySource(await fetchSources(defs, fetchImpl)).get("celestrak:active");
+  }
+
   it("accepts a valid OMM JSON array", async () => {
-    const result = await fetchSources(defs, async () => ({ status: 200, text: async () => JSON.stringify([{ OBJECT_NAME: "X", NORAD_CAT_ID: 1 }]) }));
-    const records = result.get("celestrak:active");
-    expect(Array.isArray(records)).toBe(true);
+    expect(Array.isArray(await records(async () => ({ status: 200, text: async () => JSON.stringify([{ OBJECT_NAME: "X", NORAD_CAT_ID: 1 }]) })))).toBe(true);
   });
 
   it("rejects HTML error pages served with HTTP 200", async () => {
-    const result = await fetchSources(defs, async () => ({ status: 200, text: async () => "<html>error</html>" }));
-    expect(result.get("celestrak:active")).toBeInstanceOf(Error);
+    expect(await records(async () => ({ status: 200, text: async () => "<html>error</html>" }))).toBeInstanceOf(Error);
   });
 
   it("rejects empty arrays", async () => {
-    const result = await fetchSources(defs, async () => ({ status: 200, text: async () => "[]" }));
-    expect(result.get("celestrak:active")).toBeInstanceOf(Error);
+    expect(await records(async () => ({ status: 200, text: async () => "[]" }))).toBeInstanceOf(Error);
   });
 
   it("rejects arrays whose first element lacks NORAD_CAT_ID", async () => {
-    const result = await fetchSources(defs, async () => ({ status: 200, text: async () => JSON.stringify([{ OBJECT_NAME: "X" }]) }));
-    expect(result.get("celestrak:active")).toBeInstanceOf(Error);
+    expect(await records(async () => ({ status: 200, text: async () => JSON.stringify([{ OBJECT_NAME: "X" }]) }))).toBeInstanceOf(Error);
   });
 
   it("rejects non-200 statuses", async () => {
-    const result = await fetchSources(defs, async () => ({ status: 404, text: async () => "[]" }));
-    expect(result.get("celestrak:active")).toBeInstanceOf(Error);
+    expect(await records(async () => ({ status: 404, text: async () => "[]" }))).toBeInstanceOf(Error);
+  });
+});
+
+describe("fetchSources diagnostics", () => {
+  const defs: GroupDefinition[] = [{ name: "g", sources: [{ celestrak: "active" }] }];
+
+  it("returns per-source status, size, records and timing on success", async () => {
+    const [r] = await fetchSources(defs, async () => ({ status: 200, text: async () => JSON.stringify([{ OBJECT_NAME: "X", NORAD_CAT_ID: 1 }]) }));
+    expect(r?.key).toBe("celestrak:active");
+    expect(r?.status).toBe(200);
+    expect(r?.records).toHaveLength(1);
+    expect(typeof r?.ms).toBe("number");
+    const probe = toProbe(r!);
+    expect(probe).toMatchObject({ key: "celestrak:active", ok: true, status: 200, records: 1, sample: "X" });
+  });
+
+  it("captures the status and a body sample on failure", async () => {
+    const [r] = await fetchSources(defs, async () => ({ status: 522, text: async () => "<html>connection timed out</html>" }));
+    expect(r?.records).toBeUndefined();
+    expect(r?.error).toContain("HTTP 522");
+    expect(r?.bodySample).toContain("connection timed out");
+    expect(toProbe(r!)).toMatchObject({ ok: false, status: 522 });
   });
 });
 

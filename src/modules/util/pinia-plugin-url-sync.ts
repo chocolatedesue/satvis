@@ -91,6 +91,11 @@ function urlToState(store: ExtendedStore, syncConfig: SyncConfigEntry[]): void {
 }
 
 function stateToUrl(store: ExtendedStore, syncConfig: SyncConfigEntry[]): void {
+  // Defaults are set by urlToState() once the router is ready; skip until then
+  // to avoid `in undefined` and pushing state before the url has been read.
+  if (!store.defaults) {
+    return;
+  }
   const params = new URLSearchParams(location.search);
   syncConfig.forEach((config: SyncConfigEntry) => {
     const value = resolve(config.name, store as Record<string, unknown>);

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 
-import { appMetadataConfig, type MetadataRule } from "../config/satelliteMetadata";
 import { SatelliteCatalog } from "../modules/SatelliteCatalog";
 import type { GpRecord } from "../modules/util/gp";
+import { appMetadataConfig, type MetadataRule } from "./satelliteMetadata";
 
 // Minimal OMM record — only name + satnum matter for metadata resolution.
 function ommRecord(name: string, satnum: number): GpRecord {

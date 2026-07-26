@@ -23,7 +23,7 @@ export const router: Router = createRouter({
 
 /**
  * Router guard to handle configuration changes when navigating between routes
- * Note: Initial load is handled in main.js before mounting
+ * Note: Initial load is handled in src/app.ts before mounting
  */
 export function setupRouterGuards(routerInstance: Router, cc: CesiumController): void {
   routerInstance.beforeEach((to, from, next) => {
@@ -35,7 +35,8 @@ export function setupRouterGuards(routerInstance: Router, cc: CesiumController):
     // Update document title and meta description
     updateMetadata(preset);
 
-    // Load new element sets via the satellite catalog
+    // Register the preset's element sets with the satellite catalog; only the
+    // groups required by the current activation state are actually fetched.
     cc.sats.loadElementSets(preset.elements);
 
     next();

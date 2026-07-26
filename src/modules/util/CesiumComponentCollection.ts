@@ -9,6 +9,7 @@ import {
   Matrix4,
   PolylineColorAppearance,
   Primitive,
+  SceneMode,
   Transforms,
   VelocityOrientationProperty,
   defined,
@@ -146,10 +147,14 @@ export class CesiumComponentCollection {
           }
           return;
         }
-        // Update model matrix right before adding to scene
-        const icrfToFixed = Transforms.computeIcrfToFixedMatrix(this.viewer.clock.currentTime);
-        if (defined(icrfToFixed)) {
-          primitive.modelMatrix = Matrix4.fromRotationTranslation(icrfToFixed);
+        // Update model matrix right before adding to scene. modelMatrix (inertial frame)
+        // is only supported in 3D, so skip it in 2D/Columbus to avoid throwing inside the
+        // render loop; the default identity matrix renders fine there.
+        if (this.viewer.scene.mode === SceneMode.SCENE3D) {
+          const icrfToFixed = Transforms.computeIcrfToFixedMatrix(this.viewer.clock.currentTime);
+          if (defined(icrfToFixed)) {
+            primitive.modelMatrix = Matrix4.fromRotationTranslation(icrfToFixed);
+          }
         }
         if (ctor.primitive) {
           this.viewer.scene.primitives.remove(ctor.primitive);
@@ -260,14 +265,11 @@ export class CesiumComponentCollection {
     entityValue: any,
     name: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    description: any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     position: any,
     moving: boolean,
   ): void {
     const entity = new Entity({
       name,
-      description,
       position,
       viewFrom: new Cartesian3(0, -3600000, 4200000),
     });

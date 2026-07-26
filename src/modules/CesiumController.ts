@@ -27,7 +27,6 @@ import type { GroundStationPositionData } from "./GroundStationEntity";
 import { SatelliteManager } from "./SatelliteManager";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
-import { InfoBoxController } from "./util/InfoBoxController";
 import { PushManager } from "./util/PushManager";
 
 dayjs.extend(utc);
@@ -69,6 +68,7 @@ export class CesiumController {
       fullscreenElement: document.body,
       geocoder: false,
       homeButton: false,
+      infoBox: false,
       navigationHelpButton: false,
       navigationInstructionsInitiallyVisible: false,
       sceneModePicker: false,
@@ -103,13 +103,6 @@ export class CesiumController {
     this.sats = new SatelliteManager(this.viewer);
 
     this.pm = new PushManager();
-
-    new InfoBoxController(
-      this.viewer,
-      this.sats,
-      (date, message) => this.pm.notifyAtDate(date, message),
-      (time) => this.setTime(time),
-    ).init();
 
     // Add privacy policy to credits when not running in iframe
     if (!DeviceDetect.inIframe()) {

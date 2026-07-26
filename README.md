@@ -31,11 +31,12 @@ Satellite orbit visualization and pass prediction.
 
 ### Setup
 
-Initialize submodules and install npm build dependencies:
+Initialize submodules and install build dependencies:
 
 ```
 git submodule update --init
-mise install         # provision Node 24 + pnpm 11 (see mise.toml); or bring your own
+mise trust && mise install   # toolchain (Node 24, pnpm 11, prek; see mise.toml)
+mise setup                   # install the pre-commit hooks
 pnpm install
 ```
 
