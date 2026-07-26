@@ -11,10 +11,10 @@ discussion; sharpen them here when they drift.
   one unit (`/api/gp/<group>.json` or the static snapshot).
 - **Tag**: a label attached to satellites by the group that supplied them, and
   the unit the user activates ("enable Weather"). One satellite may carry tags
-  from several groups. Tag names must not contain a hyphen.
+  from several groups. Tag names must not contain a comma.
 - **Component**: one visual representation of a satellite that can be switched
   on independently — point, label, orbit, orbit track, ground track, sensor
-  cone, 3D model. Component names must not contain a hyphen.
+  cone, 3D model. Component names must not contain a comma.
 - **Activation**: which catalog entries should currently exist as live
   satellites — tag-enabled entries minus per-satellite opt-outs, plus
   name-enabled entries, plus the tracked satellite. Carried as three lists
