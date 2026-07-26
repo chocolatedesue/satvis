@@ -9,16 +9,20 @@ third-party iframes (`embedded.html`) whose URLs we cannot audit. It had never b
 written down, so its conventions had drifted into fourteen hand-written
 serialize/deserialize closures with two different space escapes, two boolean
 implementations (one wrong), and a declared `default` field that nothing read. This
-ADR is the specification, and it freezes the wire format so existing links keep
-working.
+ADR is the specification.
+
+The contract is **read-compatible**, not byte-frozen: every URL that works today keeps
+working, but emitted output is allowed to differ where the old form bought nothing. The
+one place that applies is space escaping — see [String lists](#string-lists).
 
 **This describes the target contract, not the current code.** The implementation is
 `src/modules/util/pinia-plugin-url-sync.ts` plus the `urlsync` blocks in
 `src/stores/*.ts`; it does not yet conform. Known deviations at the time of writing:
 `fps` has no deserializer, nothing validates on serialize, invalid enum values are stored
-and diverge from the scene, the whole-query rebuild does not exist (foreign parameters
-survive only because `stateToUrl` reads them back out of `location.search`), `time` is
-input-only and never emitted, and no `popstate` path re-applies state.
+and diverge from the scene, list parameters still carry the two ad-hoc space escapes, the
+whole-query rebuild does not exist (foreign parameters survive only because `stateToUrl`
+reads them back out of `location.search`), `time` is input-only and never emitted, and no
+`popstate` path re-applies state.
 
 ## Parameters
 
@@ -27,10 +31,10 @@ Every parameter is optional. An absent parameter means "use the default" (see
 
 | Parameter  | State                       | Kind                     | Wire form / accepted values                                                                    | Global default |
 | ---------- | --------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------- | -------------- |
-| `elements` | `sat.enabledComponents`     | string list, space → `-` | comma-joined component names: `Point`, `Label`, `Orbit`, `Orbit track`, `Ground track`, `Sensor cone`, `3D model` | `Point,Label`  |
-| `tags`     | `sat.enabledTags`           | string list, space → `-` | comma-joined tag names                                                                          | empty          |
-| `sats`     | `sat.enabledSatellites`     | string list, space → `~` | comma-joined satellite names                                                                    | empty          |
-| `xsats`    | `sat.disabledSatellites`    | string list, space → `~` | comma-joined satellite names opted out of tag activation                                        | empty          |
+| `elements` | `sat.enabledComponents`     | string list              | comma-joined component names: `Point`, `Label`, `Orbit`, `Orbit track`, `Ground track`, `Sensor cone`, `3D model` | `Point,Label`  |
+| `tags`     | `sat.enabledTags`           | string list              | comma-joined tag names                                                                          | empty          |
+| `sats`     | `sat.enabledSatellites`     | string list              | comma-joined satellite names                                                                    | empty          |
+| `xsats`    | `sat.disabledSatellites`    | string list              | comma-joined satellite names opted out of tag activation                                        | empty          |
 | `gs`       | `sat.groundStations`        | ground-station list      | `_`-joined; each station `lat,lon` or `lat,lon,name`; lat/lon emitted at 4 decimal places        | empty          |
 | `track`    | `sat.trackedSatellite`      | string                   | one satellite name; empty means nothing tracked                                                 | empty          |
 | `overpass` | `sat.overpassMode`          | enum                     | `elevation` \| `swath`                                                                          | `elevation`    |
@@ -42,6 +46,28 @@ Every parameter is optional. An absent parameter means "use the default" (see
 | `fps`      | `cesium.showFps`            | boolean                  | `true` \| `false`                                                                               | `false`        |
 | `bg`       | `cesium.background`         | boolean                  | `true` \| `false`                                                                               | `true`         |
 | `time`     | clock time                  | timestamp                | emitted as ISO-8601 at minute precision (`2026-07-26T20:46Z`); any `dayjs`-parseable value accepted | absent (live)  |
+
+### String lists
+
+There is **one** string-list kind and it takes no options: join and split on `,`. Spaces
+need no escaping — `URLSearchParams` and vue-router's query parser both encode a space as
+`+` and decode it back identically, so spaces already round-trip losslessly.
+
+The two historic escapes (space → `-` for `elements`/`tags`, space → `~` for
+`sats`/`xsats`) were pure decoration. They bought URL cosmetics and cost two naming
+constraints, so they are dropped from emission and survive only as read shims:
+
+| Parameter        | Legacy read shim                                                     | Why                                                              |
+| ---------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `elements`       | try the literal; if it is not a known component, retry with `-` → space | deterministic — components are a closed, compile-time vocabulary |
+| `sats` / `xsats` | `~` → space, unconditionally                                          | open vocabulary; nothing to resolve an ambiguity against         |
+| `tags`           | none                                                                  | no `tags` URL has ever carried an escape                         |
+
+The `tags` row holds because no tag name contains a space, so the escape never fired.
+Tags reach the catalog only through `SatelliteCatalog.registerGroups`, whose sole
+production caller is `SatelliteManager.loadElementSets(preset.elements)`, and every tag in
+`src/config/presets.ts` is a single word. Adding a tag with a space is fine — it will
+encode as `+` — but it must never be escaped as `-`.
 
 `layers` items are validated against the leading segment before `_`. Base layers:
 `Offline`, `OfflineHighres`, `ArcGis`, `OSM`, `Topo`, `BlackMarble`. Overlays: `Tiles`,
@@ -89,6 +115,8 @@ how it fails:
   offending element is dropped and the rest of the list is kept. A link written against a
   different build referencing a component that no longer exists should not wipe the whole
   selection. For a scalar enum there is no "rest", so this collapses to the malformed case.
+  For `elements` the legacy shim runs **before** this rule: an element is dropped only if
+  neither the literal form nor the `-` → space form names a known component.
 - **Malformed element of `gs`** — that station is dropped, the remaining stations are
   kept.
 - **Open vocabularies** (`tags`, `sats`, `xsats`, `track`) — **not membership-validated at
@@ -131,46 +159,56 @@ Instead, the affected vocabularies are constrained, and **the codec validates on
 serialize as well as on parse** — an unrepresentable value is refused at the boundary
 rather than silently corrupted.
 
-| Vocabulary            | Constraint                     |
-| --------------------- | ------------------------------ |
-| tag names             | no `-`                         |
-| component names       | no `-`                         |
-| satellite names       | no `,`, no `~`                 |
-| ground-station names  | no `,`, no `_`                 |
-| imagery layer names   | no `_`, no `,`                 |
+There is one real rule — **no comma in a list member** — plus one carve-out per parameter
+that owns a second delimiter:
+
+| Vocabulary            | Constraint     | Source of the carve-out          |
+| --------------------- | -------------- | -------------------------------- |
+| tag names             | no `,`         | —                                |
+| component names       | no `,`         | —                                |
+| satellite names       | no `,`, no `~` | the `sats`/`xsats` legacy shim   |
+| ground-station names  | no `,`, no `_` | the `gs` station separator       |
+| imagery layer names   | no `,`, no `_` | the `layers` alpha suffix        |
 
 No existing name violates these. Component and layer names are closed, compile-time
-vocabularies, so those two rows hold by construction. The satellite-name row is inherited
-from `sats`/`xsats`; `track` is a bare string with no delimiter and could carry a comma on
-its own, but the same name must be representable everywhere it appears.
+vocabularies, so those rows hold by construction. The satellite-name row is inherited from
+`sats`/`xsats`; `track` is a bare string with no delimiter and could carry a comma on its
+own, but the same name must be representable everywhere it appears.
+
+Hyphens are legal everywhere. The `~` carve-out exists only to keep the legacy shim
+unambiguous and would disappear if `sats`/`xsats`/`track` ever stopped carrying names.
+
+Keying those three on NORAD ids was considered for exactly that reason and **deferred**.
+It is not a wire-format change: a NORAD id is not an identity in the current catalog
+model, where the dedup key is `satnum|name`, names are unique (`#byName`, first-wins) and
+satnums are modelled one-to-many because renames can fork one object into several entries.
+Adopting ids means first deciding whether a rename replaces or forks, which is a catalog
+decision with its own migration. Nothing in this specification forecloses it: an id form
+would arrive as another read shim alongside the ones above.
 
 Ground-station coordinates are stored at 4 decimal places (~11 m). This is a deliberate
 size/precision trade, not a defect.
 
-The `elements` constraint could be lifted later by resolving candidates against the seven
-known component names, since that vocabulary is closed and fixed at compile time. `tags`
-cannot: the catalog may not know every tag at the time the URL is parsed.
-
 ## Considered options
 
-**Normalising the format** — one space escape, one separator — was rejected because
-`elements=Point,Label,Sensor-cone` is a live, common URL. Dropping `-` → space on read is
-what would be required to allow a literal hyphen, and that breaks every existing
-multi-word `elements` and `tags` link.
+**Keeping the two space escapes** and freezing emission byte-for-byte was the first
+position. Rejected once it became clear the escapes are decoration: both readers already
+round-trip spaces through `+`, so the escapes bought nothing and cost a hyphen ban on
+tags and components. Dropping them from emission costs a legacy read shim per parameter
+and breaks no existing link.
 
 **A raw-first reader** that splits the un-decoded query before percent-decoding each
 element would make `,` escapable inside satellite and station names. Rejected: it means
-hand-rolling `+` → space and percent-decoding, it still cannot rescue the `~`/`-`
-escapes, and every trap it closes is latent rather than reachable — there is no
-ground-station name input in the UI today, no tag or component name contains a hyphen,
-and CelesTrak `OBJECT_NAME` values contain no commas. Validating on serialize gets the
-safety without the parser.
+hand-rolling `+` → space and percent-decoding, and every trap it closes is latent rather
+than reachable — there is no ground-station name input in the UI today, and CelesTrak
+`OBJECT_NAME` values contain no commas. Validating on serialize gets the safety without
+the parser.
 
 ## Consequences
 
 `?fps=false` changes meaning. Today it deserializes to the truthy string `"false"` and
 switches the counter **on**; with a boolean kind the link will do what it says. This is
-the one intentional break in an otherwise frozen format.
+the one place an existing link changes behaviour rather than merely continuing to work.
 
 `?terrain=Garbage` and its siblings stop diverging. Today the store accepts the value,
 Cesium logs `Unknown terrain provider` and no-ops, and the store, URL and radio buttons
@@ -183,5 +221,13 @@ silently dropping any station on the equator or the Greenwich meridian. Rejectin
 malformed stations at parse time makes that filter unnecessary rather than merely
 correct.
 
-Adding a component or tag whose name contains a hyphen is a breaking change to this
-contract, not a feature addition.
+Emitted URLs change shape for `elements`, `sats` and `xsats`: `Sensor-cone` becomes
+`Sensor+cone`, `NOAA~19` becomes `NOAA+19`. Existing links keep working through the read
+shims, so the two forms coexist in the wild indefinitely. Both must stay covered by
+tests — the legacy form has no other way to be exercised once nothing emits it.
+
+Adding a component or tag whose name contains a hyphen is now an ordinary change. For
+components it also exercises the `elements` shim's membership resolution, so a name that
+collides with an escaped form of another component — a literal `Sensor-cone` alongside
+`Sensor cone` — would be ambiguous. That is worth an assertion over the component list
+rather than a constraint.
