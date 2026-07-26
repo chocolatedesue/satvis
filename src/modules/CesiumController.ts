@@ -21,7 +21,7 @@ import utc from "dayjs/plugin/utc";
 
 import { usePostHog } from "../composables/usePostHog";
 import { useCesiumStore } from "../stores/cesium";
-import type { SerializedGroundStation } from "../stores/sat";
+import { useSatStore } from "../stores/sat";
 import {
   baseLayerNames,
   type ImageryProviderEntry,
@@ -31,7 +31,6 @@ import {
   terrainProviders,
   terrainProviderNames as visibleTerrainProviderNames,
 } from "./CesiumLayerProviders";
-import type { GroundStationPositionData } from "./GroundStationEntity";
 import { SatelliteManager } from "./SatelliteManager";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
@@ -213,11 +212,13 @@ export class CesiumController {
       }
     };
 
-    if (this.sats.enabledComponents.includes("Orbit")) {
-      this.sats.disableComponent("Orbit");
-
+    // Suppressed rather than disabled: the user still has Orbit switched on and
+    // the toolbar has to keep saying so through the morph. Asking the manager
+    // whether it actually suppressed anything avoids reading back a value that
+    // this call has already changed.
+    if (this.sats.suppressComponent("Orbit")) {
       const enableOrbits = (): void => {
-        this.sats.enableComponent("Orbit");
+        this.sats.releaseComponent("Orbit");
         this.viewer.scene.morphComplete.removeEventListener(enableOrbits);
       };
       this.viewer.scene.morphComplete.addEventListener(enableOrbits);
@@ -309,25 +310,13 @@ export class CesiumController {
     }, ScreenSpaceEventType.LEFT_CLICK);
   }
 
-  private groundStationPosition(latitude: number, longitude: number, height: number): GroundStationPositionData {
-    return {
-      latitude,
-      longitude,
-      height,
-      cartesian: Cartesian3.fromDegrees(longitude, latitude, height),
-    };
-  }
-
   setGroundStationFromClickEvent(event: ScreenSpaceEventHandler.PositionedEvent): void {
     const cartesian = this.viewer.camera.pickEllipsoid(event.position);
     if (!defined(cartesian)) {
       return;
     }
     const cartographicPosition = Cartographic.fromCartesian(cartesian);
-    this.sats.addGroundStation(
-      this.groundStationPosition(CesiumMath.toDegrees(cartographicPosition.latitude), CesiumMath.toDegrees(cartographicPosition.longitude), cartographicPosition.height),
-      "",
-    );
+    this.addGroundStation(CesiumMath.toDegrees(cartographicPosition.latitude), CesiumMath.toDegrees(cartographicPosition.longitude));
     useCesiumStore().pickMode = false;
   }
 
@@ -336,25 +325,22 @@ export class CesiumController {
       if (typeof position === "undefined") {
         return;
       }
-      const { latitude, longitude, altitude } = position.coords;
-      this.sats.addGroundStation(this.groundStationPosition(latitude, longitude, altitude ?? 0), "Geolocation");
+      const { latitude, longitude } = position.coords;
+      this.addGroundStation(latitude, longitude, "Geolocation");
     });
   }
 
-  setGroundStationFromLatLon(lat: number, lon: number, height = 0): void {
-    if (!lat || !lon) {
-      return;
-    }
-    this.sats.addGroundStation(this.groundStationPosition(lat, lon, height), "");
+  setGroundStationFromLatLon(lat: number, lon: number): void {
+    this.addGroundStation(lat, lon);
   }
 
-  setGroundStations(groundStations: SerializedGroundStation[]): void {
-    if (!groundStations) {
-      return;
-    }
-    this.sats.groundStations = groundStations
-      .filter((gs) => gs.lat && gs.lon)
-      .map((gs) => this.sats.createGroundstation(this.groundStationPosition(gs.lat, gs.lon, 0), gs.name ?? ""));
+  // Ground stations are store state; the scene sync turns them into entities.
+  // Note the coordinates are not truth-tested here: 0 is a real latitude, and
+  // the filter that used to live downstream tested `lat && lon`, so it erased
+  // any station on the equator or the Greenwich meridian.
+  private addGroundStation(lat: number, lon: number, name = ""): void {
+    const satStore = useSatStore();
+    satStore.setGroundStations([...satStore.groundStations, { lat, lon, ...(name ? { name } : {}) }]);
   }
 
   set showUI(enabled: boolean) {

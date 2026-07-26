@@ -201,12 +201,11 @@
 
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute } from "vue-router";
 
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
-import type { SerializedGroundStation } from "../stores/sat";
 import { useSatStore } from "../stores/sat";
 import EntityInfoPanel from "./EntityInfoPanel.vue";
 import SatelliteBrowser from "./SatelliteBrowser.vue";
@@ -227,7 +226,7 @@ const menu = reactive<Record<MenuKey, boolean>>({
 const showUI = ref(true);
 
 const cesiumStore = useCesiumStore();
-const { layers, terrainProvider, sceneMode, cameraMode, qualityPreset, showFps, background, pickMode } = storeToRefs(cesiumStore);
+const { layers, terrainProvider, sceneMode, cameraMode, qualityPreset, showFps, pickMode } = storeToRefs(cesiumStore);
 
 // The checkbox list writes the whole array back. layers is read-only because
 // "at most one base layer" is an invariant of the list, so the write is routed
@@ -238,79 +237,7 @@ const layerSelection = computed({
 });
 
 const satStore = useSatStore();
-const { enabledComponents, enabledSatellites, enabledTags, disabledSatellites, groundStations, overpassMode, trackedSatellite } = storeToRefs(satStore);
-
-// The "at most one base layer" rule lives in the store's setLayers action, so
-// whatever arrives here is already resolved.
-watch(
-  layers,
-  (newLayers: string[]) => {
-    cc.imageryLayers = newLayers;
-  },
-  { deep: true },
-);
-watch(terrainProvider, (newProvider: string) => {
-  cc.terrainProvider = newProvider;
-});
-watch(sceneMode, (newMode: string) => {
-  cc.sceneMode = newMode;
-});
-watch(cameraMode, (newMode: string) => {
-  cc.cameraMode = newMode;
-});
-watch(
-  qualityPreset,
-  (value: string) => {
-    cc.qualityPreset = value;
-  },
-  { immediate: true },
-);
-watch(showFps, (value: boolean) => {
-  cc.showFps = value;
-});
-watch(background, (value: boolean) => {
-  cc.background = value;
-});
-watch(
-  enabledComponents,
-  (newComponents: string[]) => {
-    cc.sats.enabledComponents = newComponents;
-  },
-  { deep: true },
-);
-watch(groundStations, (newGroundStations: SerializedGroundStation[], oldGroundStations: SerializedGroundStation[]) => {
-  // Ignore if new and old ground stations are identical (also avoids a re-entrant
-  // update loop, since setGroundStations writes the same values back to the store)
-  const serialize = (stations: SerializedGroundStation[]) => JSON.stringify(stations.map((gs) => [gs.lat, gs.lon, gs.name]));
-  if (serialize(newGroundStations) === serialize(oldGroundStations)) {
-    return;
-  }
-  cc.setGroundStations(newGroundStations);
-});
-watch(overpassMode, (newMode: string) => {
-  cc.sats.overpassMode = newMode;
-});
-// Carry the store's satellite activation state into the SatelliteManager. These
-// live here (an always-mounted component) rather than in the catalog panel
-// (SatelliteBrowser, mounted with a v-if and thus unmounted whenever the panel
-// is closed) so that URL-hydrated state (applied by the url-sync plugin after
-// mount, as a store change) reaches Cesium even when the catalog panel is never
-// opened.
-// Non-immediate on purpose: the url-sync plugin writes the hydrated values into
-// the store after mount, which fires these watchers; the manager starts from
-// its own matching defaults.
-watch(enabledSatellites, (sats: string[]) => {
-  cc.sats.enabledSatellites = sats;
-});
-watch(enabledTags, (tags: string[]) => {
-  cc.sats.enabledTags = tags;
-});
-watch(disabledSatellites, (sats: string[]) => {
-  cc.sats.disabledSatellites = sats;
-});
-watch(trackedSatellite, (satellite: string) => {
-  cc.sats.trackedSatellite = satellite;
-});
+const { enabledComponents, overpassMode } = storeToRefs(satStore);
 
 onMounted(() => {
   if (route.query.time) {
