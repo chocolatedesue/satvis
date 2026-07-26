@@ -29,23 +29,23 @@ reads them back out of `location.search`), `time` is input-only and never emitte
 Every parameter is optional. An absent parameter means "use the default" (see
 [Defaults](#defaults)).
 
-| Parameter  | State                       | Kind                     | Wire form / accepted values                                                                    | Global default |
-| ---------- | --------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------- | -------------- |
-| `elements` | `sat.enabledComponents`     | string list              | comma-joined component names: `Point`, `Label`, `Orbit`, `Orbit track`, `Ground track`, `Sensor cone`, `3D model` | `Point,Label`  |
-| `tags`     | `sat.enabledTags`           | string list              | comma-joined tag names                                                                          | empty          |
-| `sats`     | `sat.enabledSatellites`     | string list              | comma-joined satellite names                                                                    | empty          |
-| `xsats`    | `sat.disabledSatellites`    | string list              | comma-joined satellite names opted out of tag activation                                        | empty          |
-| `gs`       | `sat.groundStations`        | ground-station list      | `_`-joined; each station `lat,lon` or `lat,lon,name`; lat/lon emitted at 4 decimal places        | empty          |
-| `track`    | `sat.trackedSatellite`      | string                   | one satellite name; empty means nothing tracked                                                 | empty          |
-| `overpass` | `sat.overpassMode`          | enum                     | `elevation` \| `swath`                                                                          | `elevation`    |
-| `layers`   | `cesium.layers`             | layer list               | comma-joined; each item `Name` or `Name_<alpha>`; list order is z-order                          | `OfflineHighres` |
-| `terrain`  | `cesium.terrainProvider`    | enum                     | `None` \| `Maptiler`                                                                            | `None`         |
-| `scene`    | `cesium.sceneMode`          | enum                     | `3D` \| `2D` \| `Columbus`                                                                      | `3D`           |
-| `camera`   | `cesium.cameraMode`         | enum                     | `Fixed` \| `Inertial`                                                                           | `Fixed`        |
-| `quality`  | `cesium.qualityPreset`      | enum                     | `low` \| `high`                                                                                 | `high`         |
-| `fps`      | `cesium.showFps`            | boolean                  | `true` \| `false`                                                                               | `false`        |
-| `bg`       | `cesium.background`         | boolean                  | `true` \| `false`                                                                               | `true`         |
-| `time`     | clock time                  | timestamp                | emitted as ISO-8601 at minute precision (`2026-07-26T20:46Z`); any `dayjs`-parseable value accepted | absent (live)  |
+| Parameter  | State                    | Kind                | Wire form / accepted values                                                                                       | Global default   |
+| ---------- | ------------------------ | ------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `elements` | `sat.enabledComponents`  | string list         | comma-joined component names: `Point`, `Label`, `Orbit`, `Orbit track`, `Ground track`, `Sensor cone`, `3D model` | `Point,Label`    |
+| `tags`     | `sat.enabledTags`        | string list         | comma-joined tag names                                                                                            | empty            |
+| `sats`     | `sat.enabledSatellites`  | string list         | comma-joined satellite names                                                                                      | empty            |
+| `xsats`    | `sat.disabledSatellites` | string list         | comma-joined satellite names opted out of tag activation                                                          | empty            |
+| `gs`       | `sat.groundStations`     | ground-station list | `_`-joined; each station `lat,lon` or `lat,lon,name`; lat/lon emitted at 4 decimal places                         | empty            |
+| `track`    | `sat.trackedSatellite`   | string              | one satellite name; empty means nothing tracked                                                                   | empty            |
+| `overpass` | `sat.overpassMode`       | enum                | `elevation` \| `swath`                                                                                            | `elevation`      |
+| `layers`   | `cesium.layers`          | layer list          | comma-joined; each item `Name` or `Name_<alpha>`; list order is z-order                                           | `OfflineHighres` |
+| `terrain`  | `cesium.terrainProvider` | enum                | `None` \| `Maptiler`                                                                                              | `None`           |
+| `scene`    | `cesium.sceneMode`       | enum                | `3D` \| `2D` \| `Columbus`                                                                                        | `3D`             |
+| `camera`   | `cesium.cameraMode`      | enum                | `Fixed` \| `Inertial`                                                                                             | `Fixed`          |
+| `quality`  | `cesium.qualityPreset`   | enum                | `low` \| `high`                                                                                                   | `high`           |
+| `fps`      | `cesium.showFps`         | boolean             | `true` \| `false`                                                                                                 | `false`          |
+| `bg`       | `cesium.background`      | boolean             | `true` \| `false`                                                                                                 | `true`           |
+| `time`     | clock time               | timestamp           | emitted as ISO-8601 at minute precision (`2026-07-26T20:46Z`); any `dayjs`-parseable value accepted               | absent (live)    |
 
 ### String lists
 
@@ -57,11 +57,11 @@ The two historic escapes (space → `-` for `elements`/`tags`, space → `~` for
 `sats`/`xsats`) were pure decoration. They bought URL cosmetics and cost two naming
 constraints, so they are dropped from emission and survive only as read shims:
 
-| Parameter        | Legacy read shim                                                     | Why                                                              |
-| ---------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Parameter        | Legacy read shim                                                        | Why                                                              |
+| ---------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `elements`       | try the literal; if it is not a known component, retry with `-` → space | deterministic — components are a closed, compile-time vocabulary |
-| `sats` / `xsats` | `~` → space, unconditionally                                          | open vocabulary; nothing to resolve an ambiguity against         |
-| `tags`           | none                                                                  | no `tags` URL has ever carried an escape                         |
+| `sats` / `xsats` | `~` → space, unconditionally                                            | open vocabulary; nothing to resolve an ambiguity against         |
+| `tags`           | none                                                                    | no `tags` URL has ever carried an escape                         |
 
 The `tags` row holds because no tag name contains a space, so the escape never fired.
 Tags reach the catalog only through `SatelliteCatalog.registerGroups`, whose sole
@@ -162,13 +162,13 @@ rather than silently corrupted.
 There is one real rule — **no comma in a list member** — plus one carve-out per parameter
 that owns a second delimiter:
 
-| Vocabulary            | Constraint     | Source of the carve-out          |
-| --------------------- | -------------- | -------------------------------- |
-| tag names             | no `,`         | —                                |
-| component names       | no `,`         | —                                |
-| satellite names       | no `,`, no `~` | the `sats`/`xsats` legacy shim   |
-| ground-station names  | no `,`, no `_` | the `gs` station separator       |
-| imagery layer names   | no `,`, no `_` | the `layers` alpha suffix        |
+| Vocabulary           | Constraint     | Source of the carve-out        |
+| -------------------- | -------------- | ------------------------------ |
+| tag names            | no `,`         | —                              |
+| component names      | no `,`         | —                              |
+| satellite names      | no `,`, no `~` | the `sats`/`xsats` legacy shim |
+| ground-station names | no `,`, no `_` | the `gs` station separator     |
+| imagery layer names  | no `,`, no `_` | the `layers` alpha suffix      |
 
 No existing name violates these. Component and layer names are closed, compile-time
 vocabularies, so those rows hold by construction. The satellite-name row is inherited from
