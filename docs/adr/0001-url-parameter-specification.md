@@ -16,18 +16,14 @@ working, but emitted output is allowed to differ where the old form bought nothi
 one place that applies is space escaping — see [String lists](#string-lists).
 
 The implementation is `src/modules/util/urlCodec.ts` (the pure part) behind
-`src/modules/util/pinia-plugin-url-sync.ts` (the adapter), with the per-parameter schema
-declared in the `urlsync` blocks of `src/stores/*.ts`.
+`src/modules/util/urlSync.ts` (the adapter), with the per-parameter schema declared in the
+`urlsync` blocks of `src/stores/*.ts`. Invariants belong to the store actions the adapter
+writes through, and `src/modules/sceneSync.ts` carries state on to the globe.
 
-**Not everything here is built yet.** Outstanding:
-
-- History still goes through raw `pushState` rather than vue-router, so
-  `router.currentRoute` goes stale after the first write and no `popstate` path re-applies
-  state — the back button changes the url without changing the scene.
-- `time` is input-only: read once at load, never emitted, and preserved across rebuilds
-  only by the foreign-parameter rule. Nothing implements live vs pinned.
-- The "at most one base layer" rule is unenforced; it belongs to the store action that
-  does not exist yet.
+One rule is worth stating here because it is not obvious from the parameter table: while
+the clock is pinned it rewrites `time` every minute, so **a change that moves only `time`
+replaces rather than pushes**. The trade is that pinning by scrubbing is not separately
+undoable, which is better than a history made of clock ticks.
 
 ## Parameters
 
@@ -82,9 +78,9 @@ UI control. The accepted set is derived from the imagery-provider registry
 
 At most one base layer may be active. When a URL supplies several, the **last in list
 order wins** and earlier base layers are dropped; all overlays are preserved regardless.
-Last-wins matches what toggling a base layer means to a user. Today `?layers=ArcGis,OSM`
-instead leaves two base layers in the store and returns before assigning
-`cc.imageryLayers` at all, so the scene never updates.
+Last-wins matches what toggling a base layer means to a user. The rule belongs to the
+store's `setLayers` action rather than to this codec, because it constrains the list as a
+whole and has to hold whatever the source.
 
 Note `ArcGis` (imagery) and `ArcGIS` (terrain) differ only in capitalisation and are
 different things. The terrain provider is registered `visible: false`, so `?terrain=ArcGIS`
@@ -221,11 +217,9 @@ buttons all reported a terrain that was never applied. Validation now rejects it
 way in.
 
 Ground stations are no longer stored as `NaN`; malformed ones are dropped at parse time.
-That makes `CesiumController.setGroundStations`'s `gs.lat && gs.lon` filter unnecessary,
-but it is still in place and still discards `0`, so a station on the equator or the
-Greenwich meridian is erased — verified in the running app: `{lat: 0, lon: 11.5}` round
-trips to an empty store. Removing the filter belongs with the write-back it defends
-against.
+That retired `CesiumController.setGroundStations` and its `gs.lat && gs.lon` filter, which
+discarded any station on the equator or the Greenwich meridian because `0` is falsy —
+`?gs=0,11.5` used to round trip to an empty store and now renders.
 
 Emitted URLs change shape for `elements`, `sats` and `xsats`: `Sensor-cone` becomes
 `Sensor+cone`, `NOAA~19` becomes `NOAA+19`. Existing links keep working through the read
