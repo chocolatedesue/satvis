@@ -5,7 +5,8 @@
     <div class="toolbarTitle">Satellite groups</div>
     <div class="browser-quickselect">
       <USelectMenu
-        v-model="enabledTags"
+        :model-value="enabledTags"
+        @update:model-value="setEnabledTags"
         :items="groupItems"
         value-key="value"
         label-key="label"
@@ -67,6 +68,7 @@ const {
   clearSearch,
   availableGroups,
   enabledTags,
+  setEnabledTags,
   rows,
   activeSatCount,
   groupCount,

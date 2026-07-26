@@ -86,7 +86,7 @@
       <div v-show="menu.map" class="toolbarSwitches">
         <div class="toolbarTitle">Layers</div>
         <label v-for="name in cc.imageryProviderNames" :key="name" class="toolbarSwitch">
-          <input v-model="layers" type="checkbox" :value="name" />
+          <input v-model="layerSelection" type="checkbox" :value="name" />
           <span class="slider"></span>
           {{ name }}
         </label>
@@ -201,7 +201,7 @@
 
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
-import { onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
 import { DeviceDetect } from "../modules/util/DeviceDetect";
@@ -229,19 +229,22 @@ const showUI = ref(true);
 const cesiumStore = useCesiumStore();
 const { layers, terrainProvider, sceneMode, cameraMode, qualityPreset, showFps, background, pickMode } = storeToRefs(cesiumStore);
 
+// The checkbox list writes the whole array back. layers is read-only because
+// "at most one base layer" is an invariant of the list, so the write is routed
+// through the action that enforces it.
+const layerSelection = computed({
+  get: () => layers.value,
+  set: (next: string[]) => cesiumStore.setLayers(next),
+});
+
 const satStore = useSatStore();
 const { enabledComponents, enabledSatellites, enabledTags, disabledSatellites, groundStations, overpassMode, trackedSatellite } = storeToRefs(satStore);
 
+// The "at most one base layer" rule lives in the store's setLayers action, so
+// whatever arrives here is already resolved.
 watch(
   layers,
-  (newLayers: string[], oldLayers: string[]) => {
-    // Ensure only a single base layer is active
-    const newBaseLayers = newLayers.filter((layer) => cc.baseLayers.includes(layer));
-    if (newBaseLayers.length > 1) {
-      const oldBaseLayers = new Set(oldLayers.filter((layer) => cc.baseLayers.includes(layer)));
-      layers.value = newBaseLayers.filter((layer) => !oldBaseLayers.has(layer));
-      return;
-    }
+  (newLayers: string[]) => {
     cc.imageryLayers = newLayers;
   },
   { deep: true },

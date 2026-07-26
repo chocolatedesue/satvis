@@ -16,6 +16,11 @@ export type { FieldKind, FieldSpec } from "./urlCodec";
 interface UrlSyncConfig {
   enabled?: boolean;
   config: FieldSpec[];
+  // How a decoded patch reaches the store. Stores with guarded keys supply
+  // this so the url goes through the same actions as every other writer;
+  // without it each key is assigned directly.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  apply?: (store: any, patch: Record<string, unknown>) => void;
 }
 
 declare module "pinia" {
@@ -35,6 +40,7 @@ interface ExtendedStore extends PiniaStore {
 interface Registration {
   store: ExtendedStore;
   specs: FieldSpec[];
+  apply: UrlSyncConfig["apply"];
   // Store keys are qualified with the store id so two stores can use the same
   // key name without colliding in the shared rebuild below.
   qualified: FieldSpec[];
@@ -79,14 +85,36 @@ function isSameValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+// Guarded keys are read-only computeds, so a store that has any must route
+// writes through its actions. Assigning them directly would silently do
+// nothing beyond a Vue warning.
+function commit(entry: Registration, patch: Record<string, unknown>): void {
+  if (entry.apply) {
+    entry.apply(entry.store, patch);
+    return;
+  }
+  Object.assign(entry.store, patch);
+}
+
 function applyQuery(entry: Registration, query: Query): void {
   const { patch, invalid } = decode(query, entry.qualified, entry.defaults ?? {});
+
+  // Back to unqualified store keys, and note whether anything actually moved:
+  // decode hands back fresh arrays every time, so a blind apply would churn.
+  const next: Record<string, unknown> = {};
+  let changed = false;
   for (const [index, spec] of entry.specs.entries()) {
-    const next = patch[entry.qualified[index]!.name];
-    if (!isSameValue(entry.store[spec.name], next)) {
-      entry.store[spec.name] = next;
+    const value = patch[entry.qualified[index]!.name];
+    next[spec.name] = value;
+    if (!isSameValue(entry.store[spec.name], value)) {
+      changed = true;
     }
   }
+
+  if (changed) {
+    commit(entry, next);
+  }
+
   for (const param of invalid) {
     console.warn(`Ignoring invalid url parameter: ${param}`);
   }
@@ -152,11 +180,20 @@ function hydrate(entry: Registration, router: Router): void {
   const { store, specs } = entry;
 
   // The preset supplies this route's defaults, so it is applied before the
-  // defaults are captured and before the url is read.
+  // defaults are captured and before the url is read. It sets only some keys,
+  // so the rest are carried over to make a whole patch for commit().
   const preset = store.customConfig[store.$id];
   if (preset) {
+    const merged: Record<string, unknown> = {};
+    for (const spec of specs) {
+      merged[spec.name] = spec.name in preset ? preset[spec.name] : store[spec.name];
+    }
+    commit(entry, merged);
+    // Anything the preset sets that is not url-synced has no schema entry.
     for (const [key, value] of Object.entries(preset)) {
-      store[key] = value;
+      if (!specs.some((spec) => spec.name === key)) {
+        store[key] = value;
+      }
     }
   }
 
@@ -186,18 +223,28 @@ function createUrlSync({ options, store }: PiniaPluginContext): void {
   const entry: Registration = {
     store: extended,
     specs: urlsync.config,
+    apply: urlsync.apply,
     qualified: qualify(store.$id, urlsync.config),
   };
   registry.set(store.$id, entry);
 
   void router.isReady().then(() => hydrate(entry, router));
 
-  store.$subscribe(() => {
-    if (entry.defaults === undefined) {
-      return;
-    }
-    writeQuery(router, "push");
-  });
+  // Watch the synced values rather than $subscribe: guarded keys are exposed
+  // as computeds over private refs, and a private ref is not part of $state, so
+  // $subscribe never sees an activation or layer change. Watching the schema's
+  // own keys also means state that is deliberately not synced — catalogRevision,
+  // pickMode — cannot reach the url at all.
+  watch(
+    () => entry.specs.map((spec) => extended[spec.name]),
+    () => {
+      if (entry.defaults === undefined) {
+        return;
+      }
+      writeQuery(router, "push");
+    },
+    { deep: true },
+  );
 }
 
 export default createUrlSync;

@@ -222,10 +222,6 @@ export class SatelliteManager {
 
   set enabledSatellites(newSats: string[]) {
     this.#enabledSatellites = newSats;
-
-    const satStore = useSatStore();
-    satStore.enabledSatellites = newSats;
-
     void this.#ensureCatalogCoverage();
     this.#reconcileActive();
   }
@@ -237,10 +233,6 @@ export class SatelliteManager {
   // Names opted out of tag-activation (see satelliteActivation.ts).
   set disabledSatellites(newSats: string[]) {
     this.#disabledSatellites = newSats;
-
-    const satStore = useSatStore();
-    satStore.disabledSatellites = newSats;
-
     this.#reconcileActive();
   }
 
@@ -254,10 +246,6 @@ export class SatelliteManager {
 
   set enabledTags(newTags: string[]) {
     this.#enabledTags = newTags;
-
-    const satStore = useSatStore();
-    satStore.enabledTags = newTags;
-
     void this.#ensureCatalogCoverage();
     this.#reconcileActive();
   }
@@ -340,13 +328,12 @@ export class SatelliteManager {
     });
 
     // Update store for url state
-    const satStore = useSatStore();
     const serialized: SerializedGroundStation[] = this.#groundStations.map((gs) => ({
       lat: gs.position.latitude,
       lon: gs.position.longitude,
       name: gs.hasName ? gs.name : undefined,
     }));
-    satStore.groundStations = serialized;
+    useSatStore().setGroundStations(serialized);
   }
 
   get overpassMode(): string {
