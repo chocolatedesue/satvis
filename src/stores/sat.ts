@@ -15,12 +15,16 @@ export interface SerializedGroundStation {
  * the three are written together because none can be validated alone.
  */
 export interface ActivationPatch {
-  tags?: string[];
-  satellites?: string[];
-  excluded?: string[];
+  enabledTags?: string[];
+  enabledSatellites?: string[];
+  disabledSatellites?: string[];
 }
 
 const unique = (names: readonly string[]): string[] => [...new Set(names)];
+// ~11 m. A deliberate size/precision trade, and the reason the store rounds
+// rather than leaving it to whatever wrote the value.
+const COORDINATE_PRECISION = 4;
+const roundCoordinate = (value: number): number => Number(value.toFixed(COORDINATE_PRECISION));
 const sameList = (a: readonly unknown[], b: readonly unknown[]): boolean => a.length === b.length && a.every((entry, index) => entry === b[index]);
 
 export const useSatStore = defineStore(
@@ -55,10 +59,10 @@ export const useSatStore = defineStore(
      * care about the other direction pass both lists explicitly.
      */
     function setActivation(patch: ActivationPatch): void {
-      const nextTags = unique(patch.tags ?? tags.value);
-      const nextSatellites = unique(patch.satellites ?? satellites.value);
+      const nextTags = unique(patch.enabledTags ?? tags.value);
+      const nextSatellites = unique(patch.enabledSatellites ?? satellites.value);
       const enabled = new Set(nextSatellites);
-      const nextExcluded = unique(patch.excluded ?? excluded.value).filter((name) => !enabled.has(name));
+      const nextExcluded = unique(patch.disabledSatellites ?? excluded.value).filter((name) => !enabled.has(name));
 
       // Assigning an equal list would still fire $subscribe and land a history
       // entry, so compare before committing.
@@ -81,12 +85,14 @@ export const useSatStore = defineStore(
         if (!Number.isFinite(station.lat) || !Number.isFinite(station.lon)) {
           continue;
         }
-        const key = `${station.lat}|${station.lon}|${station.name ?? ""}`;
+        const lat = roundCoordinate(station.lat);
+        const lon = roundCoordinate(station.lon);
+        const key = `${lat}|${lon}|${station.name ?? ""}`;
         if (seen.has(key)) {
           continue;
         }
         seen.add(key);
-        valid.push(station);
+        valid.push(station.name === undefined ? { lat, lon } : { lat, lon, name: station.name });
       }
       const unchanged =
         valid.length === stations.value.length &&
@@ -132,9 +138,9 @@ export const useSatStore = defineStore(
         store.trackedSatellite = patch.trackedSatellite as string;
         store.overpassMode = patch.overpassMode as string;
         store.setActivation({
-          tags: patch.enabledTags as string[],
-          satellites: patch.enabledSatellites as string[],
-          excluded: patch.disabledSatellites as string[],
+          enabledTags: patch.enabledTags as string[],
+          enabledSatellites: patch.enabledSatellites as string[],
+          disabledSatellites: patch.disabledSatellites as string[],
         });
         store.setGroundStations(patch.groundStations as SerializedGroundStation[]);
       },

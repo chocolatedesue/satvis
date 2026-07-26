@@ -259,7 +259,7 @@ export function useSatelliteBrowser() {
   // Replace the enabled groups wholesale. Pruning lives here rather than at the
   // call sites so the multiselect and the group rows cannot disagree.
   function setEnabledTags(next: string[]): void {
-    satStore.setActivation({ tags: next, excluded: prunedExclusions(next) });
+    satStore.setActivation({ enabledTags: next, disabledSatellites: prunedExclusions(next) });
   }
 
   // Toggle a whole group. Never touches enabledSatellites — the old "promote
@@ -269,13 +269,13 @@ export function useSatelliteBrowser() {
   // (clear the members' exclusions); all on -> off.
   function toggleGroup(tag: string): void {
     if (!enabledTagSet.value.has(tag)) {
-      satStore.setActivation({ tags: [...enabledTags.value, tag] });
+      satStore.setActivation({ enabledTags: [...enabledTags.value, tag] });
       return;
     }
     const memberNames = new Set(catalog.entriesWithTag(tag).map((entry) => entry.name));
     const hasExcludedMember = disabledSatellites.value.some((name) => memberNames.has(name));
     if (hasExcludedMember) {
-      satStore.setActivation({ excluded: disabledSatellites.value.filter((name) => !memberNames.has(name)) });
+      satStore.setActivation({ disabledSatellites: disabledSatellites.value.filter((name) => !memberNames.has(name)) });
       return;
     }
     setEnabledTags(enabledTags.value.filter((t) => t !== tag));
@@ -289,23 +289,23 @@ export function useSatelliteBrowser() {
     const entry = catalog.getByName(name);
     if (entry && isEnabledByTag(entry, enabledTagSet.value)) {
       if (disabledSatSet.value.has(name)) {
-        satStore.setActivation({ excluded: disabledSatellites.value.filter((s) => s !== name) });
+        satStore.setActivation({ disabledSatellites: disabledSatellites.value.filter((s) => s !== name) });
       } else {
         // Drop a redundant individual enable, which would beat the exclusion.
         satStore.setActivation({
-          excluded: [...disabledSatellites.value, name],
-          satellites: enabledSatellites.value.filter((s) => s !== name),
+          disabledSatellites: [...disabledSatellites.value, name],
+          enabledSatellites: enabledSatellites.value.filter((s) => s !== name),
         });
       }
       return;
     }
     if (enabledSatSet.value.has(name)) {
-      satStore.setActivation({ satellites: enabledSatellites.value.filter((s) => s !== name) });
+      satStore.setActivation({ enabledSatellites: enabledSatellites.value.filter((s) => s !== name) });
     } else {
       // An explicit enable overrides a stale exclusion.
       satStore.setActivation({
-        satellites: [...enabledSatellites.value, name],
-        excluded: disabledSatellites.value.filter((s) => s !== name),
+        enabledSatellites: [...enabledSatellites.value, name],
+        disabledSatellites: disabledSatellites.value.filter((s) => s !== name),
       });
     }
   }
@@ -323,7 +323,7 @@ export function useSatelliteBrowser() {
   }
 
   function clearAll(): void {
-    satStore.setActivation({ tags: [], satellites: [], excluded: [] });
+    satStore.setActivation({ enabledTags: [], enabledSatellites: [], disabledSatellites: [] });
   }
 
   const hasActiveSelection = computed(() => enabledTags.value.length > 0 || enabledSatellites.value.length > 0);

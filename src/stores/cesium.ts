@@ -1,10 +1,10 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
+import { layerProvider } from "../config/layers";
+import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { baseLayerNames, imageryProviderNames, terrainProviderNames } from "../modules/CesiumLayerProviders";
 import { boolean, enumString, layerList, timestamp, toMinuteIso } from "../modules/util/urlCodec";
-
-const providerOf = (layer: string): string => layer.split("_")[0] ?? "";
 
 export const useCesiumStore = defineStore(
   "cesium",
@@ -43,9 +43,15 @@ export const useCesiumStore = defineStore(
     function setLayers(next: readonly string[]): void {
       const known = new Set(imageryProviderNames());
       const bases = new Set(baseLayerNames());
-      const valid = next.filter((layer) => known.has(providerOf(layer)));
-      const lastBase = valid.reduce((last, layer, index) => (bases.has(providerOf(layer)) ? index : last), -1);
-      const resolved = valid.filter((layer, index) => !bases.has(providerOf(layer)) || index === lastBase);
+      // A layer with an unusable opacity is no more storable than an unknown
+      // provider — it would reach Cesium as NaN and render nothing.
+      const valid = next.filter((layer) => {
+        const provider = layerProvider(layer);
+        return provider !== undefined && known.has(provider);
+      });
+      const isBase = (layer: string) => bases.has(layerProvider(layer) ?? "");
+      const lastBase = valid.reduce((last, layer, index) => (isBase(layer) ? index : last), -1);
+      const resolved = valid.filter((layer, index) => !isBase(layer) || index === lastBase);
 
       const unchanged = resolved.length === activeLayers.value.length && resolved.every((layer, index) => layer === activeLayers.value[index]);
       if (!unchanged) {
@@ -74,8 +80,8 @@ export const useCesiumStore = defineStore(
       config: [
         { name: "layers", url: "layers", kind: layerList(imageryProviderNames) },
         { name: "terrainProvider", url: "terrain", kind: enumString(terrainProviderNames()) },
-        { name: "sceneMode", url: "scene", kind: enumString(["3D", "2D", "Columbus"]) },
-        { name: "cameraMode", url: "camera", kind: enumString(["Fixed", "Inertial"]) },
+        { name: "sceneMode", url: "scene", kind: enumString(SCENE_MODES) },
+        { name: "cameraMode", url: "camera", kind: enumString(CAMERA_MODES) },
         { name: "qualityPreset", url: "quality", kind: enumString(["low", "high"]) },
         { name: "showFps", url: "fps", kind: boolean() },
         { name: "background", url: "bg", kind: boolean() },

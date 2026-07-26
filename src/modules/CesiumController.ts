@@ -20,6 +20,8 @@ import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
 import { usePostHog } from "../composables/usePostHog";
+import { parseLayer } from "../config/layers";
+import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import {
@@ -100,8 +102,8 @@ export class CesiumController {
     window.cc = this;
 
     // CesiumController config
-    this.sceneModes = ["3D", "2D", "Columbus"];
-    this.cameraModes = ["Fixed", "Inertial"];
+    this.sceneModes = [...SCENE_MODES];
+    this.cameraModes = [...CAMERA_MODES];
 
     this.createInputHandler();
     this.addErrorHandler();
@@ -153,9 +155,11 @@ export class CesiumController {
   set imageryLayers(newLayerNames: string[]) {
     this.clearImageryLayers();
     newLayerNames.forEach((layerName) => {
-      const [name, alphaStr] = layerName.split("_");
-      const alpha = alphaStr === undefined ? undefined : Number(alphaStr);
-      const layer = this.createImageryLayer(name as string, alpha);
+      const selection = parseLayer(layerName);
+      if (selection === undefined) {
+        return;
+      }
+      const layer = this.createImageryLayer(selection.provider, selection.alpha);
       if (layer) {
         this.viewer.scene.imageryLayers.add(layer);
       }

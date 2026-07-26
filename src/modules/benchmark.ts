@@ -48,13 +48,21 @@ async function test(): Promise<void> {
         .entriesWithTag(satelliteTag)
         .slice(0, satelliteCount)
         .map((entry) => entry.name);
-      cc.sats.reconcile({ tags: [], satellites, excluded: [], components, groundStations: [], overpassMode: "elevation", tracked: "" });
+      cc.sats.reconcile({
+        enabledTags: [],
+        enabledSatellites: satellites,
+        disabledSatellites: [],
+        components,
+        groundStations: [],
+        overpassMode: "elevation",
+        trackedSatellite: "",
+      });
       console.log(satellites, cc.sats.catalog.entriesWithTag(satelliteTag));
 
       // eslint-disable-next-line no-await-in-loop
       await logPerformance();
     }
-    cc.sats.reconcile({ tags: [], satellites: [], excluded: [], components: [], groundStations: [], overpassMode: "elevation", tracked: "" });
+    cc.sats.reconcile({ enabledTags: [], enabledSatellites: [], disabledSatellites: [], components: [], groundStations: [], overpassMode: "elevation", trackedSatellite: "" });
   }
 }
 test();

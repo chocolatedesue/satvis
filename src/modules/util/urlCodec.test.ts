@@ -153,6 +153,21 @@ describe("layerList", () => {
     expect(kind.format(["ArcGis_0.5", "Nextrad"])).toEqual({ ok: true, value: "ArcGis_0.5,Nextrad" });
   });
 
+  // An unusable alpha reached Cesium as NaN and rendered an invisible layer.
+  test("drops a layer whose opacity is not a usable number", () => {
+    expect(kind.parse("OSM_abc,ArcGis")).toEqual({ ok: true, value: ["ArcGis"] });
+    expect(kind.parse("OSM_5,ArcGis")).toEqual({ ok: true, value: ["ArcGis"] });
+    expect(kind.parse("OSM_,ArcGis")).toEqual({ ok: true, value: ["ArcGis"] });
+  });
+
+  test("0 and 1 are usable opacities", () => {
+    expect(kind.parse("OSM_0,ArcGis_1")).toEqual({ ok: true, value: ["OSM_0", "ArcGis_1"] });
+  });
+
+  test("refuses to format an unusable opacity", () => {
+    expect(kind.format(["OSM_abc"]).ok).toBe(false);
+  });
+
   test("a hyphenated provider name is fine", () => {
     expect(kind.parse("GOES-IR")).toEqual({ ok: true, value: ["GOES-IR"] });
   });
@@ -289,9 +304,10 @@ describe("encode", () => {
     expect(encode({ ...DEFAULTS, enabledTags: ["Weather", "Stations"] }, DEFAULTS, SCHEMA)).toEqual({ tags: "Weather,Stations" });
   });
 
-  test("preserves parameters it does not own", () => {
-    const params = encode({ ...DEFAULTS, showFps: true }, DEFAULTS, SCHEMA, { utm_source: "x", fbclid: "y" });
-    expect(params).toEqual({ utm_source: "x", fbclid: "y", fps: "true" });
+  // Foreign parameters are the adapter's business — see urlSync.test.ts. This
+  // map cannot express a valueless or repeated one, so it does not carry them.
+  test("emits only the parameters it owns", () => {
+    expect(encode({ ...DEFAULTS, showFps: true }, DEFAULTS, SCHEMA)).toEqual({ fps: "true" });
   });
 
   test("a live clock leaves no time parameter", () => {

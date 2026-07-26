@@ -15,23 +15,23 @@ import type { GpRecord } from "./util/gp";
  * own about any of it — the store decides, this is the value it hands over.
  */
 export interface DesiredScene {
-  tags: string[];
-  satellites: string[];
-  excluded: string[];
+  enabledTags: string[];
+  enabledSatellites: string[];
+  disabledSatellites: string[];
   components: string[];
   groundStations: SerializedGroundStation[];
   overpassMode: string;
-  tracked: string;
+  trackedSatellite: string;
 }
 
 const EMPTY_SCENE: DesiredScene = {
-  tags: [],
-  satellites: [],
-  excluded: [],
+  enabledTags: [],
+  enabledSatellites: [],
+  disabledSatellites: [],
   components: [],
   groundStations: [],
   overpassMode: "elevation",
-  tracked: "",
+  trackedSatellite: "",
 };
 
 const sameNames = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((name, index) => name === b[index]);
@@ -110,7 +110,11 @@ export class SatelliteManager {
     const previous = this.#desired;
     this.#desired = desired;
 
-    if (!sameNames(previous.tags, desired.tags) || !sameNames(previous.satellites, desired.satellites) || previous.tracked !== desired.tracked) {
+    if (
+      !sameNames(previous.enabledTags, desired.enabledTags) ||
+      !sameNames(previous.enabledSatellites, desired.enabledSatellites) ||
+      previous.trackedSatellite !== desired.trackedSatellite
+    ) {
       void this.#ensureCatalogCoverage();
     }
 
@@ -126,8 +130,8 @@ export class SatelliteManager {
       this.#applyComponents(previous.components);
     }
 
-    if (previous.tracked !== desired.tracked) {
-      this.#applyTracked(desired.tracked);
+    if (previous.trackedSatellite !== desired.trackedSatellite) {
+      this.#applyTracked(desired.trackedSatellite);
     }
 
     this.#reconcileActive();
@@ -212,8 +216,8 @@ export class SatelliteManager {
   // (URL-enabled sats, pending track) cannot be resolved yet — the group of an
   // unknown name is unknowable without loading.
   #ensureCatalogCoverage(): Promise<void> {
-    const loads = [this.catalog.ensureTags(this.#desired.tags)];
-    const names = [...this.#desired.satellites];
+    const loads = [this.catalog.ensureTags(this.#desired.enabledTags)];
+    const names = [...this.#desired.enabledSatellites];
     if (this.pendingTrackedSatellite) {
       names.push(this.pendingTrackedSatellite);
     }
@@ -236,9 +240,9 @@ export class SatelliteManager {
   #activeTargetEntries(): Map<string, CatalogEntry> {
     return activeTargetEntries({
       entries: this.catalog.entries,
-      enabledTags: this.#desired.tags,
-      enabledSatellites: this.#desired.satellites,
-      disabledSatellites: this.#desired.excluded,
+      enabledTags: this.#desired.enabledTags,
+      enabledSatellites: this.#desired.enabledSatellites,
+      disabledSatellites: this.#desired.disabledSatellites,
       trackedName: this.trackedSatellite || undefined,
       pendingTrackedName: this.pendingTrackedSatellite,
     });

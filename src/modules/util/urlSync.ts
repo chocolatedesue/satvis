@@ -9,7 +9,7 @@ import type { PiniaPluginContext, Store as PiniaStore } from "pinia";
 import { watch } from "vue";
 import type { LocationQuery, Router } from "vue-router";
 
-import { decode, encode, type FieldSpec, type Query } from "./urlCodec";
+import { decode, encode, type FieldSpec, paramOf, type Query } from "./urlCodec";
 
 export type { FieldKind, FieldSpec } from "./urlCodec";
 
@@ -58,15 +58,19 @@ let watching = false;
 // The one parameter that changes without anyone asking it to.
 const CLOCK_PARAM = "time";
 
-const paramOf = (spec: FieldSpec) => spec.url ?? spec.name;
 const qualify = (storeId: string, specs: FieldSpec[]): FieldSpec[] => specs.map((spec) => ({ ...spec, name: `${storeId}.${spec.name}` }));
 const hydratedEntries = () => [...registry.values()].filter((entry) => entry.defaults !== undefined);
 
 // vue-router hands back string | null | (string | null)[]; the codec wants one
-// string per parameter. A repeated parameter keeps its first value.
-function normalizeQuery(query: LocationQuery): Query {
+// string per parameter. Lossy on purpose, and only ever applied to parameters
+// the codec owns — a foreign parameter keeps the router's own representation so
+// that `?embed` (valueless) and repeated parameters survive untouched.
+function normalizeQuery(query: LocationQuery, owned?: ReadonlySet<string>): Query {
   const normalized: Record<string, string> = {};
   for (const [key, value] of Object.entries(query)) {
+    if (owned !== undefined && !owned.has(key)) {
+      continue;
+    }
     const first = Array.isArray(value) ? value[0] : value;
     if (typeof first === "string") {
       normalized[key] = first;
@@ -74,6 +78,13 @@ function normalizeQuery(query: LocationQuery): Query {
   }
   return normalized;
 }
+
+const stableQuery = (query: LocationQuery): string =>
+  JSON.stringify(
+    Object.keys(query)
+      .toSorted()
+      .map((key) => [key, query[key]]),
+  );
 
 // Values reach the store as fresh arrays and objects on every decode, so
 // identity is useless for deciding whether anything actually changed. Without
@@ -132,9 +143,8 @@ function writeQuery(router: Router, mode: "push" | "replace"): void {
     return;
   }
 
-  const current = normalizeQuery(router.currentRoute.value.query);
+  const current = router.currentRoute.value.query;
   const owned = new Set(hydrated.flatMap((entry) => entry.specs.map(paramOf)));
-  const foreign = Object.fromEntries(Object.entries(current).filter(([param]) => !owned.has(param)));
 
   const state: Record<string, unknown> = {};
   const defaults: Record<string, unknown> = {};
@@ -148,14 +158,23 @@ function writeQuery(router: Router, mode: "push" | "replace"): void {
     Object.assign(defaults, entry.defaults);
   }
 
-  const next = encode(state, defaults, schema, foreign);
+  // Parameters this codec does not own pass through with the value the router
+  // gave us, so a valueless or repeated one is not flattened away.
+  const next: LocationQuery = {};
+  for (const [param, value] of Object.entries(current)) {
+    if (!owned.has(param)) {
+      next[param] = value;
+    }
+  }
+  Object.assign(next, encode(state, defaults, schema));
+
   // A write that changes nothing is not a state change and must not become a
   // history entry. This is also what stops a push from echoing back through
   // the query watcher.
-  const moved = [...new Set([...Object.keys(current), ...Object.keys(next)])].filter((param) => current[param] !== next[param]);
-  if (moved.length === 0) {
+  if (stableQuery(next) === stableQuery(current)) {
     return;
   }
+  const moved = [...new Set([...Object.keys(current), ...Object.keys(next)])].filter((param) => JSON.stringify(current[param]) !== JSON.stringify(next[param]));
   // A history entry stands for an intent, and a minute elapsing is not one.
   // While the clock is pinned it rewrites `time` every minute, so a change that
   // moves nothing else replaces rather than pushes. The cost is that pinning by
@@ -177,9 +196,8 @@ function watchQuery(router: Router): void {
   watch(
     () => router.currentRoute.value.query,
     (query) => {
-      const normalized = normalizeQuery(query);
       for (const entry of hydratedEntries()) {
-        applyQuery(entry, normalized);
+        applyQuery(entry, normalizeQuery(query, new Set(entry.specs.map(paramOf))));
       }
     },
   );
@@ -212,7 +230,7 @@ function hydrate(entry: Registration, router: Router): void {
   }
   entry.defaults = defaults;
 
-  applyQuery(entry, normalizeQuery(router.currentRoute.value.query));
+  applyQuery(entry, normalizeQuery(router.currentRoute.value.query, new Set(specs.map(paramOf))));
 
   // Normalise the url to what the state actually is — dropping anything
   // invalid and anything that turned out to equal a default. Replace rather

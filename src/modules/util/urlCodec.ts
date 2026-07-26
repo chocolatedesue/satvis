@@ -9,6 +9,7 @@
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
+import { formatLayer, parseLayer } from "../../config/layers";
 import type { SerializedGroundStation } from "../../stores/sat";
 
 dayjs.extend(utc);
@@ -157,15 +158,25 @@ export function closedStringList(members: () => readonly string[]): FieldKind<st
  * not here.
  */
 export function layerList(providers: () => readonly string[]): FieldKind<string[]> {
-  const known = (entry: string, names: readonly string[]) => names.includes(entry.split("_")[0] ?? "");
+  // Both the provider and the opacity have to be usable: an out-of-range or
+  // non-numeric alpha would reach Cesium as NaN and render nothing at all.
+  const usable = (entry: string, names: readonly string[]): string | undefined => {
+    const selection = parseLayer(entry);
+    return selection !== undefined && names.includes(selection.provider) ? formatLayer(selection) : undefined;
+  };
   return {
     parse: (raw) => {
       const names = providers();
-      return ok(splitList(raw).filter((entry) => known(entry, names)));
+      return ok(
+        splitList(raw).flatMap((entry) => {
+          const selection = usable(entry, names);
+          return selection === undefined ? [] : [selection];
+        }),
+      );
     },
     format: (value) => {
       const names = providers();
-      if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || !known(entry, names))) {
+      if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || usable(entry, names) === undefined)) {
         return FAIL;
       }
       return formatList(value);
@@ -235,11 +246,15 @@ export function groundStationList(): FieldKind<SerializedGroundStation[]> {
 
 const MINUTE_ISO = "YYYY-MM-DDTHH:mm[Z]";
 
-/** Round to the minute, or undefined if this is not a time at all. */
-export function toMinuteIso(value: string): string | undefined {
+/**
+ * Round to the minute, or undefined if this is not a time at all. The one place
+ * the minute wire form is spelled out; callers holding a Date pass it straight
+ * in rather than formatting it themselves.
+ */
+export function toMinuteIso(value: string | Date): string | undefined {
   // dayjs is lenient enough to accept things like "Point", so gate on Date
   // first and let dayjs do the formatting.
-  if (Number.isNaN(Date.parse(value))) {
+  if (typeof value === "string" && Number.isNaN(Date.parse(value))) {
     return undefined;
   }
   const parsed = dayjs.utc(value);
@@ -281,7 +296,8 @@ export interface DecodeResult {
   invalid: string[];
 }
 
-const paramOf = (spec: FieldSpec) => spec.url ?? spec.name;
+/** The query parameter a field is carried in. */
+export const paramOf = (spec: FieldSpec): string => spec.url ?? spec.name;
 
 /**
  * Query -> state. Defaults are supplied by the caller because they are the
@@ -311,25 +327,16 @@ export function decode(query: Query, schema: readonly FieldSpec[], defaults: Rea
 }
 
 /**
- * State -> query parameters. Returns the parameter map rather than a string:
+ * State -> the parameters this codec owns. Returns a map rather than a string:
  * turning that into a url is the router's job, and its serializer already
  * matches the wire format this codec targets.
  *
- * `foreign` carries parameters this codec does not own — they are preserved
- * verbatim rather than eaten by the rebuild.
+ * Parameters belonging to anyone else are deliberately not handled here — only
+ * the adapter has a query type able to express a valueless or repeated
+ * parameter, and flattening one through this map would destroy it.
  */
-export function encode(
-  state: Readonly<Record<string, unknown>>,
-  defaults: Readonly<Record<string, unknown>>,
-  schema: readonly FieldSpec[],
-  foreign: Query = {},
-): Record<string, string> {
+export function encode(state: Readonly<Record<string, unknown>>, defaults: Readonly<Record<string, unknown>>, schema: readonly FieldSpec[]): Record<string, string> {
   const params: Record<string, string> = {};
-  for (const [key, value] of Object.entries(foreign)) {
-    if (value !== undefined) {
-      params[key] = value;
-    }
-  }
 
   for (const spec of schema) {
     const param = paramOf(spec);

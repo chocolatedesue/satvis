@@ -14,15 +14,15 @@ beforeEach(() => {
 describe("setActivation", () => {
   test("omitted lists keep their current value", () => {
     const sat = useSatStore();
-    sat.setActivation({ tags: ["Weather"], satellites: ["ISS"], excluded: ["NOAA 19"] });
-    sat.setActivation({ tags: ["Weather", "Stations"] });
+    sat.setActivation({ enabledTags: ["Weather"], enabledSatellites: ["ISS"], disabledSatellites: ["NOAA 19"] });
+    sat.setActivation({ enabledTags: ["Weather", "Stations"] });
     expect(sat.enabledSatellites).toEqual(["ISS"]);
     expect(sat.disabledSatellites).toEqual(["NOAA 19"]);
   });
 
   test("drops duplicates", () => {
     const sat = useSatStore();
-    sat.setActivation({ tags: ["Weather", "Weather"], satellites: ["ISS", "ISS"] });
+    sat.setActivation({ enabledTags: ["Weather", "Weather"], enabledSatellites: ["ISS", "ISS"] });
     expect(sat.enabledTags).toEqual(["Weather"]);
     expect(sat.enabledSatellites).toEqual(["ISS"]);
   });
@@ -31,16 +31,16 @@ describe("setActivation", () => {
   // it got there — a hand-written url, or a stale exclusion plus a new enable.
   test("keeps the enabled and excluded lists disjoint, enable winning", () => {
     const sat = useSatStore();
-    sat.setActivation({ satellites: ["ISS", "NOAA 19"], excluded: ["ISS"] });
+    sat.setActivation({ enabledSatellites: ["ISS", "NOAA 19"], disabledSatellites: ["ISS"] });
     expect(sat.enabledSatellites).toEqual(["ISS", "NOAA 19"]);
     expect(sat.disabledSatellites).toEqual([]);
   });
 
   test("a caller that wants the exclusion to win passes both lists", () => {
     const sat = useSatStore();
-    sat.setActivation({ satellites: ["ISS", "NOAA 19"] });
+    sat.setActivation({ enabledSatellites: ["ISS", "NOAA 19"] });
     // what toggleSat does when excluding a satellite that was individually enabled
-    sat.setActivation({ excluded: ["ISS"], satellites: ["NOAA 19"] });
+    sat.setActivation({ disabledSatellites: ["ISS"], enabledSatellites: ["NOAA 19"] });
     expect(sat.enabledSatellites).toEqual(["NOAA 19"]);
     expect(sat.disabledSatellites).toEqual(["ISS"]);
   });
@@ -48,15 +48,15 @@ describe("setActivation", () => {
   // An equal write still fires $subscribe, which would land a history entry.
   test("committing an equal value does not replace the array", () => {
     const sat = useSatStore();
-    sat.setActivation({ tags: ["Weather"] });
+    sat.setActivation({ enabledTags: ["Weather"] });
     const before = sat.enabledTags;
-    sat.setActivation({ tags: ["Weather"] });
+    sat.setActivation({ enabledTags: ["Weather"] });
     expect(sat.enabledTags).toBe(before);
   });
 
   test("the guarded lists are not writable", () => {
     const sat = useSatStore();
-    sat.setActivation({ tags: ["Weather"] });
+    sat.setActivation({ enabledTags: ["Weather"] });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     // @ts-expect-error enabledTags is read-only; setActivation is the way in
     sat.enabledTags = [];
@@ -85,6 +85,23 @@ describe("setGroundStations", () => {
       { lat: 48.1, lon: 11.5 },
     ]);
     expect(sat.groundStations).toEqual([{ lat: 48.1, lon: 11.5 }]);
+  });
+
+  // ~11 m. The url emits 4 dp either way, so without rounding here the store
+  // and the url disagreed about a station's position.
+  test("rounds coordinates to 4 decimal places", () => {
+    const sat = useSatStore();
+    sat.setGroundStations([{ lat: 48.123456, lon: 11.987654, name: "P" }]);
+    expect(sat.groundStations).toEqual([{ lat: 48.1235, lon: 11.9877, name: "P" }]);
+  });
+
+  test("dedupes stations that differ only below the stored precision", () => {
+    const sat = useSatStore();
+    sat.setGroundStations([
+      { lat: 48.12341, lon: 11.5 },
+      { lat: 48.12342, lon: 11.5 },
+    ]);
+    expect(sat.groundStations).toEqual([{ lat: 48.1234, lon: 11.5 }]);
   });
 
   test("dedupes identical stations", () => {
