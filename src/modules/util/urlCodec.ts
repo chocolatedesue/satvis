@@ -6,7 +6,12 @@
 // strings and plain values are the only things that cross its interface, which
 // is what makes it exhaustively testable in the node-env vitest.
 
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+
 import type { SerializedGroundStation } from "../../stores/sat";
+
+dayjs.extend(utc);
 
 // A parse or format attempt. `ok: false` means "this cannot be represented" —
 // the caller decides whether that costs an element or the whole parameter.
@@ -220,6 +225,45 @@ export function groundStationList(): FieldKind<SerializedGroundStation[]> {
         parts.push(name ? `${coordinates},${name}` : coordinates);
       }
       return ok(parts.join(STATION_SEPARATOR));
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Time
+// ---------------------------------------------------------------------------
+
+const MINUTE_ISO = "YYYY-MM-DDTHH:mm[Z]";
+
+/** Round to the minute, or undefined if this is not a time at all. */
+export function toMinuteIso(value: string): string | undefined {
+  // dayjs is lenient enough to accept things like "Point", so gate on Date
+  // first and let dayjs do the formatting.
+  if (Number.isNaN(Date.parse(value))) {
+    return undefined;
+  }
+  const parsed = dayjs.utc(value);
+  return parsed.isValid() ? parsed.format(MINUTE_ISO) : undefined;
+}
+
+/**
+ * `time`. Minute precision on the way out, anything parseable on the way in —
+ * unlike the other parameters there is no historic emitted form to stay
+ * compatible with, because `time` was never written to the url before.
+ *
+ * `null` means the clock is live and the parameter is absent; formatting it
+ * fails, which is how the codec drops a parameter.
+ */
+export function timestamp(): FieldKind<string | null> {
+  const round = (value: unknown) => (typeof value === "string" ? toMinuteIso(value) : undefined);
+  return {
+    parse: (raw) => {
+      const rounded = toMinuteIso(raw);
+      return rounded === undefined ? FAIL : ok(rounded);
+    },
+    format: (value) => {
+      const rounded = round(value);
+      return rounded === undefined ? FAIL : ok(rounded);
     },
   };
 }

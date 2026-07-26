@@ -13,6 +13,7 @@ import {
   queryString,
   stringList,
   tildeEscapedStringList,
+  timestamp,
   type FieldSpec,
 } from "./urlCodec";
 
@@ -208,6 +209,35 @@ describe("groundStationList", () => {
   });
 });
 
+describe("timestamp", () => {
+  const kind = timestamp();
+
+  test("rounds to the minute on the way out", () => {
+    expect(kind.format("2026-07-26T20:46:37.512Z")).toEqual({ ok: true, value: "2026-07-26T20:46Z" });
+  });
+
+  test("accepts anything parseable on the way in", () => {
+    expect(kind.parse("2026-07-26T20:46Z")).toEqual({ ok: true, value: "2026-07-26T20:46Z" });
+    expect(kind.parse("2026-07-26T20:46:37Z")).toEqual({ ok: true, value: "2026-07-26T20:46Z" });
+    expect(kind.parse("2026-07-26")).toEqual({ ok: true, value: "2026-07-26T00:00Z" });
+  });
+
+  test("rejects a non-time", () => {
+    expect(kind.parse("Point").ok).toBe(false);
+    expect(kind.parse("").ok).toBe(false);
+  });
+
+  // null is the live clock: not a value the url carries.
+  test("refuses to format null, which is how the parameter is omitted", () => {
+    expect(kind.format(null).ok).toBe(false);
+  });
+
+  test("round-trips", () => {
+    const formatted = kind.format("2026-07-26T20:46:37Z");
+    expect(formatted.ok && kind.parse(formatted.value)).toEqual({ ok: true, value: "2026-07-26T20:46Z" });
+  });
+});
+
 // ---------------------------------------------------------------------------
 
 const SCHEMA: FieldSpec[] = [
@@ -217,6 +247,7 @@ const SCHEMA: FieldSpec[] = [
   { name: "trackedSatellite", url: "track", kind: plainString() },
   { name: "showFps", url: "fps", kind: boolean() },
   { name: "layers", url: "layers", kind: layerList(providers) },
+  { name: "time", url: "time", kind: timestamp() },
 ];
 
 const DEFAULTS = {
@@ -226,6 +257,7 @@ const DEFAULTS = {
   trackedSatellite: "",
   showFps: false,
   layers: ["OfflineHighres"],
+  time: null as string | null,
 };
 
 describe("decode", () => {
@@ -258,8 +290,16 @@ describe("encode", () => {
   });
 
   test("preserves parameters it does not own", () => {
-    const params = encode({ ...DEFAULTS, showFps: true }, DEFAULTS, SCHEMA, { time: "2026-07-26T20:46Z", utm_source: "x" });
-    expect(params).toEqual({ time: "2026-07-26T20:46Z", utm_source: "x", fps: "true" });
+    const params = encode({ ...DEFAULTS, showFps: true }, DEFAULTS, SCHEMA, { utm_source: "x", fbclid: "y" });
+    expect(params).toEqual({ utm_source: "x", fbclid: "y", fps: "true" });
+  });
+
+  test("a live clock leaves no time parameter", () => {
+    expect(encode(DEFAULTS, DEFAULTS, SCHEMA)).toEqual({});
+  });
+
+  test("a pinned clock emits one", () => {
+    expect(encode({ ...DEFAULTS, time: "2026-07-26T20:46Z" }, DEFAULTS, SCHEMA)).toEqual({ time: "2026-07-26T20:46Z" });
   });
 
   test("omits a value it cannot represent rather than corrupting it", () => {
@@ -284,6 +324,7 @@ describe("round trip", () => {
       trackedSatellite: "ISS (ZARYA)",
       showFps: true,
       layers: ["ArcGis_0.5", "Nextrad"],
+      time: "2026-07-26T20:46Z",
     };
     const params = encode(state, DEFAULTS, SCHEMA);
     // through the wire form and back, so the round trip covers encoding too
@@ -304,6 +345,7 @@ describe("read compatibility with the pre-codec format", () => {
       trackedSatellite: "ISS (ZARYA)",
       showFps: true,
       layers: ["OfflineHighres"],
+      time: null,
     });
   });
 

@@ -10,12 +10,20 @@
 // that also travels the other way is tracking, because the user can start it by
 // clicking a satellite on the globe, and that arrives as a callback.
 
+import { JulianDate } from "@cesium/engine";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
 import { watch } from "vue";
 
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import type { CesiumController } from "./CesiumController";
 import type { DesiredScene } from "./SatelliteManager";
+
+dayjs.extend(utc);
+
+// Enough to keep a fast clock multiplier from hammering the history api.
+const MIN_CLOCK_WRITE_MS = 1000;
 
 export function startSceneSync(cc: CesiumController): void {
   const cesiumStore = useCesiumStore();
@@ -79,6 +87,51 @@ export function startSceneSync(cc: CesiumController): void {
   });
 
   watch(desired, (next) => cc.sats.reconcile(next), { deep: true, immediate: true });
+
+  // --- the clock ------------------------------------------------------------
+  // Live by default: `time` is null and absent from the url, so a shared link
+  // opens at the recipient's present. It pins on a deliberate act — a time in
+  // the url, or the user dragging the timeline — and then follows the clock at
+  // minute granularity so the link reproduces the moment being looked at.
+  const clockMinute = (): string => dayjs.utc(JulianDate.toDate(cc.viewer.clock.currentTime)).format("YYYY-MM-DDTHH:mm[Z]");
+
+  watch(
+    () => cesiumStore.time,
+    (pinned) => {
+      if (pinned !== null && pinned !== clockMinute()) {
+        cc.setTime(pinned);
+      }
+    },
+    { immediate: true },
+  );
+
+  let lastClockWrite = 0;
+  cc.viewer.clock.onTick.addEventListener(() => {
+    if (cesiumStore.time === null) {
+      return;
+    }
+    const now = performance.now();
+    if (now - lastClockWrite < MIN_CLOCK_WRITE_MS) {
+      return;
+    }
+    const minute = clockMinute();
+    if (minute === cesiumStore.time) {
+      return;
+    }
+    lastClockWrite = now;
+    cesiumStore.setTime(minute);
+  });
+
+  // Dragging the timeline is the other way in. Cesium's Timeline dispatches
+  // this on its own element; it is absent in minimal ui, where there is no
+  // timeline to drag.
+  // Cesium dispatches this from Timeline.prototype._setTimeBarTime but does not
+  // declare addEventListener on the widget, so the cast covers a typing gap
+  // rather than an assumption.
+  const timeline = cc.viewer.timeline as unknown as { addEventListener?: (type: string, listener: () => void) => void } | undefined;
+  timeline?.addEventListener?.("settime", () => {
+    cesiumStore.setTime(clockMinute());
+  });
 
   // --- back from the globe --------------------------------------------------
   cc.sats.onTrackedChange((name) => {

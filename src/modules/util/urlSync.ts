@@ -55,6 +55,9 @@ interface Registration {
 const registry = new Map<string, Registration>();
 let watching = false;
 
+// The one parameter that changes without anyone asking it to.
+const CLOCK_PARAM = "time";
+
 const paramOf = (spec: FieldSpec) => spec.url ?? spec.name;
 const qualify = (storeId: string, specs: FieldSpec[]): FieldSpec[] => specs.map((spec) => ({ ...spec, name: `${storeId}.${spec.name}` }));
 const hydratedEntries = () => [...registry.values()].filter((entry) => entry.defaults !== undefined);
@@ -147,12 +150,18 @@ function writeQuery(router: Router, mode: "push" | "replace"): void {
 
   const next = encode(state, defaults, schema, foreign);
   // A write that changes nothing is not a state change and must not become a
-  // history entry — catalogRevision and pickMode both fire $subscribe. This is
-  // also what stops a push from echoing back through the query watcher.
-  if (isSameValue(next, current)) {
+  // history entry. This is also what stops a push from echoing back through
+  // the query watcher.
+  const moved = [...new Set([...Object.keys(current), ...Object.keys(next)])].filter((param) => current[param] !== next[param]);
+  if (moved.length === 0) {
     return;
   }
-  void router[mode]({ query: next }).catch(() => {
+  // A history entry stands for an intent, and a minute elapsing is not one.
+  // While the clock is pinned it rewrites `time` every minute, so a change that
+  // moves nothing else replaces rather than pushes. The cost is that pinning by
+  // scrubbing is not separately undoable, which beats a history full of ticks.
+  const clockOnly = moved.every((param) => param === CLOCK_PARAM);
+  void router[clockOnly ? "replace" : mode]({ query: next }).catch(() => {
     // A redundant navigation is not an error worth surfacing.
   });
 }

@@ -202,7 +202,6 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
 import { computed, onMounted, reactive, ref } from "vue";
-import { useRoute } from "vue-router";
 
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
@@ -212,7 +211,6 @@ import SatelliteBrowser from "./SatelliteBrowser.vue";
 
 type MenuKey = "cat" | "sat" | "gs" | "map" | "ios" | "dbg";
 
-const route = useRoute();
 const cc = globalThis.cc;
 
 const menu = reactive<Record<MenuKey, boolean>>({
@@ -240,9 +238,6 @@ const satStore = useSatStore();
 const { enabledComponents, overpassMode } = storeToRefs(satStore);
 
 onMounted(() => {
-  if (route.query.time) {
-    cc.setTime(route.query.time as string);
-  }
   showUI.value = !DeviceDetect.inIframe();
 });
 

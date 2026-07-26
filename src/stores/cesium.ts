@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { baseLayerNames, imageryProviderNames, terrainProviderNames } from "../modules/CesiumLayerProviders";
-import { boolean, enumString, layerList } from "../modules/util/urlCodec";
+import { boolean, enumString, layerList, timestamp, toMinuteIso } from "../modules/util/urlCodec";
 
 const providerOf = (layer: string): string => layer.split("_")[0] ?? "";
 
@@ -21,6 +21,19 @@ export const useCesiumStore = defineStore(
     // whole, so it cannot be enforced from a per-checkbox write.
     const activeLayers = ref<string[]>(["OfflineHighres"]);
     const layers = computed(() => activeLayers.value);
+
+    // null means the clock is live and follows the present; a value means it
+    // was pinned, by a url or by the user scrubbing the timeline. Read-only so
+    // the minute-rounding cannot be skipped — see CONTEXT.md, live vs pinned.
+    const pinnedTime = ref<string | null>(null);
+    const time = computed(() => pinnedTime.value);
+
+    function setTime(value: string | null): void {
+      const next = value === null ? null : (toMinuteIso(value) ?? null);
+      if (next !== pinnedTime.value) {
+        pinnedTime.value = next;
+      }
+    }
 
     /**
      * Commit a layer stack. Unknown providers are dropped, and where several
@@ -43,6 +56,8 @@ export const useCesiumStore = defineStore(
     return {
       layers,
       setLayers,
+      time,
+      setTime,
       terrainProvider,
       sceneMode,
       cameraMode,
@@ -64,6 +79,7 @@ export const useCesiumStore = defineStore(
         { name: "qualityPreset", url: "quality", kind: enumString(["low", "high"]) },
         { name: "showFps", url: "fps", kind: boolean() },
         { name: "background", url: "bg", kind: boolean() },
+        { name: "time", url: "time", kind: timestamp() },
       ],
       apply(store, patch) {
         store.setLayers(patch.layers as string[]);
@@ -73,6 +89,7 @@ export const useCesiumStore = defineStore(
         store.qualityPreset = patch.qualityPreset as string;
         store.showFps = patch.showFps as boolean;
         store.background = patch.background as boolean;
+        store.setTime(patch.time as string | null);
       },
     },
   },
