@@ -6,9 +6,29 @@ discussion; sharpen them here when they drift.
 - **Satellite**: one orbiting object, identified by a catalog entry
   (satnum + name) built from a GP element set (OMM or TLE).
 - **Catalog**: the deduplicated registry of satellites across all loaded
-  groups, with tag merging and metadata resolution (`SatelliteCatalog`).
+  groups, with tag merging (`SatelliteCatalog`). Metadata is not resolved here —
+  it arrives attached to the record.
 - **Group**: a named, declaratively-configured list of element sets served as
-  one unit (`/api/gp/<group>.json` or the static snapshot).
+  one unit (`/api/gp/<group>.json` or the static snapshot). A group decides what
+  is served and under which name, never what is true of a satellite: per-satellite
+  facts live in the satellite table, which is independent of any group.
+- **Satellite table**: the NORAD-keyed table of static per-satellite facts,
+  merged from the core config and every plugin config, and independent of the
+  groups alongside it. Matching is by NORAD id alone; a table entry's `name` is
+  documentation. A group's `satellites[].metadata` contributes to the same table
+  under that row's id, so a value written once applies wherever the record is
+  served (`worker/src/config/satvis.core.yaml`).
+- **Satellite metadata**: the bag of static facts the worker attaches to a served
+  GP record at refresh time, from the satellite table. Opaque to the worker,
+  interpreted by the frontend (`src/config/satelliteMetadata.ts`). A satellite
+  absent from the table carries no metadata and falls back to app defaults.
+- **Swath extent**: the cross-track distance from the ground track to the edge of
+  a sensor's footprint, held per side (starboard = velocity bearing + 90°). Not
+  half a width: the sides differ when a sensor is tilted, so a swath is a pair of
+  extents, and their sum is the total width.
+- **Orbit class**: the orbit's regime — LEO, MEO, GEO or HEO — derived from the
+  element set, never configured, so every satellite has one and it cannot
+  contradict its own orbit (`Orbit.orbitClass`).
 - **Tag**: a label attached to satellites by the group that supplied them, and
   the unit the user activates ("enable Weather"). One satellite may carry tags
   from several groups. Tag names must not contain a comma.
@@ -25,7 +45,9 @@ discussion; sharpen them here when they drift.
   against.
 - **Pass**: a time range in which a satellite serves a ground station — by
   line-of-sight elevation ("elevation" mode) or sensor footprint overlap
-  ("swath" mode).
+  ("swath" mode). In swath mode the footprint is bounded cross-track by the
+  extent of the side the station falls on and along-track by the wider extent, so
+  a tilted sensor serves one side further than the other.
 - **Pass predictor**: the single owner of pass prediction for one satellite:
   ground stations, overpass mode, the recompute window guard, the computed
   pass list, and its Cesium time intervals (`PassPredictor`).
