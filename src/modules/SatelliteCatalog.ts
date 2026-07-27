@@ -4,14 +4,12 @@
 //
 // This module must stay Cesium-free (node-env vitest exercises it).
 
-import { appMetadataConfig, type MetadataRule, type ResolvedMetadata } from "../config/satelliteMetadata";
+import type { SatelliteMetadata } from "../config/satelliteMetadata";
 import { parseGpPayload, recordName, recordSatnum, type GpRecord } from "./util/gp";
-import { fetchGpGroup, fetchGpIndex, fetchGpMetadata } from "./util/gpSource";
+import { fetchGpGroup, fetchGpIndex } from "./util/gpSource";
 
 // A single known satellite. Created by SatelliteCatalog.addRecords, which owns
-// the identity/tag indices; the entry keeps a back-reference to its catalog so
-// `metadata` can resolve lazily against the current rule set. The dependency is
-// explicit (constructor arg) rather than closed over, so there is no this-alias.
+// the identity/tag indices.
 export class CatalogEntry {
   // Dedup identity, matching today's SatelliteManager.#add: satnum + "|" + name.
   readonly key: string;
@@ -27,15 +25,7 @@ export class CatalogEntry {
 
   readonly record: GpRecord;
 
-  // Per-entry memoized resolved metadata, tagged with the catalog metadata
-  // revision it was computed against. Invalidated implicitly when the catalog's
-  // revision bumps (mergeMetadataConfig), so a stale cache is never returned.
-  #cache: { revision: number; metadata: ResolvedMetadata } | undefined;
-
-  constructor(
-    private readonly catalog: SatelliteCatalog,
-    fields: { key: string; name: string; nameUpper: string; satnum: string; tags: string[]; record: GpRecord },
-  ) {
+  constructor(fields: { key: string; name: string; nameUpper: string; satnum: string; tags: string[]; record: GpRecord }) {
     this.key = fields.key;
     this.name = fields.name;
     this.nameUpper = fields.nameUpper;
@@ -44,24 +34,13 @@ export class CatalogEntry {
     this.record = fields.record;
   }
 
-  // Resolved per-satellite metadata (swath, cone FOV, model URL). Resolved
-  // lazily via the catalog and memoized against its metadata revision, so
-  // entries created before remote rules arrive still see the merged result.
-  get metadata(): ResolvedMetadata {
-    const revision = this.catalog.metadataRevision;
-    if (this.#cache && this.#cache.revision === revision) {
-      return this.#cache.metadata;
-    }
-    const metadata = this.catalog.resolveMetadata(this);
-    this.#cache = { revision, metadata };
-    return metadata;
+  // Static per-satellite facts (swath extents, cone FOV, model URL, operator),
+  // attached to the record by the worker at refresh time. Empty for a satellite
+  // absent from the satellite table — consumers apply their own defaults. No
+  // resolution or memoization: the record either carries the bag or it does not.
+  get metadata(): SatelliteMetadata {
+    return this.record.metadata ?? {};
   }
-}
-
-// A rule paired with its compiled RegExp (compiled once, on first match).
-interface CompiledRule {
-  rule: MetadataRule;
-  pattern: RegExp | undefined;
 }
 
 // A preset group source known to the catalog but fetched lazily: registered
@@ -88,20 +67,6 @@ export class SatelliteCatalog {
 
   #byTag = new Map<string, Set<CatalogEntry>>();
 
-  // Metadata rules: app rules first, then remote rules appended by
-  // mergeMetadataConfig (remote wins field-wise). RegExps are compiled lazily
-  // and cached per rule. The revision bumps whenever the rule set changes,
-  // invalidating per-entry memoized metadata.
-  #compiledRules: CompiledRule[] = appMetadataConfig.rules.map((rule) => ({ rule, pattern: undefined }));
-
-  #metadataRevision = 0;
-
-  // Current metadata rule-set revision. Read by CatalogEntry to key its memo;
-  // bumped by mergeMetadataConfig to invalidate every entry's cached metadata.
-  get metadataRevision(): number {
-    return this.#metadataRevision;
-  }
-
   #changeCallbacks: CatalogChangeCallback[] = [];
 
   onChange(cb: CatalogChangeCallback): void {
@@ -122,8 +87,6 @@ export class SatelliteCatalog {
   #indexCounts = new Map<string, number>();
 
   #indexLoad: Promise<void> | undefined;
-
-  #metadataLoad: Promise<void> | undefined;
 
   // Register preset groups without fetching them. Repeated registration (e.g.
   // navigating between presets) merges tags; already-loaded groups stay loaded.
@@ -184,9 +147,6 @@ export class SatelliteCatalog {
   }
 
   async #loadRegisteredGroup(group: RegisteredGroup): Promise<void> {
-    // Fetch metadata (once) BEFORE the first group file so ground tracks /
-    // cones aren't created with stale widths.
-    await (this.#metadataLoad ??= this.#loadMetadata());
     try {
       const text = await fetchGpGroup(group.source);
       const records = parseGpPayload(text);
@@ -197,21 +157,6 @@ export class SatelliteCatalog {
       console.log(error);
       // Clear the memoized load so a later ensure call retries.
       group.load = undefined;
-    }
-  }
-
-  // Fetch and merge remote metadata rules. Tolerant of worker-less / older
-  // deployments: any failure (404, network, invalid body) logs and continues
-  // with the built-in app defaults.
-  async #loadMetadata(): Promise<void> {
-    try {
-      const remote = await fetchGpMetadata();
-      if (!Array.isArray(remote)) {
-        throw new Error("metadata payload is not an array");
-      }
-      this.mergeMetadataConfig(remote as MetadataRule[]);
-    } catch (error) {
-      console.log(error);
     }
   }
 
@@ -233,7 +178,7 @@ export class SatelliteCatalog {
         }
         continue;
       }
-      const entry = new CatalogEntry(this, {
+      const entry = new CatalogEntry({
         key,
         name,
         nameUpper: name.toUpperCase(),
@@ -261,50 +206,6 @@ export class SatelliteCatalog {
       tagEntries.add(entry);
       this.#byTag.set(tag, tagEntries);
     }
-  }
-
-  // Append remote metadata rules after the built-in app rules (remote wins
-  // field-wise, being merged last). Bumps the metadata revision so previously
-  // memoized per-entry metadata is recomputed on next access.
-  mergeMetadataConfig(remoteRules: MetadataRule[]): void {
-    for (const rule of remoteRules) {
-      this.#compiledRules.push({ rule, pattern: undefined });
-    }
-    this.#metadataRevision += 1;
-  }
-
-  // Resolve metadata for an entry: start from app defaults, then shallow-merge
-  // the metadata of every matching rule in order. Package-visible (not #private)
-  // so CatalogEntry.metadata can delegate here; memoization lives in the entry,
-  // keyed by metadataRevision. The result is a ResolvedMetadata because it
-  // spreads `defaults` (which supplies the required fields), and rules only ever
-  // overwrite those fields with values of the same type.
-  resolveMetadata(entry: CatalogEntry): ResolvedMetadata {
-    const metadata: ResolvedMetadata = { ...appMetadataConfig.defaults };
-    for (const compiled of this.#compiledRules) {
-      if (this.#ruleMatches(compiled, entry)) {
-        Object.assign(metadata, compiled.rule.metadata);
-      }
-    }
-    return metadata;
-  }
-
-  #ruleMatches(compiled: CompiledRule, entry: CatalogEntry): boolean {
-    const { match } = compiled.rule;
-    if (match.satnums?.includes(entry.satnum)) {
-      return true;
-    }
-    if (match.names?.includes(entry.name)) {
-      return true;
-    }
-    if (match.namePattern) {
-      // Compile once per rule and cache.
-      compiled.pattern ??= new RegExp(match.namePattern);
-      if (compiled.pattern.test(entry.name)) {
-        return true;
-      }
-    }
-    return false;
   }
 
   // All known groups: tags with loaded entries (exact counts) plus registered

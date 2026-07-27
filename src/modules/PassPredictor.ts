@@ -3,7 +3,7 @@ import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
 import type Orbit from "./Orbit";
-import type { ElevationPass, GroundStationPosition, SwathPass } from "./Orbit";
+import type { ElevationPass, GroundStationPosition, SwathExtents, SwathPass } from "./Orbit";
 
 dayjs.extend(utc);
 
@@ -47,9 +47,9 @@ interface PassWindow {
 export class PassPredictor {
   #orbit: Orbit;
 
-  // Swath width is resolved from catalog metadata, which can change after
-  // construction (remote rules); read it lazily per recompute.
-  #swath: () => number;
+  // Per-side swath extents, read lazily per recompute so a satellite whose
+  // record arrives later still predicts against its own footprint.
+  #swath: () => SwathExtents;
 
   #groundStations: GroundStation[] = [];
 
@@ -62,7 +62,7 @@ export class PassPredictor {
   /** Pass time ranges as Cesium intervals, kept in sync with the pass list. */
   passIntervals = new TimeIntervalCollection();
 
-  constructor(orbit: Orbit, swath: () => number) {
+  constructor(orbit: Orbit, swath: () => SwathExtents) {
     this.#orbit = orbit;
     this.#swath = swath;
   }

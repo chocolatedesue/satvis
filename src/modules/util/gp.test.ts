@@ -178,3 +178,49 @@ describe("recordTleLines", () => {
     expect(recordTleLines(omm)).toBeUndefined();
   });
 });
+
+describe("metadata lifting", () => {
+  const OMM_ISS = JSON.parse(OMM_ARRAY)[0] as Record<string, unknown>;
+  const [TLE_LINE1, TLE_LINE2] = TLE_2LINE.split("\n");
+
+  test("lifts an OMM record's metadata off the element set", () => {
+    const payload = JSON.stringify([{ ...OMM_ISS, metadata: { swathStarboardKm: 1000, swathPortKm: 500 } }]);
+    const record = parseGpPayload(payload)[0]!;
+    expect(record.metadata).toEqual({ swathStarboardKm: 1000, swathPortKm: 500 });
+    // The bag must not remain in `omm`: that object is handed to json2satrec and
+    // rendered as the satellite's element set in the info panel.
+    expect(record.kind).toBe("omm");
+    expect(record.kind === "omm" && "metadata" in record.omm).toBe(false);
+  });
+
+  test("lifts a worker TLE record's metadata too", () => {
+    const payload = JSON.stringify([
+      {
+        OBJECT_NAME: "ISS",
+        TLE_LINE1: TLE_LINE1,
+        TLE_LINE2: TLE_LINE2,
+        metadata: { coneFovDeg: 45 },
+      },
+    ]);
+    const record = parseGpPayload(payload)[0]!;
+    expect(record.kind).toBe("tle");
+    expect(record.metadata).toEqual({ coneFovDeg: 45 });
+  });
+
+  test("leaves no metadata property on an unenriched record", () => {
+    const record = parseGpPayload(JSON.stringify([OMM_ISS]))[0]!;
+    expect("metadata" in record).toBe(false);
+  });
+
+  test("ignores a metadata value that is not an object", () => {
+    for (const bad of ["nope", 42, [1, 2], null]) {
+      const record = parseGpPayload(JSON.stringify([{ ...OMM_ISS, metadata: bad }]))[0]!;
+      expect(record.metadata, JSON.stringify(bad)).toBeUndefined();
+    }
+  });
+
+  test("does not lift metadata out of legacy TLE text (no place to carry it)", () => {
+    const record = parseGpPayload(`ISS\n${TLE_LINE1}\n${TLE_LINE2}`)[0]!;
+    expect(record.metadata).toBeUndefined();
+  });
+});

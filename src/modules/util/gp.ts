@@ -10,7 +10,15 @@
 
 import { json2satrec, twoline2satrec, type OMMJsonObject, type SatRec } from "satellite.js";
 
-export type GpRecord = { kind: "omm"; omm: OMMJsonObject } | { kind: "tle"; name: string; line1: string; line2: string };
+import type { SatelliteMetadata } from "../../config/satelliteMetadata";
+
+// `metadata` is common to both arms: the worker attaches it to OMM and pseudo-TLE
+// records alike, and parseGpPayload lifts it OUT of the payload so the `omm`
+// object handed to json2satrec stays a pure element set. Absent when the
+// satellite has no entry in the satellite table.
+export type GpRecord = ({ kind: "omm"; omm: OMMJsonObject } | { kind: "tle"; name: string; line1: string; line2: string }) & {
+  metadata?: SatelliteMetadata;
+};
 
 // Worker `TleRecord` (see worker/src/gp/types.ts) — pseudo element sets carried
 // verbatim as two TLE lines.
@@ -76,14 +84,29 @@ function parseJsonPayload(text: string): GpRecord[] {
   for (const item of array) {
     if (isWorkerTleRecord(item)) {
       const name = item.OBJECT_NAME?.trim() || satnumFromTleLine(item.TLE_LINE1);
-      records.push({ kind: "tle", name, line1: item.TLE_LINE1, line2: item.TLE_LINE2 });
+      records.push({ kind: "tle", name, line1: item.TLE_LINE1, line2: item.TLE_LINE2, ...metadataOf(item) });
     } else if (typeof item === "object" && item !== null) {
-      records.push({ kind: "omm", omm: item as OMMJsonObject });
+      // Lift `metadata` out of the payload: json2satrec ignores unknown keys, but
+      // keeping it in `omm` would leave a non-CCSDS field in what the rest of the
+      // app treats as a verbatim element set (and what the info panel displays).
+      const { metadata: _lifted, ...omm } = item as Record<string, unknown>;
+      records.push({ kind: "omm", omm: omm as OMMJsonObject, ...metadataOf(item) });
     } else {
       console.warn("Skipping unrecognized GP record", item);
     }
   }
   return records;
+}
+
+// The record's `metadata` bag as a spreadable fragment, omitting the key entirely
+// when absent so an unenriched record has no `metadata` property at all rather
+// than an explicit undefined.
+function metadataOf(item: unknown): { metadata?: SatelliteMetadata } {
+  const metadata = (item as { metadata?: unknown }).metadata;
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    return {};
+  }
+  return { metadata: metadata as SatelliteMetadata };
 }
 
 // Walk TLE text handling 3-line blocks (optionally "0 "-prefixed name),
