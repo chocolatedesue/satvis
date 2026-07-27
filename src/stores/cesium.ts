@@ -1,10 +1,15 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
+
+import { layerProvider } from "../config/layers";
+import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
+import { baseLayerNames, imageryProviderNames, terrainProviderNames } from "../modules/CesiumLayerProviders";
+import { sameValue } from "../modules/util/equality";
+import { boolean, enumString, layerList, timestamp, toMinuteIso } from "../modules/util/urlCodec";
 
 export const useCesiumStore = defineStore(
   "cesium",
   () => {
-    const layers = ref<string[]>(["OfflineHighres"]);
     const terrainProvider = ref("None");
     const sceneMode = ref("3D");
     const cameraMode = ref("Fixed");
@@ -13,8 +18,52 @@ export const useCesiumStore = defineStore(
     const showFps = ref(false);
     const pickMode = ref(false);
 
+    // Read-only: "at most one base layer" is an invariant of the list as a
+    // whole, so it cannot be enforced from a per-checkbox write.
+    const activeLayers = ref<string[]>(["OfflineHighres"]);
+    const layers = computed(() => activeLayers.value);
+
+    // null means the clock is live and follows the present; a value means it
+    // was pinned, by a url or by the user scrubbing the timeline. Read-only so
+    // the minute-rounding cannot be skipped — see CONTEXT.md, live vs pinned.
+    const pinnedTime = ref<string | null>(null);
+    const time = computed(() => pinnedTime.value);
+
+    function setTime(value: string | null): void {
+      const next = value === null ? null : (toMinuteIso(value) ?? null);
+      if (next !== pinnedTime.value) {
+        pinnedTime.value = next;
+      }
+    }
+
+    /**
+     * Commit a layer stack. Unknown providers are dropped, and where several
+     * base layers are present the last one wins — that is what picking a new
+     * base means. Overlays are always kept; list order is z-order.
+     */
+    function setLayers(next: readonly string[]): void {
+      const known = new Set(imageryProviderNames());
+      const bases = new Set(baseLayerNames());
+      // A layer with an unusable opacity is no more storable than an unknown
+      // provider — it would reach Cesium as NaN and render nothing.
+      const valid = next.filter((layer) => {
+        const provider = layerProvider(layer);
+        return provider !== undefined && known.has(provider);
+      });
+      const isBase = (layer: string) => bases.has(layerProvider(layer) ?? "");
+      const lastBase = valid.reduce((last, layer, index) => (isBase(layer) ? index : last), -1);
+      const resolved = valid.filter((layer, index) => !isBase(layer) || index === lastBase);
+
+      if (!sameValue(resolved, activeLayers.value)) {
+        activeLayers.value = resolved;
+      }
+    }
+
     return {
       layers,
+      setLayers,
+      time,
+      setTime,
       terrainProvider,
       sceneMode,
       cameraMode,
@@ -25,51 +74,26 @@ export const useCesiumStore = defineStore(
     };
   },
   {
+    // Wire format: docs/adr/0001-url-parameter-specification.md.
     urlsync: {
       enabled: true,
       config: [
-        {
-          name: "layers",
-          url: "layers",
-          serialize: (v) => (v as string[]).join(","),
-          deserialize: (v) => v.split(",").filter((e) => e),
-          valid: (v) =>
-            (v as string[]).every((l) => ["Offline", "OfflineHighres", "ArcGis", "OSM", "Topo", "BlackMarble", "Tiles", "GOES-IR", "Nextrad"].includes(l.split("_")[0] ?? "")),
-          default: ["OfflineHighres"],
-        },
-        {
-          name: "terrainProvider",
-          url: "terrain",
-          default: "None",
-        },
-        {
-          name: "sceneMode",
-          url: "scene",
-          default: "3D",
-        },
-        {
-          name: "cameraMode",
-          url: "camera",
-          default: "Fixed",
-        },
-        {
-          name: "qualityPreset",
-          url: "quality",
-          default: "high",
-        },
-        {
-          name: "showFps",
-          url: "fps",
-          default: "false",
-        },
-        {
-          name: "background",
-          url: "bg",
-          serialize: (v) => `${v}`,
-          deserialize: (v) => v === "true",
-          default: "true",
-        },
+        { name: "layers", url: "layers", kind: layerList(imageryProviderNames) },
+        { name: "terrainProvider", url: "terrain", kind: enumString(terrainProviderNames()) },
+        { name: "sceneMode", url: "scene", kind: enumString(SCENE_MODES) },
+        { name: "cameraMode", url: "camera", kind: enumString(CAMERA_MODES) },
+        { name: "qualityPreset", url: "quality", kind: enumString(["low", "high"]) },
+        { name: "showFps", url: "fps", kind: boolean() },
+        { name: "background", url: "bg", kind: boolean() },
+        { name: "time", url: "time", kind: timestamp() },
       ],
+      // Only the guarded keys are named; everything else is a plain ref.
+      apply(store, patch) {
+        const { layers, time, ...free } = patch;
+        Object.assign(store, free);
+        store.setLayers(layers as string[]);
+        store.setTime(time as string | null);
+      },
     },
   },
 );

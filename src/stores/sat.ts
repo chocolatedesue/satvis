@@ -1,11 +1,31 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
+
+import { SATELLITE_COMPONENTS } from "../config/components";
+import { sameValue } from "../modules/util/equality";
+import { closedStringList, enumString, groundStationList, plainString, stringList, tildeEscapedStringList } from "../modules/util/urlCodec";
 
 export interface SerializedGroundStation {
   lat: number;
   lon: number;
   name?: string;
 }
+
+/**
+ * A change to the activation triple. Omitted lists keep their current value;
+ * the three are written together because none can be validated alone.
+ */
+export interface ActivationPatch {
+  enabledTags?: string[];
+  enabledSatellites?: string[];
+  disabledSatellites?: string[];
+}
+
+const unique = (names: readonly string[]): string[] => [...new Set(names)];
+// ~11 m. A deliberate size/precision trade, and the reason the store rounds
+// rather than leaving it to whatever wrote the value.
+const COORDINATE_PRECISION = 4;
+const roundCoordinate = (value: number): number => Number(value.toFixed(COORDINATE_PRECISION));
 
 export const useSatStore = defineStore(
   "sat",
@@ -14,101 +34,109 @@ export const useSatStore = defineStore(
     // Bumped whenever the catalog changes so the UI can recompute catalog
     // queries reactively without putting the ~10k entries into Pinia. Not URL-synced.
     const catalogRevision = ref(0);
-    const enabledSatellites = ref<string[]>([]);
-    const enabledTags = ref<string[]>([]);
-    // Names opted out of tag-activation (a satellite unchecked inside an
-    // enabled group). Only meaningful while a covering group is enabled.
-    const disabledSatellites = ref<string[]>([]);
-    const groundStations = ref<SerializedGroundStation[]>([]);
     const trackedSatellite = ref("");
     const overpassMode = ref("elevation");
+
+    // Activation is one invariant cluster — see CONTEXT.md. Held privately and
+    // exposed read-only so every writer goes through setActivation and the
+    // three lists cannot drift out of step with each other.
+    const tags = ref<string[]>([]);
+    const satellites = ref<string[]>([]);
+    // Names opted out of tag-activation (a satellite unchecked inside an
+    // enabled group). Only meaningful while a covering group is enabled.
+    const excluded = ref<string[]>([]);
+    const stations = ref<SerializedGroundStation[]>([]);
+
+    const enabledTags = computed(() => tags.value);
+    const enabledSatellites = computed(() => satellites.value);
+    const disabledSatellites = computed(() => excluded.value);
+    const groundStations = computed(() => stations.value);
+
+    /**
+     * Commit a change to the activation triple. Duplicates are dropped and the
+     * enabled/excluded lists are kept disjoint; an individual enable wins,
+     * matching what clicking an already-excluded satellite means. Callers that
+     * care about the other direction pass both lists explicitly.
+     */
+    function setActivation(patch: ActivationPatch): void {
+      const nextTags = unique(patch.enabledTags ?? tags.value);
+      const nextSatellites = unique(patch.enabledSatellites ?? satellites.value);
+      const enabled = new Set(nextSatellites);
+      const nextExcluded = unique(patch.disabledSatellites ?? excluded.value).filter((name) => !enabled.has(name));
+
+      if (!sameValue(nextTags, tags.value)) {
+        tags.value = nextTags;
+      }
+      if (!sameValue(nextSatellites, satellites.value)) {
+        satellites.value = nextSatellites;
+      }
+      if (!sameValue(nextExcluded, excluded.value)) {
+        excluded.value = nextExcluded;
+      }
+    }
+
+    /** Drop unusable coordinates and duplicates before anything renders them. */
+    function setGroundStations(next: readonly SerializedGroundStation[]): void {
+      const seen = new Set<string>();
+      const valid: SerializedGroundStation[] = [];
+      for (const station of next) {
+        if (!Number.isFinite(station.lat) || !Number.isFinite(station.lon)) {
+          continue;
+        }
+        const lat = roundCoordinate(station.lat);
+        const lon = roundCoordinate(station.lon);
+        const key = `${lat}|${lon}|${station.name ?? ""}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        valid.push(station.name === undefined ? { lat, lon } : { lat, lon, name: station.name });
+      }
+      if (!sameValue(valid, stations.value)) {
+        stations.value = valid;
+      }
+    }
 
     return {
       enabledComponents,
       catalogRevision,
-      enabledSatellites,
-      enabledTags,
-      disabledSatellites,
-      groundStations,
       trackedSatellite,
       overpassMode,
+      enabledTags,
+      enabledSatellites,
+      disabledSatellites,
+      groundStations,
+      setActivation,
+      setGroundStations,
     };
   },
   {
+    // Wire format: docs/adr/0001-url-parameter-specification.md.
     urlsync: {
       enabled: true,
       config: [
-        {
-          name: "enabledComponents",
-          url: "elements",
-          serialize: (v) => (v as string[]).join(",").replaceAll(" ", "-"),
-          deserialize: (v) =>
-            v
-              .replaceAll("-", " ")
-              .split(",")
-              .filter((e) => e),
-          default: ["Point", "Label"],
-        },
-        {
-          name: "enabledSatellites",
-          url: "sats",
-          serialize: (v) => (v as string[]).join(",").replaceAll(" ", "~"),
-          deserialize: (v) =>
-            v
-              .replaceAll("~", " ")
-              .split(",")
-              .filter((e) => e),
-          default: [],
-        },
-        {
-          name: "disabledSatellites",
-          url: "xsats",
-          serialize: (v) => (v as string[]).join(",").replaceAll(" ", "~"),
-          deserialize: (v) =>
-            v
-              .replaceAll("~", " ")
-              .split(",")
-              .filter((e) => e),
-          default: [],
-        },
-        {
-          name: "enabledTags",
-          url: "tags",
-          serialize: (v) => (v as string[]).join(",").replaceAll(" ", "-"),
-          deserialize: (v) =>
-            v
-              .replaceAll("-", " ")
-              .split(",")
-              .filter((e) => e),
-          default: [],
-        },
-        {
-          name: "groundStations",
-          url: "gs",
-          serialize: (v) => (v as SerializedGroundStation[]).map((gs) => `${gs.lat.toFixed(4)},${gs.lon.toFixed(4)}${gs.name ? `,${gs.name}` : ""}`).join("_"),
-          deserialize: (v) =>
-            v.split("_").map((gs) => {
-              const g = gs.split(",");
-              // Preserve NaN for missing components; downstream callers filter these out.
-              return {
-                lat: g[0] === undefined ? Number.NaN : parseFloat(g[0]),
-                lon: g[1] === undefined ? Number.NaN : parseFloat(g[1]),
-                name: g[2],
-              };
-            }),
-          default: [],
-        },
-        {
-          name: "trackedSatellite",
-          url: "track",
-          default: "",
-        },
-        {
-          name: "overpassMode",
-          url: "overpass",
-          default: "elevation",
-        },
+        { name: "enabledComponents", url: "elements", kind: closedStringList(() => SATELLITE_COMPONENTS) },
+        { name: "enabledSatellites", url: "sats", kind: tildeEscapedStringList() },
+        { name: "disabledSatellites", url: "xsats", kind: tildeEscapedStringList() },
+        { name: "enabledTags", url: "tags", kind: stringList() },
+        { name: "groundStations", url: "gs", kind: groundStationList() },
+        { name: "trackedSatellite", url: "track", kind: plainString() },
+        { name: "overpassMode", url: "overpass", kind: enumString(["elevation", "swath"]) },
       ],
+      // Guarded keys are read-only, so the url goes through the same actions as
+      // every other writer; the triple is applied in one call to keep it
+      // atomic. Naming only the guarded keys means adding a free parameter
+      // needs no change here.
+      apply(store, patch) {
+        const { enabledTags, enabledSatellites, disabledSatellites, groundStations, ...free } = patch;
+        Object.assign(store, free);
+        store.setActivation({
+          enabledTags: enabledTags as string[],
+          enabledSatellites: enabledSatellites as string[],
+          disabledSatellites: disabledSatellites as string[],
+        });
+        store.setGroundStations(groundStations as SerializedGroundStation[]);
+      },
     },
   },
 );

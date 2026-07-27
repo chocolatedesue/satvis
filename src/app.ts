@@ -6,7 +6,8 @@ import App from "./App.vue";
 import { usePWAUpdate } from "./composables/usePWAUpdate";
 import { getConfigPreset } from "./config/presets";
 import { CesiumController } from "./modules/CesiumController";
-import piniaUrlSync from "./modules/util/pinia-plugin-url-sync";
+import { startSceneSync } from "./modules/sceneSync";
+import piniaUrlSync from "./modules/util/urlSync";
 import { router, setupRouterGuards } from "./router";
 
 declare module "vue" {
@@ -31,6 +32,10 @@ pinia.use(({ store }) => {
 });
 pinia.use(piniaUrlSync);
 app.use(pinia);
+
+// Carry store state into the globe. Not a component: it has to outlive every
+// panel, and it must not depend on component mount order.
+startSceneSync(cc);
 
 // Setup router guards to handle configuration changes on route changes
 setupRouterGuards(router, cc);

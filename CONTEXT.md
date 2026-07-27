@@ -9,6 +9,18 @@ discussion; sharpen them here when they drift.
   groups, with tag merging and metadata resolution (`SatelliteCatalog`).
 - **Group**: a named, declaratively-configured list of element sets served as
   one unit (`/api/gp/<group>.json` or the static snapshot).
+- **Tag**: a label attached to satellites by the group that supplied them, and
+  the unit the user activates ("enable Weather"). One satellite may carry tags
+  from several groups. Tag names must not contain a comma.
+- **Component**: one visual representation of a satellite that can be switched
+  on independently — point, label, orbit, orbit track, ground track, sensor
+  cone, 3D model. Component names must not contain a comma.
+- **Activation**: which catalog entries should currently exist as live
+  satellites — tag-enabled entries minus per-satellite opt-outs, plus
+  name-enabled entries, plus the tracked satellite. Carried as three lists
+  (enabled tags, enabled satellites, disabled satellites) that are only
+  meaningful together: none of them can be validated without the other two
+  (`src/modules/satelliteActivation.ts`).
 - **Ground station**: a named position on the ground that passes are computed
   against.
 - **Pass**: a time range in which a satellite serves a ground station — by
@@ -18,6 +30,10 @@ discussion; sharpen them here when they drift.
   ground stations, overpass mode, the recompute window guard, the computed
   pass list, and its Cesium time intervals (`PassPredictor`).
 - **Overpass mode**: how passes are computed — "elevation" or "swath".
+- **Live vs pinned time**: whether the viewer's clock follows the present or a
+  moment the user chose. Live is the default. The clock becomes pinned only by
+  a deliberate act — a time supplied in the URL, or scrubbing the timeline —
+  and stays pinned for the session, still advancing from that moment.
 - **Sampled trajectory**: the sliding sample window of a satellite's position
   (half an orbit back, 1.5 forward) in both the fixed and inertial frames,
   kept fresh as time advances (`SampledTrajectory`).
@@ -27,3 +43,8 @@ discussion; sharpen them here when they drift.
 - **GP source**: where the frontend gets GP data — the worker API when the
   probe succeeds, the static `data/gp/` snapshot otherwise, with a
   per-request API→static fallback mid-session (`src/modules/util/gpSource.ts`).
+- **Preset**: the per-route starting configuration — a title, the element sets
+  to register, and the default value of each shared setting. A preset supplies
+  defaults, not initial state: the URL carries only deviations from the
+  preset's values, so the same query string means different things on different
+  routes (`src/config/presets.ts`).

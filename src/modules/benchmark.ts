@@ -41,19 +41,28 @@ async function logPerformance(): Promise<void> {
 async function test(): Promise<void> {
   for (const components of componentTests) {
     for (const satelliteCount of satelliteCounts) {
-      cc.sats.enabledComponents = components;
-      // getSatellitesWithTag is now active-only; take the name list from the
-      // catalog (all known satellites with the tag) so we can enable N of them.
-      cc.sats.enabledSatellites = cc.sats.catalog
+      // This file is pasted into the console, so it cannot import the store.
+      // It drives the manager directly instead, which means it deliberately
+      // bypasses the store — the next store change will overwrite the scene.
+      const satellites = cc.sats.catalog
         .entriesWithTag(satelliteTag)
         .slice(0, satelliteCount)
         .map((entry) => entry.name);
-      console.log(cc.sats.enabledSatellites, cc.sats.catalog.entriesWithTag(satelliteTag));
+      cc.sats.reconcile({
+        enabledTags: [],
+        enabledSatellites: satellites,
+        disabledSatellites: [],
+        components,
+        groundStations: [],
+        overpassMode: "elevation",
+        trackedSatellite: "",
+      });
+      console.log(satellites, cc.sats.catalog.entriesWithTag(satelliteTag));
 
       // eslint-disable-next-line no-await-in-loop
       await logPerformance();
     }
-    cc.sats.enabledSatellites = [];
+    cc.sats.reconcile({ enabledTags: [], enabledSatellites: [], disabledSatellites: [], components: [], groundStations: [], overpassMode: "elevation", trackedSatellite: "" });
   }
 }
 test();
