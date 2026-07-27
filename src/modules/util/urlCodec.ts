@@ -358,13 +358,3 @@ export function encode(state: Readonly<Record<string, unknown>>, defaults: Reado
 
   return params;
 }
-
-/**
- * The wire form of a parameter map, for tests and for anything that needs the
- * string rather than the map. Commas are delimiters and can never appear
- * inside a value, so leaving them unescaped is safe and keeps urls readable.
- */
-export function queryString(params: Readonly<Record<string, string>>): string {
-  const query = new URLSearchParams(params).toString().replaceAll("%2C", ",");
-  return query === "" ? "" : `?${query}`;
-}

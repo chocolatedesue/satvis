@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 import { layerProvider } from "../config/layers";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { baseLayerNames, imageryProviderNames, terrainProviderNames } from "../modules/CesiumLayerProviders";
+import { sameValue } from "../modules/util/equality";
 import { boolean, enumString, layerList, timestamp, toMinuteIso } from "../modules/util/urlCodec";
 
 export const useCesiumStore = defineStore(
@@ -53,8 +54,7 @@ export const useCesiumStore = defineStore(
       const lastBase = valid.reduce((last, layer, index) => (isBase(layer) ? index : last), -1);
       const resolved = valid.filter((layer, index) => !isBase(layer) || index === lastBase);
 
-      const unchanged = resolved.length === activeLayers.value.length && resolved.every((layer, index) => layer === activeLayers.value[index]);
-      if (!unchanged) {
+      if (!sameValue(resolved, activeLayers.value)) {
         activeLayers.value = resolved;
       }
     }
@@ -87,15 +87,12 @@ export const useCesiumStore = defineStore(
         { name: "background", url: "bg", kind: boolean() },
         { name: "time", url: "time", kind: timestamp() },
       ],
+      // Only the guarded keys are named; everything else is a plain ref.
       apply(store, patch) {
-        store.setLayers(patch.layers as string[]);
-        store.terrainProvider = patch.terrainProvider as string;
-        store.sceneMode = patch.sceneMode as string;
-        store.cameraMode = patch.cameraMode as string;
-        store.qualityPreset = patch.qualityPreset as string;
-        store.showFps = patch.showFps as boolean;
-        store.background = patch.background as boolean;
-        store.setTime(patch.time as string | null);
+        const { layers, time, ...free } = patch;
+        Object.assign(store, free);
+        store.setLayers(layers as string[]);
+        store.setTime(time as string | null);
       },
     },
   },

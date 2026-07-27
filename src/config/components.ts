@@ -4,5 +4,3 @@
 //
 // Order is the order they appear in the toolbar.
 export const SATELLITE_COMPONENTS = ["Point", "Label", "Orbit", "Orbit track", "Ground track", "Sensor cone", "3D model"] as const;
-
-export type SatelliteComponent = (typeof SATELLITE_COMPONENTS)[number];

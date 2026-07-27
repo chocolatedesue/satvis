@@ -8,6 +8,7 @@ import { activeTargetEntries } from "./satelliteActivation";
 import { type CatalogEntry, SatelliteCatalog } from "./SatelliteCatalog";
 import { SatelliteComponentCollection } from "./SatelliteComponentCollection";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
+import { sameValue } from "./util/equality";
 import type { GpRecord } from "./util/gp";
 
 /**
@@ -33,10 +34,6 @@ const EMPTY_SCENE: DesiredScene = {
   overpassMode: "elevation",
   trackedSatellite: "",
 };
-
-const sameNames = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((name, index) => name === b[index]);
-const sameStations = (a: readonly SerializedGroundStation[], b: readonly SerializedGroundStation[]): boolean =>
-  a.length === b.length && a.every((station, index) => station.lat === b[index]?.lat && station.lon === b[index]?.lon && station.name === b[index]?.name);
 
 export class SatelliteManager {
   // The last scene handed to reconcile. Nothing else mirrors store state.
@@ -111,14 +108,14 @@ export class SatelliteManager {
     this.#desired = desired;
 
     if (
-      !sameNames(previous.enabledTags, desired.enabledTags) ||
-      !sameNames(previous.enabledSatellites, desired.enabledSatellites) ||
+      !sameValue(previous.enabledTags, desired.enabledTags) ||
+      !sameValue(previous.enabledSatellites, desired.enabledSatellites) ||
       previous.trackedSatellite !== desired.trackedSatellite
     ) {
       void this.#ensureCatalogCoverage();
     }
 
-    if (!sameStations(previous.groundStations, desired.groundStations)) {
+    if (!sameValue(previous.groundStations, desired.groundStations)) {
       this.#applyGroundStations(desired.groundStations);
     }
 
@@ -126,7 +123,7 @@ export class SatelliteManager {
       this.#applyOverpassMode(desired.overpassMode);
     }
 
-    if (!sameNames(previous.components, desired.components)) {
+    if (!sameValue(previous.components, desired.components)) {
       this.#applyComponents(previous.components);
     }
 

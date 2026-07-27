@@ -9,6 +9,7 @@ import type { PiniaPluginContext, Store as PiniaStore } from "pinia";
 import { watch } from "vue";
 import type { LocationQuery, Router } from "vue-router";
 
+import { sameValue } from "./equality";
 import { decode, encode, type FieldSpec, paramOf, type Query } from "./urlCodec";
 
 export type { FieldKind, FieldSpec } from "./urlCodec";
@@ -86,19 +87,6 @@ const stableQuery = (query: LocationQuery): string =>
       .map((key) => [key, query[key]]),
   );
 
-// Values reach the store as fresh arrays and objects on every decode, so
-// identity is useless for deciding whether anything actually changed. Without
-// this every url write would echo back as a store write and round again.
-function isSameValue(a: unknown, b: unknown): boolean {
-  if (a === b) {
-    return true;
-  }
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
-    return false;
-  }
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
 // Guarded keys are read-only computeds, so a store that has any must route
 // writes through its actions. Assigning them directly would silently do
 // nothing beyond a Vue warning.
@@ -120,7 +108,7 @@ function applyQuery(entry: Registration, query: Query): void {
   for (const [index, spec] of entry.specs.entries()) {
     const value = patch[entry.qualified[index]!.name];
     next[spec.name] = value;
-    if (!isSameValue(entry.store[spec.name], value)) {
+    if (!sameValue(entry.store[spec.name], value)) {
       changed = true;
     }
   }

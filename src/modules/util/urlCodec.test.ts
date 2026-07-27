@@ -10,7 +10,6 @@ import {
   groundStationList,
   layerList,
   plainString,
-  queryString,
   stringList,
   tildeEscapedStringList,
   timestamp,
@@ -18,6 +17,13 @@ import {
 } from "./urlCodec";
 
 const components = () => SATELLITE_COMPONENTS as readonly string[];
+
+// The wire form the ADR pins. Production hands the parameter map to vue-router,
+// whose serializer matches this; asserting on it here keeps the format honest.
+const queryString = (params: Readonly<Record<string, string>>): string => {
+  const query = new URLSearchParams(params).toString().replaceAll("%2C", ",");
+  return query === "" ? "" : `?${query}`;
+};
 const providers = () => ["Offline", "OfflineHighres", "ArcGis", "OSM", "Topo", "BlackMarble", "Tiles", "GOES-IR", "Nextrad"];
 
 describe("boolean", () => {

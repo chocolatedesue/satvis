@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { SATELLITE_COMPONENTS } from "../config/components";
+import { sameValue } from "../modules/util/equality";
 import { closedStringList, enumString, groundStationList, plainString, stringList, tildeEscapedStringList } from "../modules/util/urlCodec";
 
 export interface SerializedGroundStation {
@@ -25,7 +26,6 @@ const unique = (names: readonly string[]): string[] => [...new Set(names)];
 // rather than leaving it to whatever wrote the value.
 const COORDINATE_PRECISION = 4;
 const roundCoordinate = (value: number): number => Number(value.toFixed(COORDINATE_PRECISION));
-const sameList = (a: readonly unknown[], b: readonly unknown[]): boolean => a.length === b.length && a.every((entry, index) => entry === b[index]);
 
 export const useSatStore = defineStore(
   "sat",
@@ -64,15 +64,13 @@ export const useSatStore = defineStore(
       const enabled = new Set(nextSatellites);
       const nextExcluded = unique(patch.disabledSatellites ?? excluded.value).filter((name) => !enabled.has(name));
 
-      // Assigning an equal list would still fire $subscribe and land a history
-      // entry, so compare before committing.
-      if (!sameList(nextTags, tags.value)) {
+      if (!sameValue(nextTags, tags.value)) {
         tags.value = nextTags;
       }
-      if (!sameList(nextSatellites, satellites.value)) {
+      if (!sameValue(nextSatellites, satellites.value)) {
         satellites.value = nextSatellites;
       }
-      if (!sameList(nextExcluded, excluded.value)) {
+      if (!sameValue(nextExcluded, excluded.value)) {
         excluded.value = nextExcluded;
       }
     }
@@ -94,13 +92,7 @@ export const useSatStore = defineStore(
         seen.add(key);
         valid.push(station.name === undefined ? { lat, lon } : { lat, lon, name: station.name });
       }
-      const unchanged =
-        valid.length === stations.value.length &&
-        valid.every((station, index) => {
-          const current = stations.value[index];
-          return current !== undefined && current.lat === station.lat && current.lon === station.lon && current.name === station.name;
-        });
-      if (!unchanged) {
+      if (!sameValue(valid, stations.value)) {
         stations.value = valid;
       }
     }
@@ -132,17 +124,18 @@ export const useSatStore = defineStore(
         { name: "overpassMode", url: "overpass", kind: enumString(["elevation", "swath"]) },
       ],
       // Guarded keys are read-only, so the url goes through the same actions as
-      // every other writer. The triple is applied in one call to keep it atomic.
+      // every other writer; the triple is applied in one call to keep it
+      // atomic. Naming only the guarded keys means adding a free parameter
+      // needs no change here.
       apply(store, patch) {
-        store.enabledComponents = patch.enabledComponents as string[];
-        store.trackedSatellite = patch.trackedSatellite as string;
-        store.overpassMode = patch.overpassMode as string;
+        const { enabledTags, enabledSatellites, disabledSatellites, groundStations, ...free } = patch;
+        Object.assign(store, free);
         store.setActivation({
-          enabledTags: patch.enabledTags as string[],
-          enabledSatellites: patch.enabledSatellites as string[],
-          disabledSatellites: patch.disabledSatellites as string[],
+          enabledTags: enabledTags as string[],
+          enabledSatellites: enabledSatellites as string[],
+          disabledSatellites: disabledSatellites as string[],
         });
-        store.setGroundStations(patch.groundStations as SerializedGroundStation[]);
+        store.setGroundStations(groundStations as SerializedGroundStation[]);
       },
     },
   },
