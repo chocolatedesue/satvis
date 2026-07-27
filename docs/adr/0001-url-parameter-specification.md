@@ -41,12 +41,18 @@ Every parameter is optional. An absent parameter means "use the default" (see
 | `overpass` | `sat.overpassMode`       | enum                | `elevation` \| `swath`                                                                                            | `elevation`      |
 | `layers`   | `cesium.layers`          | layer list          | comma-joined; each item `Name` or `Name_<alpha>`; list order is z-order                                           | `OfflineHighres` |
 | `terrain`  | `cesium.terrainProvider` | enum                | `None` \| `Maptiler`                                                                                              | `None`           |
-| `scene`    | `cesium.sceneMode`       | enum                | `3D` \| `2D` \| `Columbus`                                                                                        | `3D`             |
+| `scene`    | `cesium.sceneMode`       | enum                | `3D` \| `2D` \| `Columbus` \| `Sky`                                                                               | `3D`             |
 | `camera`   | `cesium.cameraMode`      | enum                | `Fixed` \| `Inertial`                                                                                             | `Fixed`          |
 | `quality`  | `cesium.qualityPreset`   | enum                | `low` \| `high`                                                                                                   | `high`           |
 | `fps`      | `cesium.showFps`         | boolean             | `true` \| `false`                                                                                                 | `false`          |
 | `bg`       | `cesium.background`      | boolean             | `true` \| `false`                                                                                                 | `true`           |
 | `time`     | clock time               | timestamp           | emitted as ISO-8601 at minute precision (`2026-07-26T20:46Z`); any `dayjs`-parseable value accepted               | absent (live)    |
+
+`scene=Sky` is the odd one out: the other three name a Cesium `SceneMode` and it does
+not — it is the ground-level sky view, which renders in 3D. It shares the parameter
+because a projection and a vantage point cannot be chosen independently, so one closed
+enum cannot express the illegal combinations two parameters would have allowed. See
+`docs/adr/0003-sky-view.md`.
 
 ### String lists
 

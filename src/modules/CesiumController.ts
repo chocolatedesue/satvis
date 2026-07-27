@@ -34,6 +34,8 @@ import {
   terrainProviderNames as visibleTerrainProviderNames,
 } from "./CesiumLayerProviders";
 import { SatelliteManager } from "./SatelliteManager";
+import { SkyInteraction } from "./SkyInteraction";
+import { SkyView } from "./SkyView";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
 import { PushManager } from "./util/PushManager";
@@ -53,6 +55,10 @@ export class CesiumController {
 
   sats!: SatelliteManager;
 
+  skyView!: SkyView;
+
+  skyInteraction!: SkyInteraction;
+
   pm!: PushManager;
 
   sceneModes: string[] = [];
@@ -64,6 +70,15 @@ export class CesiumController {
   performanceStats: CesiumPerformanceStats | undefined;
 
   oldBottomContainerStyleLeft: string = "";
+
+  // What the store last asked for, and whether anything is currently overriding
+  // it. Held separately so releasing a suppression restores the user's choice
+  // rather than a guess at it.
+  #cameraMode: string = "Fixed";
+
+  #cameraModeSuppressed = false;
+
+  #removeCameraTrackEci: (() => void) | undefined;
 
   constructor() {
     this.preloadReferenceFrameData();
@@ -110,6 +125,18 @@ export class CesiumController {
 
     // Create Satellite Manager
     this.sats = new SatelliteManager(this.viewer);
+
+    this.skyView = new SkyView(this.viewer.scene);
+    this.skyInteraction = new SkyInteraction({
+      scene: this.viewer.scene,
+      skyView: this.skyView,
+      sats: this.sats,
+      // Selecting by entity identity is all the info panel needs: it resolves
+      // the selection itself off `viewer.selectedEntity`.
+      onSelect: (target) => {
+        this.viewer.selectedEntity = target.sat.defaultEntity;
+      },
+    });
 
     this.pm = new PushManager();
 
@@ -200,7 +227,13 @@ export class CesiumController {
     this.viewer.terrainProvider = provider;
   }
 
-  set sceneMode(sceneMode: string) {
+  /**
+   * Switch the Cesium projection. Only the three view modes that name a Cesium
+   * `SceneMode` come here — "Sky" is a camera placement rather than a
+   * projection, and is driven from sceneSync because it needs an observer that
+   * only the store can supply.
+   */
+  morphTo(sceneMode: string): void {
     if (sceneMode === "3D") {
       this.viewer.scene.morphTo3D();
       return;
@@ -263,15 +296,43 @@ export class CesiumController {
   }
 
   set cameraMode(cameraMode: string) {
-    switch (cameraMode) {
-      case "Inertial":
-        this.viewer.scene.postUpdate.addEventListener(this.cameraTrackEci);
-        break;
-      case "Fixed":
-        this.viewer.scene.postUpdate.removeEventListener(this.cameraTrackEci);
-        break;
-      default:
-        console.error("Unknown camera mode");
+    if (cameraMode !== "Inertial" && cameraMode !== "Fixed") {
+      console.error("Unknown camera mode");
+      return;
+    }
+    this.#cameraMode = cameraMode;
+    this.#applyCameraMode();
+  }
+
+  /**
+   * Stop honouring the camera mode without changing it — the sky view drives
+   * the camera itself, and inertial tracking re-parents it on every frame, so
+   * the two cannot share it.
+   *
+   * Suppressed rather than forced back to Fixed, the way a morph suppresses the
+   * Orbit component: the user's choice stands and the toolbar keeps saying so,
+   * and no history entry is pushed for a change nobody asked for.
+   */
+  suppressCameraMode(): void {
+    this.#cameraModeSuppressed = true;
+    this.#applyCameraMode();
+  }
+
+  releaseCameraMode(): void {
+    this.#cameraModeSuppressed = false;
+    this.#applyCameraMode();
+  }
+
+  #applyCameraMode(): void {
+    const trackEci = this.#cameraMode === "Inertial" && !this.#cameraModeSuppressed;
+    // Tracked by its removal callback rather than by re-deriving it: Cesium's
+    // Event happily registers the same listener twice, so asking for Inertial
+    // while already inertial would otherwise stack a second one.
+    if (trackEci && !this.#removeCameraTrackEci) {
+      this.#removeCameraTrackEci = this.viewer.scene.postUpdate.addEventListener(this.cameraTrackEci);
+    } else if (!trackEci && this.#removeCameraTrackEci) {
+      this.#removeCameraTrackEci();
+      this.#removeCameraTrackEci = undefined;
     }
   }
 

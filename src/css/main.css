@@ -24,16 +24,20 @@ body {
   display: none;
 }
 
+/* Above the sky view's HUD (z-4) and the entity info panel (z-5), so the control
+   that leaves the sky view stays reachable while it is up. */
 #toolbarLeft {
   position: absolute;
   top: 5px;
   left: 2px;
+  z-index: 6;
 }
 
 #toolbarRight {
   position: absolute;
   top: 5px;
   right: 2px;
+  z-index: 6;
 }
 
 .toolbarSwitches {

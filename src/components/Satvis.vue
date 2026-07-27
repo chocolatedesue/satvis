@@ -196,6 +196,7 @@
     <!-- Deliberately outside the showUI toggle: the entity info replaces the
          Cesium InfoBox, which was visible with hidden UI and in minimalUI. -->
     <entity-info-panel />
+    <sky-hud />
   </div>
 </template>
 
@@ -208,6 +209,7 @@ import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import EntityInfoPanel from "./EntityInfoPanel.vue";
 import SatelliteBrowser from "./SatelliteBrowser.vue";
+import SkyHud from "./SkyHud.vue";
 
 type MenuKey = "cat" | "sat" | "gs" | "map" | "ios" | "dbg";
 

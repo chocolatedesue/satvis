@@ -11,12 +11,15 @@
 // clicking a satellite on the globe, and that arrives as a callback.
 
 import { JulianDate } from "@cesium/engine";
-import { watch } from "vue";
+import { nextTick, watch } from "vue";
 
+import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import type { CesiumController } from "./CesiumController";
 import type { DesiredScene } from "./SatelliteManager";
+import type { Observer } from "./SkyView";
+import { currentPosition } from "./util/geolocation";
 import { toMinuteIso } from "./util/urlCodec";
 
 // Enough to keep a fast clock multiplier from hammering the history api.
@@ -40,11 +43,104 @@ export function startSceneSync(cc: CesiumController): void {
       cc.terrainProvider = name;
     },
   );
+  // The view mode is the one setting that cannot be a plain assignment. Three
+  // of the four are a Cesium projection, but "Sky" needs an observer, which may
+  // still be arriving from the url or may have to be asked for — so entering is
+  // an action with a result, and a refusal has to put the mode back.
+  let viewModeGeneration = 0;
+
+  async function resolveObserver(): Promise<Observer | undefined> {
+    // The cesium and sat stores hydrate from the url independently, so a ground
+    // station in `?gs=` can land a tick after the view mode in `?scene=` does.
+    // Waiting is the difference between using the observer the link supplied and
+    // prompting for a location on top of it.
+    await nextTick();
+    const existing = satStore.groundStations[0];
+    if (existing) {
+      return { lat: existing.lat, lon: existing.lon };
+    }
+
+    const fix = await currentPosition();
+    if (!fix) {
+      return undefined;
+    }
+    // The device's location becomes a ground station rather than a private
+    // second notion of "here": the sky view's next-pass figures are then the
+    // passes the app was already computing. Read it back rather than reusing
+    // `fix`, so the observer is the rounded value the store and url agree on.
+    satStore.setGroundStations([...satStore.groundStations, { ...fix, name: "Geolocation" }]);
+    const created = satStore.groundStations[0];
+    return created ? { lat: created.lat, lon: created.lon } : undefined;
+  }
+
+  async function applyViewMode(mode: string, previous: string): Promise<void> {
+    const generation = ++viewModeGeneration;
+
+    if (mode !== SKY_MODE) {
+      cc.skyInteraction.stop();
+      cc.skyView.exit();
+      cc.releaseCameraMode();
+      cc.morphTo(mode);
+      return;
+    }
+
+    const observer = await resolveObserver();
+    // Leaving again while the browser was asking for a location, or a second
+    // switch overtaking this one, makes this answer stale.
+    if (generation !== viewModeGeneration) {
+      return;
+    }
+    if (!observer) {
+      console.warn("Sky view needs an observer: no ground station, and no location from the device");
+      cesiumStore.sceneMode = previous === SKY_MODE ? "3D" : previous;
+      return;
+    }
+
+    // Both of these fight the sky view for the camera, and they are handled
+    // differently on purpose — see docs/adr/0003-sky-view.md. Inertial is
+    // suppressed, so `?camera=Inertial` survives the round trip. Tracking is
+    // cleared, because a camera cannot both follow a satellite and be a pair of
+    // eyes on the ground, so there is nothing to come back to.
+    cc.suppressCameraMode();
+    satStore.trackedSatellite = "";
+    cc.skyView.enter(observer);
+    cc.skyInteraction.start();
+  }
+
   watch(
     () => cesiumStore.sceneMode,
-    (mode) => {
-      cc.sceneMode = mode;
+    (mode, previous) => {
+      void applyViewMode(mode, previous);
     },
+  );
+
+  // Nothing is tracked while the sky view is up, held as a standing invariant
+  // rather than a one-off clear on entry. A track can arrive later than the
+  // view mode does: `pendingTrackedSatellite` resolves whenever its group
+  // finishes loading, which can be long after. Writing the store rather than
+  // `viewer.trackedEntity` matters — tracking is the one value the globe
+  // reports back, so poking Cesium would reach the store from behind and race
+  // the forward path.
+  watch(
+    () => satStore.trackedSatellite,
+    (tracked) => {
+      if (tracked !== "" && cc.skyView.active) {
+        satStore.trackedSatellite = "";
+      }
+    },
+  );
+
+  // Moving the first ground station moves the observer under a live sky view.
+  // Removing every station does not close it: the view stays where it was
+  // rather than collapsing out from under someone editing their stations.
+  watch(
+    () => satStore.groundStations[0],
+    (station) => {
+      if (station && cc.skyView.active) {
+        cc.skyView.enter({ lat: station.lat, lon: station.lon });
+      }
+    },
+    { deep: true },
   );
   watch(
     () => cesiumStore.cameraMode,
