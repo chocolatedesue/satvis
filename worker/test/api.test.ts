@@ -68,7 +68,7 @@ describe("GET /api/gp/<group>.json", () => {
   });
 });
 
-describe("index and metadata routes", () => {
+describe("index route", () => {
   it("serves gp:index at /api/groups.json", async () => {
     const index: GroupsIndex = { updated: UPDATED, groups: [{ name: "weather", updated: UPDATED, count: 2 }] };
     await env.GP_KV.put("gp:index", JSON.stringify(index));
@@ -86,10 +86,11 @@ describe("index and metadata routes", () => {
     expect(body.groups).toEqual([]);
   });
 
-  it("serves metadata rules at /api/metadata.json", async () => {
+  // Metadata is no longer shipped as a separate rule set for the browser to
+  // match: records carry it, attached at refresh time.
+  it("404s the retired /api/metadata.json", async () => {
     const res = await SELF.fetch("https://satvis.space/api/metadata.json");
-    expect(res.status).toBe(200);
-    expect(Array.isArray(await res.json())).toBe(true);
+    expect(res.status).toBe(404);
   });
 
   it("404s an unknown /api/* path", async () => {

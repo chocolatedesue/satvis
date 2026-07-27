@@ -171,6 +171,15 @@ function validateMetadata(metadata, where) {
   }
 }
 
+// The keys of a satellite-table entry that are bookkeeping rather than payload.
+// Everything else in the entry IS the metadata bag, which is what keeps adding a
+// field a data-only edit.
+const TABLE_ENTRY_KEYS = new Set(["noradId", "name", "decayed"]);
+
+function metadataFields(entry) {
+  return Object.fromEntries(Object.entries(entry).filter(([key]) => !TABLE_ENTRY_KEYS.has(key)));
+}
+
 // Validate a config's top-level `satellites` table. Every entry keys on a
 // numeric `noradId`; `name` is documentation only.
 function validateSatelliteTable(entries, source) {
@@ -191,7 +200,7 @@ function validateSatelliteTable(entries, source) {
     if (entry.decayed !== undefined && typeof entry.decayed !== "boolean") {
       throw new Error(`${where}: "decayed" must be a boolean`);
     }
-    const { noradId, name, decayed, ...metadata } = entry;
+    const metadata = metadataFields(entry);
     validateMetadata(metadata, where);
     if (Object.keys(metadata).length === 0) {
       throw new Error(`${where}: has no metadata fields — remove the entry or give it something to attach`);
@@ -275,14 +284,19 @@ function createSatelliteTable() {
     // Strip the bookkeeping (`origins`) that only the merge needed, and drop
     // absent optional keys so the generated JSON stays free of nulls.
     entries() {
-      return [...byNoradId.values()]
-        .map(({ noradId, name, decayed, metadata }) => ({
-          noradId,
-          ...(name === undefined ? {} : { name }),
-          ...(decayed ? { decayed: true } : {}),
-          metadata,
-        }))
-        .toSorted((a, b) => a.noradId - b.noradId);
+      const out = [];
+      for (const { noradId, name, decayed, metadata } of byNoradId.values()) {
+        const entry = { noradId };
+        if (name !== undefined) {
+          entry.name = name;
+        }
+        if (decayed) {
+          entry.decayed = true;
+        }
+        entry.metadata = metadata;
+        out.push(entry);
+      }
+      return out.toSorted((a, b) => a.noradId - b.noradId);
     },
   };
 }
@@ -300,8 +314,8 @@ function main() {
   for (const { path: configPath, config } of configs) {
     const source = path.relative(repoRoot, configPath);
     validateSatelliteTable(config.satellites, source);
-    for (const { noradId, name, decayed, ...metadata } of config.satellites) {
-      table.add(noradId, { metadata, name, decayed }, `${source} satellites`);
+    for (const entry of config.satellites) {
+      table.add(entry.noradId, { metadata: metadataFields(entry), name: entry.name, decayed: entry.decayed }, `${source} satellites`);
     }
   }
   // Group rows contribute after every table, so a hand-written per-group value
