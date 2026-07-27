@@ -11,7 +11,6 @@
           <line :x1="tick.offset" :y1="COMPASS_Y + (tick.major ? 0 : TAPE_LENGTH / 2)" :x2="tick.offset" :y2="COMPASS_Y + TAPE_LENGTH" :class="tickClass(tick)" />
           <text v-if="tick.label" :x="tick.offset" :y="COMPASS_Y - 4" class="sky-hud__label" text-anchor="middle">{{ tick.label }}</text>
         </g>
-        <polygon :points="pointerPoints" class="sky-hud__pointer" />
       </g>
 
       <!-- Elevation tape, projected the same way, along the current azimuth. -->
@@ -23,6 +22,12 @@
         </g>
       </g>
     </svg>
+
+    <!-- The compass tape's centre pointer. A positioned element rather than an
+         SVG polygon, because the svg has no viewBox and its user units are
+         absolute — a polygon at x=0 sits at the left edge, not the middle, and
+         centring it would mean threading the live viewport width through. -->
+    <div class="sky-hud__pointer"></div>
 
     <div class="sky-hud__reticle" :class="{ 'sky-hud__reticle--locked': locked }">
       <svg viewBox="-30 -30 60 60" class="h-full w-full">
@@ -79,12 +84,6 @@ const { compass, elevation, locked, trace, start, stop } = createSkyHud();
 
 const { sceneMode } = storeToRefs(useCesiumStore());
 const visible = computed(() => sceneMode.value === SKY_MODE);
-
-const pointerPoints = computed(() => {
-  // Centre pointer, drawn against the same band the ticks hang from.
-  const y = COMPASS_Y + TAPE_LENGTH;
-  return `-7,${y + 9} 7,${y + 9} 0,${y}`;
-});
 
 const facts = computed<[string, string][]>(() => {
   const target = locked.value;
@@ -194,8 +193,17 @@ onUnmounted(() => {
   stroke-width: 2.5px;
 }
 
+/* A triangle pointing up at the tape band the ticks hang from. */
 .sky-hud__pointer {
-  fill: #4ade80;
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 9px solid #4ade80;
 }
 
 .sky-hud__reticle {

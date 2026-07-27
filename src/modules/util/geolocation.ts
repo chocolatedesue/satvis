@@ -8,15 +8,12 @@
 // Note that this needs a secure context: over plain http on a LAN address the
 // api is either absent or refuses, so `pnpm dev:host` cannot exercise it.
 
-export interface Coordinates {
-  lat: number;
-  lon: number;
-}
+import type { Observer } from "../skyGeometry";
 
 const TIMEOUT_MS = 10_000;
 
 /** Resolves to undefined when the user declines, the fix fails, or it times out. */
-export async function currentPosition(): Promise<Coordinates | undefined> {
+export async function currentPosition(): Promise<Observer | undefined> {
   if (!navigator.geolocation) {
     return undefined;
   }

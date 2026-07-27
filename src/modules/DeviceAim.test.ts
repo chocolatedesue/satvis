@@ -1,10 +1,31 @@
+import { Cartesian3, Math as CesiumMath, Matrix3 } from "@cesium/engine";
 import { describe, expect, test } from "vitest";
 
-import { aimFromDeviceOrientation, CompassCalibration, compassIsMeaningful, compassYawOffset, normalizeAzimuth, type DeviceOrientationSample } from "./DeviceAim";
+import { aimFromDeviceOrientation, CompassCalibration, compassIsMeaningful, compassYawOffset, type DeviceOrientationSample, normalizeAzimuth } from "./DeviceAim";
+import { skyBasis } from "./SkyView";
 
 const sample = (alpha: number, beta: number, gamma: number, screenAngle = 0): DeviceOrientationSample => ({ alpha, beta, gamma, screenAngle });
 
 const azimuthError = (actual: number, expected: number): number => Math.abs(((((actual - expected) % 360) + 540) % 360) - 180);
+
+/**
+ * The device's own axes in east-north-up, built here from the `deviceorientation`
+ * Euler order rather than borrowed from the module, so the round-trip test below
+ * checks the implementation against the specification and not against itself.
+ */
+function deviceRotationForTest({ alpha, beta, gamma, screenAngle }: DeviceOrientationSample): { backCamera: Cartesian3; screenUp: Cartesian3 } {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const rotation = [
+    Matrix3.fromRotationZ(radians(alpha)),
+    Matrix3.fromRotationX(radians(beta)),
+    Matrix3.fromRotationY(radians(gamma)),
+    Matrix3.fromRotationZ(radians(-screenAngle)),
+  ].reduce((accumulated, next) => Matrix3.multiply(accumulated, next, new Matrix3()));
+  return {
+    backCamera: Matrix3.multiplyByVector(rotation, new Cartesian3(0, 0, -1), new Cartesian3()),
+    screenUp: Matrix3.multiplyByVector(rotation, new Cartesian3(0, 1, 0), new Cartesian3()),
+  };
+}
 
 describe("aimFromDeviceOrientation", () => {
   test("looks straight down when the phone lies flat, screen up", () => {
@@ -55,6 +76,23 @@ describe("aimFromDeviceOrientation", () => {
     const landscape = aimFromDeviceOrientation(sample(0, 90, 0, 90));
     expect(upright.roll).toBeCloseTo(0, 6);
     expect(Math.abs(landscape.roll)).toBeCloseTo(90, 6);
+  });
+
+  test("hands the camera back the orientation the device reported", () => {
+    // The end-to-end invariant: decomposing a device orientation into an aim and
+    // recomposing that aim into a camera basis must reproduce the device's own
+    // axes. Roll used to come back negated here — the decomposition and the
+    // composition were written separately from the same formula and disagreed in
+    // sign, which mirrored the sky about the view axis. Nothing caught it because
+    // the tests only asserted the magnitude of the roll.
+    for (const posture of [sample(0, 90, 0, 90), sample(40, 120, 20, 0), sample(200, 150, -35, 270)]) {
+      const basis = skyBasis(aimFromDeviceOrientation(posture));
+      const rotation = deviceRotationForTest(posture);
+      const label = `a=${posture.alpha} b=${posture.beta} g=${posture.gamma} s=${posture.screenAngle}`;
+
+      expect(CesiumMath.toDegrees(Cartesian3.angleBetween(basis.direction, rotation.backCamera)), label).toBeCloseTo(0, 6);
+      expect(CesiumMath.toDegrees(Cartesian3.angleBetween(basis.up, rotation.screenUp)), label).toBeCloseTo(0, 6);
+    }
   });
 
   test("stays finite and level-consistent pointing at the zenith", () => {

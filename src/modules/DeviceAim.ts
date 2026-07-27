@@ -13,9 +13,11 @@
 // and Z is up — the same axes as the observer's east-north-up frame, so at
 // alpha = beta = gamma = 0 the rotation is the identity.
 
-import { Math as CesiumMath } from "@cesium/engine";
+import { Cartesian3, Math as CesiumMath, Matrix3 } from "@cesium/engine";
 
-import type { Aim } from "./SkyView";
+import { type Aim, normalizeAzimuth, rollOf } from "./skyGeometry";
+
+export { normalizeAzimuth } from "./skyGeometry";
 
 export interface DeviceOrientationSample {
   /** Rotation about the vertical, 0-360. Relative to an arbitrary zero on iOS. */
@@ -37,94 +39,53 @@ export interface DeviceOrientationSample {
  */
 const COMPASS_POSTURE_TOLERANCE = 35;
 
-type Vector = [number, number, number];
+const BACK_CAMERA: Cartesian3 = new Cartesian3(0, 0, -1);
+const SCREEN_UP: Cartesian3 = new Cartesian3(0, 1, 0);
+const SCREEN_NORMAL: Cartesian3 = new Cartesian3(0, 0, 1);
 
-const multiply = (a: number[], b: number[]): number[] => {
-  const out = Array.from<number>({ length: 9 }).fill(0);
-  for (let row = 0; row < 3; row++) {
-    for (let column = 0; column < 3; column++) {
-      let sum = 0;
-      for (let k = 0; k < 3; k++) {
-        sum += (a[row * 3 + k] as number) * (b[k * 3 + column] as number);
-      }
-      out[row * 3 + column] = sum;
-    }
-  }
-  return out;
-};
-
-const apply = (m: number[], v: Vector): Vector => [
-  (m[0] as number) * v[0] + (m[1] as number) * v[1] + (m[2] as number) * v[2],
-  (m[3] as number) * v[0] + (m[4] as number) * v[1] + (m[5] as number) * v[2],
-  (m[6] as number) * v[0] + (m[7] as number) * v[1] + (m[8] as number) * v[2],
-];
-
-const rotateX = (radians: number): number[] => {
-  const c = Math.cos(radians);
-  const s = Math.sin(radians);
-  return [1, 0, 0, 0, c, -s, 0, s, c];
-};
-
-const rotateY = (radians: number): number[] => {
-  const c = Math.cos(radians);
-  const s = Math.sin(radians);
-  return [c, 0, s, 0, 1, 0, -s, 0, c];
-};
-
-const rotateZ = (radians: number): number[] => {
-  const c = Math.cos(radians);
-  const s = Math.sin(radians);
-  return [c, -s, 0, s, c, 0, 0, 0, 1];
-};
-
-const dot = (a: Vector, b: Vector): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-
-/** Wrap to [0, 360). */
-export const normalizeAzimuth = (degrees: number): number => ((degrees % 360) + 360) % 360;
+/**
+ * The device's rotation, taking device-frame vectors into east-north-up.
+ *
+ * Intrinsic Z-X'-Y'', the order `deviceorientation` specifies. The screen
+ * rotation is about the device's own Z and comes last, because it turns the
+ * *display* without turning the hardware.
+ */
+function deviceRotation({ alpha, beta, gamma, screenAngle }: DeviceOrientationSample): Matrix3 {
+  const rotation = Matrix3.multiply(
+    Matrix3.multiply(Matrix3.fromRotationZ(CesiumMath.toRadians(alpha)), Matrix3.fromRotationX(CesiumMath.toRadians(beta)), new Matrix3()),
+    Matrix3.fromRotationY(CesiumMath.toRadians(gamma)),
+    new Matrix3(),
+  );
+  return Matrix3.multiply(rotation, Matrix3.fromRotationZ(CesiumMath.toRadians(-screenAngle)), rotation);
+}
 
 /**
  * The aim a device orientation implies, before any compass correction: the
  * azimuth is measured from `alpha`'s zero, which on iOS drifts and is arbitrary.
  */
 export function aimFromDeviceOrientation(sample: DeviceOrientationSample): Aim {
-  const { alpha, beta, gamma, screenAngle } = sample;
-  // Intrinsic Z-X'-Y'', the order `deviceorientation` specifies. The trailing
-  // screen rotation is about the device's own Z, so it commutes with nothing and
-  // has to come last — it turns the *display* without turning the hardware.
-  const rotation = multiply(
-    multiply(multiply(rotateZ(CesiumMath.toRadians(alpha)), rotateX(CesiumMath.toRadians(beta))), rotateY(CesiumMath.toRadians(gamma))),
-    rotateZ(CesiumMath.toRadians(-screenAngle)),
-  );
-
+  const rotation = deviceRotation(sample);
   // The rear camera looks out of the back of the screen, along -Z; the top of
   // the display is +Y. Both are device-frame vectors rotated into the world.
-  const direction = apply(rotation, [0, 0, -1]);
-  const screenUp = apply(rotation, [0, 1, 0]);
+  const direction = Matrix3.multiplyByVector(rotation, BACK_CAMERA, new Cartesian3());
+  const screenUp = Matrix3.multiplyByVector(rotation, SCREEN_UP, new Cartesian3());
 
-  const elevation = CesiumMath.toDegrees(Math.asin(CesiumMath.clamp(direction[2], -1, 1)));
-  const azimuth = normalizeAzimuth(CesiumMath.toDegrees(Math.atan2(direction[0], direction[1])));
-
-  // Roll is what the screen's up does relative to a level view along the same
-  // axis. Derived by projecting onto the unrolled pair rather than from an Euler
-  // angle, so it stays defined when the phone points straight up.
-  const az = CesiumMath.toRadians(azimuth);
-  const el = CesiumMath.toRadians(elevation);
-  const sinAz = Math.sin(az);
-  const cosAz = Math.cos(az);
-  const levelUp: Vector = [-sinAz * Math.sin(el), -cosAz * Math.sin(el), Math.cos(el)];
-  const levelRight: Vector = [cosAz, -sinAz, 0];
-  const roll = CesiumMath.toDegrees(Math.atan2(dot(screenUp, levelRight), dot(screenUp, levelUp)));
-
-  return { azimuth, elevation, roll };
+  const elevation = CesiumMath.toDegrees(Math.asin(CesiumMath.clamp(direction.z, -1, 1)));
+  const azimuth = normalizeAzimuth(CesiumMath.toDegrees(Math.atan2(direction.x, direction.y)));
+  // Decomposed against the same level pair `skyBasis` composes with, so the two
+  // are exact inverses — see skyGeometry. Projecting rather than reading an
+  // Euler angle is what keeps this defined with the phone pointed straight up.
+  return { azimuth, elevation, roll: rollOf(azimuth, elevation, screenUp) };
 }
 
 /** Whether the screen is flat enough for iOS's compass heading to mean anything. */
 export function compassIsMeaningful(sample: DeviceOrientationSample): boolean {
   // Screen normal is +Z in the device frame; flat means it is near vertical,
-  // either face up or face down.
-  const rotation = multiply(multiply(rotateZ(CesiumMath.toRadians(sample.alpha)), rotateX(CesiumMath.toRadians(sample.beta))), rotateY(CesiumMath.toRadians(sample.gamma)));
-  const screenNormal = apply(rotation, [0, 0, 1]);
-  const tiltFromHorizontal = CesiumMath.toDegrees(Math.acos(CesiumMath.clamp(Math.abs(screenNormal[2]), -1, 1)));
+  // either face up or face down. The screen angle cannot change that, so it is
+  // left out rather than cancelled.
+  const rotation = deviceRotation({ ...sample, screenAngle: 0 });
+  const screenNormal = Matrix3.multiplyByVector(rotation, SCREEN_NORMAL, new Cartesian3());
+  const tiltFromHorizontal = CesiumMath.toDegrees(Math.acos(CesiumMath.clamp(Math.abs(screenNormal.z), -1, 1)));
   return tiltFromHorizontal <= COMPASS_POSTURE_TOLERANCE;
 }
 

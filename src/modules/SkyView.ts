@@ -18,25 +18,11 @@
 //     `adjustHeightForTerrain` free to lift the camera off the observer on any
 //     frame it thinks it moved. Both flags come off.
 
-import { Cartesian3, Cartographic, Math as CesiumMath, Matrix3, Matrix4, PerspectiveFrustum, type Scene, Transforms } from "@cesium/engine";
+import { Cartesian3, Cartographic, Math as CesiumMath, Matrix3, Matrix4, PerspectiveFrustum, type Scene, SceneMode, Transforms } from "@cesium/engine";
 
-/** Where the sky view looks up from — see CONTEXT.md, observer. */
-export interface Observer {
-  lat: number;
-  lon: number;
-}
+import { type Aim, enuDirection, type Observer, rollBasis } from "./skyGeometry";
 
-/**
- * Which way the sky view is pointing, in the same terms as a satellite's own
- * position: azimuth clockwise from north, elevation above the horizon, both in
- * degrees. Roll is the rotation about the view axis, which a handheld device
- * supplies and a mouse does not.
- */
-export interface Aim {
-  azimuth: number;
-  elevation: number;
-  roll: number;
-}
+export type { Aim, Observer } from "./skyGeometry";
 
 /** An orthonormal camera basis in east-north-up components. */
 export interface Basis {
@@ -87,27 +73,7 @@ export const defaultAzimuth = (observer: Observer): number => (observer.lat >= 0
  * there is no singularity at the zenith and no discontinuity crossing it.
  */
 export function skyBasis(aim: Aim): Basis {
-  const azimuth = CesiumMath.toRadians(aim.azimuth);
-  const elevation = CesiumMath.toRadians(aim.elevation);
-  const roll = CesiumMath.toRadians(aim.roll);
-
-  const sinAz = Math.sin(azimuth);
-  const cosAz = Math.cos(azimuth);
-  const sinEl = Math.sin(elevation);
-  const cosEl = Math.cos(elevation);
-
-  const direction = new Cartesian3(sinAz * cosEl, cosAz * cosEl, sinEl);
-  // The unrolled up/right pair: `up` is where the view axis is heading as
-  // elevation increases, `right` is level with the horizon at this azimuth.
-  const levelUp = new Cartesian3(-sinAz * sinEl, -cosAz * sinEl, cosEl);
-  const levelRight = new Cartesian3(cosAz, -sinAz, 0);
-
-  const sinRoll = Math.sin(roll);
-  const cosRoll = Math.cos(roll);
-  const up = new Cartesian3(levelUp.x * cosRoll - levelRight.x * sinRoll, levelUp.y * cosRoll - levelRight.y * sinRoll, levelUp.z * cosRoll - levelRight.z * sinRoll);
-  const right = new Cartesian3(levelRight.x * cosRoll + levelUp.x * sinRoll, levelRight.y * cosRoll + levelUp.y * sinRoll, levelRight.z * cosRoll + levelUp.z * sinRoll);
-
-  return { direction, up, right };
+  return { direction: enuDirection(aim.azimuth, aim.elevation), ...rollBasis(aim.azimuth, aim.elevation, aim.roll) };
 }
 
 /**
@@ -196,6 +162,15 @@ export class SkyView {
       this.#setObserver(observer);
       this.#apply();
       return;
+    }
+
+    // The sky view is 3D, so entering from 2D or Columbus has to morph first —
+    // instantly, because the camera is about to be assigned outright and an
+    // animated morph would spend two seconds fighting it. Without this the basis
+    // lands in an orthographic projection where it means nothing, and the frustum
+    // is not a PerspectiveFrustum so there is no `fov` to save or to put back.
+    if (this.#scene.mode !== SceneMode.SCENE3D) {
+      this.#scene.morphTo3D(0);
     }
 
     const { camera, screenSpaceCameraController: controller } = this.#scene;

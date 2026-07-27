@@ -13,9 +13,10 @@
 // projected form also picks up roll for free, which the linear one cannot
 // express at all.
 
-import { Cartesian2, Cartesian3, Math as CesiumMath, type JulianDate, Matrix3, Matrix4, type Scene, SceneTransforms, Transforms } from "@cesium/engine";
+import { Cartesian2, Cartesian3, Cartographic, Math as CesiumMath, type JulianDate, Matrix3, Matrix4, type Scene, SceneTransforms, Transforms } from "@cesium/engine";
 
 import type { SatelliteComponentCollection } from "./SatelliteComponentCollection";
+import { enuDirection, normalizeAzimuth } from "./skyGeometry";
 
 /** A position as the observer sees it. */
 export interface LookAngles {
@@ -64,17 +65,14 @@ export function lookAngles(frame: ObserverFrame, target: Cartesian3): LookAngles
     return { azimuth: 0, elevation: 0, rangeKm: 0 };
   }
   const local = Matrix3.multiplyByVector(frame.fixedToEnu, delta, new Cartesian3());
-  const azimuth = (CesiumMath.toDegrees(Math.atan2(local.x, local.y)) + 360) % 360;
+  const azimuth = normalizeAzimuth(CesiumMath.toDegrees(Math.atan2(local.x, local.y)));
   const elevation = CesiumMath.toDegrees(Math.asin(CesiumMath.clamp(local.z / range, -1, 1)));
   return { azimuth, elevation, rangeKm: range / 1000 };
 }
 
 /** The world position a direction from the observer points at. */
 export function directionToWorld(frame: ObserverFrame, azimuth: number, elevation: number, distance = DIRECTION_DISTANCE): Cartesian3 {
-  const az = CesiumMath.toRadians(azimuth);
-  const el = CesiumMath.toRadians(elevation);
-  const cosEl = Math.cos(el);
-  const local = new Cartesian3(Math.sin(az) * cosEl * distance, Math.cos(az) * cosEl * distance, Math.sin(el) * distance);
+  const local = enuDirection(azimuth, elevation, distance);
   const enuToFixed = Matrix3.transpose(frame.fixedToEnu, new Matrix3());
   const offset = Matrix3.multiplyByVector(enuToFixed, local, new Cartesian3());
   return Cartesian3.add(frame.position, offset, offset);
@@ -104,7 +102,10 @@ export function skyTargets(scene: Scene, frame: ObserverFrame, satellites: reado
       ...angles,
       sat,
       name: sat.props.name,
-      altitudeKm: (Cartesian3.magnitude(position) - Cartesian3.magnitude(frame.position)) / 1000,
+      // Height above the ellipsoid, not the difference of two geocentric radii:
+      // the observer's own radius varies 6357-6378 km with latitude, which would
+      // put a ~12 km latitude-dependent bias on every altitude reported.
+      altitudeKm: (Cartographic.fromCartesian(position)?.height ?? 0) / 1000,
       window: SceneTransforms.worldToWindowCoordinates(scene, position),
     });
   }
@@ -141,6 +142,6 @@ export function nearestTarget(targets: readonly SkyTarget[], center: Cartesian2,
 /** The compass letter for an azimuth, for the detail card. */
 export function compassPoint(azimuth: number): string {
   const points = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
-  const index = Math.round((((azimuth % 360) + 360) % 360) / 22.5) % points.length;
+  const index = Math.round(normalizeAzimuth(azimuth) / 22.5) % points.length;
   return points[index] as string;
 }

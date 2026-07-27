@@ -12,10 +12,10 @@
 // replaced wholesale each frame, which is cheap at this size and avoids making
 // every tick individually reactive.
 
-import { JulianDate, SceneTransforms } from "@cesium/engine";
+import { type Cartesian3, JulianDate, type Scene, SceneTransforms } from "@cesium/engine";
 import { shallowRef, type ShallowRef } from "vue";
 
-import { compassPoint, directionToWindow, lookAngles, observerFrame, type SkyTarget } from "../modules/SkyTargets";
+import { compassPoint, directionToWindow, lookAngles, type ObserverFrame, observerFrame, type SkyTarget } from "../modules/SkyTargets";
 
 /** A mark on one of the tapes, already placed in CSS pixels. */
 export interface TapeTick {
@@ -78,8 +78,12 @@ export function createSkyHud(): SkyHudState & { start: () => void; stop: () => v
   const trace = shallowRef("");
 
   let removePreRender: (() => void) | undefined;
-  let lastTrace = 0;
-  let lastTraceKey = "";
+  let sampledAt = 0;
+  let sampledFor = "";
+  // World positions, not window coordinates. Only the propagation is worth
+  // caching: where a position lands on screen depends on the camera, so a cached
+  // path would visibly detach from its satellite the moment the view moved.
+  let samples: Cartesian3[] = [];
 
   function refresh(time: JulianDate): void {
     const { viewer, skyView, skyInteraction } = globalThis.cc;
@@ -112,38 +116,45 @@ export function createSkyHud(): SkyHudState & { start: () => void; stop: () => v
     elevation.value = thin(elevationTicks);
 
     locked.value = skyInteraction.locked;
-    refreshTrace(time);
+    sampleTrace(time);
+    trace.value = projectTrace(scene, frame);
   }
 
-  function refreshTrace(time: JulianDate): void {
+  /** Re-propagate the locked satellite's track, at most every TRACE_INTERVAL_MS. */
+  function sampleTrace(time: JulianDate): void {
     const target = locked.value;
     if (!target) {
-      trace.value = "";
-      lastTraceKey = "";
+      samples = [];
+      sampledFor = "";
       return;
     }
     const now = performance.now();
-    if (target.name === lastTraceKey && now - lastTrace < TRACE_INTERVAL_MS) {
+    if (target.name === sampledFor && now - sampledAt < TRACE_INTERVAL_MS) {
       return;
     }
-    lastTrace = now;
-    lastTraceKey = target.name;
+    sampledAt = now;
+    sampledFor = target.name;
 
-    const { viewer } = globalThis.cc;
-    const { scene } = viewer;
-    const frame = observerFrame(scene.camera.position);
-    const sample = new JulianDate();
+    const at = new JulianDate();
+    samples = [];
+    for (let offset = -TRACE_BACK_SECONDS; offset <= TRACE_FORWARD_SECONDS; offset += TRACE_STEP_SECONDS) {
+      JulianDate.addSeconds(time, offset, at);
+      const position = target.sat.props.trajectory.position(at);
+      if (position) {
+        samples.push(position);
+      }
+    }
+  }
 
+  /** Project the cached track for this frame's camera. */
+  function projectTrace(scene: Scene, frame: ObserverFrame): string {
     // Broken into runs rather than one polyline: a track that dips below the
     // horizon and comes back must not be joined straight through the Earth.
     const runs: string[] = [];
     let current: string[] = [];
-    for (let offset = -TRACE_BACK_SECONDS; offset <= TRACE_FORWARD_SECONDS; offset += TRACE_STEP_SECONDS) {
-      JulianDate.addSeconds(time, offset, sample);
-      const position = target.sat.props.trajectory.position(sample);
-      // Samples below the horizon are dropped rather than clipped, so the track
-      // does not run through the Earth on its way to the next visible point.
-      const window = position && lookAngles(frame, position).elevation > 0 ? SceneTransforms.worldToWindowCoordinates(scene, position) : undefined;
+    for (const position of samples) {
+      // Dropped rather than clipped, for the same reason.
+      const window = lookAngles(frame, position).elevation > 0 ? SceneTransforms.worldToWindowCoordinates(scene, position) : undefined;
       if (!window) {
         if (current.length > 1) {
           runs.push(current.join(" "));
@@ -156,7 +167,7 @@ export function createSkyHud(): SkyHudState & { start: () => void; stop: () => v
     if (current.length > 1) {
       runs.push(current.join(" "));
     }
-    trace.value = runs.join(" ");
+    return runs.join(" ");
   }
 
   return {
