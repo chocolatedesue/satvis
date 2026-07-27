@@ -78,6 +78,7 @@ export function startSceneSync(cc: CesiumController): void {
 
     if (mode !== SKY_MODE) {
       cc.skyView.exit();
+      cc.releaseCameraMode();
       cc.morphTo(mode);
       return;
     }
@@ -93,6 +94,14 @@ export function startSceneSync(cc: CesiumController): void {
       cesiumStore.sceneMode = previous === SKY_MODE ? "3D" : previous;
       return;
     }
+
+    // Both of these fight the sky view for the camera, and they are handled
+    // differently on purpose — see docs/adr/0003-sky-view.md. Inertial is
+    // suppressed, so `?camera=Inertial` survives the round trip. Tracking is
+    // cleared, because a camera cannot both follow a satellite and be a pair of
+    // eyes on the ground, so there is nothing to come back to.
+    cc.suppressCameraMode();
+    satStore.trackedSatellite = "";
     cc.skyView.enter(observer);
   }
 
@@ -100,6 +109,22 @@ export function startSceneSync(cc: CesiumController): void {
     () => cesiumStore.sceneMode,
     (mode, previous) => {
       void applyViewMode(mode, previous);
+    },
+  );
+
+  // Nothing is tracked while the sky view is up, held as a standing invariant
+  // rather than a one-off clear on entry. A track can arrive later than the
+  // view mode does: `pendingTrackedSatellite` resolves whenever its group
+  // finishes loading, which can be long after. Writing the store rather than
+  // `viewer.trackedEntity` matters — tracking is the one value the globe
+  // reports back, so poking Cesium would reach the store from behind and race
+  // the forward path.
+  watch(
+    () => satStore.trackedSatellite,
+    (tracked) => {
+      if (tracked !== "" && cc.skyView.active) {
+        satStore.trackedSatellite = "";
+      }
     },
   );
 

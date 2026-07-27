@@ -68,6 +68,15 @@ export class CesiumController {
 
   oldBottomContainerStyleLeft: string = "";
 
+  // What the store last asked for, and whether anything is currently overriding
+  // it. Held separately so releasing a suppression restores the user's choice
+  // rather than a guess at it.
+  #cameraMode: string = "Fixed";
+
+  #cameraModeSuppressed = false;
+
+  #removeCameraTrackEci: (() => void) | undefined;
+
   constructor() {
     this.preloadReferenceFrameData();
     this.minimalUI = DeviceDetect.inIframe() || DeviceDetect.isIos();
@@ -274,15 +283,43 @@ export class CesiumController {
   }
 
   set cameraMode(cameraMode: string) {
-    switch (cameraMode) {
-      case "Inertial":
-        this.viewer.scene.postUpdate.addEventListener(this.cameraTrackEci);
-        break;
-      case "Fixed":
-        this.viewer.scene.postUpdate.removeEventListener(this.cameraTrackEci);
-        break;
-      default:
-        console.error("Unknown camera mode");
+    if (cameraMode !== "Inertial" && cameraMode !== "Fixed") {
+      console.error("Unknown camera mode");
+      return;
+    }
+    this.#cameraMode = cameraMode;
+    this.#applyCameraMode();
+  }
+
+  /**
+   * Stop honouring the camera mode without changing it — the sky view drives
+   * the camera itself, and inertial tracking re-parents it on every frame, so
+   * the two cannot share it.
+   *
+   * Suppressed rather than forced back to Fixed, the way a morph suppresses the
+   * Orbit component: the user's choice stands and the toolbar keeps saying so,
+   * and no history entry is pushed for a change nobody asked for.
+   */
+  suppressCameraMode(): void {
+    this.#cameraModeSuppressed = true;
+    this.#applyCameraMode();
+  }
+
+  releaseCameraMode(): void {
+    this.#cameraModeSuppressed = false;
+    this.#applyCameraMode();
+  }
+
+  #applyCameraMode(): void {
+    const trackEci = this.#cameraMode === "Inertial" && !this.#cameraModeSuppressed;
+    // Tracked by its removal callback rather than by re-deriving it: Cesium's
+    // Event happily registers the same listener twice, so asking for Inertial
+    // while already inertial would otherwise stack a second one.
+    if (trackEci && !this.#removeCameraTrackEci) {
+      this.#removeCameraTrackEci = this.viewer.scene.postUpdate.addEventListener(this.cameraTrackEci);
+    } else if (!trackEci && this.#removeCameraTrackEci) {
+      this.#removeCameraTrackEci();
+      this.#removeCameraTrackEci = undefined;
     }
   }
 

@@ -10,7 +10,10 @@
           <UTooltip v-if="selection.kind === 'satellite'" text="Show satellite info on n2yo.com">
             <UButton icon="i-lucide-info" variant="ghost" color="neutral" size="xs" aria-label="Show satellite info on n2yo.com" @click="openExternalInfo" />
           </UTooltip>
-          <UTooltip :text="isTracked ? 'Stop tracking' : 'Track entity'">
+          <!-- Hidden rather than disabled in the sky view, which owns the camera:
+               tracking there has no meaning to convey, and a button that silently
+               did nothing would read as broken. -->
+          <UTooltip v-if="!inSkyView" :text="isTracked ? 'Stop tracking' : 'Track entity'">
             <UButton icon="i-lucide-video" variant="ghost" :color="isTracked ? 'primary' : 'neutral'" size="xs" aria-label="Track entity" @click="toggleTrack" />
           </UTooltip>
           <UButton icon="i-lucide-x" variant="ghost" color="neutral" size="xs" aria-label="Close" @click="deselect" />
@@ -109,7 +112,9 @@ import { storeToRefs } from "pinia";
 import { computed } from "vue";
 
 import { useSelectedEntity } from "../composables/useSelectedEntity";
+import { SKY_MODE } from "../config/viewModes";
 import type { Pass } from "../modules/PassPredictor";
+import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 
 const cc = globalThis.cc;
@@ -118,6 +123,9 @@ const toast = useToast();
 const { selection, isTracked, name, position, passRows, hasAnyPasses, showPastPasses, elements, satelliteInfo, deselect, toggleTrack } = useSelectedEntity();
 
 const { overpassMode } = storeToRefs(useSatStore());
+
+const { sceneMode } = storeToRefs(useCesiumStore());
+const inSkyView = computed(() => sceneMode.value === SKY_MODE);
 const modeLabel = computed(() => overpassMode.value.charAt(0).toUpperCase() + overpassMode.value.slice(1));
 
 function notifyForPass(pass: Pass, aheadMin = 5): void {
