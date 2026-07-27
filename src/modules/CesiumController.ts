@@ -34,6 +34,7 @@ import {
   terrainProviderNames as visibleTerrainProviderNames,
 } from "./CesiumLayerProviders";
 import { SatelliteManager } from "./SatelliteManager";
+import { SkyInteraction } from "./SkyInteraction";
 import { SkyView } from "./SkyView";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
@@ -55,6 +56,8 @@ export class CesiumController {
   sats!: SatelliteManager;
 
   skyView!: SkyView;
+
+  skyInteraction!: SkyInteraction;
 
   pm!: PushManager;
 
@@ -124,6 +127,16 @@ export class CesiumController {
     this.sats = new SatelliteManager(this.viewer);
 
     this.skyView = new SkyView(this.viewer.scene);
+    this.skyInteraction = new SkyInteraction({
+      scene: this.viewer.scene,
+      skyView: this.skyView,
+      sats: this.sats,
+      // Selecting by entity identity is all the info panel needs: it resolves
+      // the selection itself off `viewer.selectedEntity`.
+      onSelect: (target) => {
+        this.viewer.selectedEntity = target.sat.defaultEntity;
+      },
+    });
 
     this.pm = new PushManager();
 

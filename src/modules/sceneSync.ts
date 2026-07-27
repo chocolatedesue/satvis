@@ -77,6 +77,7 @@ export function startSceneSync(cc: CesiumController): void {
     const generation = ++viewModeGeneration;
 
     if (mode !== SKY_MODE) {
+      cc.skyInteraction.stop();
       cc.skyView.exit();
       cc.releaseCameraMode();
       cc.morphTo(mode);
@@ -103,6 +104,7 @@ export function startSceneSync(cc: CesiumController): void {
     cc.suppressCameraMode();
     satStore.trackedSatellite = "";
     cc.skyView.enter(observer);
+    cc.skyInteraction.start();
   }
 
   watch(
