@@ -1,16 +1,13 @@
 import { describe, expect, test } from "vitest";
 
 import { activeTargetEntries, isEnabledByTag } from "./satelliteActivation";
-import { CatalogEntry, SatelliteCatalog } from "./SatelliteCatalog";
+import { CatalogEntry } from "./SatelliteCatalog";
 import type { GpRecord } from "./util/gp";
 
 // Minimal CatalogEntry factory — activeTargetEntries only reads key/name/tags.
-// CatalogEntry needs a catalog back-reference for lazy metadata resolution, so
-// build entries through a throwaway catalog rather than a plain object literal.
-const catalog = new SatelliteCatalog();
 function entry(name: string, satnum: string, tags: string[]): CatalogEntry {
   const record: GpRecord = { kind: "tle", name, line1: "", line2: "" };
-  return new CatalogEntry(catalog, { key: `${satnum}|${name}`, name, nameUpper: name.toUpperCase(), satnum, tags, record });
+  return new CatalogEntry({ key: `${satnum}|${name}`, name, nameUpper: name.toUpperCase(), satnum, tags, record });
 }
 
 const ALPHA = entry("ALPHA", "1", ["Weather", "New"]);

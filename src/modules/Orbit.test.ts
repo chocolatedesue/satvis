@@ -47,6 +47,115 @@ describe("Orbit (TLE record)", () => {
   });
 });
 
+// Swath containment is tested against ground stations placed at a known offset
+// from the ground track, so the assertions are about geometry rather than about
+// whichever passes SGP4 happens to produce over a real city.
+describe("Orbit swath containment", () => {
+  const orbit = new Orbit("ISS", parseGpPayload(TLE)[0] as GpRecord);
+  const EARTH_RADIUS_KM = 6371;
+  const deg2rad = Math.PI / 180;
+  const rad2deg = 180 / Math.PI;
+  const AT = dayjs("2018-12-08T12:00:00Z").toDate();
+
+  /** Destination point `distanceKm` from (lat, lon) along `bearingRad`, in degrees. */
+  function destination(latDeg: number, lonDeg: number, bearingRad: number, distanceKm: number) {
+    const lat = latDeg * deg2rad;
+    const lon = lonDeg * deg2rad;
+    const delta = distanceKm / EARTH_RADIUS_KM;
+    const lat2 = Math.asin(Math.sin(lat) * Math.cos(delta) + Math.cos(lat) * Math.sin(delta) * Math.cos(bearingRad));
+    const lon2 = lon + Math.atan2(Math.sin(bearingRad) * Math.sin(delta) * Math.cos(lat), Math.cos(delta) - Math.sin(lat) * Math.sin(lat2));
+    return { latitude: lat2 * rad2deg, longitude: lon2 * rad2deg, height: 0 };
+  }
+
+  /** The satellite's flight bearing (radians) at AT, from two subpoints. */
+  function flightBearing(): number {
+    const here = orbit.positionGeodetic(AT)!;
+    const ahead = orbit.positionGeodetic(new Date(AT.getTime() + 10_000))!;
+    const lat1 = here.latitude * deg2rad;
+    const lon1 = here.longitude * deg2rad;
+    const lat2 = ahead.latitude * deg2rad;
+    const lon2 = ahead.longitude * deg2rad;
+    const deltaLon = lon2 - lon1;
+    return Math.atan2(Math.sin(deltaLon) * Math.cos(lat2), Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLon));
+  }
+
+  /** Ground stations 400 km to starboard and to port of the track at AT. */
+  function flankingStations(offsetKm = 400) {
+    const here = orbit.positionGeodetic(AT)!;
+    const bearing = flightBearing();
+    return {
+      starboard: destination(here.latitude, here.longitude, bearing + Math.PI / 2, offsetKm),
+      port: destination(here.latitude, here.longitude, bearing - Math.PI / 2, offsetKm),
+    };
+  }
+
+  test("names the side a station lies on", () => {
+    const { starboard, port } = flankingStations();
+    expect(orbit.trackOffsets(starboard, AT)!.side).toBe("starboard");
+    expect(orbit.trackOffsets(port, AT)!.side).toBe("port");
+  });
+
+  test("reports the great-circle distance to the subpoint", () => {
+    const { starboard, port } = flankingStations();
+    expect(orbit.trackOffsets(starboard, AT)!.distanceKm).toBeCloseTo(400, 0);
+    expect(orbit.trackOffsets(port, AT)!.distanceKm).toBeCloseTo(400, 0);
+  });
+
+  test("bounds a station straight ahead by distance, so it is not served", () => {
+    // A per-side test keyed on cross-track offset alone would place this station at
+    // zero offset and serve it for the whole orbit; distance bounds it.
+    const here = orbit.positionGeodetic(AT)!;
+    const ahead = destination(here.latitude, here.longitude, flightBearing(), 1200);
+    expect(orbit.trackOffsets(ahead, AT)!.distanceKm).toBeCloseTo(1200, -1);
+    expect(orbit.computePassesSwath(ahead, { starboardKm: 600, portKm: 600 }, AT, new Date(AT.getTime() + 60_000))).toHaveLength(0);
+  });
+
+  test("an asymmetric swath serves the wide side and not the narrow one", () => {
+    const { starboard, port } = flankingStations();
+    // 400 km off-track: inside a 600 km starboard extent, outside a 200 km port one.
+    const swath = { starboardKm: 600, portKm: 200 };
+    const start = AT;
+    const end = new Date(AT.getTime() + 30 * 60_000);
+
+    expect(orbit.computePassesSwath(starboard, swath, start, end).length).toBeGreaterThan(0);
+    expect(orbit.computePassesSwath(port, swath, start, end)).toHaveLength(0);
+
+    // Mirroring the extents flips which station is served — the sides are not
+    // interchangeable, which a single total width could never express.
+    const mirrored = { starboardKm: 200, portKm: 600 };
+    expect(orbit.computePassesSwath(starboard, mirrored, start, end)).toHaveLength(0);
+    expect(orbit.computePassesSwath(port, mirrored, start, end).length).toBeGreaterThan(0);
+  });
+
+  test("a symmetric swath is the plain distance test the old single-width model used", () => {
+    // Pins the ADR-0002 claim that symmetric satellites keep their windows exactly:
+    // containment must be `distance <= total / 2`, side-independent.
+    const { starboard, port } = flankingStations(400);
+    const start = AT;
+    const end = new Date(AT.getTime() + 30 * 60_000);
+    for (const station of [starboard, port]) {
+      // 400 km out: served by a 401 km side extent, not by a 399 km one.
+      expect(orbit.computePassesSwath(station, { starboardKm: 401, portKm: 401 }, start, end).length).toBeGreaterThan(0);
+      expect(orbit.computePassesSwath(station, { starboardKm: 399, portKm: 399 }, start, end)).toHaveLength(0);
+    }
+  });
+
+  test("a symmetric swath serves both sides alike", () => {
+    const { starboard, port } = flankingStations();
+    const swath = { starboardKm: 600, portKm: 600 };
+    const start = AT;
+    const end = new Date(AT.getTime() + 30 * 60_000);
+    expect(orbit.computePassesSwath(starboard, swath, start, end).length).toBeGreaterThan(0);
+    expect(orbit.computePassesSwath(port, swath, start, end).length).toBeGreaterThan(0);
+  });
+
+  test("reports the total width on the pass, for display", () => {
+    const { starboard } = flankingStations();
+    const passes = orbit.computePassesSwath(starboard, { starboardKm: 600, portKm: 200 }, AT, new Date(AT.getTime() + 30 * 60_000));
+    expect(passes[0]!.swathWidth).toBe(800);
+  });
+});
+
 describe("Orbit (GpRecord path)", () => {
   test("OMM record builds an orbit without tle lines", () => {
     const omm = JSON.stringify([

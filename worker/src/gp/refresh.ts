@@ -3,12 +3,23 @@
 // The worker cron/API run it against KV (refreshAll); the static snapshot
 // generator runs the same pipeline against disk (scripts/update-static-gp.mjs).
 
-import config from "../config/groups.generated.json" with { type: "json" };
-import { buildStatuses, collectSources, evaluateGroups, fetchSources, type FetchImpl, type SourceProbe, toProbe, toRecordsBySource } from "./evaluate.ts";
+import generatedConfig from "../config/satvis.generated.json" with { type: "json" };
+import {
+  buildStatuses,
+  collectSources,
+  indexSatellitesByNoradId,
+  enrichRecords,
+  evaluateGroups,
+  fetchSources,
+  type FetchImpl,
+  type SourceProbe,
+  toProbe,
+  toRecordsBySource,
+} from "./evaluate.ts";
 import { kvGroupStore, type GroupStore } from "./store.ts";
-import type { GroupDefinition, GroupsConfig, GroupsIndex } from "./types.ts";
+import type { GroupsConfig, GroupsIndex } from "./types.ts";
 
-const groupsConfig = config as GroupsConfig;
+const groupsConfig = generatedConfig as GroupsConfig;
 
 // Result of one refresh run: the rebuilt index plus the per-source fetch
 // diagnostics and write tallies, so a manual trigger (POST /api/refresh) can
@@ -21,10 +32,12 @@ export interface RefreshReport {
   durationMs: number;
 }
 
-// Fetch upstream, evaluate, and write results to the store. Failed groups are
-// skipped so their last-known-good value stays in the store; the rebuilt index
-// (see buildStatuses) keeps their old `updated` and gains lastError/lastErrorAt.
-export async function refreshGroups(defs: GroupDefinition[], store: GroupStore, fetchImpl: FetchImpl): Promise<RefreshReport> {
+// Fetch upstream, evaluate, enrich, and write results to the store. Failed
+// groups are skipped so their last-known-good value stays in the store; the
+// rebuilt index (see buildStatuses) keeps their old `updated` and gains
+// lastError/lastErrorAt.
+export async function refreshGroups(config: GroupsConfig, store: GroupStore, fetchImpl: FetchImpl): Promise<RefreshReport> {
+  const defs = config.groups;
   const startedMs = Date.now();
   const now = new Date().toISOString();
   console.log(`gp refresh: start — ${defs.length} groups, ${collectSources(defs).length} sources`);
@@ -33,6 +46,12 @@ export async function refreshGroups(defs: GroupDefinition[], store: GroupStore, 
   const evaluated = evaluateGroups(defs, toRecordsBySource(fetched));
   const previous = await store.readIndex();
   const statuses = buildStatuses(defs, evaluated, previous, now);
+
+  // Enrichment runs here rather than inside evaluateGroups so it sits on the far
+  // side of `include` and `extraRecords` — every record actually served gets
+  // exactly one pass, including pseudo TLE extras.
+  const table = indexSatellitesByNoradId(config.satellites ?? []);
+  const matchedSatnums = new Set<string>();
 
   // Persist successful groups in parallel (independent keys). Failed groups
   // get no write, so their last-known-good value stays intact.
@@ -48,10 +67,31 @@ export async function refreshGroups(defs: GroupDefinition[], store: GroupStore, 
       for (const warning of result.warnings) {
         console.warn(`gp refresh: ${def.name}: ${warning}`);
       }
+      const enriched = enrichRecords(result.records, table);
+      for (const satnum of enriched.matched) {
+        matchedSatnums.add(satnum);
+      }
       written++;
-      return store.writeGroup(def.name, result.records, { updated: now, count: result.records.length });
+      return store.writeGroup(def.name, enriched.records, { updated: now, count: enriched.records.length });
     }),
   );
+
+  // A table entry matching nothing in any group is a config-health signal (typo,
+  // or a satellite quietly gone), not per-group status — so it is logged rather
+  // than written into the index. Decayed entries are expected never to match.
+  //
+  // Only meaningful when every group evaluated: a failed group contributes no
+  // records, so its satellites would look unmatched when the truth is only that we
+  // could not reach the upstream. Reporting that as a config problem would cry wolf
+  // on every transient CelesTrak failure, so the check is skipped instead.
+  if (skipped > 0) {
+    console.log(`gp refresh: skipping the satellite-table check — ${skipped} group(s) failed, so unmatched entries cannot be distinguished from unreachable ones`);
+  } else {
+    const unmatched = (config.satellites ?? []).filter((entry) => !entry.decayed && !matchedSatnums.has(String(entry.noradId)));
+    for (const entry of unmatched) {
+      console.warn(`gp refresh: satellite table entry ${entry.noradId}${entry.name ? ` (${entry.name})` : ""} matched no record in any group`);
+    }
+  }
 
   const index: GroupsIndex = { updated: now, groups: statuses };
   await store.writeIndex(index);
@@ -62,5 +102,5 @@ export async function refreshGroups(defs: GroupDefinition[], store: GroupStore, 
 
 // Worker entrypoint: bundled config, KV store, global fetch.
 export async function refreshAll(env: Env): Promise<RefreshReport> {
-  return refreshGroups(groupsConfig.groups, kvGroupStore(env.GP_KV), (url, init) => fetch(url, init));
+  return refreshGroups(groupsConfig, kvGroupStore(env.GP_KV), (url, init) => fetch(url, init));
 }

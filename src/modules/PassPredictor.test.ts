@@ -50,7 +50,9 @@ const VIENNA: GroundStation = { name: "Vienna", position: { latitude: 48.2082, l
 
 function issPredictor(swathKm = 500): { orbit: Orbit; predictor: PassPredictor } {
   const orbit = new Orbit("ISS", parseGpPayload(TLE)[0] as GpRecord);
-  const predictor = new PassPredictor(orbit, () => swathKm);
+  // A symmetric split of the total, which is what a satellite without per-side
+  // extents of its own gets from SatelliteProperties.
+  const predictor = new PassPredictor(orbit, () => ({ starboardKm: swathKm / 2, portKm: swathKm / 2 }));
   return { orbit, predictor };
 }
 
@@ -98,7 +100,7 @@ describe("PassPredictor", () => {
     expect(predictor.passIntervals.length).toBe(0);
   });
 
-  test("swath mode computes swath passes using the resolved swath width", () => {
+  test("swath mode hands the per-side extents to the orbit", () => {
     const { orbit, predictor } = issPredictor(290);
     predictor.groundStations = [MUNICH];
     const spy = vi.spyOn(orbit, "computePassesSwath");
@@ -106,7 +108,7 @@ describe("PassPredictor", () => {
     predictor.mode = "swath";
     const passes = predictor.passes(EPOCH_TIME);
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy.mock.calls[0]![1]).toBe(290);
+    expect(spy.mock.calls[0]![1]).toEqual({ starboardKm: 145, portKm: 145 });
     expect(passes.every((pass) => "minDistance" in pass)).toBe(true);
   });
 

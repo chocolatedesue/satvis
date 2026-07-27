@@ -25,7 +25,7 @@ import type { GroundStationEntity } from "../modules/GroundStationEntity";
 import { filterPasses, toPassRows, type PassRow } from "../modules/PassPredictor";
 import type { SatelliteComponentCollection } from "../modules/SatelliteComponentCollection";
 import { CesiumCallbackHelper } from "../modules/util/CesiumCallbackHelper";
-import { getElementsInfo, type ElementsInfo } from "../modules/util/entityInfo";
+import { getElementsInfo, getSatelliteInfo, type ElementsInfo } from "../modules/util/entityInfo";
 import { useSatStore } from "../stores/sat";
 
 export type Selection = { kind: "satellite"; sat: SatelliteComponentCollection } | { kind: "groundstation"; gs: GroundStationEntity };
@@ -49,6 +49,9 @@ const hasAnyPasses = ref(false);
 const showPastPasses = ref(false);
 const groundStationAvailable = ref(false);
 const elements: ShallowRef<ElementsInfo | null> = shallowRef(null);
+// Static facts about the satellite (derived orbit class + whatever its record
+// carries). Resolved once per selection, not per tick — none of it is time-dependent.
+const satelliteInfo: ShallowRef<[string, string][]> = shallowRef([]);
 
 let initialized = false;
 let removeTickCallback: (() => void) | undefined;
@@ -126,6 +129,7 @@ function update(time?: JulianDate): void {
   if (selectionTarget(next) !== previousTarget) {
     selection.value = next;
     elements.value = next?.kind === "satellite" ? getElementsInfo(next.sat.props.orbit) : null;
+    satelliteInfo.value = next?.kind === "satellite" ? getSatelliteInfo(next.sat.props.orbit, next.sat.props.metadata) : [];
     if (next && !removeTickCallback) {
       removeTickCallback = CesiumCallbackHelper.createPeriodicTimeCallback(viewer, 1, (tickTime) => update(tickTime));
     } else if (!next && removeTickCallback) {
@@ -189,6 +193,7 @@ export function useSelectedEntity() {
     showPastPasses,
     groundStationAvailable,
     elements,
+    satelliteInfo,
     deselect,
     toggleTrack,
   };

@@ -33,6 +33,18 @@
         </table>
       </template>
 
+      <template v-if="satelliteInfo.length > 0">
+        <h3>Satellite</h3>
+        <table class="info-table">
+          <tbody>
+            <tr v-for="[label, value] in satelliteInfo" :key="label">
+              <td>{{ label }}</td>
+              <td class="text-right!">{{ value }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
+
       <template v-if="!hasAnyPasses">
         <h3>Passes</h3>
         <div class="text-center">{{ selection.kind === "groundstation" ? "No passes available" : "No ground station set" }}</div>
@@ -103,7 +115,7 @@ import { useSatStore } from "../stores/sat";
 const cc = globalThis.cc;
 const toast = useToast();
 
-const { selection, isTracked, name, position, passRows, hasAnyPasses, showPastPasses, elements, deselect, toggleTrack } = useSelectedEntity();
+const { selection, isTracked, name, position, passRows, hasAnyPasses, showPastPasses, elements, satelliteInfo, deselect, toggleTrack } = useSelectedEntity();
 
 const { overpassMode } = storeToRefs(useSatStore());
 const modeLabel = computed(() => overpassMode.value.charAt(0).toUpperCase() + overpassMode.value.slice(1));

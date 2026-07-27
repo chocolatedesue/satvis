@@ -1,65 +1,66 @@
-// Per-satellite metadata, externalized from the old hardcoded swath table in
-// SatelliteProperties. Resolution lives in SatelliteCatalog (Cesium-free): it
-// starts from `defaults`, then shallow-merges the `metadata` of every matching
-// rule in order (app rules first, then remote rules appended by
-// mergeMetadataConfig — remote wins field-wise).
+// Per-satellite metadata: the static facts a served GP record carries alongside
+// its element set, attached by the worker at refresh time from the satellite
+// table in worker/src/config/satvis.core.yaml (and plugin configs).
 //
-// This module must stay Cesium-free (node-env vitest exercises it). A type-only
-// import from worker/ is fine — it is erased at build and carries no runtime dep.
+// The worker treats the bag as opaque and only copies it, so this file is the
+// single place where it acquires meaning. Adding a field costs a declaration here,
+// a value in the YAML, and a reader wherever it should show up (for a display-only
+// field, a row in entityInfo.getSatelliteInfo) — but no worker or pipeline change,
+// because nothing between the config and this file inspects the payload. The one
+// exception is the swath pair, whose both-or-neither rule the generator enforces.
+//
+// This module must stay Cesium-free (node-env vitest exercises it).
 
-import type { MetadataRule as WireMetadataRule } from "../../worker/src/gp/types";
-
-// Extensible bag of per-satellite metadata. All fields optional at the rule
-// level; resolution guarantees the defaulted fields (see ResolvedMetadata).
+// Static facts about one satellite. Every field is optional: a record either
+// carries a value or the consumer applies its own default (see the DEFAULT_*
+// constants below and SatelliteProperties).
 export interface SatelliteMetadata {
-  swathKm?: number;
+  // Cross-track distance (km) from the ground track to the swath edge, per side,
+  // relative to flight direction (starboard = velocity bearing + 90°). NOT
+  // halves of a full width — the sides can differ, e.g. Sentinel-3's SLSTR is
+  // tilted against sunglint. Given for both sides or neither (the generator
+  // rejects a half-specified swath), so consumers read them as a pair.
+  swathStarboardKm?: number;
+  swathPortKm?: number;
   coneFovDeg?: number;
   modelUrl?: string;
+  // Display-only, free text, shown verbatim in the entity info panel.
+  operator?: string;
+  missionType?: string;
 }
 
-// The result of resolving metadata for a satellite. The fields covered by
-// `appMetadataConfig.defaults` are always present, so consumers read them
-// without a fallback. Keep this in sync with the `defaults` shape below: the
-// Required<Pick<...>> and the `defaults: ResolvedMetadata` typing pin the two
-// together, so a field added to one without the other fails to compile.
-export type ResolvedMetadata = SatelliteMetadata & Required<Pick<SatelliteMetadata, "swathKm" | "coneFovDeg">>;
+// Total swath width for a satellite with no extents of its own. Kept as a total
+// rather than a pair of per-side halves so "200 km wide by default" is stated
+// once, and a half-specified swath cannot arise here either.
+export const DEFAULT_SWATH_KM = 200;
 
-// A rule matches a satellite by exact satnums, exact names, or a name pattern
-// (RegExp tested against the name — mirrors the worker's group-select
-// semantics). The old `includes()` substrings translate to identical literal
-// regexes. When a rule matches, its `metadata` is shallow-merged over the
-// accumulated result.
-//
-// The wire `match` shape is single-sourced from the worker; only the payload
-// type narrows (the worker treats `metadata` as opaque, the frontend interprets
-// it as SatelliteMetadata).
-export type MetadataRule = Omit<WireMetadataRule, "metadata"> & { metadata: SatelliteMetadata };
+export const DEFAULT_CONE_FOV_DEG = 10;
 
-export interface MetadataConfig {
-  // Typed as ResolvedMetadata so the compiler enforces that defaults cover
-  // exactly the fields resolution promises to always populate.
-  defaults: ResolvedMetadata;
-  rules: MetadataRule[];
+/**
+ * Per-side cross-track extents of a sensor footprint (km), measured from the
+ * ground track outwards relative to flight direction.
+ *
+ * Lives here rather than beside its consumers because the pair is one domain
+ * value: the two fields are stored together, validated together (the generator
+ * rejects a half-specified swath) and read together.
+ */
+export interface SwathExtents {
+  starboardKm: number;
+  portKm: number;
 }
 
-// Exact translation of the previous hardcoded swath getter:
-//   ["SUOMI NPP", "NOAA 20 (JPSS-1)", "NOAA 21 (JPSS-2)"] -> 3000
-//   ["AQUA", "TERRA"] -> 2330
-//   includes("SENTINEL-2") -> 290
-//   includes("SENTINEL-3") -> 740
-//   includes("LANDSAT") -> 185
-//   includes("FENGYUN") -> 2900
-//   includes("METOP") -> 2900
-//   default -> 200 (swath), 10 (cone fov)
-export const appMetadataConfig: MetadataConfig = {
-  defaults: { swathKm: 200, coneFovDeg: 10 },
-  rules: [
-    { match: { names: ["SUOMI NPP", "NOAA 20 (JPSS-1)", "NOAA 21 (JPSS-2)"] }, metadata: { swathKm: 3000 } },
-    { match: { names: ["AQUA", "TERRA"] }, metadata: { swathKm: 2330 } },
-    { match: { namePattern: "SENTINEL-2" }, metadata: { swathKm: 290 } },
-    { match: { namePattern: "SENTINEL-3" }, metadata: { swathKm: 740 } },
-    { match: { namePattern: "LANDSAT" }, metadata: { swathKm: 185 } },
-    { match: { namePattern: "FENGYUN" }, metadata: { swathKm: 2900 } },
-    { match: { namePattern: "METOP" }, metadata: { swathKm: 2900 } },
-  ],
-};
+/**
+ * The satellite's own extents, or `undefined` when its record carries none.
+ *
+ * The single place the both-or-neither rule is interpreted. Callers that need a
+ * usable value fall back to a default; callers that must distinguish real data
+ * from a fallback — the info panel, which would otherwise present a renderer
+ * default as a fact — check for `undefined`.
+ */
+export function swathExtentsOf(metadata: SatelliteMetadata): SwathExtents | undefined {
+  const { swathStarboardKm, swathPortKm } = metadata;
+  if (swathStarboardKm === undefined || swathPortKm === undefined) {
+    return undefined;
+  }
+  return { starboardKm: swathStarboardKm, portKm: swathPortKm };
+}

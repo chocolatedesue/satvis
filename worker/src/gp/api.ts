@@ -1,12 +1,9 @@
 // Fetch-handler routing for the GP data API.
 
-import config from "../config/groups.generated.json" with { type: "json" };
 import { coerceIndex } from "./evaluate.ts";
 import { refreshAll } from "./refresh.ts";
 import { GP_INDEX_KEY, GP_KEY_PREFIX, type GroupWriteMetadata } from "./store.ts";
-import type { GroupsConfig, MetadataRule } from "./types.ts";
 
-const groupsConfig = config as GroupsConfig;
 const GROUP_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 // Cooldown for POST /api/refresh: within this window of the last refresh (manual
 // OR cron) the endpoint will not re-hit CelesTrak. Long enough to keep a public,
@@ -63,13 +60,6 @@ async function handleIndex(env: Env): Promise<Response> {
   return new Response(index, {
     headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=300" },
   });
-}
-
-// GET /api/metadata.json — merged metadata rules from the bundled generated
-// config (no KV round-trip; the config is opaque JSON to the worker).
-function handleMetadata(): Response {
-  const rules: MetadataRule[] = groupsConfig.metadata ?? [];
-  return jsonResponse(rules, { headers: { "Cache-Control": "public, max-age=300" } });
 }
 
 // POST /api/refresh — run the same refresh as the cron (fetch every source,
@@ -135,9 +125,6 @@ export async function handleApi(request: Request, env: Env): Promise<Response | 
   }
   if (path === "/api/groups.json") {
     return handleIndex(env);
-  }
-  if (path === "/api/metadata.json") {
-    return handleMetadata();
   }
   if (path === "/api/refresh") {
     return handleRefresh(request, env);

@@ -3,9 +3,8 @@
 // the cron (importing the runtime refresh directly via node's built-in TS
 // type stripping, node >= 24) against a disk-backed GroupStore adapter,
 // writing a static OMM-JSON snapshot into data/gp/ at the repo root:
-//   data/gp/<group>.json  — the evaluated records for each successful group
+//   data/gp/<group>.json  — the evaluated, enriched records for each successful group
 //   data/gp/index.json    — GroupsIndex shape (mirrors gp:index)
-//   data/gp/metadata.json — merged metadata rules
 //
 // `pnpm update-gp` chains generate-groups first so the generated config is
 // fresh. Output is gitignored.
@@ -21,7 +20,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const workerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(workerDir, "..");
 
-const configPath = path.join(workerDir, "src", "config", "groups.generated.json");
+const configPath = path.join(workerDir, "src", "config", "satvis.generated.json");
 const outDir = path.join(repoRoot, "data", "gp");
 
 // Disk adapter for the GroupStore seam (see worker/src/gp/store.ts). Failed
@@ -55,7 +54,7 @@ async function main() {
   const defs = config.groups;
 
   fs.mkdirSync(outDir, { recursive: true });
-  const report = await refreshGroups(defs, diskGroupStore(outDir), (url, init) => fetch(url, init));
+  const report = await refreshGroups(config, diskGroupStore(outDir), (url, init) => fetch(url, init));
 
   for (const s of report.index.groups) {
     if (s.lastError) {
@@ -67,8 +66,6 @@ async function main() {
       process.stdout.write(`    WARNING: ${warning}\n`);
     }
   }
-
-  fs.writeFileSync(path.join(outDir, "metadata.json"), `${JSON.stringify(config.metadata ?? [], null, 2)}\n`);
 
   process.stdout.write(`Wrote ${path.relative(repoRoot, outDir)}/ (${report.written}/${defs.length} groups)\n`);
 }

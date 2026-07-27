@@ -1,6 +1,7 @@
 import dayjs from "dayjs";
 import * as satellitejs from "satellite.js";
 
+import type { SwathExtents } from "../config/satelliteMetadata";
 import { createSatrec, recordTleLines, type GpRecord } from "./util/gp";
 
 const deg2rad = Math.PI / 180;
@@ -41,6 +42,44 @@ export interface SwathPass {
   swathWidth: number;
 }
 
+/**
+ * Orbit regime, derived from the element set (see Orbit.orbitClass). "LEO" here is
+ * the same band the ground-track and sensor-cone visuals gate on (isLeo).
+ */
+export type OrbitClass = "LEO" | "MEO" | "GEO" | "HEO";
+
+/** Which side of the ground track something lies on, relative to flight direction. */
+export type SwathSide = "starboard" | "port";
+
+/** A ground station's position relative to the ground track (see Orbit.trackOffsets). */
+export interface TrackOffsets {
+  side: SwathSide;
+  distanceKm: number;
+}
+
+const EARTH_RADIUS_KM = 6371;
+
+// Lookahead used to derive the ground-track bearing from two subpoints. Short
+// enough that the track is locally straight, long enough that the two subpoints
+// are ~75 km apart in LEO and the bearing is not dominated by rounding.
+const BEARING_SAMPLE_MS = 10_000;
+
+/** Initial bearing (radians) from one geodetic point to another, all in radians. */
+function bearingRad(fromLat: number, fromLon: number, toLat: number, toLon: number): number {
+  const deltaLon = toLon - fromLon;
+  const y = Math.sin(deltaLon) * Math.cos(toLat);
+  const x = Math.cos(fromLat) * Math.sin(toLat) - Math.sin(fromLat) * Math.cos(toLat) * Math.cos(deltaLon);
+  return Math.atan2(y, x);
+}
+
+/** Great-circle distance (km) between two geodetic points, all in radians. */
+function greatCircleKm(fromLat: number, fromLon: number, toLat: number, toLon: number): number {
+  const deltaLat = toLat - fromLat;
+  const deltaLon = toLon - fromLon;
+  const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(fromLat) * Math.cos(toLat) * Math.sin(deltaLon / 2) ** 2;
+  return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 export default class Orbit {
   name: string;
 
@@ -76,6 +115,31 @@ export default class Orbit {
     const meanMotionRad = this.satrec.no;
     const period = (2 * Math.PI) / meanMotionRad;
     return period;
+  }
+
+  /**
+   * The orbit's regime, derived from the element set rather than configured.
+   *
+   * Deriving it means every satellite has one — all ~10,000, not just the few in
+   * the satellite table — and it cannot contradict the orbit it describes: a
+   * satellite lowered towards re-entry reclassifies itself. Eccentricity is
+   * checked first because a highly elliptical orbit can have an MEO-looking
+   * period while spending its time nowhere near a circular MEO.
+   */
+  get orbitClass(): OrbitClass {
+    if (this.satrec.ecco > 0.25) {
+      return "HEO";
+    }
+    const periodMin = this.orbitalPeriod;
+    if (periodMin <= 128) {
+      return "LEO";
+    }
+    // Geosynchronous period is 1436 min; allow a band for drifting and inclined
+    // geosynchronous orbits, which are still GEO for display purposes.
+    if (periodMin >= 1400 && periodMin <= 1470) {
+      return "GEO";
+    }
+    return "MEO";
   }
 
   positionECI(time: Date): satellitejs.EciVec3<number> | null {
@@ -188,17 +252,57 @@ export default class Orbit {
     return passes;
   }
 
+  /**
+   * Where a ground station sits relative to the ground track at `date`:
+   *
+   * - `distanceKm` — great-circle distance to the subpoint. This is the magnitude
+   *   containment compares against, and the pass's closest approach.
+   * - `side` — which side of the track the station is on, from the sign of its
+   *   cross-track offset. Starboard is the velocity bearing + 90°. This is the
+   *   only thing the cross-track decomposition is needed for: it selects WHICH
+   *   extent applies, while `distanceKm` decides whether the station is within it.
+   *
+   * `undefined` when the position cannot be propagated.
+   *
+   * The flight bearing comes from two subpoints BEARING_SAMPLE_MS apart rather
+   * than the velocity vector: positionGeodetic returns only the speed magnitude,
+   * and rotating the ECI velocity into ECF without the ω × r term would skew the
+   * bearing by a few degrees.
+   */
+  trackOffsets(groundStation: GroundStationPosition, date: Date): TrackOffsets | undefined {
+    const here = this.positionGeodetic(date);
+    const ahead = this.positionGeodetic(new Date(date.getTime() + BEARING_SAMPLE_MS));
+    if (!here || !ahead) {
+      return undefined;
+    }
+    const satLat = here.latitude * deg2rad;
+    const satLon = here.longitude * deg2rad;
+    const stationLat = groundStation.latitude * deg2rad;
+    const stationLon = groundStation.longitude * deg2rad;
+
+    const flightBearing = bearingRad(satLat, satLon, ahead.latitude * deg2rad, ahead.longitude * deg2rad);
+    const stationBearing = bearingRad(satLat, satLon, stationLat, stationLon);
+    const distanceKm = greatCircleKm(satLat, satLon, stationLat, stationLon);
+
+    // sin() of the bearing difference carries the side: positive means the station
+    // lies clockwise of the flight direction, i.e. to starboard. Only the sign is
+    // used, so the cross-track magnitude is never computed.
+    const side: SwathSide = Math.sin(stationBearing - flightBearing) >= 0 ? "starboard" : "port";
+
+    return { side, distanceKm };
+  }
+
   computePassesSwath(
     groundStationPosition: GroundStationPosition,
-    swathKm: number,
+    swath: SwathExtents,
     startDate: Date = dayjs().toDate(),
     endDate: Date = dayjs(startDate).add(7, "day").toDate(),
     maxPasses = 50,
   ): SwathPass[] {
-    const groundStation = { ...groundStationPosition };
-    groundStation.latitude *= deg2rad;
-    groundStation.longitude *= deg2rad;
-    groundStation.height /= 1000;
+    const swathWidth = swath.starboardKm + swath.portKm;
+    // The widest side bounds how far a station can be and still be served, so it
+    // drives the coarse time-stepping below (which runs before the side is known).
+    const maxExtent = Math.max(swath.starboardKm, swath.portKm);
 
     const date = new Date(startDate);
     const passes: SwathPass[] = [];
@@ -208,29 +312,23 @@ export default class Orbit {
 
     // eslint-disable-next-line no-unmodified-loop-condition -- date is mutated via setMinutes/setSeconds
     while (date < endDate) {
-      const positionGeodetic = this.positionGeodetic(date);
-      if (!positionGeodetic) {
+      const offsets = this.trackOffsets(groundStationPosition, date);
+      if (offsets === undefined) {
         date.setMinutes(date.getMinutes() + 1);
         continue;
       }
+      const { side, distanceKm } = offsets;
 
-      // Convert satellite position to radians for calculations
-      const satLat = positionGeodetic.latitude * deg2rad;
-      const satLon = positionGeodetic.longitude * deg2rad;
+      // The footprint is a half-disc per side: the station is served when its
+      // distance to the subpoint is within the extent of the side it lies on.
+      //
+      // For a symmetric swath both sides share one radius and this is byte-for-byte
+      // the test used before (`distanceKm <= swathKm / 2`), so the 37 symmetric
+      // satellites keep their pass windows exactly. An asymmetric sensor narrows
+      // only the side that is actually narrower.
+      const extentKm = side === "starboard" ? swath.starboardKm : swath.portKm;
 
-      // Calculate great circle distance between satellite and ground station
-      const deltaLat = satLat - groundStation.latitude;
-      const deltaLon = satLon - groundStation.longitude;
-      const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) + Math.cos(groundStation.latitude) * Math.cos(satLat) * Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const earthRadius = 6371; // Earth radius in km
-      const distanceKm = earthRadius * c;
-
-      // Check if ground station is within swath
-      const halfSwath = swathKm / 2;
-      const withinSwath = distanceKm <= halfSwath;
-
-      if (withinSwath) {
+      if (distanceKm <= extentKm) {
         if (!ongoingPass) {
           // Start of new pass
           pass = {
@@ -238,7 +336,7 @@ export default class Orbit {
             start: date.getTime(),
             minDistance: distanceKm,
             minDistanceTime: date.getTime(),
-            swathWidth: swathKm,
+            swathWidth,
           };
           ongoingPass = true;
         } else if (pass && distanceKm < (pass.minDistance ?? Infinity)) {
@@ -264,10 +362,10 @@ export default class Orbit {
         const deltaDistance = distanceKm - lastDistance;
         lastDistance = distanceKm;
 
-        if (deltaDistance > 0 && distanceKm > halfSwath * 3) {
+        if (deltaDistance > 0 && distanceKm > maxExtent * 3) {
           // Moving away and far from swath, skip ahead more
           date.setMinutes(date.getMinutes() + Math.max(10, this.orbitalPeriod * 0.2));
-        } else if (distanceKm > halfSwath * 2) {
+        } else if (distanceKm > maxExtent * 2) {
           // Moderately far from swath
           date.setMinutes(date.getMinutes() + 5);
         } else {

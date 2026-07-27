@@ -1,6 +1,6 @@
 */
 
-# Keep the committed example plugin (declarative group definition).
+# Keep the committed example plugin (declarative groups + satellite facts).
 !example/
 example/*
-!example/groups.json
+!example/satvis.yaml

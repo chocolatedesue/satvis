@@ -24,6 +24,9 @@ export interface TleRecord {
   OBJECT_NAME?: string;
   TLE_LINE1: string;
   TLE_LINE2: string;
+  // Attached by enrichRecords, like on OmmRecord (which admits it via its index
+  // signature). Lowercase to stand apart from the SCREAMING_SNAKE CCSDS fields.
+  metadata?: Record<string, unknown>;
 }
 
 export type GpRecord = OmmRecord | TleRecord;
@@ -51,9 +54,13 @@ export interface SatelliteSpec {
   upstreamName?: string;
   // Display-name override. Omit to keep the upstream OBJECT_NAME.
   name?: string;
-  // Optional per-satellite metadata (e.g. { swathKm: 290 }); the generator
-  // lifts this into the merged MetadataRule[] served at /api/metadata.json.
+  // Optional per-satellite metadata (e.g. { swathStarboardKm: 205 }); the
+  // generator lifts this into the merged satellite table, keyed by noradId, so
+  // it applies wherever the record is served — not just in this group.
   metadata?: Record<string, unknown>;
+  // The satellite has decayed and is expected to match no record ever again.
+  // Suppresses the "matched no record" warning; a match warns in reverse.
+  decayed?: boolean;
 }
 
 export interface GroupDefinition {
@@ -77,21 +84,22 @@ export interface GroupDefinition {
   extraRecords?: GpRecord[];
 }
 
-// A metadata rule matches records and attaches opaque metadata. The worker
-// treats `metadata` as opaque JSON and only merges rule arrays; the frontend
-// interprets the payload.
-export interface MetadataRule {
-  match: {
-    satnums?: string[];
-    names?: string[];
-    namePattern?: string;
-  };
+// One row of the satellite table: static facts about a satellite, matched
+// against a record's NORAD_CAT_ID alone. `name` is documentation only.
+//
+// The worker treats `metadata` as opaque JSON — it copies the bag onto matching
+// records without interpreting it, so new fields need no worker change. The
+// frontend gives it meaning (see src/config/satelliteMetadata.ts).
+export interface SatelliteEntry {
+  noradId: number;
+  name?: string;
   metadata: Record<string, unknown>;
+  decayed?: boolean;
 }
 
 export interface GroupsConfig {
   groups: GroupDefinition[];
-  metadata?: MetadataRule[];
+  satellites?: SatelliteEntry[];
 }
 
 // Per-group status entry stored in the KV index (gp:index).

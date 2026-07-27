@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { fetchGpGroup, fetchGpIndex, fetchGpMetadata, resetGpSource } from "./gpSource";
+import { fetchGpGroup, fetchGpIndex, resetGpSource } from "./gpSource";
 
 type RouteMap = Record<string, () => Response>;
 
@@ -71,8 +71,8 @@ describe("GpSource probe", () => {
   test("probes only once per session", async () => {
     const requested = installFetch(WORKER_ROUTES);
     await fetchGpIndex();
-    await fetchGpMetadata().catch(() => undefined);
     await fetchGpGroup("weather").catch(() => undefined);
+    await fetchGpGroup("stations").catch(() => undefined);
     expect(requested.filter((url) => url === "/api/groups.json")).toHaveLength(1);
   });
 });
@@ -105,31 +105,5 @@ describe("fetchGpGroup", () => {
       "data/gp/weather.json": () => new Response("missing", { status: 404 }),
     });
     await expect(fetchGpGroup("weather")).rejects.toThrow();
-  });
-});
-
-describe("fetchGpMetadata", () => {
-  test("uses the API endpoint when the worker answered the probe", async () => {
-    const requested = installFetch({
-      ...WORKER_ROUTES,
-      "/api/metadata.json": json([{ match: { satnums: ["1"] }, metadata: { swathKm: 290 } }]),
-    });
-    const rules = await fetchGpMetadata();
-    expect(Array.isArray(rules)).toBe(true);
-    expect(requested).toContain("/api/metadata.json");
-  });
-
-  test("uses the static endpoint in worker-less deployments", async () => {
-    const requested = installFetch({
-      ...STATIC_ROUTES,
-      "data/gp/metadata.json": json([]),
-    });
-    await fetchGpMetadata();
-    expect(requested).toContain("data/gp/metadata.json");
-  });
-
-  test("throws on failure so the caller decides tolerance", async () => {
-    installFetch(WORKER_ROUTES);
-    await expect(fetchGpMetadata()).rejects.toThrow();
   });
 });

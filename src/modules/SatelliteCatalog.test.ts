@@ -134,7 +134,6 @@ const PROBE_ROUTES: RouteMap = {
       { name: "stations", count: 1 },
     ],
   }),
-  "/api/metadata.json": json([]),
 };
 
 describe("SatelliteCatalog lazy loading", () => {

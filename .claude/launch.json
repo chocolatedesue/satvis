@@ -14,6 +14,16 @@
       "runtimeArgs": ["run", "preview"],
       "port": 5188,
       "autoPort": true
+    },
+    {
+      // The real Worker against local KV, serving the built dist/ as assets.
+      // Unlike `dev`/`preview` — whose /api proxy points at production — this
+      // exercises the worker's own API, so run `pnpm build` first.
+      "name": "worker",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["run", "dev:worker"],
+      "port": 8080,
+      "autoPort": false
     }
   ]
 }

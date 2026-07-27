@@ -1,7 +1,7 @@
 // Pure, runtime-agnostic group evaluator. NO Cloudflare APIs here so it can be
 // unit-tested and reused by the static generator via node type stripping.
 
-import type { GpRecord, GroupDefinition, GroupsIndex, GroupStatus, OmmRecord, SatelliteSpec, SourceSpec } from "./types.ts";
+import type { GpRecord, GroupDefinition, GroupsIndex, GroupStatus, OmmRecord, SatelliteEntry, SatelliteSpec, SourceSpec } from "./types.ts";
 
 const CELESTRAK_BASE = "https://celestrak.org/NORAD/elements/";
 const USER_AGENT = "satvis.space (https://github.com/Flowm/satvis)";
@@ -221,6 +221,15 @@ function recordName(record: GpRecord): string {
   return record.OBJECT_NAME ?? "";
 }
 
+// The satnum a `select` / `satellites` row matches against: the raw NORAD_CAT_ID
+// as a string, OMM records only.
+//
+// Deliberately NOT the same as enrichmentSatnum below, which normalizes and also
+// reads TLE records. Selection semantics are frozen — widening this to normalize,
+// or to reach pseudo TLE extras, would silently change which records land in which
+// group. Enrichment has no such constraint and wants both. Same reasoning as the
+// deliberate parseTleText near-duplicate between this package and the frontend: do
+// not unify them.
 function recordSatnum(record: GpRecord): string | undefined {
   const id = (record as OmmRecord).NORAD_CAT_ID;
   return id === undefined || id === null ? undefined : String(id);
@@ -381,9 +390,22 @@ function applySelectAndRename(records: OmmRecord[], def: GroupDefinition): Selec
   }
 
   // Rows whose id matched no record: satellite gone from the group's sources.
+  // A row marked `decayed` is expected never to match, so its silence is the
+  // normal case — warning on it forever would bury a real disappearance in noise.
+  // A decayed row that DOES match is the surprise, and says so.
   for (let r = 0; r < rows.length; r++) {
-    if (!matchedByRow[r] && rows[r]!.noradId !== undefined) {
-      warnings.push(`noradId ${rows[r]!.noradId}: matched no record in the group's sources`);
+    const row = rows[r]!;
+    if (row.noradId === undefined) {
+      continue;
+    }
+    if (row.decayed) {
+      if (matchedByRow[r]) {
+        warnings.push(`noradId ${row.noradId}: marked decayed but matched a record`);
+      }
+      continue;
+    }
+    if (!matchedByRow[r]) {
+      warnings.push(`noradId ${row.noradId}: matched no record in the group's sources`);
     }
   }
 
@@ -483,6 +505,56 @@ export function evaluateGroups(defs: GroupDefinition[], recordsBySource: Records
     }
   }
   return results;
+}
+
+// The satnum a record is enriched under. Unlike recordSatnum (which feeds
+// `select` matching and must keep its exact historical string form), this
+// normalizes so a table entry keyed on 5 matches a NORAD_CAT_ID of 5, "5" or
+// "00005" alike, and it reaches TleRecords too by reading columns 3-8 of line 1 —
+// pseudo element sets in `extraRecords` have no NORAD_CAT_ID field.
+//
+// Alpha-5 designators ("E8493") normalize to themselves and so never match a
+// table entry, whose noradId is numeric by definition.
+function enrichmentSatnum(record: GpRecord): string {
+  // A plain `"TLE_LINE1" in record` cannot narrow here: OmmRecord's index
+  // signature admits the key, so the check leaves the value `unknown`.
+  const line1 = (record as { TLE_LINE1?: unknown }).TLE_LINE1;
+  const raw = typeof line1 === "string" ? line1.substring(2, 7) : String((record as OmmRecord).NORAD_CAT_ID ?? "");
+  const trimmed = raw.trim();
+  return /^\d+$/.test(trimmed) ? String(parseInt(trimmed, 10)) : trimmed;
+}
+
+// Index a satellite table by satnum for O(1) enrichment lookups. Entry ids are
+// numeric by definition, so they need no normalization on this side; the record
+// side does (see enrichmentSatnum).
+export function indexSatellitesByNoradId(entries: SatelliteEntry[]): Map<string, SatelliteEntry> {
+  return new Map(entries.map((entry) => [String(entry.noradId), entry]));
+}
+
+// Attach each matching table entry's metadata to a copy of the record, under the
+// lowercase `metadata` key (lowercase to stand apart from the SCREAMING_SNAKE
+// CCSDS fields, and because CelesTrak emits no lowercase keys — so it cannot
+// collide with an upstream field).
+//
+// Records with no table entry are returned untouched and carry no `metadata` key
+// at all: the frontend applies its own defaults, so enriching all ~10,000 records
+// with a default bag would inflate every payload to say nothing. The returned
+// satnum set lets the caller report entries that matched nothing anywhere.
+export function enrichRecords(records: GpRecord[], table: Map<string, SatelliteEntry>): { records: GpRecord[]; matched: Set<string> } {
+  const matched = new Set<string>();
+  if (table.size === 0) {
+    return { records, matched };
+  }
+  const out = records.map((record) => {
+    const satnum = enrichmentSatnum(record);
+    const entry = table.get(satnum);
+    if (entry === undefined) {
+      return record;
+    }
+    matched.add(satnum);
+    return { ...record, metadata: entry.metadata };
+  });
+  return { records: out, matched };
 }
 
 // Coerce a possibly-missing or corrupt raw index value into a valid
