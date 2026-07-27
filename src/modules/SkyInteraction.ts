@@ -11,9 +11,21 @@
 
 import { Cartesian2, type JulianDate, type Scene } from "@cesium/engine";
 
+import { aimFromDeviceOrientation, CompassCalibration } from "./DeviceAim";
 import type { SatelliteManager } from "./SatelliteManager";
 import { nearestTarget, observerFrame, type SkyTarget, skyTargets } from "./SkyTargets";
 import type { SkyView } from "./SkyView";
+
+// iOS gates the sensor behind a call made from a user gesture, and only over
+// https. Typed here because it is not in lib.dom.
+interface DeviceOrientationPermission {
+  requestPermission?: () => Promise<"granted" | "denied" | "prompt">;
+}
+
+/** Safari's compass reading, absent everywhere else. */
+interface CompassEvent extends DeviceOrientationEvent {
+  webkitCompassHeading?: number;
+}
 
 /** How far the crosshair reaches, in CSS pixels. */
 export const CAPTURE_RADIUS = 60;
@@ -23,6 +35,9 @@ export const CAPTURE_RADIUS = 60;
  * a phone without swallowing a deliberate short flick.
  */
 const TAP_SLOP = 8;
+
+/** How long to wait for the orientation sensor to say something before giving up. */
+const SENSOR_PROBE_MS = 1200;
 
 export interface SkyInteractionOptions {
   scene: Scene;
@@ -51,9 +66,82 @@ export class SkyInteraction {
 
   #locked: SkyTarget | undefined;
 
+  readonly compass = new CompassCalibration();
+
+  #orientationActive = false;
+
+  #sawOrientation = false;
+
   constructor(options: SkyInteractionOptions) {
     this.#options = options;
   }
+
+  /** Whether the aim is following the device rather than the pointer. */
+  get orientationActive(): boolean {
+    return this.#orientationActive;
+  }
+
+  /**
+   * Hand the aim over to the device's own orientation.
+   *
+   * Must be called from a user gesture: iOS gates the sensor behind a
+   * permission prompt that only a gesture may raise, and only in a secure
+   * context. Returns false when the sensor is unavailable or refused, leaving
+   * dragging in place.
+   */
+  async enableDeviceOrientation(): Promise<boolean> {
+    if (this.#orientationActive) {
+      return true;
+    }
+    if (typeof DeviceOrientationEvent === "undefined") {
+      return false;
+    }
+    const gate = DeviceOrientationEvent as unknown as DeviceOrientationPermission;
+    if (typeof gate.requestPermission === "function") {
+      try {
+        if ((await gate.requestPermission()) !== "granted") {
+          return false;
+        }
+      } catch {
+        // Thrown when called outside a gesture, which is a refusal too.
+        return false;
+      }
+    }
+    window.addEventListener("deviceorientation", this.#onDeviceOrientation);
+    this.#orientationActive = true;
+
+    // Desktop browsers define the event and grant it happily, then never fire
+    // it. Taking that as success would hand the aim to a sensor that does not
+    // exist and silently freeze the view, so the sensor has to prove itself.
+    this.#sawOrientation = false;
+    await new Promise((resolve) => setTimeout(resolve, SENSOR_PROBE_MS));
+    if (!this.#sawOrientation) {
+      this.disableDeviceOrientation();
+      return false;
+    }
+    return true;
+  }
+
+  disableDeviceOrientation(): void {
+    if (!this.#orientationActive) {
+      return;
+    }
+    window.removeEventListener("deviceorientation", this.#onDeviceOrientation);
+    this.#orientationActive = false;
+  }
+
+  #onDeviceOrientation = (event: DeviceOrientationEvent): void => {
+    const { alpha, beta, gamma } = event;
+    if (alpha === null || beta === null || gamma === null) {
+      return;
+    }
+    this.#sawOrientation = true;
+    const sample = { alpha, beta, gamma, screenAngle: screen.orientation?.angle ?? 0 };
+    // The compass is a yaw offset about world up, refreshed only from postures
+    // that justify it, never folded into alpha — see DeviceAim.
+    this.compass.update(sample, (event as CompassEvent).webkitCompassHeading);
+    this.#options.skyView.look(this.compass.correct(aimFromDeviceOrientation(sample)));
+  };
 
   /** Everything currently in the observer's sky, refreshed each frame. */
   get targets(): readonly SkyTarget[] {
@@ -86,6 +174,7 @@ export class SkyInteraction {
     this.#canvas.removeEventListener("pointerup", this.#onPointerUp);
     this.#canvas.removeEventListener("pointercancel", this.#onPointerUp);
     this.#canvas = undefined;
+    this.disableDeviceOrientation();
     this.#removePreRender?.();
     this.#removePreRender = undefined;
     this.#pointerId = undefined;
@@ -137,6 +226,12 @@ export class SkyInteraction {
     const dy = event.clientY - this.#last.y;
     this.#last = new Cartesian2(event.clientX, event.clientY);
     this.#dragged += Math.abs(dx) + Math.abs(dy);
+
+    // The device is aiming; a drag would be overwritten by the next sensor
+    // reading anyway. Still counted above, so it stays a drag rather than a tap.
+    if (this.#orientationActive) {
+      return;
+    }
 
     // Degrees per pixel straight off the vertical field of view, so dragging
     // moves the sky by the amount that lies under the cursor at any zoom.
