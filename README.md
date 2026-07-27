@@ -79,50 +79,55 @@ Element sets come from [CelesTrak](https://celestrak.org) as OMM JSON
 
 - A cron trigger (every 3 h) refreshes each group into Workers KV; failed
   sources keep the last-known-good copy.
-- `GET /api/gp/<group>.json` — one group's element sets (OMM array).
+- `GET /api/gp/<group>.json` — one group's element sets (OMM array, with
+  per-satellite metadata attached; see below).
 - `GET /api/groups.json` — the group index (also the frontend's worker probe).
-- `GET /api/metadata.json` — per-satellite metadata rules (see below).
 
-Groups are **declarative**, not shell scripts:
+Configuration is **declarative** YAML, not shell scripts. Each config file
+contributes two independent sections: `groups` (what is served, as which unit) and
+`satellites` (static per-satellite facts, keyed by NORAD id).
 
-- Core groups live in `worker/src/config/groups.core.json` (CelesTrak
-  pass-throughs, e.g. `{ "name": "starlink", "sources": [{ "celestrak": "starlink" }] }`).
-- Plugins add `data/custom/<plugin>/groups.json` with
+- The core config lives in `worker/src/config/satvis.core.yaml` (CelesTrak
+  pass-throughs, plus the satellite table).
+- Plugins add `data/custom/<plugin>/satvis.yaml` with
   `sources` / `select` / `rename` / `include` / `extraRecordsFile`. Example
-  (`data/custom/example/groups.json`):
+  (`data/custom/example/satvis.yaml`):
 
-  ```json
-  {
-    "groups": [
-      {
-        "name": "iss",
-        "sources": [{ "celestrak": "stations" }],
-        "satellites": [{ "noradId": 25544, "upstreamName": "ISS (ZARYA)", "name": "ISS" }]
-      }
-    ]
-  }
+  ```yaml
+  groups:
+    - name: iss
+      sources: [{ celestrak: stations }]
+      satellites:
+        - { noradId: 25544, upstreamName: ISS (ZARYA), name: ISS }
   ```
 
 `pnpm --filter satvis-worker generate-groups` merges the core config with every
-`data/custom/*/groups.json` (inlining `extraRecordsFile` element sets) into the
-gitignored `worker/src/config/groups.generated.json` used by the worker.
+`data/custom/*/satvis.yaml` (inlining `extraRecordsFile` element sets) into the
+gitignored `worker/src/config/satvis.generated.json` used by the worker.
 
 ### Worker-less deployments
 
 For plain static hosting (or forks without a worker), run
-`pnpm update-gp` before `pnpm build`. It runs the same group evaluator as the
-cron and writes a static snapshot into `data/gp/` (`<group>.json`,
-`index.json`, `metadata.json`; gitignored). At runtime the app probes
+`pnpm update-gp` before `pnpm build`. It runs the same refresh pipeline as the
+cron — including metadata enrichment — and writes a static snapshot into
+`data/gp/` (`<group>.json`, `index.json`; gitignored). At runtime the app probes
 `/api/groups.json`; if that fails it falls back to the static `data/gp/`
 snapshot, so all presets keep working without the worker.
 
 ### Satellite metadata
 
-Per-satellite metadata (e.g. sensor swath width, cone FOV, model URL) is
-resolved from the built-in rules in `src/config/satelliteMetadata.ts`, extended
-by optional remote rules. Plugins declare remote rules via a `metadata` array
-in their `groups.json`; those are merged and served at `/api/metadata.json` and
-applied on top of the app rules.
+Static per-satellite facts — per-side swath extents, sensor cone FOV, model URL,
+operator — live in the `satellites` table of `satvis.core.yaml` (and of any plugin
+config), keyed by NORAD id. The refresh attaches each matching satellite's facts to
+its served record under a lowercase `metadata` key, so metadata travels with the
+element set instead of being matched against a separate rule list in the browser.
+Satellites absent from the table carry no metadata and fall back to the defaults in
+`src/config/satelliteMetadata.ts`.
+
+Swath extents are **per-side** cross-track distances from the ground track,
+relative to flight direction — not halves of a total width, because a tilted sensor
+reaches further one way than the other. See
+`docs/adr/0002-static-satellite-metadata.md`.
 
 ## iOS App
 

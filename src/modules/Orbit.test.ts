@@ -89,27 +89,25 @@ describe("Orbit swath containment", () => {
     };
   }
 
-  test("signs the cross-track offset: starboard positive, port negative", () => {
+  test("names the side a station lies on", () => {
     const { starboard, port } = flankingStations();
-    expect(orbit.trackOffsets(starboard, AT)!.crossTrackKm).toBeCloseTo(400, 0);
-    expect(orbit.trackOffsets(port, AT)!.crossTrackKm).toBeCloseTo(-400, 0);
+    expect(orbit.trackOffsets(starboard, AT)!.side).toBe("starboard");
+    expect(orbit.trackOffsets(port, AT)!.side).toBe("port");
   });
 
-  test("splits a flanking station's distance entirely onto the cross-track axis", () => {
-    const { starboard } = flankingStations();
-    const offsets = orbit.trackOffsets(starboard, AT)!;
-    expect(Math.abs(offsets.alongTrackKm)).toBeLessThan(5);
-    expect(offsets.distanceKm).toBeCloseTo(400, 0);
+  test("reports the great-circle distance to the subpoint", () => {
+    const { starboard, port } = flankingStations();
+    expect(orbit.trackOffsets(starboard, AT)!.distanceKm).toBeCloseTo(400, 0);
+    expect(orbit.trackOffsets(port, AT)!.distanceKm).toBeCloseTo(400, 0);
   });
 
-  test("splits a station straight ahead entirely onto the along-track axis", () => {
-    // Cross-track alone cannot distinguish this from a station right beside the
-    // satellite, which is why containment bounds both axes.
+  test("bounds a station straight ahead by distance, so it is not served", () => {
+    // A per-side test keyed on cross-track offset alone would place this station at
+    // zero offset and serve it for the whole orbit; distance bounds it.
     const here = orbit.positionGeodetic(AT)!;
     const ahead = destination(here.latitude, here.longitude, flightBearing(), 1200);
-    const offsets = orbit.trackOffsets(ahead, AT)!;
-    expect(Math.abs(offsets.crossTrackKm)).toBeLessThan(10);
-    expect(offsets.alongTrackKm).toBeCloseTo(1200, -1);
+    expect(orbit.trackOffsets(ahead, AT)!.distanceKm).toBeCloseTo(1200, -1);
+    expect(orbit.computePassesSwath(ahead, { starboardKm: 600, portKm: 600 }, AT, new Date(AT.getTime() + 60_000))).toHaveLength(0);
   });
 
   test("an asymmetric swath serves the wide side and not the narrow one", () => {
@@ -127,6 +125,19 @@ describe("Orbit swath containment", () => {
     const mirrored = { starboardKm: 200, portKm: 600 };
     expect(orbit.computePassesSwath(starboard, mirrored, start, end)).toHaveLength(0);
     expect(orbit.computePassesSwath(port, mirrored, start, end).length).toBeGreaterThan(0);
+  });
+
+  test("a symmetric swath is the plain distance test the old single-width model used", () => {
+    // Pins the ADR-0002 claim that symmetric satellites keep their windows exactly:
+    // containment must be `distance <= total / 2`, side-independent.
+    const { starboard, port } = flankingStations(400);
+    const start = AT;
+    const end = new Date(AT.getTime() + 30 * 60_000);
+    for (const station of [starboard, port]) {
+      // 400 km out: served by a 401 km side extent, not by a 399 km one.
+      expect(orbit.computePassesSwath(station, { starboardKm: 401, portKm: 401 }, start, end).length).toBeGreaterThan(0);
+      expect(orbit.computePassesSwath(station, { starboardKm: 399, portKm: 399 }, start, end)).toHaveLength(0);
+    }
   });
 
   test("a symmetric swath serves both sides alike", () => {

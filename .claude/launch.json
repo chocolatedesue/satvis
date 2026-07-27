@@ -21,8 +21,8 @@
       // exercises the worker's own API, so run `pnpm build` first.
       "name": "worker",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "satvis-worker", "exec", "wrangler", "dev", "--port", "8788", "--test-scheduled"],
-      "port": 8788,
+      "runtimeArgs": ["run", "dev:worker"],
+      "port": 8080,
       "autoPort": false
     }
   ]

@@ -33,8 +33,9 @@ CI runs `lint`, then `test` (frontend + worker), then `build`.
 - **Frontend**: Vue 3 + Vite + CesiumJS + Nuxt UI (Tailwind). Single-page app in `src/`.
 - **Worker**: Cloudflare Worker backend in `worker/` — a workspace package (`satvis-worker`) with its own `package.json`, installed by the root `pnpm install`. Uses Wrangler for dev/deploy. Has its own `lint`, `type-check`, `test`, and `generate-types` scripts (run via `pnpm --filter satvis-worker <script>`).
 - **Satellite data (GP element sets)**: fetched from CelesTrak as OMM JSON.
-  - The worker refreshes each group into Workers KV via a cron trigger (every 3 h) and serves `/api/gp/<group>.json`, `/api/groups.json`, `/api/metadata.json`.
-  - Groups are declarative: core groups in `worker/src/config/groups.core.json`, plugin groups in `data/custom/<plugin>/groups.json` (`sources`/`satellites`/`select`/`rename`/`include`/`extraRecordsFile`). `pnpm --filter satvis-worker generate-groups` merges them into the gitignored `worker/src/config/groups.generated.json`.
+  - The worker refreshes each group into Workers KV via a cron trigger (every 3 h) and serves `/api/gp/<group>.json` and `/api/groups.json`.
+  - Config is declarative and YAML: core config in `worker/src/config/satvis.core.yaml`, plugin config in `data/custom/<plugin>/satvis.yaml`. Each contributes two independent sections — `groups` (`sources`/`satellites`/`select`/`rename`/`include`/`extraRecordsFile`) and `satellites` (static per-satellite facts keyed by NORAD id). `pnpm --filter satvis-worker generate-groups` merges them into the gitignored `worker/src/config/satvis.generated.json`.
+  - **Satellite metadata** (swath extents, sensor FOV, model URL, operator) is attached to each matching record **at refresh time**, under a lowercase `metadata` key, from the merged satellite table. There is no metadata endpoint and no browser-side rule matching: a record either carries the bag or the frontend applies its defaults (`src/config/satelliteMetadata.ts`). See `docs/adr/0002-static-satellite-metadata.md`.
   - **Worker-less mode**: `pnpm update-gp` runs the same evaluator and writes a static snapshot into `data/gp/` (gitignored). The app probes `/api/groups.json` and falls back to that snapshot.
 - **Data assets**: `data/` also contains Cesium assets (imagery, textures, stars) and 3D-model plugins under `data/custom/`. Copied into `dist/` at build time via `vite-plugin-static-copy`.
 - Entrypoints: `index.html`, `embedded.html`, `test.html` (all configured as Vite MPA inputs).
@@ -65,20 +66,28 @@ wrangler dev --remote --test-scheduled
 curl "http://localhost:8080/__scheduled?cron=23+*%2F3+*+*+*"
 ```
 
-### Migrating a private plugin from `sync.sh` to `groups.json`
+### Private plugin config (`data/custom/<plugin>/satvis.yaml`)
 
-Private plugins (e.g. the maintainer's untracked `data/custom/ot-tle/`) used to
-be shell scripts that `grep`/`sed`-ed the bundled TLE files. Rewrite each as a
-declarative `data/custom/<plugin>/groups.json` (untracked; same trust model as
-before — never commit private plugin data):
+Private plugins are untracked directories under `data/custom/`, each holding a
+declarative YAML config (same trust model as before — never commit private plugin
+data). They replaced hand-written `sync.sh` scripts that `grep`/`sed`-ed the bundled
+TLE files. A config has two independent top-level sections, both optional: `groups`
+and `satellites`.
+
+The generator **fails loudly** on a plugin directory holding a pre-YAML
+`groups.json` with no `satvis.yaml` beside it — a silent skip would make that
+plugin's groups vanish from the build.
+
+`groups` entries take:
 
 - **`satellites`** (preferred for known, individually-named satellites): an
   array of per-satellite rows, each co-locating a satellite's NORAD id, its
   expected upstream name, and its display name so a rename's three facts live
   together instead of being scattered across `select.noradIds` and `rename`:
 
-  ```json
-  "satellites": [{ "noradId": 43556, "upstreamName": "LEMUR-2-EMBRIONOVIS", "name": "FOREST-2" }]
+  ```yaml
+  satellites:
+    - { noradId: 25544, upstreamName: ISS (ZARYA), name: ISS }
   ```
 
   A row matches by `noradId` when present (else by exact `upstreamName`), is
@@ -88,8 +97,20 @@ before — never commit private plugin data):
   row carries both id and `upstreamName`, an id match against a differently
   named record — or a row whose id matches nothing — surfaces a warning in
   `/api/groups.json` (the group's `warnings` array) so upstream renames and
-  decays are caught. Optional per-row `metadata` (e.g. `{ "swathKm": 290 }`) is
-  lifted into the metadata rules served at `/api/metadata.json`.
+  decays are caught.
+
+  Optional per-row **`metadata`** (e.g. `{ swathStarboardKm: 205, swathPortKm: 205 }`)
+  is lifted into the merged satellite table under that row's `noradId`, so it
+  applies **wherever the record is served**, not only in this group — write a
+  value once even when the satellite appears in several groups. Requires a
+  `noradId` (matching is by id only) and must not be empty. Two places giving one
+  satellite different values for a field is a build failure, not a precedence
+  question.
+
+  Optional **`decayed: true`** marks a satellite expected never to match again. It
+  suppresses the "matched no record" warning (and warns in reverse if the id does
+  match), so a permanently-gone satellite cannot bury the report of one that has
+  just disappeared unexpectedly.
 
 - **`select`** (for bulk/pattern selection): `noradIds`, `names`, or a
   `namePattern` regex, ORed together. Prefer `noradIds` over `names` — CelesTrak
@@ -108,10 +129,27 @@ before — never commit private plugin data):
   records (the old sync.sh concatenated the base list _before_ appending
   extras). If you need the old ordering, split the extras into a separate
   included group. See the comment on `include` in `worker/src/gp/types.ts`.
-- **`celestrakSup`**: use `{ "celestrakSup": "<file>" }` sources for CelesTrak
+- **`celestrakSup`**: use `{ celestrakSup: <file> }` sources for CelesTrak
   supplemental data (e.g. launch/pre-launch element sets).
-- **`metadata`**: an optional array of remote metadata rules, merged and served
-  at `/api/metadata.json` (e.g. sensor swath for OT satellites).
 
-Deploy migration: write the plugin `groups.json`, delete the old local
-`sync.sh`, `pnpm deploy`, then force the first KV fill as above.
+The top-level **`satellites`** section (a sibling of `groups`, not nested inside
+one) is the satellite table: static facts keyed by NORAD id, independent of any
+group, because a satellite's swath is not a fact about a group. `name` there is
+documentation only — matching is by id.
+
+```yaml
+satellites:
+  - { noradId: 41335, name: SENTINEL-3A, swathStarboardKm: 1000, swathPortKm: 500 }
+```
+
+Everything in an entry except `noradId`, `name` and `decayed` **is** the metadata
+bag, so adding a field is a data-only edit. Swath extents are per-side cross-track
+distances from the ground track relative to flight direction (starboard = velocity
+bearing + 90°) — not halves of a width, and required in both-or-neither pairs. Use
+a group row's `metadata` when the row already exists; use this table otherwise —
+and note that adding rows to a pass-all group (one with neither `satellites` nor
+`select`) would filter it down to just those rows.
+
+Deploy migration: write the plugin `satvis.yaml`, delete the old local `sync.sh`
+and any pre-YAML `groups.json`, `pnpm deploy`, then force the first KV fill as
+above.

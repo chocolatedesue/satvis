@@ -143,6 +143,12 @@ function validateSatellites(group) {
         // no key to lift it under.
         throw new Error(`${where}: "metadata" requires a "noradId" (matching is by NORAD id only)`);
       }
+      // Same rule as a top-level table entry: an empty bag would attach a
+      // meaningless `metadata` key to the served record, which is supposed to be
+      // present only when the satellite actually has facts to carry.
+      if (Object.keys(row.metadata).length === 0) {
+        throw new Error(`${where}: "metadata" is empty — remove it or give it a field`);
+      }
     }
     if (row.decayed !== undefined && typeof row.decayed !== "boolean") {
       throw new Error(`${where}: "decayed" must be a boolean`);
@@ -153,7 +159,8 @@ function validateSatellites(group) {
 // Validate a metadata bag. The worker treats it as opaque, so only the fields
 // whose shape the frontend depends on are checked here: the swath extents, which
 // must be positive numbers and must be given for both sides or neither (see
-// SatelliteProperties.swathKm, which reads them as a pair).
+// swathExtentsOf in src/config/satelliteMetadata.ts, which reads them as a pair
+// and treats a half-specified swath as absent).
 function validateMetadata(metadata, where) {
   if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)) {
     throw new Error(`${where}: "metadata" must be an object`);
@@ -318,8 +325,10 @@ function main() {
       table.add(entry.noradId, { metadata: metadataFields(entry), name: entry.name, decayed: entry.decayed }, `${source} satellites`);
     }
   }
-  // Group rows contribute after every table, so a hand-written per-group value
-  // overrides the general statement for that satellite.
+  // Group rows contribute after every table. Order only decides which origin is
+  // named first in a conflict message — it does NOT establish precedence: two
+  // places giving one satellite different values for a field is a build failure,
+  // because whichever won would depend on config discovery order.
   for (const group of groups) {
     for (const row of group.satellites ?? []) {
       if (row.metadata !== undefined) {

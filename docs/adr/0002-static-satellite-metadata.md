@@ -73,25 +73,35 @@ orientation.
 Revisit when a third asymmetric satellite appears, or when someone reports a pass
 that "should" have happened.
 
-## Why containment bounds two axes, not one
+## Why containment compares distance, not cross-track offset
 
 The obvious implementation of a per-side test is signed cross-track distance
-against the side's extent. On its own it is wrong, and wrong in a way that looks
-right: great-circle cross-track distance measures offset from the _track_, not
-from the satellite. A station 1200 km straight ahead has a cross-track offset of
-zero, so it would count as in-swath for as long as the satellite stayed on that
-great circle — the pass would never end.
+against the side's extent. It is wrong, and wrong in a way that looks right:
+great-circle cross-track distance measures offset from the _track_, not from the
+satellite. A station 1200 km straight ahead has a cross-track offset of zero, so it
+would count as in-swath for as long as the satellite stayed on that great circle —
+the pass would never end.
 
-Containment therefore bounds both axes as an ellipse: cross-track by the extent of
-the side the station falls on, along-track by the wider extent. For a symmetric
-swath both axes share one radius and this is exactly the circle used before, so
-the 37 symmetric satellites keep their pass windows unchanged and only genuinely
-asymmetric footprints move.
+So the cross-track decomposition is used for one thing only: its **sign**, which
+says which side the station is on and therefore which extent applies. The
+magnitude compared against that extent is the plain great-circle distance to the
+subpoint. The footprint is a half-disc per side.
+
+That makes the symmetric case identical to the previous single-width model —
+`distance <= total / 2` — so the 37 symmetric satellites keep their pass windows
+exactly, and only genuinely asymmetric footprints move. `Orbit.test.ts` pins this
+with a test asserting containment at the 400 km boundary is side-independent for a
+symmetric swath.
+
+An earlier iteration bounded a second, along-track axis to form an ellipse. It was
+dropped: distance already bounds the station in every direction, and the along-track
+radius had no value in the data behind it — it had to be invented from the wider
+side, which meant a port-side station was judged against a starboard-side number.
 
 The flight bearing comes from two subpoints 10 s apart rather than from the
 velocity vector: `positionGeodetic` returns only the speed magnitude, and rotating
 the ECI velocity into ECF without the ω × r term skews the bearing by a few
-degrees — enough to matter for the side test near the along-track direction.
+degrees — enough to flip the side for a station nearly along-track.
 
 ## Orbit class is derived, not stored
 
@@ -109,13 +119,13 @@ it is computed in `Orbit.orbitClass`.
   reintroduces pattern matching and makes the table no longer a mirror of its
   upstream.
 - **Group-scoped metadata**, i.e. `satellites[].metadata` applying only within its
-  group. Rejected because a satellite's swath is not a fact about a group: FOREST-4
-  appears in two OT groups and would have needed the value twice, kept in sync by
+  group. Rejected because a satellite's swath is not a fact about a group: a
+  satellite listed in two groups would have needed the value twice, kept in sync by
   hand. Row metadata instead lifts into the global table under the row's id.
 - **Keeping a single `swathKm` total.** Simplest, and 37 of 39 satellites are
   symmetric — but it makes the Sentinel-3 asymmetry unrepresentable, and that
   asymmetry is verified against real SLSTR granule footprints.
 - **Enriching every record with a default bag** so `metadata` is always present.
-  Rejected: ~10,000 records would each carry a copy of `{swathKm: 200,
-coneFovDeg: 10}` to say nothing. Defaults live in the frontend, and an absent
-  key means "not in the table".
+  Rejected: ~10,000 records would each carry a copy of the same defaults to say
+  nothing. Defaults live in the frontend, and an absent key means "not in the
+  table".

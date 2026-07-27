@@ -2,7 +2,7 @@ import { JulianDate } from "@cesium/engine";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
-import type { SatelliteMetadata } from "../../config/satelliteMetadata";
+import { swathExtentsOf, type SatelliteMetadata } from "../../config/satelliteMetadata";
 import type Orbit from "../Orbit";
 import { recordTleLines } from "./gp";
 
@@ -24,11 +24,13 @@ export type ElementsInfo = { kind: "tle"; epoch: string; lines: string } | { kin
 export function getSatelliteInfo(orbit: Orbit, metadata: SatelliteMetadata): [string, string][] {
   const rows: [string, string][] = [["Orbit", orbit.orbitClass]];
 
-  const { swathStarboardKm, swathPortKm, coneFovDeg, operator, missionType } = metadata;
-  if (swathStarboardKm !== undefined && swathPortKm !== undefined) {
-    const total = swathStarboardKm + swathPortKm;
+  const { coneFovDeg, operator, missionType } = metadata;
+  const extents = swathExtentsOf(metadata);
+  if (extents !== undefined) {
+    const { starboardKm, portKm } = extents;
+    const total = starboardKm + portKm;
     // Spell out the sides only when they differ — otherwise the total says it all.
-    rows.push(["Swath", swathStarboardKm === swathPortKm ? `${total} km` : `${total} km (${swathStarboardKm} stbd / ${swathPortKm} port)`]);
+    rows.push(["Swath", starboardKm === portKm ? `${total} km` : `${total} km (${starboardKm} stbd / ${portKm} port)`]);
   }
   if (coneFovDeg !== undefined) {
     rows.push(["Sensor FOV", `${coneFovDeg}°`]);

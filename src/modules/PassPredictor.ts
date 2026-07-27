@@ -2,8 +2,9 @@ import { JulianDate, TimeInterval, TimeIntervalCollection } from "@cesium/engine
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
+import type { SwathExtents } from "../config/satelliteMetadata";
 import type Orbit from "./Orbit";
-import type { ElevationPass, GroundStationPosition, SwathExtents, SwathPass } from "./Orbit";
+import type { ElevationPass, GroundStationPosition, SwathPass } from "./Orbit";
 
 dayjs.extend(utc);
 

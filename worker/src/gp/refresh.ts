@@ -7,7 +7,7 @@ import generatedConfig from "../config/satvis.generated.json" with { type: "json
 import {
   buildStatuses,
   collectSources,
-  compileSatelliteTable,
+  indexSatellitesByNoradId,
   enrichRecords,
   evaluateGroups,
   fetchSources,
@@ -50,7 +50,7 @@ export async function refreshGroups(config: GroupsConfig, store: GroupStore, fet
   // Enrichment runs here rather than inside evaluateGroups so it sits on the far
   // side of `include` and `extraRecords` — every record actually served gets
   // exactly one pass, including pseudo TLE extras.
-  const table = compileSatelliteTable(config.satellites ?? []);
+  const table = indexSatellitesByNoradId(config.satellites ?? []);
   const matchedSatnums = new Set<string>();
 
   // Persist successful groups in parallel (independent keys). Failed groups
@@ -79,9 +79,18 @@ export async function refreshGroups(config: GroupsConfig, store: GroupStore, fet
   // A table entry matching nothing in any group is a config-health signal (typo,
   // or a satellite quietly gone), not per-group status — so it is logged rather
   // than written into the index. Decayed entries are expected never to match.
-  const unmatched = (config.satellites ?? []).filter((entry) => !entry.decayed && !matchedSatnums.has(String(entry.noradId)));
-  for (const entry of unmatched) {
-    console.warn(`gp refresh: satellite table entry ${entry.noradId}${entry.name ? ` (${entry.name})` : ""} matched no record in any group`);
+  //
+  // Only meaningful when every group evaluated: a failed group contributes no
+  // records, so its satellites would look unmatched when the truth is only that we
+  // could not reach the upstream. Reporting that as a config problem would cry wolf
+  // on every transient CelesTrak failure, so the check is skipped instead.
+  if (skipped > 0) {
+    console.log(`gp refresh: skipping the satellite-table check — ${skipped} group(s) failed, so unmatched entries cannot be distinguished from unreachable ones`);
+  } else {
+    const unmatched = (config.satellites ?? []).filter((entry) => !entry.decayed && !matchedSatnums.has(String(entry.noradId)));
+    for (const entry of unmatched) {
+      console.warn(`gp refresh: satellite table entry ${entry.noradId}${entry.name ? ` (${entry.name})` : ""} matched no record in any group`);
+    }
   }
 
   const index: GroupsIndex = { updated: now, groups: statuses };

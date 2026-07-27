@@ -4,7 +4,7 @@ import {
   buildStatuses,
   coerceIndex,
   collectSources,
-  compileSatelliteTable,
+  indexSatellitesByNoradId,
   enrichRecords,
   evaluateGroups,
   fetchSources,
@@ -424,7 +424,7 @@ describe("buildStatuses", () => {
   });
 });
 
-const table = (...entries: SatelliteEntry[]) => compileSatelliteTable(entries);
+const table = (...entries: SatelliteEntry[]) => indexSatellitesByNoradId(entries);
 
 function metadataOf(record: GpRecord): unknown {
   return (record as OmmRecord).metadata;

@@ -221,6 +221,15 @@ function recordName(record: GpRecord): string {
   return record.OBJECT_NAME ?? "";
 }
 
+// The satnum a `select` / `satellites` row matches against: the raw NORAD_CAT_ID
+// as a string, OMM records only.
+//
+// Deliberately NOT the same as enrichmentSatnum below, which normalizes and also
+// reads TLE records. Selection semantics are frozen — widening this to normalize,
+// or to reach pseudo TLE extras, would silently change which records land in which
+// group. Enrichment has no such constraint and wants both. Same reasoning as the
+// deliberate parseTleText near-duplicate between this package and the frontend: do
+// not unify them.
 function recordSatnum(record: GpRecord): string | undefined {
   const id = (record as OmmRecord).NORAD_CAT_ID;
   return id === undefined || id === null ? undefined : String(id);
@@ -515,8 +524,10 @@ function enrichmentSatnum(record: GpRecord): string {
   return /^\d+$/.test(trimmed) ? String(parseInt(trimmed, 10)) : trimmed;
 }
 
-// Index a satellite table by its normalized satnum for O(1) enrichment lookups.
-export function compileSatelliteTable(entries: SatelliteEntry[]): Map<string, SatelliteEntry> {
+// Index a satellite table by satnum for O(1) enrichment lookups. Entry ids are
+// numeric by definition, so they need no normalization on this side; the record
+// side does (see enrichmentSatnum).
+export function indexSatellitesByNoradId(entries: SatelliteEntry[]): Map<string, SatelliteEntry> {
   return new Map(entries.map((entry) => [String(entry.noradId), entry]));
 }
 

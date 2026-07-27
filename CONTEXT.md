@@ -12,12 +12,11 @@ discussion; sharpen them here when they drift.
   one unit (`/api/gp/<group>.json` or the static snapshot). A group decides what
   is served and under which name, never what is true of a satellite: per-satellite
   facts live in the satellite table, which is independent of any group.
-- **Satellite table**: the NORAD-keyed table of static per-satellite facts,
-  merged from the core config and every plugin config, and independent of the
-  groups alongside it. Matching is by NORAD id alone; a table entry's `name` is
-  documentation. A group's `satellites[].metadata` contributes to the same table
-  under that row's id, so a value written once applies wherever the record is
-  served (`worker/src/config/satvis.core.yaml`).
+- **Satellite table**: the registry of static per-satellite facts, identified by
+  NORAD id and independent of the groups that serve those satellites. One table,
+  merged from every config that contributes to it, so a fact is stated once no
+  matter how many groups carry the satellite
+  (`worker/src/config/satvis.core.yaml`).
 - **Satellite metadata**: the bag of static facts the worker attaches to a served
   GP record at refresh time, from the satellite table. Opaque to the worker,
   interpreted by the frontend (`src/config/satelliteMetadata.ts`). A satellite
@@ -45,9 +44,8 @@ discussion; sharpen them here when they drift.
   against.
 - **Pass**: a time range in which a satellite serves a ground station — by
   line-of-sight elevation ("elevation" mode) or sensor footprint overlap
-  ("swath" mode). In swath mode the footprint is bounded cross-track by the
-  extent of the side the station falls on and along-track by the wider extent, so
-  a tilted sensor serves one side further than the other.
+  ("swath" mode). In swath mode which side of the ground track the station lies on
+  matters, because a tilted sensor reaches further one way than the other.
 - **Pass predictor**: the single owner of pass prediction for one satellite:
   ground stations, overpass mode, the recompute window guard, the computed
   pass list, and its Cesium time intervals (`PassPredictor`).

@@ -1,6 +1,7 @@
 import dayjs from "dayjs";
 import * as satellitejs from "satellite.js";
 
+import type { SwathExtents } from "../config/satelliteMetadata";
 import { createSatrec, recordTleLines, type GpRecord } from "./util/gp";
 
 const deg2rad = Math.PI / 180;
@@ -42,26 +43,17 @@ export interface SwathPass {
 }
 
 /**
- * Per-side cross-track extents of a sensor footprint (km), measured from the
- * ground track outwards relative to flight direction. Starboard is the velocity
- * bearing + 90°. The sides differ when the sensor is tilted (Sentinel-3's SLSTR
- * avoids sunglint), which is why containment tests them separately.
- */
-export interface SwathExtents {
-  starboardKm: number;
-  portKm: number;
-}
-
-/**
  * Orbit regime, derived from the element set (see Orbit.orbitClass). "LEO" here is
  * the same band the ground-track and sensor-cone visuals gate on (isLeo).
  */
 export type OrbitClass = "LEO" | "MEO" | "GEO" | "HEO";
 
+/** Which side of the ground track something lies on, relative to flight direction. */
+export type SwathSide = "starboard" | "port";
+
 /** A ground station's position relative to the ground track (see Orbit.trackOffsets). */
 export interface TrackOffsets {
-  crossTrackKm: number;
-  alongTrackKm: number;
+  side: SwathSide;
   distanceKm: number;
 }
 
@@ -261,18 +253,14 @@ export default class Orbit {
   }
 
   /**
-   * Where a ground station sits relative to the ground track at `date`, decomposed
-   * into the two axes that matter for a cross-track sensor:
+   * Where a ground station sits relative to the ground track at `date`:
    *
-   * - `crossTrackKm` — signed distance from the track: positive to starboard
-   *   (velocity bearing + 90°), negative to port. This is the axis the per-side
-   *   swath extents bound.
-   * - `alongTrackKm` — signed distance measured along the track from the current
-   *   subpoint: positive ahead. Cross-track alone says nothing about this (a
-   *   station 1000 km straight ahead has zero cross-track offset), so containment
-   *   needs it to know the station is actually beside the satellite now.
-   * - `distanceKm` — great-circle distance to the subpoint, reported as the pass's
-   *   closest approach.
+   * - `distanceKm` — great-circle distance to the subpoint. This is the magnitude
+   *   containment compares against, and the pass's closest approach.
+   * - `side` — which side of the track the station is on, from the sign of its
+   *   cross-track offset. Starboard is the velocity bearing + 90°. This is the
+   *   only thing the cross-track decomposition is needed for: it selects WHICH
+   *   extent applies, while `distanceKm` decides whether the station is within it.
    *
    * `undefined` when the position cannot be propagated.
    *
@@ -296,17 +284,12 @@ export default class Orbit {
     const stationBearing = bearingRad(satLat, satLon, stationLat, stationLon);
     const distanceKm = greatCircleKm(satLat, satLon, stationLat, stationLon);
 
-    // Standard great-circle cross-track distance. sin() of the bearing difference
-    // carries the side: positive means the station lies clockwise of the flight
-    // direction, i.e. to starboard.
-    const angularDistance = distanceKm / EARTH_RADIUS_KM;
-    const bearingDelta = stationBearing - flightBearing;
-    const crossTrackRad = Math.asin(Math.sin(angularDistance) * Math.sin(bearingDelta));
-    // Along-track leg of the same right spherical triangle, signed by whether the
-    // station lies ahead of or behind the subpoint.
-    const alongTrackRad = Math.acos(Math.min(1, Math.cos(angularDistance) / Math.cos(crossTrackRad))) * Math.sign(Math.cos(bearingDelta));
+    // sin() of the bearing difference carries the side: positive means the station
+    // lies clockwise of the flight direction, i.e. to starboard. Only the sign is
+    // used, so the cross-track magnitude is never computed.
+    const side: SwathSide = Math.sin(stationBearing - flightBearing) >= 0 ? "starboard" : "port";
 
-    return { crossTrackKm: crossTrackRad * EARTH_RADIUS_KM, alongTrackKm: alongTrackRad * EARTH_RADIUS_KM, distanceKm };
+    return { side, distanceKm };
   }
 
   computePassesSwath(
@@ -317,8 +300,8 @@ export default class Orbit {
     maxPasses = 50,
   ): SwathPass[] {
     const swathWidth = swath.starboardKm + swath.portKm;
-    // The widest side bounds how far off-track the station can be and still be
-    // imaged; it drives the coarse time-stepping below.
+    // The widest side bounds how far a station can be and still be served, so it
+    // drives the coarse time-stepping below (which runs before the side is known).
     const maxExtent = Math.max(swath.starboardKm, swath.portKm);
 
     const date = new Date(startDate);
@@ -334,20 +317,18 @@ export default class Orbit {
         date.setMinutes(date.getMinutes() + 1);
         continue;
       }
-      const { crossTrackKm, alongTrackKm, distanceKm } = offsets;
+      const { side, distanceKm } = offsets;
 
-      // The footprint is an ellipse around the subpoint: bounded cross-track by
-      // the extent of the side the station falls on, and along-track by the widest
-      // extent. Scaling the cross-track axis per side is the whole point — a
-      // tilted sensor reaches further one way than the other.
+      // The footprint is a half-disc per side: the station is served when its
+      // distance to the subpoint is within the extent of the side it lies on.
       //
-      // For a symmetric swath both axes share one radius, so this reduces exactly
-      // to the circle the pass window used before; asymmetric extents narrow only
-      // the side that is actually narrower.
-      const extentKm = crossTrackKm >= 0 ? swath.starboardKm : swath.portKm;
-      const inSwath = (crossTrackKm / extentKm) ** 2 + (alongTrackKm / maxExtent) ** 2 <= 1;
+      // For a symmetric swath both sides share one radius and this is byte-for-byte
+      // the test used before (`distanceKm <= swathKm / 2`), so the 37 symmetric
+      // satellites keep their pass windows exactly. An asymmetric sensor narrows
+      // only the side that is actually narrower.
+      const extentKm = side === "starboard" ? swath.starboardKm : swath.portKm;
 
-      if (inSwath) {
+      if (distanceKm <= extentKm) {
         if (!ongoingPass) {
           // Start of new pass
           pass = {

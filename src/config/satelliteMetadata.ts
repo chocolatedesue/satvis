@@ -3,8 +3,11 @@
 // table in worker/src/config/satvis.core.yaml (and plugin configs).
 //
 // The worker treats the bag as opaque and only copies it, so this file is the
-// single place where it acquires meaning. Adding a field here plus a value in the
-// YAML is the whole change — no worker or pipeline code is involved.
+// single place where it acquires meaning. Adding a field costs a declaration here,
+// a value in the YAML, and a reader wherever it should show up (for a display-only
+// field, a row in entityInfo.getSatelliteInfo) — but no worker or pipeline change,
+// because nothing between the config and this file inspects the payload. The one
+// exception is the swath pair, whose both-or-neither rule the generator enforces.
 //
 // This module must stay Cesium-free (node-env vitest exercises it).
 
@@ -32,3 +35,32 @@ export interface SatelliteMetadata {
 export const DEFAULT_SWATH_KM = 200;
 
 export const DEFAULT_CONE_FOV_DEG = 10;
+
+/**
+ * Per-side cross-track extents of a sensor footprint (km), measured from the
+ * ground track outwards relative to flight direction.
+ *
+ * Lives here rather than beside its consumers because the pair is one domain
+ * value: the two fields are stored together, validated together (the generator
+ * rejects a half-specified swath) and read together.
+ */
+export interface SwathExtents {
+  starboardKm: number;
+  portKm: number;
+}
+
+/**
+ * The satellite's own extents, or `undefined` when its record carries none.
+ *
+ * The single place the both-or-neither rule is interpreted. Callers that need a
+ * usable value fall back to a default; callers that must distinguish real data
+ * from a fallback — the info panel, which would otherwise present a renderer
+ * default as a fact — check for `undefined`.
+ */
+export function swathExtentsOf(metadata: SatelliteMetadata): SwathExtents | undefined {
+  const { swathStarboardKm, swathPortKm } = metadata;
+  if (swathStarboardKm === undefined || swathPortKm === undefined) {
+    return undefined;
+  }
+  return { starboardKm: swathStarboardKm, portKm: swathPortKm };
+}

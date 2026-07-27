@@ -1,5 +1,5 @@
-import { DEFAULT_CONE_FOV_DEG, DEFAULT_SWATH_KM } from "../config/satelliteMetadata";
-import Orbit, { type SwathExtents } from "./Orbit";
+import { DEFAULT_CONE_FOV_DEG, DEFAULT_SWATH_KM, swathExtentsOf, type SatelliteMetadata, type SwathExtents } from "../config/satelliteMetadata";
+import Orbit from "./Orbit";
 import { PassPredictor } from "./PassPredictor";
 import { SampledTrajectory } from "./SampledTrajectory";
 import type { CatalogEntry } from "./SatelliteCatalog";
@@ -38,16 +38,17 @@ export class SatelliteProperties {
     return this.tags.includes(tag);
   }
 
-  // Per-side cross-track swath extents (km), from the record's metadata (see
-  // src/config/satelliteMetadata.ts). The two sides are stored and validated as a
-  // pair, so either both are present or the satellite has no extents of its own
-  // and falls back to a symmetric split of the default total.
+  // Static per-satellite facts carried by this satellite's record. Fronted here so
+  // callers reach them through the properties object they already hold rather than
+  // walking down to the catalog entry.
+  get metadata(): SatelliteMetadata {
+    return this.entry.metadata;
+  }
+
+  // Per-side cross-track swath extents (km). A satellite with no extents of its
+  // own falls back to a symmetric split of the default total.
   get swathExtents(): SwathExtents {
-    const { swathStarboardKm, swathPortKm } = this.entry.metadata;
-    if (swathStarboardKm !== undefined && swathPortKm !== undefined) {
-      return { starboardKm: swathStarboardKm, portKm: swathPortKm };
-    }
-    return { starboardKm: DEFAULT_SWATH_KM / 2, portKm: DEFAULT_SWATH_KM / 2 };
+    return swathExtentsOf(this.metadata) ?? { starboardKm: DEFAULT_SWATH_KM / 2, portKm: DEFAULT_SWATH_KM / 2 };
   }
 
   // Total swath width (km) — the sum of the two sides. This is what the symmetric
@@ -60,6 +61,6 @@ export class SatelliteProperties {
 
   // Sensor-cone half-angle FOV (degrees).
   get coneFovDeg(): number {
-    return this.entry.metadata.coneFovDeg ?? DEFAULT_CONE_FOV_DEG;
+    return this.metadata.coneFovDeg ?? DEFAULT_CONE_FOV_DEG;
   }
 }
