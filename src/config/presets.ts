@@ -17,6 +17,8 @@ export interface PresetConfig {
   };
   cesium?: {
     layers?: string[];
+    // One of SCENE_MODES, so a route can open straight into the sky view.
+    sceneMode?: string;
   };
 }
 

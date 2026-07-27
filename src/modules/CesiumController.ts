@@ -34,6 +34,7 @@ import {
   terrainProviderNames as visibleTerrainProviderNames,
 } from "./CesiumLayerProviders";
 import { SatelliteManager } from "./SatelliteManager";
+import { SkyView } from "./SkyView";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
 import { PushManager } from "./util/PushManager";
@@ -52,6 +53,8 @@ export class CesiumController {
   minimalUI: boolean;
 
   sats!: SatelliteManager;
+
+  skyView!: SkyView;
 
   pm!: PushManager;
 
@@ -110,6 +113,8 @@ export class CesiumController {
 
     // Create Satellite Manager
     this.sats = new SatelliteManager(this.viewer);
+
+    this.skyView = new SkyView(this.viewer.scene);
 
     this.pm = new PushManager();
 
@@ -200,7 +205,13 @@ export class CesiumController {
     this.viewer.terrainProvider = provider;
   }
 
-  set sceneMode(sceneMode: string) {
+  /**
+   * Switch the Cesium projection. Only the three view modes that name a Cesium
+   * `SceneMode` come here — "Sky" is a camera placement rather than a
+   * projection, and is driven from sceneSync because it needs an observer that
+   * only the store can supply.
+   */
+  morphTo(sceneMode: string): void {
     if (sceneMode === "3D") {
       this.viewer.scene.morphTo3D();
       return;
