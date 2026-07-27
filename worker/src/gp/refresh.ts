@@ -3,7 +3,7 @@
 // The worker cron/API run it against KV (refreshAll); the static snapshot
 // generator runs the same pipeline against disk (scripts/update-static-gp.mjs).
 
-import config from "../config/groups.generated.json" with { type: "json" };
+import config from "../config/satvis.generated.json" with { type: "json" };
 import { buildStatuses, collectSources, evaluateGroups, fetchSources, type FetchImpl, type SourceProbe, toProbe, toRecordsBySource } from "./evaluate.ts";
 import { kvGroupStore, type GroupStore } from "./store.ts";
 import type { GroupDefinition, GroupsConfig, GroupsIndex } from "./types.ts";

@@ -1,0 +1,95 @@
+# Core satvis configuration: the GP groups served by the worker, plus the
+# static per-satellite facts attached to their records at refresh time.
+#
+# Merged with every data/custom/*/satvis.yaml plugin config into
+# satvis.generated.json by scripts/generate-groups.mjs at build time.
+
+groups:
+  - name: cubesat
+    sources: [{ celestrak: cubesat }]
+  - name: globalstar
+    sources: [{ celestrak: globalstar }]
+  - name: gnss
+    sources: [{ celestrak: gnss }]
+  - name: iridium-NEXT
+    sources: [{ celestrak: iridium-NEXT }]
+  - name: last-30-days
+    sources: [{ celestrak: last-30-days }]
+  - name: oneweb
+    sources: [{ celestrak: oneweb }]
+  - name: planet
+    sources: [{ celestrak: planet }]
+  - name: resource
+    sources: [{ celestrak: resource }]
+  - name: science
+    sources: [{ celestrak: science }]
+  - name: spire
+    sources: [{ celestrak: spire }]
+  - name: starlink
+    sources: [{ celestrak: starlink }]
+  - name: stations
+    sources: [{ celestrak: stations }]
+  - name: weather
+    sources: [{ celestrak: weather }]
+  - name: eutelsat
+    sources: [{ celestrak: eutelsat }]
+
+# Static per-satellite facts, matched against a record's NORAD_CAT_ID alone.
+# `name` is documentation only — it never takes part in matching.
+#
+# Swath extents are PER-SIDE cross-track distances (km) from the ground track to
+# the swath edge, relative to flight direction (starboard = velocity bearing +
+# 90°). They are NOT halves of a full swath width. Sides can differ: Sentinel-3's
+# sensor is tilted to avoid sunglint (starboard-heavy in flight).
+#
+# Provenance: transcribed from an upstream prediction table whose extents were
+# cross-checked against published sensor swaths and, where noted, calibrated against
+# real product footprints. Entry order and grouping mirror that table, so a re-sync
+# stays a readable diff. Only LEO imagers appear here — geostationary weather
+# platforms have no moving ground-track swath.
+#
+# Satellites absent from this table fall back to the app defaults (see
+# src/config/satelliteMetadata.ts).
+satellites:
+  # --- MODIS (Terra/Aqua) — 2330 km nominal; footprints reach ~1170/side ---
+  - { noradId: 25994, name: TERRA, swathStarboardKm: 1175, swathPortKm: 1175 }
+  - { noradId: 27424, name: AQUA, swathStarboardKm: 1175, swathPortKm: 1175 }
+
+  # --- VIIRS (JPSS) — 3040 km nominal; L1 footprints reach ~1556/side ---
+  - { noradId: 37849, name: SUOMI NPP, swathStarboardKm: 1565, swathPortKm: 1565 }
+  - { noradId: 43013, name: NOAA 20 (JPSS-1), swathStarboardKm: 1565, swathPortKm: 1565 }
+  - { noradId: 54234, name: NOAA 21 (JPSS-2), swathStarboardKm: 1565, swathPortKm: 1565 }
+
+  # --- MSI (Sentinel-2) — 290 km nominal; L1C tiles reach ~149/side ---
+  - { noradId: 40697, name: SENTINEL-2A, swathStarboardKm: 150, swathPortKm: 150 }
+  - { noradId: 42063, name: SENTINEL-2B, swathStarboardKm: 150, swathPortKm: 150 }
+  - { noradId: 60989, name: SENTINEL-2C, swathStarboardKm: 150, swathPortKm: 150 }
+
+  # --- SLSTR (Sentinel-3) — tilted against sunglint, so the sides differ ---
+  # Side assignment verified empirically against real SLSTR granule footprints:
+  # the tilt points the sensor WEST on the descending day pass, i.e. starboard.
+  # Observed reach 995-998 / 499-502 km.
+  - { noradId: 41335, name: SENTINEL-3A, swathStarboardKm: 1000, swathPortKm: 500 }
+  - { noradId: 43437, name: SENTINEL-3B, swathStarboardKm: 1000, swathPortKm: 500 }
+
+  # --- TROPOMI (Sentinel-5P) — 2600 km nominal, nadir-pointing (no tilt,
+  #     unlike Sentinel-3); NRTI footprints reach ~1366 both sides ---
+  - { noradId: 42969, name: SENTINEL-5P, swathStarboardKm: 1375, swathPortKm: 1375 }
+
+  # --- OLI (Landsat) — 185 km total ---
+  - { noradId: 39084, name: LANDSAT 8, swathStarboardKm: 92.5, swathPortKm: 92.5 }
+  - { noradId: 49260, name: LANDSAT 9, swathStarboardKm: 92.5, swathPortKm: 92.5 }
+
+  # --- AVHRR/3 (MetOp) — 2900 km total ---
+  - { noradId: 38771, name: METOP-B, swathStarboardKm: 1450, swathPortKm: 1450 }
+  - { noradId: 43689, name: METOP-C, swathStarboardKm: 1450, swathPortKm: 1450 }
+
+  # --- MERSI (Fengyun-3) — 2900 km total ---
+  # Only the satellites carrying a confirmed MERSI variant are listed; the older
+  # Fengyun 3A/3B/3C and the newer 3G/3H are deliberately absent (see ADR-0002).
+  - { noradId: 43010, name: FENGYUN 3D, swathStarboardKm: 1450, swathPortKm: 1450 }
+  - { noradId: 49008, name: FENGYUN 3E, swathStarboardKm: 1450, swathPortKm: 1450 }
+  - { noradId: 57490, name: FENGYUN 3F, swathStarboardKm: 1450, swathPortKm: 1450 }
+
+  # --- SGLI (GCOM-C) — 1150 km total ---
+  - { noradId: 43065, name: GCOM-C (SHIKISAI), swathStarboardKm: 575, swathPortKm: 575 }

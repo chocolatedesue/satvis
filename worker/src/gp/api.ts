@@ -1,6 +1,6 @@
 // Fetch-handler routing for the GP data API.
 
-import config from "../config/groups.generated.json" with { type: "json" };
+import config from "../config/satvis.generated.json" with { type: "json" };
 import { coerceIndex } from "./evaluate.ts";
 import { refreshAll } from "./refresh.ts";
 import { GP_INDEX_KEY, GP_KEY_PREFIX, type GroupWriteMetadata } from "./store.ts";

@@ -1,0 +1,24 @@
+# Example plugin config. Every data/custom/*/satvis.yaml is merged into the core
+# config by worker/scripts/generate-groups.mjs at build time.
+#
+# A config contributes two independent sections, both optional:
+#   groups     — what is served, and as which unit
+#   satellites — static per-satellite facts, keyed by NORAD id, attached to
+#                matching records wherever they are served
+
+groups:
+  - name: iss
+    sources: [{ celestrak: stations }]
+    satellites:
+      # A group row selects and renames. It may also carry `metadata`, which is
+      # lifted into the merged satellite table under its noradId — so it applies
+      # wherever the record is served, not only in this group. Use it when the
+      # row already exists; use the top-level `satellites` table below otherwise.
+      - { noradId: 25544, upstreamName: ISS (ZARYA), name: ISS }
+
+# Static facts for satellites this plugin knows about. Matching is by NORAD id
+# alone; `name` is documentation only. Swath extents are PER-SIDE cross-track
+# distances (km) from the ground track, relative to flight direction
+# (starboard = velocity bearing + 90°) — not halves of a full width.
+satellites:
+  - { noradId: 25544, name: ISS, coneFovDeg: 45 }

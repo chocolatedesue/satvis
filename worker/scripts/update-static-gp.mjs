@@ -21,7 +21,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const workerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(workerDir, "..");
 
-const configPath = path.join(workerDir, "src", "config", "groups.generated.json");
+const configPath = path.join(workerDir, "src", "config", "satvis.generated.json");
 const outDir = path.join(repoRoot, "data", "gp");
 
 // Disk adapter for the GroupStore seam (see worker/src/gp/store.ts). Failed

@@ -1,27 +1,37 @@
 #!/usr/bin/env node
-// Merge the committed core groups config with every data/custom/*/groups.json
-// plugin config, inline each group's extraRecordsFile TLE text into
-// extraRecords, validate, and write worker/src/config/groups.generated.json.
+// Merge the committed core config with every data/custom/*/satvis.yaml plugin
+// config, inline each group's extraRecordsFile TLE text into extraRecords,
+// validate, and write worker/src/config/satvis.generated.json.
 //
-// Plain node, zero deps. With no plugin configs present this still produces a
-// valid generated file from the core groups (so lint/CI stay green).
+// A config contributes two independent sections: `groups` (what is served, as
+// which unit) and `satellites` (static per-satellite facts, keyed by NORAD id
+// and attached to records at refresh time). With no plugin configs present this
+// still produces a valid generated file from the core config alone (so lint/CI
+// stay green).
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import YAML from "yaml";
+
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const workerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(workerDir, "..");
 
-const coreConfigPath = path.join(workerDir, "src", "config", "groups.core.json");
+const coreConfigPath = path.join(workerDir, "src", "config", "satvis.core.yaml");
 const customDir = path.join(repoRoot, "data", "custom");
-const outPath = path.join(workerDir, "src", "config", "groups.generated.json");
+const outPath = path.join(workerDir, "src", "config", "satvis.generated.json");
+
+const PLUGIN_CONFIG_NAME = "satvis.yaml";
+// Pre-YAML plugin config name. Detected only to fail loudly: silently skipping
+// it would make a plugin's groups vanish from the build without a word.
+const LEGACY_PLUGIN_CONFIG_NAME = "groups.json";
 
 const GROUP_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 
-function readJson(file) {
-  return JSON.parse(fs.readFileSync(file, "utf8"));
+function readYaml(file) {
+  return YAML.parse(fs.readFileSync(file, "utf8"));
 }
 
 // Parse TLE text into TleRecord objects. Supports 3-line blocks (optional
@@ -59,7 +69,7 @@ function parseTleText(text) {
 // Load and normalize one config file. `extraRecordsFile` (generator-only) is
 // resolved relative to the config's directory and inlined into extraRecords.
 function loadConfig(configPath) {
-  const config = readJson(configPath);
+  const config = readYaml(configPath);
   const dir = path.dirname(configPath);
   const groups = (config.groups ?? []).map((group) => {
     const { extraRecordsFile, ...rest } = group;
@@ -70,7 +80,7 @@ function loadConfig(configPath) {
     }
     return rest;
   });
-  return { groups, metadata: config.metadata ?? [] };
+  return { groups, satellites: config.satellites ?? [] };
 }
 
 function discoverPluginConfigs() {
@@ -82,9 +92,18 @@ function discoverPluginConfigs() {
     if (!entry.isDirectory()) {
       continue;
     }
-    const candidate = path.join(customDir, entry.name, "groups.json");
+    const dir = path.join(customDir, entry.name);
+    const candidate = path.join(dir, PLUGIN_CONFIG_NAME);
     if (fs.existsSync(candidate)) {
       configs.push(candidate);
+      continue;
+    }
+    // Fail loudly rather than silently dropping a plugin that has not migrated.
+    if (fs.existsSync(path.join(dir, LEGACY_PLUGIN_CONFIG_NAME))) {
+      throw new Error(
+        `${path.relative(repoRoot, path.join(dir, LEGACY_PLUGIN_CONFIG_NAME))} is the pre-YAML config format; ` +
+          `rename it to ${PLUGIN_CONFIG_NAME} and convert it to YAML (see worker/src/config/satvis.core.yaml)`,
+      );
     }
   }
   return configs;
@@ -117,8 +136,65 @@ function validateSatellites(group) {
     if (row.name !== undefined && typeof row.name !== "string") {
       throw new Error(`${where}: "name" must be a string`);
     }
-    if (row.metadata !== undefined && (row.metadata === null || typeof row.metadata !== "object" || Array.isArray(row.metadata))) {
-      throw new Error(`${where}: "metadata" must be an object`);
+    if (row.metadata !== undefined) {
+      validateMetadata(row.metadata, where);
+      if (row.noradId === undefined) {
+        // Metadata is keyed by NORAD id in the merged table; a name-only row has
+        // no key to lift it under.
+        throw new Error(`${where}: "metadata" requires a "noradId" (matching is by NORAD id only)`);
+      }
+    }
+    if (row.decayed !== undefined && typeof row.decayed !== "boolean") {
+      throw new Error(`${where}: "decayed" must be a boolean`);
+    }
+  });
+}
+
+// Validate a metadata bag. The worker treats it as opaque, so only the fields
+// whose shape the frontend depends on are checked here: the swath extents, which
+// must be positive numbers and must be given for both sides or neither (see
+// SatelliteProperties.swathKm, which reads them as a pair).
+function validateMetadata(metadata, where) {
+  if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw new Error(`${where}: "metadata" must be an object`);
+  }
+  const sides = ["swathStarboardKm", "swathPortKm"];
+  for (const side of sides) {
+    const value = metadata[side];
+    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value <= 0)) {
+      throw new Error(`${where}: "${side}" must be a positive number`);
+    }
+  }
+  const given = sides.filter((side) => metadata[side] !== undefined);
+  if (given.length === 1) {
+    throw new Error(`${where}: swath needs both "swathStarboardKm" and "swathPortKm" (got only ${JSON.stringify(given[0])})`);
+  }
+}
+
+// Validate a config's top-level `satellites` table. Every entry keys on a
+// numeric `noradId`; `name` is documentation only.
+function validateSatelliteTable(entries, source) {
+  if (!Array.isArray(entries)) {
+    throw new Error(`${source}: "satellites" must be an array`);
+  }
+  entries.forEach((entry, i) => {
+    const where = `${source} satellites[${i}]`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`${where}: must be an object`);
+    }
+    if (typeof entry.noradId !== "number") {
+      throw new Error(`${where}: "noradId" must be a number`);
+    }
+    if (entry.name !== undefined && typeof entry.name !== "string") {
+      throw new Error(`${where}: "name" must be a string`);
+    }
+    if (entry.decayed !== undefined && typeof entry.decayed !== "boolean") {
+      throw new Error(`${where}: "decayed" must be a boolean`);
+    }
+    const { noradId, name, decayed, ...metadata } = entry;
+    validateMetadata(metadata, where);
+    if (Object.keys(metadata).length === 0) {
+      throw new Error(`${where}: has no metadata fields — remove the entry or give it something to attach`);
     }
   });
 }
@@ -164,49 +240,84 @@ function validate(groups) {
   }
 }
 
-// Lift each satellites-row `metadata` into a MetadataRule. The frontend matches
-// rules against the SERVED record — its satnum and its displayed name — so:
-//   - a row with a noradId keys on { satnums: [String(noradId)] } (the satnum
-//     is stable across renames, so this is the most robust match);
-//   - a name-only row keys on { names: [row.name ?? row.upstreamName] }, i.e.
-//     the served name (the renamed one if `name` is set, else the upstream
-//     name that passes through unchanged) — never the raw upstreamName, which
-//     the frontend never sees once a row renames the record.
-function liftSatelliteMetadata(groups) {
-  const rules = [];
-  for (const group of groups) {
-    for (const row of group.satellites ?? []) {
-      if (row.metadata === undefined) {
-        continue;
+// Accumulator for the merged satellite table, keyed by NORAD id. Contributions
+// arrive from two kinds of place — a config's top-level `satellites` table and a
+// group's `satellites[].metadata` rows — and are merged field-wise in arrival
+// order, so a later, more specific contribution wins per field.
+//
+// Conflicts (two places giving one field different values for one satellite) are
+// a config bug: whichever won would depend on file discovery order, so we fail
+// with both origins instead of picking. Identical values merge silently, which
+// is what makes it safe to repeat a satellite across groups.
+function createSatelliteTable() {
+  const byNoradId = new Map();
+  return {
+    add(noradId, fields, origin) {
+      const existing = byNoradId.get(noradId);
+      if (existing === undefined) {
+        byNoradId.set(noradId, { noradId, metadata: { ...fields.metadata }, origins: [origin], name: fields.name, decayed: fields.decayed });
+        return;
       }
-      const match = row.noradId !== undefined ? { satnums: [String(row.noradId)] } : { names: [row.name ?? row.upstreamName] };
-      rules.push({ match, metadata: row.metadata });
-    }
-  }
-  return rules;
+      for (const [key, value] of Object.entries(fields.metadata)) {
+        const previous = existing.metadata[key];
+        if (previous !== undefined && previous !== value) {
+          throw new Error(
+            `conflicting metadata for noradId ${noradId}: ${origin} sets ${key}=${JSON.stringify(value)}, ` +
+              `but ${existing.origins.join(", ")} set ${key}=${JSON.stringify(previous)}`,
+          );
+        }
+        existing.metadata[key] = value;
+      }
+      existing.name ??= fields.name;
+      existing.decayed ||= fields.decayed;
+      existing.origins.push(origin);
+    },
+    // Strip the bookkeeping (`origins`) that only the merge needed, and drop
+    // absent optional keys so the generated JSON stays free of nulls.
+    entries() {
+      return [...byNoradId.values()]
+        .map(({ noradId, name, decayed, metadata }) => ({
+          noradId,
+          ...(name === undefined ? {} : { name }),
+          ...(decayed ? { decayed: true } : {}),
+          metadata,
+        }))
+        .toSorted((a, b) => a.noradId - b.noradId);
+    },
+  };
 }
 
 function main() {
-  const core = loadConfig(coreConfigPath);
-  const groups = [...core.groups];
-  const explicitMetadata = [...core.metadata];
+  const configs = [
+    { path: coreConfigPath, config: loadConfig(coreConfigPath) },
+    ...discoverPluginConfigs().map((configPath) => ({ path: configPath, config: loadConfig(configPath) })),
+  ];
 
-  for (const configPath of discoverPluginConfigs()) {
-    const plugin = loadConfig(configPath);
-    groups.push(...plugin.groups);
-    explicitMetadata.push(...plugin.metadata);
-  }
-
+  const groups = configs.flatMap(({ config }) => config.groups);
   validate(groups);
 
-  // Lifted rules come BEFORE explicit rules in the merged array. The frontend
-  // shallow-merges matching rules in array order (later wins field-wise), so
-  // placing explicit rules last lets them override lifted per-satellite values.
-  const metadata = [...liftSatelliteMetadata(groups), ...explicitMetadata];
+  const table = createSatelliteTable();
+  for (const { path: configPath, config } of configs) {
+    const source = path.relative(repoRoot, configPath);
+    validateSatelliteTable(config.satellites, source);
+    for (const { noradId, name, decayed, ...metadata } of config.satellites) {
+      table.add(noradId, { metadata, name, decayed }, `${source} satellites`);
+    }
+  }
+  // Group rows contribute after every table, so a hand-written per-group value
+  // overrides the general statement for that satellite.
+  for (const group of groups) {
+    for (const row of group.satellites ?? []) {
+      if (row.metadata !== undefined) {
+        table.add(row.noradId, { metadata: row.metadata, name: row.name, decayed: row.decayed }, `group ${JSON.stringify(group.name)}`);
+      }
+    }
+  }
+  const satellites = table.entries();
 
-  const generated = { groups, metadata };
+  const generated = { groups, satellites };
   fs.writeFileSync(outPath, `${JSON.stringify(generated, null, 2)}\n`);
-  process.stdout.write(`Wrote ${path.relative(repoRoot, outPath)} (${groups.length} groups, ${metadata.length} metadata rules)\n`);
+  process.stdout.write(`Wrote ${path.relative(repoRoot, outPath)} (${groups.length} groups, ${satellites.length} satellites)\n`);
 }
 
 main();

@@ -1,7 +1,7 @@
 import { createExecutionContext, createScheduledController, env, SELF, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
-import generatedConfig from "../src/config/groups.generated.json" with { type: "json" };
+import generatedConfig from "../src/config/satvis.generated.json" with { type: "json" };
 import { collectSources } from "../src/gp/evaluate.ts";
 import type { GroupsConfig, GroupsIndex, OmmRecord } from "../src/gp/types.ts";
 import worker from "../src/index.ts";

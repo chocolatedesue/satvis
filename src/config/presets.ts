@@ -35,7 +35,7 @@ export const presets: Record<string, Preset> = {
         enabledTags: ["Weather"],
       },
     },
-    // Bare group names matching worker/src/config/groups.core.json.
+    // Bare group names matching worker/src/config/satvis.core.yaml.
     elements: [
       ["cubesat", ["Cubesat"]],
       ["globalstar", ["Globalstar"]],
