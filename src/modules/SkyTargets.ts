@@ -13,10 +13,12 @@
 // projected form also picks up roll for free, which the linear one cannot
 // express at all.
 
-import { Cartesian2, Cartesian3, Cartographic, Math as CesiumMath, type JulianDate, Matrix3, Matrix4, type Scene, SceneTransforms, Transforms } from "@cesium/engine";
+import { Cartesian2, Cartesian3, Cartographic, Math as CesiumMath, type JulianDate, Matrix3, type Scene, SceneTransforms } from "@cesium/engine";
 
 import type { SatelliteComponentCollection } from "./SatelliteComponentCollection";
-import { enuDirection, normalizeAzimuth } from "./skyGeometry";
+import { enuDirection, normalizeAzimuth, type ObserverFrame } from "./skyGeometry";
+
+export { type ObserverFrame, observerFrame } from "./skyGeometry";
 
 /** A position as the observer sees it. */
 export interface LookAngles {
@@ -25,12 +27,6 @@ export interface LookAngles {
   /** Degrees above the horizon; negative is below it. */
   elevation: number;
   rangeKm: number;
-}
-
-/** The observer's local frame, prepared once and reused for every target. */
-export interface ObserverFrame {
-  position: Cartesian3;
-  fixedToEnu: Matrix3;
 }
 
 /** A satellite, where it is in the sky, and where it is on screen. */
@@ -48,15 +44,6 @@ export interface SkyTarget extends LookAngles {
  * the angle is not perturbed by it.
  */
 const DIRECTION_DISTANCE = 1e7;
-
-export function observerFrame(position: Cartesian3): ObserverFrame {
-  const enuToFixed = Matrix4.getMatrix3(Transforms.eastNorthUpToFixedFrame(position, undefined, new Matrix4()), new Matrix3());
-  return {
-    position: Cartesian3.clone(position, new Cartesian3()),
-    // Orthonormal, so the transpose is the inverse and no solve is needed.
-    fixedToEnu: Matrix3.transpose(enuToFixed, new Matrix3()),
-  };
-}
 
 export function lookAngles(frame: ObserverFrame, target: Cartesian3): LookAngles {
   const delta = Cartesian3.subtract(target, frame.position, new Cartesian3());

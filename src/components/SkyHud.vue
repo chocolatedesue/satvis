@@ -68,7 +68,7 @@
 import { storeToRefs } from "pinia";
 import { computed, onUnmounted, ref, watch } from "vue";
 
-import { createSkyHud, type TapeTick } from "../composables/useSkyHud";
+import { useSkyHud, type TapeTick } from "../composables/useSkyHud";
 import { SKY_MODE } from "../config/viewModes";
 import { compassPoint } from "../modules/SkyTargets";
 import { useCesiumStore } from "../stores/cesium";
@@ -80,7 +80,7 @@ const COMPASS_Y = 46;
 const ELEVATION_X = 8;
 const TAPE_LENGTH = 12;
 
-const { compass, elevation, locked, trace, start, stop } = createSkyHud();
+const { compass, elevation, locked, trace, start, stop } = useSkyHud();
 
 const { sceneMode } = storeToRefs(useCesiumStore());
 const visible = computed(() => sceneMode.value === SKY_MODE);

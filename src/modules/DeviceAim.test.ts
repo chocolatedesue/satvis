@@ -30,17 +30,17 @@ function deviceRotationForTest({ alpha, beta, gamma, screenAngle }: DeviceOrient
 describe("aimFromDeviceOrientation", () => {
   test("looks straight down when the phone lies flat, screen up", () => {
     // The rear camera faces the table.
-    expect(aimFromDeviceOrientation(sample(0, 0, 0)).elevation).toBeCloseTo(-90, 9);
+    expect(aimFromDeviceOrientation(sample(0, 0, 0)).pitch).toBeCloseTo(-90, 9);
   });
 
   test("looks straight up when the phone lies face down", () => {
     // Rear camera to the sky — the posture the whole feature is for.
-    expect(aimFromDeviceOrientation(sample(0, 180, 0)).elevation).toBeCloseTo(90, 9);
+    expect(aimFromDeviceOrientation(sample(0, 180, 0)).pitch).toBeCloseTo(90, 9);
   });
 
   test("looks level at the horizon when the phone is held upright", () => {
     const aim = aimFromDeviceOrientation(sample(0, 90, 0));
-    expect(aim.elevation).toBeCloseTo(0, 9);
+    expect(aim.pitch).toBeCloseTo(0, 9);
     expect(azimuthError(aim.azimuth, 0)).toBeLessThan(1e-9);
     expect(aim.roll).toBeCloseTo(0, 9);
   });
@@ -54,9 +54,9 @@ describe("aimFromDeviceOrientation", () => {
     }
   });
 
-  test("tilts elevation with beta between upright and the zenith", () => {
-    expect(aimFromDeviceOrientation(sample(0, 135, 0)).elevation).toBeCloseTo(45, 6);
-    expect(aimFromDeviceOrientation(sample(0, 45, 0)).elevation).toBeCloseTo(-45, 6);
+  test("tilts pitch with beta between upright and the zenith", () => {
+    expect(aimFromDeviceOrientation(sample(0, 135, 0)).pitch).toBeCloseTo(45, 6);
+    expect(aimFromDeviceOrientation(sample(0, 45, 0)).pitch).toBeCloseTo(-45, 6);
   });
 
   test("swings the azimuth, not the roll, when an upright phone tips sideways", () => {
@@ -64,7 +64,7 @@ describe("aimFromDeviceOrientation", () => {
     // that axis is vertical, so tipping sideways points the camera somewhere
     // else along the horizon and leaves the horizon level on screen.
     const aim = aimFromDeviceOrientation(sample(0, 90, 30));
-    expect(aim.elevation).toBeCloseTo(0, 6);
+    expect(aim.pitch).toBeCloseTo(0, 6);
     expect(azimuthError(aim.azimuth, -30)).toBeLessThan(1e-6);
     expect(aim.roll).toBeCloseTo(0, 6);
   });
@@ -99,7 +99,7 @@ describe("aimFromDeviceOrientation", () => {
     // Where `setView` would have mirrored the sky, and where an Euler-derived
     // roll is undefined.
     const aim = aimFromDeviceOrientation(sample(217, 180, 0));
-    expect(aim.elevation).toBeCloseTo(90, 9);
+    expect(aim.pitch).toBeCloseTo(90, 9);
     expect(Number.isFinite(aim.azimuth)).toBe(true);
     expect(Number.isFinite(aim.roll)).toBe(true);
   });
@@ -139,7 +139,7 @@ describe("CompassCalibration", () => {
   test("starts uncalibrated and leaves the aim alone", () => {
     const calibration = new CompassCalibration();
     expect(calibration.calibrated).toBe(false);
-    expect(calibration.correct({ azimuth: 123, elevation: 10, roll: 0 }).azimuth).toBe(123);
+    expect(calibration.correct({ azimuth: 123, pitch: 10, roll: 0 }).azimuth).toBe(123);
   });
 
   test("refuses to calibrate from a posture that cannot support it", () => {
@@ -152,11 +152,11 @@ describe("CompassCalibration", () => {
     const calibration = new CompassCalibration();
     calibration.update(sample(10, 0, 0), 40);
     expect(calibration.calibrated).toBe(true);
-    const afterFlat = calibration.correct({ azimuth: 10, elevation: 0, roll: 0 }).azimuth;
+    const afterFlat = calibration.correct({ azimuth: 10, pitch: 0, roll: 0 }).azimuth;
 
     // Tilting up must not move the offset, even with a wildly different heading.
     calibration.update(sample(10, 140, 0), 300);
-    expect(calibration.correct({ azimuth: 10, elevation: 50, roll: 0 }).azimuth).toBeCloseTo(afterFlat, 9);
+    expect(calibration.correct({ azimuth: 10, pitch: 50, roll: 0 }).azimuth).toBeCloseTo(afterFlat, 9);
   });
 
   test("ignores a device with no compass at all", () => {
@@ -168,14 +168,14 @@ describe("CompassCalibration", () => {
   test("applies the manual trim whether calibrated or not", () => {
     const calibration = new CompassCalibration();
     calibration.trim = 12;
-    expect(calibration.correct({ azimuth: 100, elevation: 0, roll: 0 }).azimuth).toBeCloseTo(112, 9);
+    expect(calibration.correct({ azimuth: 100, pitch: 0, roll: 0 }).azimuth).toBeCloseTo(112, 9);
     calibration.update(sample(0, 0, 0), 0);
-    expect(calibration.correct({ azimuth: 100, elevation: 0, roll: 0 }).azimuth).toBeCloseTo(112, 9);
+    expect(calibration.correct({ azimuth: 100, pitch: 0, roll: 0 }).azimuth).toBeCloseTo(112, 9);
   });
 
   test("wraps rather than running past a full turn", () => {
     const calibration = new CompassCalibration();
     calibration.trim = 300;
-    expect(calibration.correct({ azimuth: 100, elevation: 0, roll: 0 }).azimuth).toBeCloseTo(40, 9);
+    expect(calibration.correct({ azimuth: 100, pitch: 0, roll: 0 }).azimuth).toBeCloseTo(40, 9);
   });
 });

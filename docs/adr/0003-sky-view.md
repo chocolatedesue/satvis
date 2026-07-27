@@ -109,5 +109,14 @@ there are no per-orientation numbers and no pixel arithmetic to go stale.
   pixels, so a pick-based crosshair would silently change reach by 3× with the
   quality preset. Occlusion becomes an explicit horizon test, shared with the orbit
   trace, which needs it anyway.
+- **The ground stays opaque.** The alternative was a translucent globe, which would
+  show a camera feed through the earth — but it would also leak the satellites the
+  earth is supposed to be hiding, and correct occlusion is worth more than seeing
+  the real ground through a view whose whole job is to say what is above you. This
+  is a decision, not a default: revisit it only if passthrough makes an opaque
+  lower half untenable.
 - **`minimalUI` hides the clock and timeline on iOS**, so the shared-clock benefit is
   desktop-only and the sky view is live-time on the device it was designed for.
+- **The overlay's click-through is verified by hand**, not by a test — jsdom has no
+  layout, so `elementFromPoint` cannot answer there. The procedure and its result
+  are in `docs/manual-verification.md`; a browser-driven test would replace it.

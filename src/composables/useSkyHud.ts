@@ -15,7 +15,7 @@
 import { type Cartesian3, JulianDate, type Scene, SceneTransforms } from "@cesium/engine";
 import { shallowRef, type ShallowRef } from "vue";
 
-import { compassPoint, directionToWindow, lookAngles, type ObserverFrame, observerFrame, type SkyTarget } from "../modules/SkyTargets";
+import { compassPoint, directionToWindow, lookAngles, type ObserverFrame, type SkyTarget } from "../modules/SkyTargets";
 
 /** A mark on one of the tapes, already placed in CSS pixels. */
 export interface TapeTick {
@@ -71,7 +71,7 @@ function thin(ticks: TapeTick[]): TapeTick[] {
   return kept.toSorted((a, b) => a.offset - b.offset);
 }
 
-export function createSkyHud(): SkyHudState & { start: () => void; stop: () => void } {
+export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void } {
   const compass = shallowRef<TapeTick[]>([]);
   const elevation = shallowRef<TapeTick[]>([]);
   const locked = shallowRef<SkyTarget | undefined>(undefined);
@@ -88,10 +88,10 @@ export function createSkyHud(): SkyHudState & { start: () => void; stop: () => v
   function refresh(time: JulianDate): void {
     const { viewer, skyView, skyInteraction } = globalThis.cc;
     const { scene } = viewer;
-    if (!skyView.active) {
+    const frame = skyView.frame;
+    if (!skyView.active || !frame) {
       return;
     }
-    const frame = observerFrame(scene.camera.position);
 
     const compassTicks: TapeTick[] = [];
     for (let azimuth = 0; azimuth < 360; azimuth += COMPASS_STEP) {

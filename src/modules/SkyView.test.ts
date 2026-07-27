@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 
 import { type Aim, defaultAzimuth, fovFromFovy, isPlausibleGroundHeight, skyBasis } from "./SkyView";
 
-const aim = (azimuth: number, elevation: number, roll = 0): Aim => ({ azimuth, elevation, roll });
+const aim = (azimuth: number, pitch: number, roll = 0): Aim => ({ azimuth, pitch, roll });
 
 const angleBetween = (a: Cartesian3, b: Cartesian3): number => CesiumMath.toDegrees(Cartesian3.angleBetween(a, b));
 
@@ -15,7 +15,7 @@ describe("skyBasis", () => {
   test("is orthonormal and right-handed at every aim", () => {
     for (const a of aims) {
       const { direction, up, right } = skyBasis(a);
-      const label = `az=${a.azimuth} el=${a.elevation} roll=${a.roll}`;
+      const label = `az=${a.azimuth} pitch=${a.pitch} roll=${a.roll}`;
 
       expect(Cartesian3.magnitude(direction), label).toBeCloseTo(1, 12);
       expect(Cartesian3.magnitude(up), label).toBeCloseTo(1, 12);
@@ -31,7 +31,7 @@ describe("skyBasis", () => {
     }
   });
 
-  test("points where the azimuth and elevation say", () => {
+  test("points where the azimuth and pitch say", () => {
     // East-north-up components, azimuth clockwise from north.
     expect(skyBasis(aim(0, 0)).direction).toMatchObject({ x: expect.closeTo(0, 12), y: expect.closeTo(1, 12), z: expect.closeTo(0, 12) });
     expect(skyBasis(aim(90, 0)).direction).toMatchObject({ x: expect.closeTo(1, 12), y: expect.closeTo(0, 12), z: expect.closeTo(0, 12) });
@@ -41,9 +41,9 @@ describe("skyBasis", () => {
 
   test("keeps the horizon level when there is no roll", () => {
     // `right` has no vertical component, so the horizon is horizontal on screen.
-    for (const elevation of [-90, -45, 0, 45, 87.5, 90]) {
-      const { right } = skyBasis(aim(210, elevation));
-      expect(right.z, `el=${elevation}`).toBeCloseTo(0, 12);
+    for (const pitch of [-90, -45, 0, 45, 87.5, 90]) {
+      const { right } = skyBasis(aim(210, pitch));
+      expect(right.z, `pitch=${pitch}`).toBeCloseTo(0, 12);
     }
   });
 
@@ -63,10 +63,10 @@ describe("skyBasis", () => {
   // across the zenith moves it a quarter of a degree.
   test("is continuous through the zenith", () => {
     const step = 0.25;
-    for (let elevation = 85; elevation < 90; elevation += step) {
-      const before = skyBasis(aim(0, elevation));
-      const after = skyBasis(aim(0, Math.min(elevation + step, 90)));
-      const label = `el=${elevation}`;
+    for (let pitch = 85; pitch < 90; pitch += step) {
+      const before = skyBasis(aim(0, pitch));
+      const after = skyBasis(aim(0, Math.min(pitch + step, 90)));
+      const label = `pitch=${pitch}`;
 
       expect(angleBetween(before.direction, after.direction), label).toBeLessThan(step * 1.001);
       expect(angleBetween(before.up, after.up), label).toBeLessThan(step * 1.001);

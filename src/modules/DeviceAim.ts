@@ -70,12 +70,12 @@ export function aimFromDeviceOrientation(sample: DeviceOrientationSample): Aim {
   const direction = Matrix3.multiplyByVector(rotation, BACK_CAMERA, new Cartesian3());
   const screenUp = Matrix3.multiplyByVector(rotation, SCREEN_UP, new Cartesian3());
 
-  const elevation = CesiumMath.toDegrees(Math.asin(CesiumMath.clamp(direction.z, -1, 1)));
+  const pitch = CesiumMath.toDegrees(Math.asin(CesiumMath.clamp(direction.z, -1, 1)));
   const azimuth = normalizeAzimuth(CesiumMath.toDegrees(Math.atan2(direction.x, direction.y)));
   // Decomposed against the same level pair `skyBasis` composes with, so the two
   // are exact inverses — see skyGeometry. Projecting rather than reading an
   // Euler angle is what keeps this defined with the phone pointed straight up.
-  return { azimuth, elevation, roll: rollOf(azimuth, elevation, screenUp) };
+  return { azimuth, pitch, roll: rollOf(azimuth, pitch, screenUp) };
 }
 
 /** Whether the screen is flat enough for iOS's compass heading to mean anything. */

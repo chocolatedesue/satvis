@@ -17,7 +17,9 @@ export interface PresetConfig {
   };
   cesium?: {
     layers?: string[];
-    // One of SCENE_MODES, so a route can open straight into the sky view.
+    // One of SCENE_MODES. No preset sets it yet; it is here so that a route can
+    // open straight into the sky view without the type having to change first,
+    // which is the point of a preset supplying defaults.
     sceneMode?: string;
   };
 }

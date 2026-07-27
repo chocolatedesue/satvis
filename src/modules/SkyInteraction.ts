@@ -13,7 +13,7 @@ import { Cartesian2, type JulianDate, type Scene } from "@cesium/engine";
 
 import { aimFromDeviceOrientation, CompassCalibration } from "./DeviceAim";
 import type { SatelliteManager } from "./SatelliteManager";
-import { nearestTarget, observerFrame, type SkyTarget, skyTargets } from "./SkyTargets";
+import { nearestTarget, type SkyTarget, skyTargets } from "./SkyTargets";
 import type { SkyView } from "./SkyView";
 
 // iOS gates the sensor behind a call made from a user gesture, and only over
@@ -190,10 +190,10 @@ export class SkyInteraction {
 
   #refresh(time: JulianDate): void {
     const { scene, skyView, sats } = this.#options;
-    if (!skyView.active) {
+    const frame = skyView.frame;
+    if (!skyView.active || !frame) {
       return;
     }
-    const frame = observerFrame(scene.camera.position);
     this.#targets = skyTargets(scene, frame, sats.activeSatellites, time);
     this.#setLocked(nearestTarget(this.#targets, this.#center(), CAPTURE_RADIUS));
   }
@@ -238,12 +238,12 @@ export class SkyInteraction {
     const { skyView, scene } = this.#options;
     const height = scene.canvas.clientHeight || 1;
     const perPixel = skyView.fovy / height;
-    const { azimuth, elevation } = skyView.aim;
+    const { azimuth, pitch } = skyView.aim;
     skyView.look({
       azimuth: azimuth - dx * perPixel,
       // Clamped rather than wrapped: passing the zenith would need the azimuth
       // to flip and the roll to follow it, and a clamp is what a mouse expects.
-      elevation: Math.min(90, Math.max(-90, elevation + dy * perPixel)),
+      pitch: Math.min(90, Math.max(-90, pitch + dy * perPixel)),
     });
   };
 

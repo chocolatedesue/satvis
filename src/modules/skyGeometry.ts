@@ -6,7 +6,7 @@
 // position to project. A second copy of the level basis is a sign error waiting
 // to happen — composing and decomposing must be each other's inverse.
 
-import { Cartesian3, Math as CesiumMath } from "@cesium/engine";
+import { Cartesian3, Math as CesiumMath, Matrix3, Matrix4, Transforms } from "@cesium/engine";
 
 /** Where the sky view looks up from — see CONTEXT.md, observer. */
 export interface Observer {
@@ -15,15 +15,39 @@ export interface Observer {
 }
 
 /**
- * Which way the sky view is pointing, in the same terms as a satellite's own
- * position: azimuth clockwise from north, elevation above the horizon, both in
- * degrees. Roll is the rotation about the view axis, which a handheld device
- * supplies and a mouse does not.
+ * Which way the sky view is pointing: azimuth clockwise from north and pitch
+ * above the horizontal, both in degrees, plus the roll about the view axis that
+ * a handheld device supplies and a mouse does not.
+ *
+ * Pitch, not elevation. The two are equal whenever the camera is looking at
+ * something — which is what makes the crosshair work — but they are different
+ * roles: the camera has an attitude, a satellite has a position in the sky. This
+ * codebase already spends "elevation" on the latter (see CONTEXT.md, pass, and
+ * `?overpass=elevation`), and heights are called height.
  */
 export interface Aim {
   azimuth: number;
-  elevation: number;
+  pitch: number;
   roll: number;
+}
+
+/**
+ * The observer's local frame, built once and reused for every angle taken
+ * against it. Owned by `SkyView`, which knows when the observer moves — building
+ * one costs a 4x4 and a transpose, and three callers wanted it per frame.
+ */
+export interface ObserverFrame {
+  position: Cartesian3;
+  fixedToEnu: Matrix3;
+}
+
+export function observerFrame(position: Cartesian3): ObserverFrame {
+  const enuToFixed = Matrix4.getMatrix3(Transforms.eastNorthUpToFixedFrame(position, undefined, new Matrix4()), new Matrix3());
+  return {
+    position: Cartesian3.clone(position, new Cartesian3()),
+    // Orthonormal, so the transpose is the inverse and no solve is needed.
+    fixedToEnu: Matrix3.transpose(enuToFixed, new Matrix3()),
+  };
 }
 
 /** Wrap an azimuth to [0, 360). */

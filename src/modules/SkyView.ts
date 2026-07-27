@@ -20,7 +20,7 @@
 
 import { Cartesian3, Cartographic, Math as CesiumMath, Matrix3, Matrix4, PerspectiveFrustum, type Scene, SceneMode, Transforms } from "@cesium/engine";
 
-import { type Aim, enuDirection, type Observer, rollBasis } from "./skyGeometry";
+import { type Aim, enuDirection, type Observer, type ObserverFrame, observerFrame, rollBasis } from "./skyGeometry";
 
 export type { Aim, Observer } from "./skyGeometry";
 
@@ -56,11 +56,11 @@ export const isPlausibleGroundHeight = (height: number | undefined): height is n
 
 /**
  * Defaults chosen so the first frame is legible rather than empty sky. The
- * horizon is on screen because `elevation < fovy / 2`; that invariant is the
- * whole guarantee, which is why there is no per-orientation arithmetic here.
+ * horizon is on screen because `pitch < fovy / 2`; that invariant is the whole
+ * guarantee, which is why there is no per-orientation arithmetic here.
  */
 export const DEFAULT_FOVY = 75;
-export const DEFAULT_ELEVATION = 30;
+export const DEFAULT_PITCH = 30;
 
 /** North is the emptiest direction to open on: passes culminate toward the equator. */
 export const defaultAzimuth = (observer: Observer): number => (observer.lat >= 0 ? 180 : 0);
@@ -73,7 +73,7 @@ export const defaultAzimuth = (observer: Observer): number => (observer.lat >= 0
  * there is no singularity at the zenith and no discontinuity crossing it.
  */
 export function skyBasis(aim: Aim): Basis {
-  return { direction: enuDirection(aim.azimuth, aim.elevation), ...rollBasis(aim.azimuth, aim.elevation, aim.roll) };
+  return { direction: enuDirection(aim.azimuth, aim.pitch), ...rollBasis(aim.azimuth, aim.pitch, aim.roll) };
 }
 
 /**
@@ -118,9 +118,13 @@ export class SkyView {
   // default terrain provider and a safe one for every other.
   #groundHeight = 0;
 
-  #aim: Aim = { azimuth: 0, elevation: DEFAULT_ELEVATION, roll: 0 };
+  #aim: Aim = { azimuth: 0, pitch: DEFAULT_PITCH, roll: 0 };
 
   #fovy: number = DEFAULT_FOVY;
+
+  // Rebuilt only when the observer or the ground under it moves, which is rare;
+  // everything that reads it wants it every frame.
+  #frame: ObserverFrame | undefined;
 
   #removePreRender: (() => void) | undefined;
 
@@ -138,6 +142,11 @@ export class SkyView {
 
   get aim(): Readonly<Aim> {
     return this.#aim;
+  }
+
+  /** The observer's local frame, for anything measuring angles against it. */
+  get frame(): ObserverFrame | undefined {
+    return this.#frame;
   }
 
   get fovy(): number {
@@ -186,7 +195,7 @@ export class SkyView {
     };
 
     this.#setObserver(observer);
-    this.#aim = { azimuth: defaultAzimuth(observer), elevation: DEFAULT_ELEVATION, roll: 0 };
+    this.#aim = { azimuth: defaultAzimuth(observer), pitch: DEFAULT_PITCH, roll: 0 };
     this.#fovy = DEFAULT_FOVY;
 
     // A leftover reference frame — from `jumpTo`, or from tracking — would
@@ -214,6 +223,7 @@ export class SkyView {
     this.#removePreRender = undefined;
     this.#saved = undefined;
     this.#observer = undefined;
+    this.#frame = undefined;
 
     const { camera, screenSpaceCameraController: controller } = this.#scene;
     camera.lookAtTransform(Matrix4.IDENTITY);
@@ -232,8 +242,9 @@ export class SkyView {
   #setObserver(observer: Observer): void {
     this.#observer = observer;
     Cartographic.fromDegrees(observer.lon, observer.lat, 0, this.#observerCartographic);
-    // A different place has a different ground under it.
+    // A different place has a different ground under it, and a different frame.
     this.#groundHeight = 0;
+    this.#frame = undefined;
   }
 
   #apply(): void {
@@ -248,10 +259,12 @@ export class SkyView {
     // implausible one — which is how a missing tile reports itself — leaves the
     // camera where it was instead of dropping it through the surface.
     const measured = this.#scene.globe.getHeight(this.#observerCartographic);
-    if (isPlausibleGroundHeight(measured)) {
+    if (isPlausibleGroundHeight(measured) && measured !== this.#groundHeight) {
       this.#groundHeight = measured;
+      this.#frame = undefined;
     }
     Cartesian3.fromDegrees(observer.lon, observer.lat, this.#groundHeight + EYE_HEIGHT, undefined, camera.position);
+    this.#frame ??= observerFrame(camera.position);
 
     const enu = Transforms.eastNorthUpToFixedFrame(camera.position, undefined, new Matrix4());
     const rotation = Matrix4.getMatrix3(enu, new Matrix3());

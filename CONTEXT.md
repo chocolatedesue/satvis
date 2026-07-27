@@ -67,6 +67,16 @@ discussion; sharpen them here when they drift.
   (`src/config/viewModes.ts`).
 - **Camera mode**: the reference frame the camera is pinned to — earth-fixed or
   inertial. Independent of the view mode.
+- **Sky view**: the view mode that stands at the observer and looks up, showing
+  satellites where they actually are in that person's sky. It owns the camera
+  outright, which is why nothing is tracked while it is up.
+- **Aim**: which way the sky view is pointing — azimuth, pitch above the
+  horizontal, and roll about the view axis. Pitch, not elevation: the two are
+  equal whenever the camera is looking at something, but a camera has an
+  attitude where a satellite has a position.
+- **Lock**: the satellite the crosshair currently holds — the nearest one above
+  the horizon within the crosshair's reach. What a tap acts on, and what the
+  detail card and the on-sky track describe.
 - **Live vs pinned time**: whether the viewer's clock follows the present or a
   moment the user chose. Live is the default. The clock becomes pinned only by
   a deliberate act — a time supplied in the URL, or scrubbing the timeline —
