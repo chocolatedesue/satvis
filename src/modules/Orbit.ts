@@ -52,6 +52,12 @@ export interface SwathExtents {
   portKm: number;
 }
 
+/**
+ * Orbit regime, derived from the element set (see Orbit.orbitClass). "LEO" here is
+ * the same band the ground-track and sensor-cone visuals gate on (isLeo).
+ */
+export type OrbitClass = "LEO" | "MEO" | "GEO" | "HEO";
+
 /** A ground station's position relative to the ground track (see Orbit.trackOffsets). */
 export interface TrackOffsets {
   crossTrackKm: number;
@@ -117,6 +123,31 @@ export default class Orbit {
     const meanMotionRad = this.satrec.no;
     const period = (2 * Math.PI) / meanMotionRad;
     return period;
+  }
+
+  /**
+   * The orbit's regime, derived from the element set rather than configured.
+   *
+   * Deriving it means every satellite has one — all ~10,000, not just the few in
+   * the satellite table — and it cannot contradict the orbit it describes: a
+   * satellite lowered towards re-entry reclassifies itself. Eccentricity is
+   * checked first because a highly elliptical orbit can have an MEO-looking
+   * period while spending its time nowhere near a circular MEO.
+   */
+  get orbitClass(): OrbitClass {
+    if (this.satrec.ecco > 0.25) {
+      return "HEO";
+    }
+    const periodMin = this.orbitalPeriod;
+    if (periodMin <= 128) {
+      return "LEO";
+    }
+    // Geosynchronous period is 1436 min; allow a band for drifting and inclined
+    // geosynchronous orbits, which are still GEO for display purposes.
+    if (periodMin >= 1400 && periodMin <= 1470) {
+      return "GEO";
+    }
+    return "MEO";
   }
 
   positionECI(time: Date): satellitejs.EciVec3<number> | null {

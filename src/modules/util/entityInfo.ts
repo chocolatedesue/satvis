@@ -2,12 +2,45 @@ import { JulianDate } from "@cesium/engine";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
+import type { SatelliteMetadata } from "../../config/satelliteMetadata";
 import type Orbit from "../Orbit";
 import { recordTleLines } from "./gp";
 
 dayjs.extend(utc);
 
 export type ElementsInfo = { kind: "tle"; epoch: string; lines: string } | { kind: "omm"; epoch: string; rows: [string, string][] };
+
+/**
+ * Label/value rows describing the satellite itself, as opposed to its orbit
+ * elements or current position: the derived orbit class plus whatever static
+ * facts its record carries.
+ *
+ * Only the orbit class is unconditional, because it is derived from the element
+ * set every satellite has. Every other row appears only when the record actually
+ * carries the field — a satellite absent from the satellite table shows nothing
+ * rather than the fallback values the renderer happens to use, which would read
+ * as data about the satellite when it is really a default.
+ */
+export function getSatelliteInfo(orbit: Orbit, metadata: SatelliteMetadata): [string, string][] {
+  const rows: [string, string][] = [["Orbit", orbit.orbitClass]];
+
+  const { swathStarboardKm, swathPortKm, coneFovDeg, operator, missionType } = metadata;
+  if (swathStarboardKm !== undefined && swathPortKm !== undefined) {
+    const total = swathStarboardKm + swathPortKm;
+    // Spell out the sides only when they differ — otherwise the total says it all.
+    rows.push(["Swath", swathStarboardKm === swathPortKm ? `${total} km` : `${total} km (${swathStarboardKm} stbd / ${swathPortKm} port)`]);
+  }
+  if (coneFovDeg !== undefined) {
+    rows.push(["Sensor FOV", `${coneFovDeg}°`]);
+  }
+  if (operator !== undefined) {
+    rows.push(["Operator", operator]);
+  }
+  if (missionType !== undefined) {
+    rows.push(["Mission", missionType]);
+  }
+  return rows;
+}
 
 export function getElementsInfo(orbit: Orbit): ElementsInfo {
   const epoch = formatEpoch(orbit.julianDate);
