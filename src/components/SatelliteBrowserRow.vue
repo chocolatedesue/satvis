@@ -2,7 +2,7 @@
   <!-- Group row: expand chevron + tri-state checkbox + tag name + count badge. -->
   <div v-if="row.kind === 'group'" class="browser-row browser-row--group">
     <button type="button" class="browser-chevron" :aria-label="row.expanded ? 'Collapse group' : 'Expand group'" @click="emit('toggle-expand', row.tag)">
-      <UIcon :name="row.expanded ? 'fa6-solid:chevron-down' : 'fa6-solid:chevron-right'" />
+      <UIcon :name="row.expanded ? 'lucide:chevron-down' : 'lucide:chevron-right'" />
     </button>
     <input
       ref="groupCheckbox"

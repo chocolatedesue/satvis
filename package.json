@@ -43,7 +43,6 @@
   },
   "devDependencies": {
     "@iconify-json/fa6-brands": "^1.2.6",
-    "@iconify-json/fa6-solid": "^1.2.4",
     "@iconify-json/lucide": "^1.2.118",
     "@types/node": "^26.1.1",
     "@vite-pwa/assets-generator": "^1.0.2",
