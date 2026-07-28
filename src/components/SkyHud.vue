@@ -12,13 +12,22 @@
           <text v-if="tick.label" :x="tick.offset" :y="COMPASS_Y - 4" class="sky-hud__label" text-anchor="middle">{{ tick.label }}</text>
         </g>
       </g>
+    </svg>
 
-      <!-- Elevation tape, projected the same way, along the current azimuth. -->
+    <!-- Elevation tape, projected the same way, along the current azimuth.
+         Its own right-anchored svg rather than a group in the one above: the
+         menu panels are left-anchored and were covering this tape completely,
+         and a tape whose ticks are projected in y can move freely in x without
+         lying about where the sky is. A separate element is what makes "against
+         the right edge" expressible at all — the parent svg has no viewBox, so
+         its user units are absolute and there is no live viewport width here to
+         subtract from. -->
+    <svg class="sky-hud__svg sky-hud__side">
       <g class="sky-hud__tape">
-        <line :x1="ELEVATION_X + TAPE_LENGTH" :y1="0" :x2="ELEVATION_X + TAPE_LENGTH" :y2="'100%'" class="sky-hud__tape-rule" />
+        <line :x1="ELEVATION_RULE_X" :y1="0" :x2="ELEVATION_RULE_X" :y2="'100%'" class="sky-hud__tape-rule" />
         <g v-for="tick in elevation" :key="`el${tick.value}`">
-          <line :x1="ELEVATION_X + (tick.major ? 0 : TAPE_LENGTH / 2)" :y1="tick.offset" :x2="ELEVATION_X + TAPE_LENGTH" :y2="tick.offset" :class="tickClass(tick)" />
-          <text v-if="tick.major" :x="ELEVATION_X + TAPE_LENGTH + 5" :y="tick.offset + 4" class="sky-hud__label">{{ tick.label }}</text>
+          <line :x1="ELEVATION_RULE_X" :y1="tick.offset" :x2="ELEVATION_RULE_X + (tick.major ? TAPE_LENGTH : TAPE_LENGTH / 2)" :y2="tick.offset" :class="tickClass(tick)" />
+          <text v-if="tick.major" :x="ELEVATION_RULE_X - 5" :y="tick.offset + 4" class="sky-hud__label" text-anchor="end">{{ tick.label }}</text>
         </g>
       </g>
     </svg>
@@ -70,8 +79,16 @@ import { useCesiumStore } from "../stores/cesium";
 // Geometry that the template needs as numbers. It cannot go through Tailwind:
 // classes are extracted by scanning source text, so a class built at runtime
 // (`bottom-[${x}px]`) never has any CSS emitted for it.
-const COMPASS_Y = 46;
-const ELEVATION_X = 8;
+//
+// The compass band clears the toolbars. `.cesium-toolbar-button` is 32px square
+// and both #toolbarLeft and #toolbarRight start at top: 5px, so the button rows
+// occupy y 5-37 on both sides — and the tick labels, drawn 4px above the band,
+// used to land at y 42 with their glyph tops around 34, i.e. inside the buttons.
+// That is what put N and S behind the menu on a phone.
+const COMPASS_Y = 62;
+// Measured inside the side svg, not the viewport: the rule sits this far from
+// that box's left edge, and the box is pinned to the right.
+const ELEVATION_RULE_X = 46;
 const TAPE_LENGTH = 12;
 
 const { compass, elevation, locked, trace, calibrated, start, stop } = useSkyHud();
@@ -141,6 +158,13 @@ onUnmounted(() => {
   overflow: visible;
 }
 
+/* Full height and top-aligned, so a tick's projected window y is still its y in
+   here. Only the width is constrained, which is the whole point. */
+.sky-hud__side {
+  inset: 0 0 0 auto;
+  width: 64px;
+}
+
 .sky-hud__trace {
   fill: none;
   stroke: #7dd3fc;
@@ -175,10 +199,11 @@ onUnmounted(() => {
   stroke-width: 2.5px;
 }
 
-/* A triangle pointing up at the tape band the ticks hang from. */
+/* A triangle pointing up at the tape band the ticks hang from, so it tracks
+   COMPASS_Y + TAPE_LENGTH. */
 .sky-hud__pointer {
   position: absolute;
-  top: 58px;
+  top: 74px;
   left: 50%;
   width: 0;
   height: 0;
