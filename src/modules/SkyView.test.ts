@@ -1,7 +1,7 @@
-import { Cartesian3, Math as CesiumMath } from "@cesium/engine";
+import { Cartesian3, Math as CesiumMath, type Scene } from "@cesium/engine";
 import { describe, expect, test } from "vitest";
 
-import { type Aim, defaultAzimuth, fovFromFovy, isPlausibleGroundHeight, skyBasis } from "./SkyView";
+import { type Aim, defaultAzimuth, DEFAULT_FOVY, DEFAULT_PITCH, fovFromFovy, isPlausibleGroundHeight, MAX_FOVY, MIN_FOVY, skyBasis, SkyView } from "./SkyView";
 
 const aim = (azimuth: number, pitch: number, roll = 0): Aim => ({ azimuth, pitch, roll });
 
@@ -138,5 +138,38 @@ describe("defaultAzimuth", () => {
     expect(defaultAzimuth({ lat: 48.14, lon: 11.58 })).toBe(180);
     expect(defaultAzimuth({ lat: 0, lon: 0 })).toBe(180);
     expect(defaultAzimuth({ lat: -33.9, lon: 151.2 })).toBe(0);
+  });
+});
+
+describe("fovy", () => {
+  // A bare scene is enough: with no observer the camera work short-circuits, and
+  // what is under test is the clamp on the way in.
+  const view = (): SkyView => new SkyView({} as Scene);
+
+  test("starts at the default", () => {
+    expect(view().fovy).toBe(DEFAULT_FOVY);
+    expect(DEFAULT_FOVY).toBeGreaterThanOrEqual(MIN_FOVY);
+    expect(DEFAULT_FOVY).toBeLessThanOrEqual(MAX_FOVY);
+  });
+
+  test("clamps rather than letting a gesture run past the ends", () => {
+    const zoomedIn = view();
+    zoomedIn.fovy = 0.001;
+    expect(zoomedIn.fovy).toBe(MIN_FOVY);
+
+    const zoomedOut = view();
+    zoomedOut.fovy = 400;
+    expect(zoomedOut.fovy).toBe(MAX_FOVY);
+  });
+
+  test("the default zoom keeps the horizon on screen at the default pitch", () => {
+    // `pitch < fovy/2` on entry — the guarantee the defaults exist to provide.
+    expect(DEFAULT_PITCH).toBeLessThan(DEFAULT_FOVY / 2);
+  });
+
+  test("zooming in is allowed to take the horizon off screen", () => {
+    // Deliberate: at maximum zoom the invariant above cannot hold at any useful
+    // pitch, and clamping pitch to preserve it would silently tilt the view down.
+    expect(DEFAULT_PITCH).toBeGreaterThan(MIN_FOVY / 2);
   });
 });

@@ -57,6 +57,15 @@ export const CAPTURE_RADIUS = 60;
  */
 const TAP_SLOP = 8;
 
+/**
+ * Zoom per unit of wheel delta, applied multiplicatively so that equal gestures
+ * feel like equal zoom rather than equal degrees.
+ */
+const WHEEL_ZOOM_RATE = 0.0015;
+
+/** Wheel deltas arrive in lines or pages on some browsers; normalise to pixels. */
+const WHEEL_DELTA_SCALE: Record<number, number> = { 1: 16, 2: 100 };
+
 /** How long to wait for the orientation sensor to say something before giving up. */
 const SENSOR_PROBE_MS = 1200;
 
@@ -82,6 +91,16 @@ export class SkyInteraction {
   #dragged = 0;
 
   #last = new Cartesian2();
+
+  /** Every pointer currently down, so a second one can become a pinch. */
+  #pointers = new Map<number, Cartesian2>();
+
+  /**
+   * Latched at the start of a pinch. The field of view is computed from these
+   * rather than from the previous move, because accumulating per-move ratios
+   * drifts over a long gesture.
+   */
+  #pinch: { startDistance: number; startFovy: number } | undefined;
 
   #targets: SkyTarget[] = [];
 
@@ -207,6 +226,8 @@ export class SkyInteraction {
     this.#canvas.addEventListener("pointermove", this.#onPointerMove);
     this.#canvas.addEventListener("pointerup", this.#onPointerUp);
     this.#canvas.addEventListener("pointercancel", this.#onPointerUp);
+    // Not passive: the wheel is the zoom, so the page must not also scroll.
+    this.#canvas.addEventListener("wheel", this.#onWheel, { passive: false });
     this.#removePreRender = scene.preRender.addEventListener((_scene: Scene, time: JulianDate) => this.#refresh(time));
   }
 
@@ -218,11 +239,14 @@ export class SkyInteraction {
     this.#canvas.removeEventListener("pointermove", this.#onPointerMove);
     this.#canvas.removeEventListener("pointerup", this.#onPointerUp);
     this.#canvas.removeEventListener("pointercancel", this.#onPointerUp);
+    this.#canvas.removeEventListener("wheel", this.#onWheel);
     this.#canvas = undefined;
     this.disableDeviceOrientation();
     this.#removePreRender?.();
     this.#removePreRender = undefined;
     this.#pointerId = undefined;
+    this.#pointers.clear();
+    this.#pinch = undefined;
     this.#targets = [];
     this.#setLocked(undefined);
   }
@@ -253,17 +277,70 @@ export class SkyInteraction {
     this.#options.onLockChange?.(target);
   }
 
-  #onPointerDown = (event: PointerEvent): void => {
-    if (this.#pointerId !== undefined) {
+  /** Zoom, about the crosshair. The aim is never touched: see the wheel handler. */
+  #zoomBy(factor: number): void {
+    const { skyView } = this.#options;
+    if (!skyView.active) {
       return;
     }
-    this.#pointerId = event.pointerId;
-    this.#dragged = 0;
-    this.#last = new Cartesian2(event.clientX, event.clientY);
+    skyView.fovy *= factor;
+  }
+
+  /**
+   * Zoom on the wheel, centred on the crosshair rather than the cursor.
+   *
+   * Zoom-to-cursor works by changing where the camera looks, and under device
+   * orientation the sensor overwrites the aim on the next reading, so the
+   * recentring would visibly snap back. Screen-centre is the only rule that
+   * behaves the same under a drag and under the sensor.
+   */
+  #onWheel = (event: WheelEvent): void => {
+    event.preventDefault();
+    const pixels = event.deltaY * (WHEEL_DELTA_SCALE[event.deltaMode] ?? 1);
+    // Scrolling down widens the field of view, which is zooming out.
+    this.#zoomBy(Math.exp(pixels * WHEEL_ZOOM_RATE));
+  };
+
+  #pinchDistance(): number | undefined {
+    const [first, second] = [...this.#pointers.values()];
+    return first && second ? Cartesian2.distance(first, second) : undefined;
+  }
+
+  #onPointerDown = (event: PointerEvent): void => {
+    this.#pointers.set(event.pointerId, new Cartesian2(event.clientX, event.clientY));
     this.#canvas?.setPointerCapture(event.pointerId);
+
+    if (this.#pointers.size === 2) {
+      // A second finger ends the drag and begins a pinch. A gesture is one or the
+      // other: letting the pair drag as well would pan the sky while zooming it,
+      // and zoom is meant to change the field of view and nothing else.
+      this.#pointerId = undefined;
+      this.#pinch = { startDistance: this.#pinchDistance() ?? 1, startFovy: this.#options.skyView.fovy };
+      return;
+    }
+    if (this.#pointers.size === 1) {
+      this.#pointerId = event.pointerId;
+      this.#dragged = 0;
+      this.#last = new Cartesian2(event.clientX, event.clientY);
+    }
   };
 
   #onPointerMove = (event: PointerEvent): void => {
+    if (!this.#pointers.has(event.pointerId)) {
+      return;
+    }
+    this.#pointers.set(event.pointerId, new Cartesian2(event.clientX, event.clientY));
+
+    if (this.#pinch) {
+      const distance = this.#pinchDistance();
+      if (distance !== undefined && distance > 0) {
+        // Fingers apart is zoom in, which is a narrower field of view. Twist is
+        // ignored: roll is only ever driven by the device sensor.
+        this.#options.skyView.fovy = (this.#pinch.startFovy * this.#pinch.startDistance) / distance;
+      }
+      return;
+    }
+
     if (event.pointerId !== this.#pointerId) {
       return;
     }
@@ -293,11 +370,33 @@ export class SkyInteraction {
   };
 
   #onPointerUp = (event: PointerEvent): void => {
+    const tracked = this.#pointers.delete(event.pointerId);
+    this.#canvas?.releasePointerCapture?.(event.pointerId);
+    if (!tracked) {
+      return;
+    }
+
+    if (this.#pinch) {
+      if (this.#pointers.size >= 2) {
+        return;
+      }
+      this.#pinch = undefined;
+      const [remaining] = [...this.#pointers.entries()];
+      if (remaining) {
+        // Re-seeded, not resumed: the surviving finger moved while it was pinching,
+        // and taking that as drag would swing the sky by however far it travelled.
+        // Past the tap slop on purpose — a gesture that pinched is not a tap.
+        this.#pointerId = remaining[0];
+        this.#last = remaining[1];
+        this.#dragged = TAP_SLOP + 1;
+      }
+      return;
+    }
+
     if (event.pointerId !== this.#pointerId) {
       return;
     }
     this.#pointerId = undefined;
-    this.#canvas?.releasePointerCapture?.(event.pointerId);
     if (this.#dragged > TAP_SLOP) {
       return;
     }
