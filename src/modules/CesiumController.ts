@@ -86,7 +86,11 @@ export class CesiumController {
 
     this.viewer = new Viewer("cesiumContainer", {
       animation: !this.minimalUI,
-      baseLayer: this.createImageryLayer("OfflineHighres"),
+      // No base layer here: the store's layer stack is the only default, and it
+      // arrives through sceneSync's immediate watcher a tick later. Naming one
+      // here as well meant two defaults that could drift, and it created the
+      // layer without the availability probe that watcher applies.
+      baseLayer: false,
       baseLayerPicker: false,
       fullscreenButton: !this.minimalUI,
       fullscreenElement: document.body,
@@ -191,6 +195,11 @@ export class CesiumController {
         this.viewer.scene.imageryLayers.add(layer);
       }
     });
+    // The stack now arrives asynchronously — the availability probe resolves
+    // after `requestRenderMode` is on — and a globe whose imagery changed
+    // between frames is not something Cesium's input handling can notice, so
+    // without this the new layer is never tiled and the globe stays blank.
+    this.viewer.scene.requestRender();
   }
 
   clearImageryLayers(): void {

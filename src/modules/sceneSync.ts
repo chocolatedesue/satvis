@@ -13,12 +13,16 @@
 import { JulianDate } from "@cesium/engine";
 import { nextTick, watch } from "vue";
 
+import { useToastProxy } from "../composables/useToastProxy";
+import { substituteUnavailable } from "../config/layers";
 import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import type { CesiumController } from "./CesiumController";
+import { layerAvailability } from "./CesiumLayerProviders";
 import type { DesiredScene } from "./SatelliteManager";
 import type { Observer } from "./SkyView";
+import { sameValue } from "./util/equality";
 import { currentPosition } from "./util/geolocation";
 import { toMinuteIso } from "./util/urlCodec";
 
@@ -30,12 +34,49 @@ export function startSceneSync(cc: CesiumController): void {
   const satStore = useSatStore();
 
   // --- globe settings -------------------------------------------------------
+
+  // Imagery backed by data that may be missing is swapped in the *store*, not
+  // silently substituted on its way to the scene, so the checkbox, the url and
+  // the pixels never disagree about which map is up. The swap re-enters this
+  // watcher, which then finds nothing left to substitute.
+  //
+  // Immediate, because the store is the only owner of the layer stack: the
+  // viewer is constructed with no base layer at all and the first stack arrives
+  // through here, probe included.
+  let layerGeneration = 0;
+
+  async function applyLayers(layers: readonly string[]): Promise<void> {
+    const generation = ++layerGeneration;
+    const substitution = await substituteUnavailable(layers, layerAvailability);
+    // A second layer change while the probe was in flight makes this stale.
+    if (generation !== layerGeneration) {
+      return;
+    }
+    if (substitution) {
+      for (const provider of substitution.replaced) {
+        console.warn(`Imagery "${provider}" is selected but its data is missing. Run \`git submodule update --init\` to fetch it.`);
+      }
+      useToastProxy().add({
+        title: `${substitution.replaced.join(", ")} imagery is unavailable`,
+        description: "Its data is missing, so a bundled layer is shown instead. Run `git submodule update --init` to fetch it.",
+        color: "warning",
+      });
+      cesiumStore.setLayers(substitution.layers);
+      // The store may keep the stack it already had — nothing would re-enter
+      // here then, and the globe would be left with no imagery at all.
+      if (!sameValue(cesiumStore.layers, layers)) {
+        return;
+      }
+    }
+    cc.imageryLayers = [...cesiumStore.layers];
+  }
+
   watch(
     () => cesiumStore.layers,
     (layers) => {
-      cc.imageryLayers = [...layers];
+      void applyLayers(layers);
     },
-    { deep: true },
+    { deep: true, immediate: true },
   );
   watch(
     () => cesiumStore.terrainProvider,

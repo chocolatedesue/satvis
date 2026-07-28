@@ -43,7 +43,7 @@ CI runs `lint`, then `test` (frontend + worker), then `build`.
 ## Key quirks
 
 - **Cesium static assets**: Vite copies Cesium engine assets from `node_modules/@cesium/engine` and `@cesium/widgets` into `dist/cesium/`. The global `CESIUM_BASE_URL` is defined as `"./cesium"` in `vite.config.ts`.
-- **Git submodules**: Required — `data/` content depends on them. Run `git submodule update --init` before first build.
+- **Git submodules**: Required — `data/` content depends on them. Run `git submodule update --init` before first build. **`git worktree add` does not populate them**, so a fresh worktree has an empty `data/cesium-assets` (high-resolution offline imagery) and `data/models` (3D models). Imagery covers for this: the `OfflineHighres` layer probes its `tilemapresource.xml` and, when it is missing, the selection is switched to the bundled `Offline` layer with a toast. The probe exists because Cesium cannot report the failure — `TileMapServiceImageryProvider.fromUrl` treats a missing `tilemapresource.xml` as "carry on with defaults" and resolves happily, then 404s every tile behind a blank globe. The 3D models have no such fallback yet.
 - **Build globals**: `__BUILD_DATE__` and `__BUILD_SHA__` are injected via `vite.config.ts` `define`.
 - **Path aliases**: `@/*` → `src/*` (in `tsconfig.json`).
 - **Formatting**: `oxfmt` (config in `.oxfmtrc.json`): `printWidth: 180`, `sortImports`, and `sortPackageJson` enabled.

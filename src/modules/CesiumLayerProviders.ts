@@ -12,10 +12,46 @@ import {
   WebMapServiceImageryProvider,
 } from "@cesium/engine";
 
+import type { LayerAvailability } from "../config/layers";
+
+// The high-resolution offline tiles live in the `data/cesium-assets` submodule,
+// which `git worktree add` does not populate — so in a fresh worktree they are
+// simply absent, while `Offline` (bundled with @cesium/engine, copied out of
+// node_modules) is always there.
+const HIGHRES_NATURAL_EARTH = "data/cesium-assets/imagery/NaturalEarthII";
+
+let highresProbe: Promise<boolean> | undefined;
+
+/**
+ * Whether the high-resolution offline tiles are actually present.
+ *
+ * Cesium cannot answer this: `TileMapServiceImageryProvider.fromUrl` treats a
+ * missing `tilemapresource.xml` as "carry on with defaults" and resolves
+ * happily, then requests thousands of tiles that 404 behind a blank globe.
+ *
+ * A `GET`, deliberately, and not a `HEAD`: the Cache API ignores requests whose
+ * method is not GET, so a HEAD would miss the service worker's tile cache and
+ * report the imagery missing to someone who is merely offline — which is the
+ * one situation an offline layer exists for. Cached, because the answer cannot
+ * change within a session and the layer stack is rebuilt on every change.
+ */
+function highresAvailable(): Promise<boolean> {
+  highresProbe ??= fetch(`${HIGHRES_NATURAL_EARTH}/tilemapresource.xml`)
+    .then((response) => response.ok)
+    .catch(() => false);
+  return highresProbe;
+}
+
 export interface ImageryProviderEntry {
   create: () => ImageryProvider | Promise<ImageryProvider>;
   alpha: number;
   base: boolean;
+  /**
+   * Present only where the tiles are data that may not be there. Absent means
+   * the provider is always usable — either it is remote, or `pnpm install`
+   * guarantees it.
+   */
+  availability?: LayerAvailability;
 }
 
 export interface TerrainProviderEntry {
@@ -31,12 +67,16 @@ export const imageryProviders: Record<string, ImageryProviderEntry> = {
   },
   OfflineHighres: {
     create: () =>
-      TileMapServiceImageryProvider.fromUrl("data/cesium-assets/imagery/NaturalEarthII", {
+      TileMapServiceImageryProvider.fromUrl(HIGHRES_NATURAL_EARTH, {
         maximumLevel: 5,
         credit: "Imagery courtesy Natural Earth",
       }),
     alpha: 1,
     base: true,
+    // Falls back to the bundled copy of the same map. They are not one layer:
+    // `Offline` is precached by the service worker and so is guaranteed with no
+    // network, while these tiles are only cached as they are viewed.
+    availability: { available: highresAvailable, fallback: "Offline" },
   },
   ArcGis: {
     create: () =>
@@ -148,6 +188,11 @@ export function overlayLayerNames(): string[] {
   return Object.entries(imageryProviders)
     .filter(([, entry]) => !entry.base)
     .map(([name]) => name);
+}
+
+/** How to check a provider's data is there, for the providers that can be missing. */
+export function layerAvailability(provider: string): LayerAvailability | undefined {
+  return imageryProviders[provider]?.availability;
 }
 
 /** Terrain providers a user may select. `ArcGIS` is registered but hidden. */
