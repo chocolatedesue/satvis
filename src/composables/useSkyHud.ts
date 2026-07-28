@@ -12,10 +12,12 @@
 // replaced wholesale each frame, which is cheap at this size and avoids making
 // every tick individually reactive.
 
-import { type Cartesian3, JulianDate, type Scene, SceneTransforms } from "@cesium/engine";
+import { type Cartesian3, Math as CesiumMath, JulianDate, type Scene, SceneTransforms } from "@cesium/engine";
 import { shallowRef, type ShallowRef } from "vue";
 
+import { normalizeAzimuth } from "../modules/skyGeometry";
 import { compassPoint, directionToWindow, lookAngles, type ObserverFrame, type SkyTarget } from "../modules/SkyTargets";
+import { fovxFromFovy } from "../modules/SkyView";
 
 /** A mark on one of the tapes, already placed in CSS pixels. */
 export interface TapeTick {
@@ -27,9 +29,36 @@ export interface TapeTick {
   major: boolean;
 }
 
-const COMPASS_STEP = 15;
-const COMPASS_LABEL_STEP = 45;
-const ELEVATION_STEP = 15;
+/**
+ * Tick spacings to choose from, coarsest first.
+ *
+ * Every rung divides 45, which is what lets a label rule as simple as "majors are
+ * multiples of three steps" always keep the compass points among the majors. And
+ * no rung is more than three times the next, which is what bounds the mark count:
+ * 3 exists only to break the 5-to-1 jump, without which a span of 15° would skip
+ * from three marks to fifteen.
+ *
+ * A fixed 15° step used to empty both tapes out when zoomed: at maximum zoom a
+ * portrait viewport spans about 4.6° of azimuth, so the nearest 15° mark was
+ * usually off screen and the tape showed nothing at all.
+ */
+const STEP_LADDER = [45, 15, 5, 3, 1];
+
+/**
+ * How many marks the span should hold before a finer step is chosen. Three keeps
+ * the step at 15° on a landscape desktop at the default zoom, which is what it has
+ * always been there, and holds the resulting count between about three and ten
+ * everywhere else. Four sounds better and is worse: the rungs are 3x apart, so
+ * asking for four marks at a span of 17° skips 5° and lands on 1°, which is
+ * seventeen of them.
+ */
+export const TICKS_WANTED = 3;
+
+/** The coarsest step that still populates the span. */
+export const stepFor = (spanDegrees: number): number => STEP_LADDER.find((step) => spanDegrees / step >= TICKS_WANTED) ?? 1;
+
+/** Majors carry the labels. At 45° every tick is a compass point, so all are. */
+export const majorStep = (step: number): number => (step === 45 ? 45 : step * 3);
 
 /**
  * Ticks closer together than this are thinned away. Thinning by screen distance
@@ -100,25 +129,47 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
       return;
     }
 
+    const { azimuth: viewAzimuth, pitch: viewPitch } = skyView.aim;
+    const { clientWidth, clientHeight } = scene.canvas;
+    const aspectRatio = clientHeight > 0 ? clientWidth / clientHeight : 1;
+    const verticalSpan = skyView.fovy;
+    const horizontalSpan = CesiumMath.toDegrees(fovxFromFovy(CesiumMath.toRadians(verticalSpan), aspectRatio));
+
+    const compassStep = stepFor(horizontalSpan);
+    const compassMajor = majorStep(compassStep);
     const compassTicks: TapeTick[] = [];
-    for (let azimuth = 0; azimuth < 360; azimuth += COMPASS_STEP) {
+    // Azimuths crowd together as the view rises — at the zenith every one of them
+    // is on screen at once — so the window has to widen by the same 1/cos(pitch)
+    // they compress by, up to the whole circle. Windowing at all is what keeps the
+    // work proportional to what is visible rather than to 360/step, which at
+    // maximum zoom would be 360 projections a frame.
+    const azimuthHalf = Math.min(180, (horizontalSpan / 2 + compassStep) / Math.max(Math.cos(CesiumMath.toRadians(viewPitch)), 1e-3));
+    const firstAzimuth = Math.ceil((viewAzimuth - azimuthHalf) / compassStep) * compassStep;
+    for (let azimuth = firstAzimuth; azimuth <= viewAzimuth + azimuthHalf; azimuth += compassStep) {
       const window = directionToWindow(scene, frame, azimuth, 0);
       if (!window) {
         continue;
       }
-      const major = azimuth % COMPASS_LABEL_STEP === 0;
-      compassTicks.push({ value: azimuth, offset: window.x, label: major ? compassPoint(azimuth) : undefined, major });
+      const value = normalizeAzimuth(azimuth);
+      const major = value % compassMajor === 0 || value % 45 === 0;
+      // Numeric where the tick is not a compass point: at a fine step the nearest
+      // cardinal is often off screen, and an unlabelled tape says nothing about
+      // which way the viewer is facing.
+      compassTicks.push({ value, offset: window.x, label: major ? (value % 45 === 0 ? compassPoint(value) : `${value}°`) : undefined, major });
     }
     compass.value = thin(compassTicks);
 
+    const elevationStep = stepFor(verticalSpan);
+    const elevationMajor = majorStep(elevationStep);
     const elevationTicks: TapeTick[] = [];
-    const { azimuth: viewAzimuth } = skyView.aim;
-    for (let angle = -90; angle <= 90; angle += ELEVATION_STEP) {
+    const elevationHalf = verticalSpan / 2 + elevationStep;
+    const firstElevation = Math.max(-90, Math.ceil((viewPitch - elevationHalf) / elevationStep) * elevationStep);
+    for (let angle = firstElevation; angle <= Math.min(90, viewPitch + elevationHalf); angle += elevationStep) {
       const window = directionToWindow(scene, frame, viewAzimuth, angle);
       if (!window) {
         continue;
       }
-      elevationTicks.push({ value: angle, offset: window.y, label: `${angle}°`, major: angle % 30 === 0 });
+      elevationTicks.push({ value: angle, offset: window.y, label: `${angle}°`, major: angle % elevationMajor === 0 });
     }
     elevation.value = thin(elevationTicks);
 

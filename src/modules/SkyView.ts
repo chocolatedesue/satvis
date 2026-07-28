@@ -94,6 +94,20 @@ export function skyBasis(aim: Aim): Basis {
 }
 
 /**
+ * The horizontal angle the view actually spans, at any aspect ratio.
+ *
+ * Distinct from `fovFromFovy` below, which answers the narrower question of what
+ * to hand Cesium: on a portrait viewport Cesium's `fov` *is* the vertical angle,
+ * so it is not the horizontal span and cannot be used as one.
+ */
+export function fovxFromFovy(fovyRadians: number, aspectRatio: number): number {
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) {
+    return fovyRadians;
+  }
+  return 2 * Math.atan(Math.tan(fovyRadians * 0.5) * aspectRatio);
+}
+
+/**
  * Cesium's `fov` is the horizontal angle on a landscape viewport and the
  * vertical one otherwise, so it means different things on a phone held two
  * ways. Everything here is specified vertically; this converts.
@@ -102,7 +116,7 @@ export function fovFromFovy(fovyRadians: number, aspectRatio: number): number {
   if (!Number.isFinite(aspectRatio) || aspectRatio <= 1) {
     return fovyRadians;
   }
-  return 2 * Math.atan(Math.tan(fovyRadians * 0.5) * aspectRatio);
+  return fovxFromFovy(fovyRadians, aspectRatio);
 }
 
 interface SavedState {
