@@ -1,7 +1,7 @@
 import { Cartesian3, Math as CesiumMath, Matrix3 } from "@cesium/engine";
 import { describe, expect, test } from "vitest";
 
-import { aimFromDeviceOrientation, CompassCalibration, compassIsMeaningful, compassYawOffset, type DeviceOrientationSample, normalizeAzimuth } from "./DeviceAim";
+import { aimFromDeviceOrientation, CompassCalibration, compassIsMeaningful, compassYawOffset, type DeviceOrientationSample, hasHeadingSource, normalizeAzimuth } from "./DeviceAim";
 import { skyBasis } from "./SkyView";
 
 const sample = (alpha: number, beta: number, gamma: number, screenAngle = 0): DeviceOrientationSample => ({ alpha, beta, gamma, screenAngle });
@@ -144,38 +144,57 @@ describe("CompassCalibration", () => {
 
   test("refuses to calibrate from a posture that cannot support it", () => {
     const calibration = new CompassCalibration();
-    calibration.update(sample(0, 90, 0), 90);
+    calibration.update(sample(0, 90, 0), { compassHeading: 90 });
     expect(calibration.calibrated).toBe(false);
   });
 
   test("calibrates from a flat posture and then holds through the tilt", () => {
     const calibration = new CompassCalibration();
-    calibration.update(sample(10, 0, 0), 40);
+    calibration.update(sample(10, 0, 0), { compassHeading: 40 });
     expect(calibration.calibrated).toBe(true);
     const afterFlat = calibration.correct({ azimuth: 10, pitch: 0, roll: 0 }).azimuth;
 
     // Tilting up must not move the offset, even with a wildly different heading.
-    calibration.update(sample(10, 140, 0), 300);
+    calibration.update(sample(10, 140, 0), { compassHeading: 300 });
     expect(calibration.correct({ azimuth: 10, pitch: 50, roll: 0 }).azimuth).toBeCloseTo(afterFlat, 9);
   });
 
   test("ignores a device with no compass at all", () => {
     const calibration = new CompassCalibration();
-    calibration.update(sample(0, 0, 0), undefined);
+    calibration.update(sample(0, 0, 0), {});
     expect(calibration.calibrated).toBe(false);
   });
 
-  test("applies the manual trim whether calibrated or not", () => {
+  test("an absolute reading calibrates at any posture and corrects by nothing", () => {
     const calibration = new CompassCalibration();
-    calibration.trim = 12;
-    expect(calibration.correct({ azimuth: 100, pitch: 0, roll: 0 }).azimuth).toBeCloseTo(112, 9);
-    calibration.update(sample(0, 0, 0), 0);
-    expect(calibration.correct({ azimuth: 100, pitch: 0, roll: 0 }).azimuth).toBeCloseTo(112, 9);
+    // Screen pointed at the zenith, where iOS's heading would be meaningless.
+    calibration.update(sample(37, 90, 0), { absolute: true });
+    expect(calibration.calibrated).toBe(true);
+    expect(calibration.correct({ azimuth: 123, pitch: 60, roll: 0 }).azimuth).toBeCloseTo(123, 9);
+  });
+
+  test("an absolute reading wins over a heading measured in the same event", () => {
+    const calibration = new CompassCalibration();
+    calibration.update(sample(10, 0, 0), { compassHeading: 40, absolute: true });
+    expect(calibration.correct({ azimuth: 10, pitch: 0, roll: 0 }).azimuth).toBeCloseTo(10, 9);
   });
 
   test("wraps rather than running past a full turn", () => {
     const calibration = new CompassCalibration();
-    calibration.trim = 300;
+    // alpha 0 with the phone flat facing 60° puts the offset at 300.
+    calibration.update(sample(0, 0, 0), { compassHeading: 60 });
     expect(calibration.correct({ azimuth: 100, pitch: 0, roll: 0 }).azimuth).toBeCloseTo(40, 9);
+  });
+});
+
+describe("hasHeadingSource", () => {
+  test("a bare relative reading cannot establish north", () => {
+    expect(hasHeadingSource({})).toBe(false);
+    expect(hasHeadingSource({ absolute: false })).toBe(false);
+  });
+
+  test("either source will do", () => {
+    expect(hasHeadingSource({ compassHeading: 0 })).toBe(true);
+    expect(hasHeadingSource({ absolute: true })).toBe(true);
   });
 });

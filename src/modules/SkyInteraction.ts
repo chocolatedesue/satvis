@@ -11,7 +11,7 @@
 
 import { Cartesian2, type JulianDate, type Scene } from "@cesium/engine";
 
-import { aimFromDeviceOrientation, CompassCalibration } from "./DeviceAim";
+import { aimFromDeviceOrientation, CompassCalibration, hasHeadingSource } from "./DeviceAim";
 import type { SatelliteManager } from "./SatelliteManager";
 import { nearestTarget, type SkyTarget, skyTargets } from "./SkyTargets";
 import type { SkyView } from "./SkyView";
@@ -26,6 +26,27 @@ interface DeviceOrientationPermission {
 interface CompassEvent extends DeviceOrientationEvent {
   webkitCompassHeading?: number;
 }
+
+/**
+ * What came of handing the aim to the device.
+ *
+ * More than a boolean because the reasons need different words in front of the
+ * user: a laptop has no sensor to grant, a phone whose permission was declined
+ * can be asked again, and a device that reports orientation without a magnetometer
+ * can aim relatively but has no idea where north is. The last one is refused
+ * rather than accepted — see docs/adr/0004-compass-aiming.md.
+ */
+export type CompassOutcome =
+  /** Aiming, and north is known. */
+  | "aiming"
+  /** Aiming, but north waits on the phone being held flat once. */
+  | "aiming-uncalibrated"
+  | "unsupported"
+  | "denied"
+  /** The event exists and was granted, but never fired. Desktop browsers do this. */
+  | "silent"
+  /** Orientation works, but nothing on this device can say where north is. */
+  | "no-heading";
 
 /** How far the crosshair reaches, in CSS pixels. */
 export const CAPTURE_RADIUS = 60;
@@ -72,6 +93,8 @@ export class SkyInteraction {
 
   #sawOrientation = false;
 
+  #sawHeadingSource = false;
+
   constructor(options: SkyInteractionOptions) {
     this.#options = options;
   }
@@ -86,27 +109,32 @@ export class SkyInteraction {
    *
    * Must be called from a user gesture: iOS gates the sensor behind a
    * permission prompt that only a gesture may raise, and only in a secure
-   * context. Returns false when the sensor is unavailable or refused, leaving
-   * dragging in place.
+   * context. Anything other than an "aiming" outcome leaves dragging in place.
+   *
+   * Both event names are subscribed. `deviceorientationabsolute` is Chrome's
+   * earth-referenced variant and the only source of north on Android;
+   * `deviceorientation` carries `webkitCompassHeading` on iOS and nothing useful
+   * for north elsewhere. Whichever fires, the samples are the same shape.
    */
-  async enableDeviceOrientation(): Promise<boolean> {
+  async enableDeviceOrientation(): Promise<CompassOutcome> {
     if (this.#orientationActive) {
-      return true;
+      return this.compass.calibrated ? "aiming" : "aiming-uncalibrated";
     }
     if (typeof DeviceOrientationEvent === "undefined") {
-      return false;
+      return "unsupported";
     }
     const gate = DeviceOrientationEvent as unknown as DeviceOrientationPermission;
     if (typeof gate.requestPermission === "function") {
       try {
         if ((await gate.requestPermission()) !== "granted") {
-          return false;
+          return "denied";
         }
       } catch {
         // Thrown when called outside a gesture, which is a refusal too.
-        return false;
+        return "denied";
       }
     }
+    window.addEventListener("deviceorientationabsolute", this.#onDeviceOrientation);
     window.addEventListener("deviceorientation", this.#onDeviceOrientation);
     this.#orientationActive = true;
 
@@ -114,18 +142,27 @@ export class SkyInteraction {
     // it. Taking that as success would hand the aim to a sensor that does not
     // exist and silently freeze the view, so the sensor has to prove itself.
     this.#sawOrientation = false;
+    this.#sawHeadingSource = false;
     await new Promise((resolve) => setTimeout(resolve, SENSOR_PROBE_MS));
     if (!this.#sawOrientation) {
       this.disableDeviceOrientation();
-      return false;
+      return "silent";
     }
-    return true;
+    // Orientation without any way to find north would aim at an azimuth measured
+    // from wherever the device happened to be, which looks like a working sky and
+    // is not one.
+    if (!this.#sawHeadingSource) {
+      this.disableDeviceOrientation();
+      return "no-heading";
+    }
+    return this.compass.calibrated ? "aiming" : "aiming-uncalibrated";
   }
 
   disableDeviceOrientation(): void {
     if (!this.#orientationActive) {
       return;
     }
+    window.removeEventListener("deviceorientationabsolute", this.#onDeviceOrientation);
     window.removeEventListener("deviceorientation", this.#onDeviceOrientation);
     this.#orientationActive = false;
   }
@@ -137,9 +174,17 @@ export class SkyInteraction {
     }
     this.#sawOrientation = true;
     const sample = { alpha, beta, gamma, screenAngle: screen.orientation?.angle ?? 0 };
-    // The compass is a yaw offset about world up, refreshed only from postures
+    // `absolute` is only trusted from the absolute event: `deviceorientation` sets
+    // it too, and sets it false, which would otherwise be read as a statement
+    // about iOS's heading rather than about this event's own alpha.
+    const reading = {
+      compassHeading: (event as CompassEvent).webkitCompassHeading,
+      absolute: event.type === "deviceorientationabsolute" && event.absolute,
+    };
+    this.#sawHeadingSource ||= hasHeadingSource(reading);
+    // The compass is a yaw offset about world up, refreshed only from readings
     // that justify it, never folded into alpha — see DeviceAim.
-    this.compass.update(sample, (event as CompassEvent).webkitCompassHeading);
+    this.compass.update(sample, reading);
     this.#options.skyView.look(this.compass.correct(aimFromDeviceOrientation(sample)));
   };
 

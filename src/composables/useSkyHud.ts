@@ -52,6 +52,12 @@ export interface SkyHudState {
   locked: ShallowRef<SkyTarget | undefined>;
   /** An SVG path for the locked satellite's track, or "" when there is none. */
   trace: ShallowRef<string>;
+  /**
+   * Whether the compass knows where north is. Read here rather than pushed,
+   * because it latches inside the sensor callback — and this is already the
+   * per-frame read of sky state.
+   */
+  calibrated: ShallowRef<boolean>;
 }
 
 /**
@@ -76,6 +82,7 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
   const elevation = shallowRef<TapeTick[]>([]);
   const locked = shallowRef<SkyTarget | undefined>(undefined);
   const trace = shallowRef("");
+  const calibrated = shallowRef(false);
 
   let removePreRender: (() => void) | undefined;
   let sampledAt = 0;
@@ -116,6 +123,7 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
     elevation.value = thin(elevationTicks);
 
     locked.value = skyInteraction.locked;
+    calibrated.value = skyInteraction.compass.calibrated;
     sampleTrace(time);
     trace.value = projectTrace(scene, frame);
   }
@@ -175,6 +183,7 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
     elevation,
     locked,
     trace,
+    calibrated,
     start(): void {
       if (removePreRender) {
         return;
@@ -188,6 +197,7 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
       elevation.value = [];
       locked.value = undefined;
       trace.value = "";
+      calibrated.value = false;
     },
   };
 }

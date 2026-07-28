@@ -119,6 +119,15 @@
           <span class="slider"></span>
           {{ name }}
         </label>
+        <!-- Only in the sky view, which is the only place an aim exists to hand
+             over, and only where the sensor could work at all. -->
+        <template v-if="inSkyView && compassOffered">
+          <div class="toolbarTitle">Aiming</div>
+          <label class="toolbarSwitch">
+            <input type="button" @click="useCompass" />
+            {{ compassActive ? "Stop using compass" : "Use compass" }}
+          </label>
+        </template>
       </div>
       <div v-show="menu.ios" class="toolbarSwitches">
         <div class="toolbarTitle">Mobile</div>
@@ -215,6 +224,8 @@
 import { storeToRefs } from "pinia";
 import { computed, onMounted, reactive, ref } from "vue";
 
+import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
+import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
@@ -250,6 +261,21 @@ const layerSelection = computed({
 
 const satStore = useSatStore();
 const { enabledComponents, overpassMode } = storeToRefs(satStore);
+
+// Handing the aim to the device is an action with an outcome, not a setting, so
+// it is a button rather than a switch — and enabling must happen inside the click
+// to satisfy iOS's user-gesture requirement for the permission prompt.
+const compassOffered = compassAvailable();
+const { active: compassActive, toggle: toggleCompass } = useSkyCompass();
+const inSkyView = computed(() => sceneMode.value === SKY_MODE);
+
+async function useCompass(): Promise<void> {
+  await toggleCompass();
+  // The panel covers the sky it was just asked to aim at.
+  if (compassActive.value) {
+    menu.view = false;
+  }
+}
 
 onMounted(() => {
   showUI.value = !DeviceDetect.inIframe();

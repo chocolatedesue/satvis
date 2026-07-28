@@ -39,17 +39,10 @@
       </svg>
     </div>
 
-    <!-- The only part of the HUD that takes pointer events. Kept narrow so the
-         canvas underneath still receives drags everywhere else. -->
-    <div v-if="orientationAvailable" class="sky-hud__compass">
-      <button type="button" @click="toggleOrientation">{{ orientationActive ? "Compass on" : "Use compass" }}</button>
-      <label v-if="orientationActive">
-        Trim
-        <input v-model.number="trim" type="range" min="-180" max="180" step="1" />
-        <span>{{ trim > 0 ? `+${trim}` : trim }}°</span>
-      </label>
-      <div v-if="orientationActive && !calibrated" class="sky-hud__warn">Hold the phone flat to set north, or trim by hand</div>
-    </div>
+    <!-- North is not known until the phone has been flat once, and until then the
+         sky is aimed from an arbitrary zero. The toast that says so on enabling is
+         dismissable; this is not, and it goes the instant calibration latches. -->
+    <div v-if="compassActive && !calibrated" class="sky-hud__warn">Hold the phone flat to set north</div>
 
     <div v-if="locked" class="sky-hud__card">
       <div class="sky-hud__name">{{ locked.name }}</div>
@@ -66,8 +59,9 @@
 
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
-import { computed, onUnmounted, ref, watch } from "vue";
+import { computed, onUnmounted, watch } from "vue";
 
+import { useSkyCompass } from "../composables/useSkyCompass";
 import { useSkyHud, type TapeTick } from "../composables/useSkyHud";
 import { SKY_MODE } from "../config/viewModes";
 import { compassPoint } from "../modules/SkyTargets";
@@ -80,7 +74,8 @@ const COMPASS_Y = 46;
 const ELEVATION_X = 8;
 const TAPE_LENGTH = 12;
 
-const { compass, elevation, locked, trace, start, stop } = useSkyHud();
+const { compass, elevation, locked, trace, calibrated, start, stop } = useSkyHud();
+const { active: compassActive, stopped: compassStopped } = useSkyCompass();
 
 const { sceneMode } = storeToRefs(useCesiumStore());
 const visible = computed(() => sceneMode.value === SKY_MODE);
@@ -100,48 +95,35 @@ const facts = computed<[string, string][]>(() => {
 
 const tickClass = (tick: TapeTick): string => (tick.major ? "sky-hud__tick sky-hud__tick--major" : "sky-hud__tick");
 
-// Device orientation needs a secure context, so the control is only offered
-// where the sensor could actually work — see docs/adr/0003-sky-view.md and the
-// note in DeviceAim about what remains unverified on hardware.
-const orientationAvailable = typeof DeviceOrientationEvent !== "undefined" && window.isSecureContext;
-const orientationActive = ref(false);
-const calibrated = ref(false);
-const trim = ref(0);
-
-async function toggleOrientation(): Promise<void> {
-  const { skyInteraction } = globalThis.cc;
-  if (orientationActive.value) {
-    skyInteraction.disableDeviceOrientation();
-    orientationActive.value = false;
-    return;
-  }
-  orientationActive.value = await skyInteraction.enableDeviceOrientation();
-}
-
-watch(trim, (degrees) => {
-  globalThis.cc.skyInteraction.compass.trim = degrees;
-});
-
-// The calibration latches inside the sensor callback, so the flag is polled
-// rather than pushed; once north is known it never goes back to unknown.
-watch(locked, () => {
-  if (orientationActive.value && !calibrated.value) {
-    calibrated.value = globalThis.cc.skyInteraction.compass.calibrated;
-  }
-});
-
-watch(visible, (on) => (on ? start() : stop()), { immediate: true });
+watch(
+  visible,
+  (on) => {
+    if (on) {
+      start();
+      return;
+    }
+    stop();
+    // Leaving the view stops the interaction, which drops the sensor subscription
+    // with it, so the control must not go on claiming the compass is aiming.
+    globalThis.cc.skyInteraction.disableDeviceOrientation();
+    compassStopped();
+  },
+  { immediate: true },
+);
 onUnmounted(() => {
   stop();
   globalThis.cc.skyInteraction.disableDeviceOrientation();
+  compassStopped();
 });
 </script>
 
 <style scoped>
-/* z-4 with no pointer events anywhere: Cesium's clock, timeline and credits sit
-   in a sibling container before #app, and #app isolates its stacking context, so
-   nothing here can ever be raised above them — a surface that swallowed clicks
-   would have no z-index fix. Look-around listens on the Cesium canvas instead. */
+/* z-4 with no pointer events anywhere, and nothing interactive left inside it
+   now the compass control has moved to the View menu: Cesium's clock, timeline
+   and credits sit in a sibling container before #app, and #app isolates its
+   stacking context, so nothing here can ever be raised above them — a surface
+   that swallowed clicks would have no z-index fix. Look-around listens on the
+   Cesium canvas instead. */
 .sky-hud {
   position: absolute;
   inset: 0;
@@ -229,38 +211,16 @@ onUnmounted(() => {
   opacity: 1;
 }
 
-.sky-hud__compass {
+.sky-hud__warn {
   position: absolute;
   right: 8px;
   bottom: 64px;
-  pointer-events: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  padding: 8px;
+  max-width: 200px;
+  padding: 6px 8px;
   border-radius: 8px;
   background-color: #303336d9;
   font-size: 12px;
-}
-
-.sky-hud__compass button {
-  cursor: pointer;
-  border-radius: 6px;
-  background-color: #4b5563;
-  padding: 3px 8px;
-}
-
-.sky-hud__compass label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sky-hud__warn {
-  max-width: 200px;
   text-align: right;
-  opacity: 0.75;
 }
 
 .sky-hud__card {
