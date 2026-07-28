@@ -20,6 +20,7 @@ import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
 import { usePostHog } from "../composables/usePostHog";
+import { useToastProxy } from "../composables/useToastProxy";
 import { parseLayer } from "../config/layers";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
@@ -38,6 +39,7 @@ import { SkyInteraction } from "./SkyInteraction";
 import { SkyView } from "./SkyView";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
+import { currentPosition } from "./util/geolocation";
 import { PushManager } from "./util/PushManager";
 
 dayjs.extend(utc);
@@ -394,14 +396,22 @@ export class CesiumController {
     useCesiumStore().pickMode = false;
   }
 
-  setGroundStationFromGeolocation(): void {
-    navigator.geolocation.getCurrentPosition((position) => {
-      if (typeof position === "undefined") {
-        return;
-      }
-      const { latitude, longitude } = position.coords;
-      this.addGroundStation(latitude, longitude, "Geolocation");
-    });
+  /**
+   * Through `currentPosition` rather than `navigator.geolocation` directly: this
+   * used to pass no error callback at all, so a declined permission left the
+   * button doing nothing, silently and forever.
+   */
+  async setGroundStationFromGeolocation(): Promise<void> {
+    const fix = await currentPosition();
+    if (!fix) {
+      useToastProxy().add({
+        title: "Location unavailable",
+        description: "No position came back. Check this site's location permission, and note that geolocation needs a secure context.",
+        color: "warning",
+      });
+      return;
+    }
+    this.addGroundStation(fix.lat, fix.lon, "Geolocation");
   }
 
   setGroundStationFromLatLon(lat: number, lon: number): void {

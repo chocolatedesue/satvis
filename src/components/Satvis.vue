@@ -64,7 +64,7 @@
           Pick on globe
         </label>
         <label class="toolbarSwitch">
-          <input type="button" @click="cc.setGroundStationFromGeolocation()" />
+          <input type="button" @click="void cc.setGroundStationFromGeolocation()" />
           Set from geolocation
         </label>
         <label class="toolbarSwitch">
