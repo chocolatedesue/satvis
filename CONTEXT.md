@@ -73,7 +73,15 @@ discussion; sharpen them here when they drift.
 - **Aim**: which way the sky view is pointing — azimuth, pitch above the
   horizontal, and roll about the view axis. Pitch, not elevation: the two are
   equal whenever the camera is looking at something, but a camera has an
-  attitude where a satellite has a position.
+  attitude where a satellite has a position. Roll is only ever driven by the
+  device's own orientation; nothing the user does with a pointer rolls the view.
+- **Field of view**: how much sky the view shows, held as the vertical angle
+  because that is the one a phone's two orientations agree on. Zoom is a change
+  to it and to nothing else: the aim does not move when the view zooms.
+- **Heading reference**: where the device's idea of north comes from when the
+  sky view aims by compass. Without one an orientation sensor gives a yaw from an
+  arbitrary zero, so the sky view declines to aim by compass rather than aim at a
+  bearing nobody measured (`docs/adr/0004-compass-aiming.md`).
 - **Lock**: the satellite the crosshair currently holds — the nearest one above
   the horizon within the crosshair's reach. What a tap acts on, and what the
   detail card and the on-sky track describe.
@@ -90,6 +98,10 @@ discussion; sharpen them here when they drift.
 - **GP source**: where the frontend gets GP data — the worker API when the
   probe succeeds, the static `data/gp/` snapshot otherwise, with a
   per-request API→static fallback mid-session (`src/modules/util/gpSource.ts`).
+- **Offline imagery**: the basemap that ships inside the app and is precached, so
+  it is the only one guaranteed with no network. The high-resolution copy of the
+  same map is data shipped beside the app and cached only as it is viewed: same
+  map, different promise, which is why they are two selectable layers and not one.
 - **Preset**: the per-route starting configuration — a title, the element sets
   to register, and the default value of each shared setting. A preset supplies
   defaults, not initial state: the URL carries only deviations from the

@@ -92,8 +92,20 @@ overlay registers with a camera image — so the vertical angle is what is store
 Cesium's `fov` is derived from the live aspect ratio and recomputed when it changes.
 
 Defaults are `fovy = 75°` and `pitch = 30°`, the same on every device, and the
-guarantee they exist to provide is the invariant **`pitch < fovy/2`** — which is why
+guarantee they exist to provide is **`pitch < fovy/2`** **on entry** — which is why
 there are no per-orientation numbers and no pixel arithmetic to go stale.
+
+That is a statement about the defaults and not a standing invariant. Wheel and pinch
+now move `fovy` within 10–90°, and zooming in on something high in the sky is
+_supposed_ to take the horizon off screen; clamping pitch to preserve the inequality
+would silently tilt the view down as the user zoomed. The range is clamped in the
+`fovy` setter rather than at each gesture, because it is a property of the view and
+not of the input that moved it.
+
+Zoom changes the field of view and nothing else — no zoom-to-cursor. Recentring works
+by moving the aim, and under device-orientation aiming the sensor overwrites the aim
+on its next reading, so the recentring would visibly snap back; screen-centre is the
+only rule that behaves identically under a drag and under the sensor.
 
 ## Consequences
 
@@ -109,6 +121,10 @@ there are no per-orientation numbers and no pixel arithmetic to go stale.
   pixels, so a pick-based crosshair would silently change reach by 3× with the
   quality preset. Occlusion becomes an explicit horizon test, shared with the orbit
   trace, which needs it anyway.
+- **The capture radius stays in CSS pixels**, so its angular reach falls out of the
+  zoom: ±5.3° at the default on an 844px-tall phone, ±0.71° at maximum zoom. That
+  is deliberate — zooming in _is_ the mechanism for choosing between two satellites
+  that share the reticle, which a radius pinned in degrees would defeat.
 - **The ground stays opaque.** The alternative was a translucent globe, which would
   show a camera feed through the earth — but it would also leak the satellites the
   earth is supposed to be hiding, and correct occlusion is worth more than seeing
