@@ -46,11 +46,73 @@ cc.sats.activeSatellites[0].defaultEntity`.
 Note that `minimalUI` (in an iframe, or on iOS) removes the clock and timeline
 entirely, so on those platforms the check covers only the controls that exist.
 
+Since the compass control moved to the View menu the HUD holds nothing interactive
+at all, which makes the arrangement above easier to keep rather than harder.
+
+## Sky view: the zoom gestures
+
+**Why it cannot be a unit test.** The clamp and the curve are unit-tested; what is
+not is that a wheel or a pinch reaches the handler and moves only the field of view.
+That needs real event dispatch against a live canvas.
+
+**Procedure.** Open `?scene=Sky&gs=48.1400,11.5800`, then dispatch synthetic
+`WheelEvent`s and `PointerEvent`s at `cc.viewer.scene.canvas`, reading
+`cc.skyView.fovy` and `cc.skyView.aim` between them. Two fingers 100px apart
+widening to 200px should halve the field of view; the aim must be identical before
+and after.
+
+**Result, 2026-07-28, Chrome.** Wheel: 75° → 55.561° → 41.161° on equal notches
+(constant ratio, i.e. multiplicative), and −200/−200/+400 returns to exactly 75°.
+Clamps at 10° and 90°. A `deltaMode: 1` line delta of −3 steps 75° → 69.79°, so
+Firefox-style deltas are not a no-op. Pinch: 60° → 30° at 2× separation and → 20°
+at 3×, computed from the gesture start rather than accumulated. The aim was
+byte-identical across every wheel notch and through the whole pinch, and a drag
+after the second finger lifted moved the aim without a jump.
+
+Note that a hidden browser tab reports `clientWidth/clientHeight` of 0 and never
+fires `requestAnimationFrame`, so Cesium's render loop stalls and the globe stays
+blank — drive `scene.render()` by hand when checking anything visual this way. A
+hidden tab also will not restyle a pseudo-element for a `checked` property set from
+script, so a switch's slider colour cannot be read that way; check the `checked`
+property instead, or take a screenshot, which fronts the pane.
+
+## Sky view: the compass tape holds its scale
+
+**Why it cannot be a unit test.** `headingOffset` is unit-tested against a
+from-scratch projection, including the `1/cos(pitch)` divergence it exists to avoid.
+What that cannot show is the tape staying legible while a live view is dragged
+upward.
+
+**Procedure.** Open `?scene=Sky&gs=48.1400,11.5800`, then step
+`cc.skyView.look({ pitch })` through 0, 30, 60 and 85 and read the tick offsets out
+of the HUD, checking the spacing between adjacent ticks does not change.
+
+**Result, 2026-07-29, Chrome.** Spacing constant at every pitch, and the tape keeps
+its marks pointing at the zenith. Before the change, 15° of azimuth spanned 147 px at
+eye level and 1691 px at 85° of pitch, and the visible window collapsed from ±15° to
+nothing.
+
+## Layers: the offline imagery fallback
+
+**Procedure.** Move `data/cesium-assets/imagery/NaturalEarthII/tilemapresource.xml`
+aside to simulate an unpopulated submodule, reload, then put it back.
+
+**Result, 2026-07-28, Chrome.** The base layer became
+`/cesium/Assets/Textures/NaturalEarthII/...` (the bundled set), the url was rewritten
+to `?layers=Offline`, and the console carried the warning naming
+`git submodule update --init`. With the file present the high-resolution provider is
+used and the globe tiles normally.
+
 ## Sky view: what a device is still needed for
 
 Open questions 1 and 2 in `docs/adr/0003-sky-view.md` need a real phone on HTTPS —
 `getUserMedia` and `DeviceOrientationEvent.requestPermission` both demand a secure
 context, so `pnpm dev:host` over a LAN address cannot exercise them. Use a tunnel
-or a preview deploy. Camera passthrough is not implemented. Device orientation is,
-with tests covering the geometry, but the sign of the screen-orientation
-correction and the behaviour of iOS's `webkitCompassHeading` are unconfirmed.
+or a preview deploy. Camera passthrough is not implemented.
+
+Device orientation **is verified on iOS**: the sign of the screen-orientation
+correction and the `360 - webkitCompassHeading` substitution are both right, and the
+sky lines up with what the phone is pointed at with no manual trim. What remains
+unverified is the Android path — `deviceorientationabsolute` — which is written
+against the specification only. See `docs/adr/0004-compass-aiming.md` for why an
+untested heading source is required to either work or decline.

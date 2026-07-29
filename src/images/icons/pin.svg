@@ -1,0 +1,24 @@
+<!--
+  The ground station marker. Lucide's `map-pin` geometry, so the billboard on the
+  globe and the toolbar button that configures it are visibly the same object.
+
+  `width` and `height` are explicit and must stay that way: Cesium loads billboard
+  images through an `Image` and draws them into a texture atlas via canvas, and an
+  svg carrying only a `viewBox` has no intrinsic size to allocate — which is how
+  the previous dish icon turned into an intermittent black box.
+
+  Filled rather than stroked, because it is drawn at ~20 px over imagery that is
+  bright in places and dark in others: the dark outline is what keeps it legible
+  over snow and desert, and the white body keeps it legible over ocean.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24">
+  <path
+    d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"
+    fill="#f8fafc"
+    stroke="#0f172a"
+    stroke-width="1.75"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle cx="12" cy="10" r="3.1" fill="#0f172a" />
+</svg>

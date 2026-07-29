@@ -29,7 +29,7 @@
       >
         <template v-if="searchQuery" #trailing>
           <button type="button" class="browser-search-clear" aria-label="Clear search" @click="clearSearch">
-            <UIcon name="fa6-solid:xmark" />
+            <UIcon name="lucide:x" />
           </button>
         </template>
       </UInput>

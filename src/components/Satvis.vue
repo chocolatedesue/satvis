@@ -4,32 +4,37 @@
       <div class="toolbarButtons">
         <UTooltip text="Satellite selection">
           <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('cat')">
-            <i class="icon svg-sat"></i>
+            <UIcon name="lucide:satellite" />
           </button>
         </UTooltip>
-        <UTooltip text="Satellite elements">
+        <UTooltip text="Satellite components">
           <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('sat')">
-            <UIcon name="fa6-solid:layer-group" />
+            <UIcon name="lucide:orbit" />
           </button>
         </UTooltip>
         <UTooltip text="Ground station">
           <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('gs')">
-            <i class="icon svg-groundstation"></i>
+            <UIcon name="lucide:map-pin" />
           </button>
         </UTooltip>
         <UTooltip text="Map">
           <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('map')">
-            <UIcon name="fa6-solid:earth-africa" />
+            <UIcon name="lucide:layers" />
+          </button>
+        </UTooltip>
+        <UTooltip text="View">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('view')">
+            <UIcon name="lucide:telescope" />
           </button>
         </UTooltip>
         <UTooltip v-if="cc.minimalUI" text="Mobile">
           <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('ios')">
-            <UIcon name="fa6-solid:mobile-screen-button" />
+            <UIcon name="lucide:smartphone" />
           </button>
         </UTooltip>
         <UTooltip text="Debug">
           <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('dbg')">
-            <UIcon name="fa6-solid:hammer" />
+            <UIcon name="lucide:hammer" />
           </button>
         </UTooltip>
       </div>
@@ -43,7 +48,9 @@
         <satellite-browser />
       </div>
       <div v-show="menu.sat" class="toolbarSwitches">
-        <div class="toolbarTitle">Satellite elements</div>
+        <!-- "Components", not "elements": an element set is the GP data a
+             satellite is built from, and this panel is about what is drawn. -->
+        <div class="toolbarTitle">Satellite components</div>
         <label v-for="componentName in cc.sats.availableComponents" :key="componentName" class="toolbarSwitch">
           <input v-model="enabledComponents" type="checkbox" :value="componentName" />
           <span class="slider"></span>
@@ -64,7 +71,8 @@
           Pick on globe
         </label>
         <label class="toolbarSwitch">
-          <input type="button" @click="cc.setGroundStationFromGeolocation()" />
+          <input type="button" :disabled="locating" @click="void locate()" />
+          <span v-if="locating" class="toolbarSpinner"></span>
           Set from geolocation
         </label>
         <label class="toolbarSwitch">
@@ -96,6 +104,10 @@
           <span class="slider"></span>
           {{ name }}
         </label>
+      </div>
+      <!-- Where you look from and with what, as against the Map panel's what you
+           are looking at. -->
+      <div v-show="menu.view" class="toolbarSwitches">
         <div class="toolbarTitle">View</div>
         <label v-for="name in cc.sceneModes" :key="name" class="toolbarSwitch">
           <input v-model="sceneMode" type="radio" :value="name" />
@@ -108,6 +120,20 @@
           <span class="slider"></span>
           {{ name }}
         </label>
+        <!-- Only in the sky view, which is the only place an aim exists to hand
+             over, and only where the sensor could work at all. -->
+        <template v-if="inSkyView && compassOffered">
+          <div class="toolbarTitle">Aiming</div>
+          <label class="toolbarSwitch">
+            <input type="checkbox" :checked="compassActive" :disabled="compassPending" @change="onCompassToggle" />
+            <!-- The spinner stands in for the slider rather than joining it: both
+                 occupy the row's left gutter, and one of the two is always the
+                 answer to "what is this control doing". -->
+            <span v-if="compassPending" class="toolbarSpinner"></span>
+            <span v-else class="slider"></span>
+            Use compass
+          </label>
+        </template>
       </div>
       <div v-show="menu.ios" class="toolbarSwitches">
         <div class="toolbarTitle">Mobile</div>
@@ -189,7 +215,7 @@
       </UTooltip>
       <UTooltip text="Toggle UI">
         <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleUI">
-          <UIcon name="fa6-solid:eye" />
+          <UIcon name="lucide:eye" />
         </button>
       </UTooltip>
     </div>
@@ -204,6 +230,9 @@
 import { storeToRefs } from "pinia";
 import { computed, onMounted, reactive, ref } from "vue";
 
+import { useGeolocation } from "../composables/useGeolocation";
+import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
+import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
@@ -211,7 +240,7 @@ import EntityInfoPanel from "./EntityInfoPanel.vue";
 import SatelliteBrowser from "./SatelliteBrowser.vue";
 import SkyHud from "./SkyHud.vue";
 
-type MenuKey = "cat" | "sat" | "gs" | "map" | "ios" | "dbg";
+type MenuKey = "cat" | "sat" | "gs" | "map" | "view" | "ios" | "dbg";
 
 const cc = globalThis.cc;
 
@@ -220,6 +249,7 @@ const menu = reactive<Record<MenuKey, boolean>>({
   sat: false,
   gs: false,
   map: false,
+  view: false,
   ios: false,
   dbg: false,
 });
@@ -238,6 +268,30 @@ const layerSelection = computed({
 
 const satStore = useSatStore();
 const { enabledComponents, overpassMode } = storeToRefs(satStore);
+
+const { pending: locating, locate } = useGeolocation();
+
+const compassOffered = compassAvailable();
+const { active: compassActive, pending: compassPending, toggle: toggleCompass } = useSkyCompass();
+const inSkyView = computed(() => sceneMode.value === SKY_MODE);
+
+// Handing the aim to a sensor is an action with an outcome, and the outcome may be
+// "no". The browser's own flip on click is the feedback that something was
+// attempted — and iOS's permission prompt has to be raised from inside the click —
+// so the switch moves first and is corrected afterwards.
+//
+// The correction has to be made by hand. Vue re-syncs a checkbox only when the value
+// bound to it changes, and a refused sensor leaves `compassActive` exactly where it
+// was, so the box would sit there checked and contradicting it.
+async function onCompassToggle(event: Event): Promise<void> {
+  await toggleCompass();
+  (event.target as HTMLInputElement).checked = compassActive.value;
+  // Success closes the panel, which was covering the sky it was just asked to aim
+  // at — so the revert above is only ever seen when it means something.
+  if (compassActive.value) {
+    menu.view = false;
+  }
+}
 
 onMounted(() => {
   showUI.value = !DeviceDetect.inIframe();

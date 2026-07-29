@@ -11,4 +11,6 @@ let toast: ToastApi | null = null;
 export const initToastProxy = (t: ToastApi): ToastApi => (toast = t);
 
 // Returns a real toast service when initialized, or a no-op fallback that warns once.
+// Everything that toasts does so in response to a user action, well after App.vue
+// has mounted, so the fallback is a bug report rather than a path to design for.
 export const useToastProxy = (): ToastApi | { add: (message: ToastMessage) => void } => toast ?? { add: () => console.warn("Toast not initialized") };

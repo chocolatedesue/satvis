@@ -1,12 +1,18 @@
 // Turning a phone's orientation into an aim for the sky view.
 //
-// UNVERIFIED ON HARDWARE. `DeviceOrientationEvent` needs a secure context, so
-// this cannot be exercised over `pnpm dev:host` on a LAN address — it wants a
-// tunnel or a preview deploy. The geometry below is tested, but the two
-// conventions that only a device can settle are called out where they are used:
-// the sign of the screen-orientation correction, and whether iOS's
-// `webkitCompassHeading` lines up with `alpha` the way the usual workaround
-// assumes. The manual trim exists because of exactly that.
+// VERIFIED ON iOS: the sign of the screen-orientation correction and the
+// `360 - webkitCompassHeading` substitution are both right, and the sky lines up
+// with what the phone is pointed at. The manual trim that existed to recover from
+// either being wrong is gone.
+//
+// NOT VERIFIED ON ANDROID, where `webkitCompassHeading` does not exist and
+// `deviceorientation`'s alpha is referenced to an arbitrary zero. North comes from
+// `deviceorientationabsolute` there instead. Where neither source is available the
+// sky view refuses to aim by compass rather than aiming at an arbitrary azimuth —
+// see docs/adr/0004-compass-aiming.md.
+//
+// Note this needs a secure context, so it cannot be exercised over
+// `pnpm dev:host` on a LAN address; it wants a tunnel or a preview deploy.
 //
 // The device frame is the one `deviceorientation` defines: with the phone flat,
 // screen up and its top edge pointing north, the device's X is east, Y is north
@@ -101,37 +107,44 @@ export function compassYawOffset(sample: DeviceOrientationSample, compassHeading
   return normalizeAzimuth(360 - compassHeading - sample.alpha);
 }
 
-/** Tracks the yaw offset, refreshing it only from postures that justify it. */
+/** Where a sample's idea of north came from, if anywhere. */
+export interface HeadingReading {
+  /** Safari's compass heading. Absent everywhere else. */
+  compassHeading?: number | undefined;
+  /** Whether the sample's own alpha is already referenced to true north. */
+  absolute?: boolean;
+}
+
+/** Whether a reading can establish north at all, whatever the current posture. */
+export const hasHeadingSource = (reading: HeadingReading): boolean => reading.absolute === true || reading.compassHeading !== undefined;
+
+/** Tracks the yaw offset, refreshing it only from readings that justify it. */
 export class CompassCalibration {
   #offset = 0;
 
   #calibrated = false;
 
-  #trim = 0;
-
   get calibrated(): boolean {
     return this.#calibrated;
   }
 
-  get trim(): number {
-    return this.#trim;
-  }
-
-  /** The escape hatch: always available, and always added on top. */
-  set trim(degrees: number) {
-    this.#trim = degrees;
-  }
-
-  update(sample: DeviceOrientationSample, compassHeading: number | undefined): void {
-    if (compassHeading === undefined || !compassIsMeaningful(sample)) {
+  update(sample: DeviceOrientationSample, reading: HeadingReading): void {
+    // An absolute reading needs no correction and no particular posture: alpha is
+    // already measured from north, so the offset is zero and known to be right.
+    if (reading.absolute) {
+      this.#offset = 0;
+      this.#calibrated = true;
       return;
     }
-    this.#offset = compassYawOffset(sample, compassHeading);
+    if (reading.compassHeading === undefined || !compassIsMeaningful(sample)) {
+      return;
+    }
+    this.#offset = compassYawOffset(sample, reading.compassHeading);
     this.#calibrated = true;
   }
 
   /** Correct a device-relative aim onto true north. */
   correct(aim: Aim): Aim {
-    return { ...aim, azimuth: normalizeAzimuth(aim.azimuth + this.#offset + this.#trim) };
+    return { ...aim, azimuth: normalizeAzimuth(aim.azimuth + this.#offset) };
   }
 }

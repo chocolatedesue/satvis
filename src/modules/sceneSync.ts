@@ -13,13 +13,14 @@
 import { JulianDate } from "@cesium/engine";
 import { nextTick, watch } from "vue";
 
+import { currentPosition } from "../composables/useGeolocation";
 import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import type { CesiumController } from "./CesiumController";
+import { offlineFallback } from "./CesiumLayerProviders";
 import type { DesiredScene } from "./SatelliteManager";
 import type { Observer } from "./SkyView";
-import { currentPosition } from "./util/geolocation";
 import { toMinuteIso } from "./util/urlCodec";
 
 // Enough to keep a fast clock multiplier from hammering the history api.
@@ -30,13 +31,32 @@ export function startSceneSync(cc: CesiumController): void {
   const satStore = useSatStore();
 
   // --- globe settings -------------------------------------------------------
+
+  // Immediate, because the store is the only owner of the layer stack: the viewer
+  // is constructed with no base layer at all and the first stack arrives here.
+  //
+  // The imagery is applied synchronously, and the availability check is a
+  // *correction* that follows. A missing tile set is then something the store is
+  // told about — the swap re-enters this watcher and the checkbox, the url and the
+  // pixels never disagree — while nothing has to wait on a probe to see a globe.
   watch(
     () => cesiumStore.layers,
     (layers) => {
       cc.imageryLayers = [...layers];
+      void correctMissingImagery();
     },
-    { deep: true },
+    { deep: true, immediate: true },
   );
+
+  async function correctMissingImagery(): Promise<void> {
+    const swapped = await offlineFallback(cesiumStore.layers);
+    // Reading the store again rather than trusting the stack this was called for:
+    // the user may have picked something else while the probe was in flight, and
+    // that answer is simply about a stack that no longer exists.
+    if (swapped) {
+      cesiumStore.setLayers(swapped);
+    }
+  }
   watch(
     () => cesiumStore.terrainProvider,
     (name) => {

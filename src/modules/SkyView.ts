@@ -62,6 +62,23 @@ export const isPlausibleGroundHeight = (height: number | undefined): height is n
 export const DEFAULT_FOVY = 75;
 export const DEFAULT_PITCH = 30;
 
+/**
+ * How far the view may zoom, stated as vertical field of view.
+ *
+ * 10° at the narrow end is roughly 7.5x magnification, which is what it takes to
+ * separate two satellites sharing the reticle at the default zoom; below about 5°
+ * hand tremor under device aiming dominates and it stops being precision. 100° at
+ * the wide end is as much sky as the perspective will take — on a 21:9 window it
+ * derives a horizontal `fov` of 141°, and the stretching at the edges is already
+ * severe there.
+ *
+ * Note this deliberately lets the user break `pitch < fovy/2`, which is a
+ * statement about the defaults on entry and not a standing invariant — zooming in
+ * on something high up is *supposed* to take the horizon off screen.
+ */
+export const MIN_FOVY = 10;
+export const MAX_FOVY = 100;
+
 /** North is the emptiest direction to open on: passes culminate toward the equator. */
 export const defaultAzimuth = (observer: Observer): number => (observer.lat >= 0 ? 180 : 0);
 
@@ -77,6 +94,20 @@ export function skyBasis(aim: Aim): Basis {
 }
 
 /**
+ * The horizontal angle the view actually spans, at any aspect ratio.
+ *
+ * Distinct from `fovFromFovy` below, which answers the narrower question of what
+ * to hand Cesium: on a portrait viewport Cesium's `fov` *is* the vertical angle,
+ * so it is not the horizontal span and cannot be used as one.
+ */
+export function fovxFromFovy(fovyRadians: number, aspectRatio: number): number {
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) {
+    return fovyRadians;
+  }
+  return 2 * Math.atan(Math.tan(fovyRadians * 0.5) * aspectRatio);
+}
+
+/**
  * Cesium's `fov` is the horizontal angle on a landscape viewport and the
  * vertical one otherwise, so it means different things on a phone held two
  * ways. Everything here is specified vertically; this converts.
@@ -85,7 +116,7 @@ export function fovFromFovy(fovyRadians: number, aspectRatio: number): number {
   if (!Number.isFinite(aspectRatio) || aspectRatio <= 1) {
     return fovyRadians;
   }
-  return 2 * Math.atan(Math.tan(fovyRadians * 0.5) * aspectRatio);
+  return fovxFromFovy(fovyRadians, aspectRatio);
 }
 
 interface SavedState {
@@ -153,8 +184,9 @@ export class SkyView {
     return this.#fovy;
   }
 
+  /** Clamped here rather than at each caller: it is a property of the view. */
   set fovy(degrees: number) {
-    this.#fovy = degrees;
+    this.#fovy = CesiumMath.clamp(degrees, MIN_FOVY, MAX_FOVY);
     this.#apply();
   }
 

@@ -12,6 +12,54 @@ import {
   WebMapServiceImageryProvider,
 } from "@cesium/engine";
 
+import { formatLayer, parseLayer } from "../config/layers";
+
+// The high-resolution offline tiles live in the `data/cesium-assets` submodule,
+// which `git worktree add` does not populate — so in a fresh worktree they are
+// simply absent, while `Offline` (bundled with @cesium/engine, copied out of
+// node_modules) is always there.
+const HIGHRES_NATURAL_EARTH = "data/cesium-assets/imagery/NaturalEarthII";
+
+let highresProbe: Promise<boolean> | undefined;
+
+/**
+ * The layer stack with `OfflineHighres` swapped for `Offline` when its tiles are
+ * not there, or undefined when nothing needs changing.
+ *
+ * Cesium cannot report the absence itself: `TileMapServiceImageryProvider.fromUrl`
+ * treats a missing `tilemapresource.xml` as "carry on with defaults" and resolves
+ * happily, then requests thousands of tiles that 404 behind a blank globe. So the
+ * manifest is fetched here instead.
+ *
+ * A `GET`, deliberately, and not a `HEAD`: the Cache API ignores requests whose
+ * method is not GET, so a HEAD would miss the service worker's tile cache and
+ * report the imagery missing to someone who is merely offline — which is the one
+ * situation an offline layer exists for. The answer is cached, since it cannot
+ * change within a session.
+ *
+ * Hardcoded to the one pair rather than expressed as a general capability of the
+ * registry: this is the only provider backed by data that `pnpm install` does not
+ * guarantee, and a framework for a single case is harder to read than the case.
+ */
+export async function offlineFallback(layers: readonly string[]): Promise<string[] | undefined> {
+  if (!layers.some((token) => parseLayer(token)?.provider === "OfflineHighres")) {
+    return undefined;
+  }
+  highresProbe ??= fetch(`${HIGHRES_NATURAL_EARTH}/tilemapresource.xml`)
+    .then((response) => response.ok)
+    .catch(() => false);
+  if (await highresProbe) {
+    return undefined;
+  }
+  console.warn("High-resolution offline imagery is missing, falling back to Offline. Run `git submodule update --init` to fetch data/cesium-assets.");
+  // Through the codec so an opacity survives: the user asked for a base map at a
+  // given opacity, and only the source of its tiles turned out to be wrong.
+  return layers.map((token) => {
+    const selection = parseLayer(token);
+    return selection?.provider === "OfflineHighres" ? formatLayer({ ...selection, provider: "Offline" }) : token;
+  });
+}
+
 export interface ImageryProviderEntry {
   create: () => ImageryProvider | Promise<ImageryProvider>;
   alpha: number;
@@ -31,7 +79,7 @@ export const imageryProviders: Record<string, ImageryProviderEntry> = {
   },
   OfflineHighres: {
     create: () =>
-      TileMapServiceImageryProvider.fromUrl("data/cesium-assets/imagery/NaturalEarthII", {
+      TileMapServiceImageryProvider.fromUrl(HIGHRES_NATURAL_EARTH, {
         maximumLevel: 5,
         credit: "Imagery courtesy Natural Earth",
       }),
