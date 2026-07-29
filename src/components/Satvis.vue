@@ -72,7 +72,8 @@
         </label>
         <label class="toolbarSwitch">
           <input type="button" :disabled="locating" @click="void locate()" />
-          {{ locating ? "Set from geolocation — locating…" : "Set from geolocation" }}
+          <span v-if="locating" class="toolbarSpinner"></span>
+          Set from geolocation
         </label>
         <label class="toolbarSwitch">
           <input type="button" @click="cc.sats.focusGroundStation()" />
@@ -125,8 +126,12 @@
           <div class="toolbarTitle">Aiming</div>
           <label class="toolbarSwitch">
             <input type="checkbox" :checked="compassActive" :disabled="compassPending" @change="onCompassToggle" />
-            <span class="slider"></span>
-            {{ compassPending ? "Use compass — starting…" : "Use compass" }}
+            <!-- The spinner stands in for the slider rather than joining it: both
+                 occupy the row's left gutter, and one of the two is always the
+                 answer to "what is this control doing". -->
+            <span v-if="compassPending" class="toolbarSpinner"></span>
+            <span v-else class="slider"></span>
+            Use compass
           </label>
         </template>
       </div>

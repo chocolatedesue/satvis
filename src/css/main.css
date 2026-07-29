@@ -83,11 +83,40 @@ body {
 }
 
 /* Waiting on the device — a location fix, or the orientation sensor answering a
-   probe. Dimmer than the row's own 0.5 and not clickable, so a second tap cannot
-   queue a second request while the first is still out. */
+   probe. Not clickable, so a second tap cannot queue a second request while the
+   first is still out. */
 .toolbarSwitch:has(input:disabled) {
-  opacity: 0.3;
   cursor: default;
+}
+
+/* Sits exactly where the slider's dot does, and is positioned rather than inline
+   so that showing it costs no width: these panels are sized by their content, so
+   anything that grows a row reflows the whole menu. That is why the wait is not
+   said in the label. */
+.toolbarSpinner {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  box-sizing: border-box;
+  height: 16px;
+  width: 16px;
+  border: 2px solid #ffffff40;
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: toolbarSpin 0.8s linear infinite;
+}
+
+@keyframes toolbarSpin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Still a ring rather than a dot, so it reads as busy without moving. */
+@media (prefers-reduced-motion: reduce) {
+  .toolbarSpinner {
+    animation: none;
+  }
 }
 
 .slider::before {
