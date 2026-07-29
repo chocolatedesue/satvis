@@ -2,7 +2,7 @@ import { Math as CesiumMath } from "@cesium/engine";
 import { describe, expect, test } from "vitest";
 
 import { fovxFromFovy, MAX_FOVY, MIN_FOVY } from "../modules/SkyView";
-import { majorStep, stepFor, TICKS_WANTED } from "./useSkyHud";
+import { headingOffset, majorStep, stepFor, TICKS_WANTED } from "./useSkyHud";
 
 /** The horizontal angle a viewport of this shape spans at this zoom. */
 const span = (fovy: number, width: number, height: number): number => CesiumMath.toDegrees(fovxFromFovy(CesiumMath.toRadians(fovy), width / height));
@@ -48,6 +48,53 @@ describe("stepFor", () => {
         const across = span(fovy, width, height);
         expect(across / stepFor(across), `${width}x${height} at ${fovy}°`).toBeLessThan(10);
       }
+    }
+  });
+});
+
+/**
+ * Where the projection of a horizon bearing actually lands, built from the camera
+ * basis rather than borrowed from the module, so the comparisons below check the tape
+ * against the geometry and not against itself.
+ */
+function projectedHorizonOffset(deltaAzimuth: number, pitch: number, halfWidth: number, tanHalfSpan: number): number {
+  const rad = (degrees: number) => (degrees * Math.PI) / 180;
+  // In the observer's east-north-up frame, with the view azimuth taken as north.
+  const forward = [0, Math.cos(rad(pitch)), Math.sin(rad(pitch))];
+  const right = [1, 0, 0];
+  const bearing = [Math.sin(rad(deltaAzimuth)), Math.cos(rad(deltaAzimuth)), 0];
+  const dot = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
+  return halfWidth + (halfWidth * (dot(bearing, right) / dot(bearing, forward))) / tanHalfSpan;
+}
+
+describe("headingOffset", () => {
+  const HALF_WIDTH = 195;
+  const tanHalfSpan = Math.tan((Math.PI / 180 / 2) * 39); // a 39° span, a phone at default zoom
+
+  test("is the crosshair for the bearing being looked at", () => {
+    expect(headingOffset(0, HALF_WIDTH, tanHalfSpan)).toBeCloseTo(HALF_WIDTH, 9);
+  });
+
+  test("puts the edge of the span at the edge of the viewport", () => {
+    expect(headingOffset(19.5, HALF_WIDTH, tanHalfSpan)).toBeCloseTo(HALF_WIDTH * 2, 6);
+    expect(headingOffset(-19.5, HALF_WIDTH, tanHalfSpan)).toBeCloseTo(0, 6);
+  });
+
+  test("matches the true projection exactly at eye level", () => {
+    for (const delta of [-19.5, -10, -1, 0, 1, 10, 19.5]) {
+      expect(headingOffset(delta, HALF_WIDTH, tanHalfSpan), `Δ${delta}°`).toBeCloseTo(projectedHorizonOffset(delta, 0, HALF_WIDTH, tanHalfSpan), 6);
+    }
+  });
+
+  test("holds its scale where the projection would grow by 1/cos(pitch)", () => {
+    // The behaviour this replaced, and the size of what was given up with it: at 60°
+    // of pitch the horizon's projection spreads to twice this scale and at 85° to
+    // eleven times, which zoomed the tape until nothing was left on screen. The
+    // readout takes no pitch at all, so the divergence is exactly that factor.
+    const stable = headingOffset(10, HALF_WIDTH, tanHalfSpan) - HALF_WIDTH;
+    for (const pitch of [0, 30, 60, 85]) {
+      const projected = projectedHorizonOffset(10, pitch, HALF_WIDTH, tanHalfSpan) - HALF_WIDTH;
+      expect(projected / stable, `pitch ${pitch}°`).toBeCloseTo(1 / Math.cos((pitch * Math.PI) / 180), 6);
     }
   });
 });

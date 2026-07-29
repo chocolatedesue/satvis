@@ -67,10 +67,21 @@ export const stepFor = (spanDegrees: number): number => STEP_LADDER.find((step) 
 export const majorStep = (step: number): number => step * 3;
 
 /**
- * Ticks closer together than this are thinned away. Thinning by screen distance
- * rather than at a pitch threshold is what makes the tape degrade gracefully:
- * near the zenith every azimuth converges on the crosshair, so ticks drop out
- * progressively instead of the whole tape vanishing at once.
+ * Where a bearing sits on the compass tape, in pixels from the left edge.
+ *
+ * The same `tan` mapping a perspective camera applies, minus the pitch: at eye level
+ * this is exactly where the projection of that bearing on the horizon lands, and at
+ * every other pitch it is the same scale rather than a projection. See the note in
+ * `refresh` for why the pitch term is deliberately absent.
+ */
+export const headingOffset = (deltaAzimuth: number, halfWidth: number, tanHalfSpan: number): number =>
+  halfWidth + (halfWidth * Math.tan(CesiumMath.toRadians(deltaAzimuth))) / tanHalfSpan;
+
+/**
+ * Ticks closer together than this are thinned away. It applies to the elevation
+ * tape, whose ticks crowd together as the view tips toward the zenith and the
+ * projection compresses them; the compass tape is evenly spaced by construction
+ * and never triggers it.
  */
 const MIN_TICK_SPACING = 26;
 
@@ -141,19 +152,38 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
     const verticalSpan = skyView.fovy;
     const horizontalSpan = CesiumMath.toDegrees(fovxFromFovy(CesiumMath.toRadians(verticalSpan), aspectRatio));
 
+    // The compass tape is a heading readout, not a projection of the horizon.
+    //
+    // Projecting horizon directions is what it used to do, and the scale then grew
+    // as 1/cos(pitch): on a 390px phone, 15° of azimuth spanned 147px at eye level
+    // and 1691px at 85° of pitch, so looking up zoomed the tape until the visible
+    // window collapsed from ±15° to nothing. That factor was buying registration —
+    // the tick sitting above the bearing you would actually see — and registration
+    // only means anything while the horizon is on screen, which holds when
+    // `pitch < fovy/2` and no longer at any zoom (see docs/adr/0003-sky-view.md).
+    // The band is drawn at a fixed height near the top of the viewport, so above
+    // that limit it was spreading for a horizon nobody could see.
+    //
+    // Dropping the pitch term leaves the same tan mapping the projection uses at eye
+    // level, where the two agree exactly, and a scale that no longer changes with
+    // where the view is pointed. The cost is that above the horizon a tick is no
+    // longer above the true bearing — satellites are still projected honestly, so at
+    // 60° of pitch one appears about twice as far off-centre as its tick. That
+    // cannot be designed away: satellites sit at different elevations, so no single
+    // horizontal tape registers with all of them. The locked target's card carries
+    // the numeric azimuth when a measurement is wanted.
+    const tanHalfSpan = Math.tan(CesiumMath.toRadians(horizontalSpan) / 2);
+    const halfWidth = clientWidth / 2;
     const compassStep = stepFor(horizontalSpan);
     const compassMajor = majorStep(compassStep);
     const compassTicks: TapeTick[] = [];
-    // Azimuths crowd together as the view rises — at the zenith every one of them
-    // is on screen at once — so the window has to widen by the same 1/cos(pitch)
-    // they compress by, up to the whole circle. Windowing at all is what keeps the
-    // work proportional to what is visible rather than to 360/step, which at
-    // maximum zoom would be 360 projections a frame.
-    const azimuthHalf = Math.min(180, (horizontalSpan / 2 + compassStep) / Math.max(Math.cos(CesiumMath.toRadians(viewPitch)), 1e-3));
+    // Exactly the visible span, with no pitch term to get wrong in either direction.
+    const azimuthHalf = horizontalSpan / 2 + compassStep;
     const firstAzimuth = Math.ceil((viewAzimuth - azimuthHalf) / compassStep) * compassStep;
     for (let azimuth = firstAzimuth; azimuth <= viewAzimuth + azimuthHalf; azimuth += compassStep) {
-      const window = directionToWindow(scene, frame, azimuth, 0);
-      if (!window) {
+      const offset = azimuth - viewAzimuth;
+      // A quarter turn away is at infinity and beyond it is behind the viewer.
+      if (Math.abs(offset) >= 90) {
         continue;
       }
       const value = normalizeAzimuth(azimuth);
@@ -161,7 +191,12 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
       // Numeric where the tick is not a compass point: at a fine step the nearest
       // cardinal is often off screen, and an unlabelled tape says nothing about
       // which way the viewer is facing.
-      compassTicks.push({ value, offset: window.x, label: major ? (value % 45 === 0 ? compassPoint(value) : `${value}°`) : undefined, major });
+      compassTicks.push({
+        value,
+        offset: headingOffset(offset, halfWidth, tanHalfSpan),
+        label: major ? (value % 45 === 0 ? compassPoint(value) : `${value}°`) : undefined,
+        major,
+      });
     }
     compass.value = thin(compassTicks);
 

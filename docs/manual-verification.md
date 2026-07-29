@@ -71,7 +71,26 @@ after the second finger lifted moved the aim without a jump.
 
 Note that a hidden browser tab reports `clientWidth/clientHeight` of 0 and never
 fires `requestAnimationFrame`, so Cesium's render loop stalls and the globe stays
-blank — drive `scene.render()` by hand when checking anything visual this way.
+blank — drive `scene.render()` by hand when checking anything visual this way. A
+hidden tab also will not restyle a pseudo-element for a `checked` property set from
+script, so a switch's slider colour cannot be read that way; check the `checked`
+property instead, or take a screenshot, which fronts the pane.
+
+## Sky view: the compass tape holds its scale
+
+**Why it cannot be a unit test.** `headingOffset` is unit-tested against a
+from-scratch projection, including the `1/cos(pitch)` divergence it exists to avoid.
+What that cannot show is the tape staying legible while a live view is dragged
+upward.
+
+**Procedure.** Open `?scene=Sky&gs=48.1400,11.5800`, then step
+`cc.skyView.look({ pitch })` through 0, 30, 60 and 85 and read the tick offsets out
+of the HUD, checking the spacing between adjacent ticks does not change.
+
+**Result, 2026-07-29, Chrome.** Spacing constant at every pitch, and the tape keeps
+its marks pointing at the zenith. Before the change, 15° of azimuth spanned 147 px at
+eye level and 1691 px at 85° of pitch, and the visible window collapsed from ±15° to
+nothing.
 
 ## Layers: the offline imagery fallback
 
