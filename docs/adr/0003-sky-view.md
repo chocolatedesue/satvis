@@ -107,6 +107,87 @@ by moving the aim, and under device-orientation aiming the sensor overwrites the
 on its next reading, so the recentring would visibly snap back; screen-centre is the
 only rule that behaves identically under a drag and under the sensor.
 
+### Entering and leaving are flights, not cuts
+
+The camera is flown between the globe pose and the ground pose over 2.2 s rather
+than being assigned outright (`src/modules/skyFlight.ts`).
+
+This is not decoration. The claim the whole view mode rests on is that this is the
+same scene from a different place, and a cut is exactly the edit that says
+otherwise: the globe and a sky full of satellites share too few pixels for the eye
+to connect them, so switching read as arriving somewhere else. The flight is what
+carries the connection.
+
+`camera.flyTo` cannot supply it, for the same reason `camera.setView` cannot place
+the camera: it routes orientation through heading/pitch/roll and mirrors the sky
+near the zenith. The blend is therefore ours, and the attitude goes through a
+quaternion rather than three separately interpolated vectors — a lerp of three unit
+vectors is not orthonormal in between, and Cesium's camera renders whatever basis
+it is handed.
+
+### The flight has three legs, because two poses are not a journey
+
+Interpolating the endpoints and nothing else is not enough to make the claim above.
+Blended straight, the attitude reaches sky-like within a few hundred milliseconds,
+the globe leaves the frame, and the rest of the descent is spent looking at empty
+sky while the position quietly travels — a flight that shows the departure and the
+arrival and says nothing about where it is going. So one clock drives three legs:
+
+1. **Lock on** (first 30%). The view swings from wherever it was onto the observer.
+   Early, because this is the leg that answers "where is this going", and because
+   the position has barely moved by then so it reads as a pan rather than a lurch.
+2. **Descend** (to 55%). The observer is held at the exact centre of the screen and
+   grows as the camera closes on it, coming to rest **directly overhead**, looking
+   down. Since the observer is the first ground station, its map pin is already
+   drawn there — the destination is not merely centred, it is labelled.
+3. **Rise** (last 45%). The camera drops the last of the way, lands at 80%, and the
+   view sweeps up off the ground, past the horizon, to the aim.
+
+Coming to rest overhead before landing is a correctness requirement as much as a
+picture. A swoop that arrives along its own great-circle tangent reaches the ground
+travelling sideways, and an aim tracking the observer then whips through the last
+few metres — measured at 10° in a single frame before the legs were split. Arriving
+vertically makes the descent's aim reach straight down smoothly, which is also
+exactly where the rise starts.
+
+That is why the rise is expressed as `skyBasis` at a pitch of -90° rather than as
+any convenient nadir: built from the same aim, the whole leg is a change of pitch
+and nothing else, so no roll creeps in and the view arrives facing the direction it
+spent the descent facing. `skyBasis` being continuous through straight down — the
+property the zenith tests already pin down — is what makes -90° an aim like any
+other.
+
+The aim itself is built by turning the straight-down attitude onto the line of
+sight, not by crossing the view axis with an up vector. A cross-product look-at has
+no answer when the camera is directly overhead, which is precisely where this
+flight ends; turning makes that case the identity rotation, so the aim stays
+defined once the camera is standing on the very point it is aiming at.
+
+Three consequences follow:
+
+- **`active` and `settled` are different questions.** The view owns the camera for
+  the whole of both flights (`active`), but only once it has landed does the aim
+  describe what is on screen (`settled`). The HUD's tapes and the crosshair read
+  `settled` — projected against a camera still somewhere over the Atlantic they
+  would swim across the viewport — and the overlay fades up as the ground arrives.
+- **The interaction starts on landing.** Dragging and the device sensor both write
+  the aim, and the aim is the flight's destination, so a gesture during the descent
+  would steer it rather than move a view that has arrived.
+- **Leaving is the same flight played backwards.** One path, one clock and a sign,
+  so the trip out retraces the trip in — look down at your feet, take off, swing
+  away — and there is no second schedule to keep in step with the first. It also
+  makes turning around free: a switch back mid-flight flips the sign and resumes
+  from the progress already made, so the camera carries on from where it is
+  instead of snapping to an end it is nowhere near.
+- **Exit is asynchronous.** `exit()` returns a promise, and morphing the projection
+  or releasing the camera mode has to wait for it — until the flight lands the
+  camera is still the sky view's — so the pair of clicks cannot leave the globe
+  half-restored.
+
+Anyone who has asked for reduced motion gets the cut this replaced, in full: the
+duration goes to zero and the camera is assigned outright, which is the honest
+reading of that request rather than a brisker version of the same movement.
+
 ## Consequences
 
 - **Restore what you changed, and only that.** `set background(false)` destroys the

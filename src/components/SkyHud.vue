@@ -1,5 +1,8 @@
 <template>
-  <div v-if="visible" class="sky-hud">
+  <!-- Mounted the moment the sky becomes the view mode, but held at zero opacity
+       until the camera has flown in: the instruments are meaningless over a
+       globe, and they fade up as the ground arrives under them. -->
+  <div v-if="visible" class="sky-hud" :class="{ 'sky-hud--settled': settled }">
     <svg class="sky-hud__svg">
       <path v-if="trace" class="sky-hud__trace" :d="trace" />
 
@@ -91,7 +94,7 @@ const COMPASS_Y = 62;
 const ELEVATION_RULE_X = 46;
 const TAPE_LENGTH = 12;
 
-const { compass, elevation, locked, trace, calibrated, start, stop } = useSkyHud();
+const { compass, elevation, locked, trace, calibrated, settled, start, stop } = useSkyHud();
 const { active: compassActive, stopped: compassStopped } = useSkyCompass();
 
 const { sceneMode } = storeToRefs(useCesiumStore());
@@ -148,6 +151,20 @@ onUnmounted(() => {
   pointer-events: none;
   color: #edffff;
   font-variant-numeric: tabular-nums;
+  opacity: 0;
+  transition: opacity 400ms ease-out;
+}
+
+.sky-hud--settled {
+  opacity: 1;
+}
+
+/* The flight is a cut for anyone who asked for less motion, so the overlay it
+   uncovers must not then fade in over it. */
+@media (prefers-reduced-motion: reduce) {
+  .sky-hud {
+    transition: none;
+  }
 }
 
 .sky-hud__svg {

@@ -104,6 +104,13 @@ export interface SkyHudState {
    * per-frame read of sky state.
    */
   calibrated: ShallowRef<boolean>;
+  /**
+   * Whether the camera has finished flying in. Everything below is computed from
+   * the aim, and during the flight the aim is where the camera is going rather
+   * than where it is looking — so the overlay has nothing true to say yet, and
+   * the component keeps it out of sight until this turns true.
+   */
+  settled: ShallowRef<boolean>;
 }
 
 /**
@@ -129,6 +136,7 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
   const locked = shallowRef<SkyTarget | undefined>(undefined);
   const trace = shallowRef("");
   const calibrated = shallowRef(false);
+  const settled = shallowRef(false);
 
   let removePreRender: (() => void) | undefined;
   let sampledAt = 0;
@@ -142,7 +150,11 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
     const { viewer, skyView, skyInteraction } = globalThis.cc;
     const { scene } = viewer;
     const frame = skyView.frame;
-    if (!skyView.active || !frame) {
+    settled.value = skyView.settled;
+    // `settled`, not `active`: while the camera is still descending, every tick
+    // below would be projected against a camera that is nowhere near the
+    // observer, and the tapes would swim across the screen behind the fade.
+    if (!skyView.settled || !frame) {
       return;
     }
 
@@ -276,6 +288,7 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
     locked,
     trace,
     calibrated,
+    settled,
     start(): void {
       if (removePreRender) {
         return;
@@ -290,6 +303,7 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
       locked.value = undefined;
       trace.value = "";
       calibrated.value = false;
+      settled.value = false;
     },
   };
 }
