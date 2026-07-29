@@ -71,6 +71,18 @@ curl "http://localhost:8080/__scheduled?cron=23+*%2F3+*+*+*"
 Then `GET /api/groups.json` lists the refreshed groups and
 `GET /api/gp/starlink.json` returns an OMM element-set array.
 
+`POST /api/refresh` runs the same refresh on demand and reports per-source
+diagnostics. It needs a bearer token, since one run pulls ~12 MB from CelesTrak
+against a 250 MB/day per-IP cap:
+
+```
+curl -X POST -H "Authorization: Bearer $REFRESH_TOKEN" http://localhost:8080/api/refresh
+```
+
+Locally the token comes from `worker/.dev.vars` (copy `worker/.dev.vars.example`);
+deployed it is a Worker secret, set with `wrangler secret put REFRESH_TOKEN`.
+With no secret set the endpoint returns 503 rather than running unauthenticated.
+
 ## Satellite data
 
 Element sets come from [CelesTrak](https://celestrak.org) as OMM JSON

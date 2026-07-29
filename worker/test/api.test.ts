@@ -14,6 +14,12 @@ const SOURCE_COUNT = collectSources((generatedConfig as GroupsConfig).groups).le
 const UPDATED = "2026-07-04T00:00:00.000Z";
 const UPDATED_MS = Date.parse(UPDATED);
 
+// Matches the REFRESH_TOKEN binding in vitest.config.ts. That binding stands in
+// for a Worker secret, which lives outside wrangler.jsonc and so is absent from
+// the generated Env type — hence the local view, mirroring api.ts.
+const AUTH = { Authorization: "Bearer test-refresh-token" };
+const secretEnv = env as typeof env & { REFRESH_TOKEN?: string };
+
 function ommArray(...pairs: [string, number][]): OmmRecord[] {
   return pairs.map(([name, id]) => ({ OBJECT_NAME: name, NORAD_CAT_ID: id }));
 }
@@ -197,7 +203,7 @@ describe("scheduled() refresh", () => {
     await env.GP_KV.put("gp:index", JSON.stringify({ updated: "2020-01-01T00:00:00.000Z", groups: [] } satisfies GroupsIndex));
     interceptCelestrak((group) => [{ OBJECT_NAME: `${group.toUpperCase()}-1`, NORAD_CAT_ID: 42 }]);
 
-    const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST" });
+    const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST", headers: AUTH });
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
 
@@ -224,7 +230,7 @@ describe("scheduled() refresh", () => {
       JSON.stringify({ updated: recent, groups: [{ name: "weather", updated: recent, count: 2, lastError: "source celestrak:weather failed: HTTP 522" }] } satisfies GroupsIndex),
     );
 
-    const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST" });
+    const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST", headers: AUTH });
     expect(res.status).toBe(429);
     expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
     const body = (await res.json()) as { refreshed: boolean; reason: string; retryAfterMs: number; groups: { name: string; lastError?: string }[] };
@@ -239,5 +245,29 @@ describe("scheduled() refresh", () => {
     const res = await SELF.fetch("https://satvis.space/api/refresh");
     expect(res.status).toBe(405);
     expect(res.headers.get("Allow")).toBe("POST");
+  });
+
+  // Both rejections must land before any upstream request — the afterEach fetch
+  // count (expectedFetches stays 0) is what proves the token actually protects
+  // CelesTrak's per-IP budget rather than just the response.
+  it.each([
+    ["no Authorization header", {}],
+    ["a wrong token", { Authorization: "Bearer not-the-token" }],
+  ])("rejects POST /api/refresh with %s", async (_label, headers) => {
+    const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST", headers });
+    expect(res.status).toBe(401);
+  });
+
+  it("fails closed with 503 when REFRESH_TOKEN is not configured", async () => {
+    // A deploy that predates `wrangler secret put` (or follows a secret delete)
+    // must disable the endpoint, never fall back to an open trigger.
+    const configured = secretEnv.REFRESH_TOKEN;
+    delete secretEnv.REFRESH_TOKEN;
+    try {
+      const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST", headers: AUTH });
+      expect(res.status).toBe(503);
+    } finally {
+      secretEnv.REFRESH_TOKEN = configured;
+    }
   });
 });

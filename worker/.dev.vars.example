@@ -1,0 +1,7 @@
+# Copy to worker/.dev.vars (gitignored) for local `wrangler dev`.
+#
+# Bearer token required by POST /api/refresh. The cron trigger does not use it.
+# Deployed value is a Worker secret, set separately:
+#   pnpm --filter satvis-worker exec wrangler secret put REFRESH_TOKEN
+# Leaving it unset disables the endpoint (503) rather than opening it.
+REFRESH_TOKEN=local-dev-token

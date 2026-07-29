@@ -6,9 +6,8 @@ import { GP_INDEX_KEY, GP_KEY_PREFIX, type GroupWriteMetadata } from "./store.ts
 
 const GROUP_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 // Cooldown for POST /api/refresh: within this window of the last refresh (manual
-// OR cron) the endpoint will not re-hit CelesTrak. Long enough to keep a public,
-// unauthenticated trigger from hammering a rate-limited upstream, short enough
-// for iterative debugging.
+// OR cron) the endpoint will not re-hit CelesTrak. A second line of defence
+// behind the bearer token, and short enough for iterative debugging.
 const REFRESH_COOLDOWN_MS = 60_000;
 
 function jsonResponse(body: unknown, init?: ResponseInit): Response {
@@ -63,17 +62,29 @@ async function handleIndex(env: Env): Promise<Response> {
 }
 
 // POST /api/refresh — run the same refresh as the cron (fetch every source,
-// evaluate, write KV) and return a per-source diagnostic report. Public but
-// rate-limited: within REFRESH_COOLDOWN_MS of the last refresh it does NOT
-// re-fetch, instead returning the cached index (errors included) with 429 so a
-// caller keeps visibility without spending CelesTrak's per-GROUP download budget
-// (which would otherwise 403 the next scheduled run). Whatever it does fetch is
-// persisted, so — unlike a read-only probe — it never wastes a download. Its
-// diagnostics matter most run against the deployed Worker, where failures like
-// Cloudflare 522s reproduce (they never do from a laptop).
+// evaluate, write KV) and return a per-source diagnostic report. Needs
+// `Authorization: Bearer <REFRESH_TOKEN>`: one run pulls ~12 MB from CelesTrak,
+// which firewalls by IP (250 MB/day) — and a Worker's egress IP is shared with
+// other Cloudflare tenants, so an open trigger risks a block that stalls the cron
+// for everyone. Also rate-limited: within REFRESH_COOLDOWN_MS of the last refresh
+// it does NOT re-fetch, instead returning the cached index (errors included) with
+// 429 so a caller keeps visibility without spending the budget. Whatever it does
+// fetch is persisted, so — unlike a read-only probe — it never wastes a download.
+// Its diagnostics matter most run against the deployed Worker, where failures
+// like the 522s an IP block produces reproduce (they never do from a laptop).
 async function handleRefresh(request: Request, env: Env): Promise<Response> {
   if (request.method !== "POST") {
     return jsonResponse({ error: "Method Not Allowed" }, { status: 405, headers: { Allow: "POST" } });
+  }
+
+  // Secrets live outside wrangler.jsonc, so `wrangler types` cannot see this one.
+  // An unset secret disables the endpoint rather than leaving it open.
+  const expected = (env as Env & { REFRESH_TOKEN?: string }).REFRESH_TOKEN;
+  if (!expected) {
+    return jsonResponse({ error: "Refresh is not configured" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
+  if (request.headers.get("Authorization") !== `Bearer ${expected}`) {
+    return jsonResponse({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
   }
 
   const previous = coerceIndex(await env.GP_KV.get(GP_INDEX_KEY, "json"));
