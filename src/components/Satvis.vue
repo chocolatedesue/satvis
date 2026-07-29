@@ -92,18 +92,30 @@
         </label>
       </div>
       <div v-show="menu.map" class="toolbarSwitches">
-        <div class="toolbarTitle">Layers</div>
-        <label v-for="name in cc.imageryProviderNames" :key="name" class="toolbarSwitch">
+        <!-- Dimmed, not disabled: a group goes inert when a surface model has
+             taken over what it describes, and the controls still say what the
+             user picked and what they will get back. -->
+        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('layers') }">Layers</div>
+        <label v-for="name in cc.imageryProviderNames" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('layers') }">
           <input v-model="layerSelection" type="checkbox" :value="name" />
           <span class="slider"></span>
           {{ name }}
         </label>
-        <div class="toolbarTitle">Terrain</div>
-        <label v-for="name in cc.terrainProviderNames" :key="name" class="toolbarSwitch">
+        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('terrain') }">Terrain</div>
+        <label v-for="name in cc.terrainProviderNames" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('terrain') }">
           <input v-model="terrainProvider" type="radio" :value="name" />
           <span class="slider"></span>
           {{ name }}
         </label>
+        <div class="toolbarTitle">Surface</div>
+        <label v-for="name in cc.surfaceModelNames" :key="name" class="toolbarSwitch">
+          <input v-model="surfaceModel" type="radio" :value="name" />
+          <span class="slider"></span>
+          {{ name }}
+        </label>
+        <!-- Only for the model actually selected: the note explains why nothing
+             happened, and is noise against a model nobody asked for. -->
+        <div v-if="surfaceUnavailable" class="toolbarNote">{{ surfaceUnavailable }}</div>
       </div>
       <!-- Where you look from and with what, as against the Map panel's what you
            are looking at. -->
@@ -232,6 +244,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { useGeolocation } from "../composables/useGeolocation";
 import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
+import { type SurfaceModel, surfaceEffects } from "../config/surfaceModels";
 import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
@@ -256,7 +269,21 @@ const menu = reactive<Record<MenuKey, boolean>>({
 const showUI = ref(true);
 
 const cesiumStore = useCesiumStore();
-const { layers, terrainProvider, sceneMode, cameraMode, qualityPreset, showFps, pickMode } = storeToRefs(cesiumStore);
+const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, qualityPreset, showFps, pickMode } = storeToRefs(cesiumStore);
+
+// What the selection means here and now, from the one function the globe reads
+// too — so a dimmed group and an unlit tileset cannot disagree.
+const effects = computed(() => surfaceEffects(surfaceModel.value, sceneMode.value));
+const inert = computed(() => effects.value.inert);
+
+// Named rather than merely flagged: "nothing happened" is the question this
+// answers, and which view mode would have worked is the answer.
+const surfaceUnavailable = computed(() => {
+  if (surfaceModel.value === "None" || !effects.value.unavailable.includes(surfaceModel.value as SurfaceModel)) {
+    return "";
+  }
+  return surfaceModel.value === "GooglePhotorealistic" ? "Applies in the sky view only" : "Applies in the 3D and sky views only";
+});
 
 // The checkbox list writes the whole array back. layers is read-only because
 // "at most one base layer" is an invariant of the list, so the write is routed

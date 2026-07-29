@@ -63,6 +63,17 @@ export function startSceneSync(cc: CesiumController): void {
       cc.terrainProvider = name;
     },
   );
+  // Both arguments, one watcher: what a surface model does depends on the view
+  // mode as much as on the selection, and there is nothing to gain from
+  // discovering which of the two moved. Immediate, because `?surface=` arrives
+  // before anything else would trigger it.
+  watch(
+    () => [cesiumStore.surfaceModel, cesiumStore.sceneMode] as const,
+    ([surfaceModel, viewMode]) => {
+      void cc.applySurfaceModel(surfaceModel, viewMode);
+    },
+    { immediate: true },
+  );
   // The view mode is the one setting that cannot be a plain assignment. Three
   // of the four are a Cesium projection, but "Sky" needs an observer, which may
   // still be arriving from the url or may have to be asked for — so entering is

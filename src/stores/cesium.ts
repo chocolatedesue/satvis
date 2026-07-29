@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { layerProvider } from "../config/layers";
+import { surfaceModelNames } from "../config/surfaceModels";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { baseLayerNames, imageryProviderNames, terrainProviderNames } from "../modules/CesiumLayerProviders";
 import { sameValue } from "../modules/util/equality";
@@ -11,6 +12,10 @@ export const useCesiumStore = defineStore(
   "cesium",
   () => {
     const terrainProvider = ref("None");
+    // A plain ref, unlike `layers`: at most one is the shape of the value rather
+    // than an invariant of a list, so there is nothing to enforce on write. What
+    // a selection *implies* is not state — it is derived, in surfaceEffects.
+    const surfaceModel = ref("None");
     const sceneMode = ref("3D");
     const cameraMode = ref("Fixed");
     const qualityPreset = ref("high");
@@ -65,6 +70,7 @@ export const useCesiumStore = defineStore(
       time,
       setTime,
       terrainProvider,
+      surfaceModel,
       sceneMode,
       cameraMode,
       qualityPreset,
@@ -80,6 +86,7 @@ export const useCesiumStore = defineStore(
       config: [
         { name: "layers", url: "layers", kind: layerList(imageryProviderNames) },
         { name: "terrainProvider", url: "terrain", kind: enumString(terrainProviderNames()) },
+        { name: "surfaceModel", url: "surface", kind: enumString(surfaceModelNames()) },
         { name: "sceneMode", url: "scene", kind: enumString(SCENE_MODES) },
         { name: "cameraMode", url: "camera", kind: enumString(CAMERA_MODES) },
         { name: "qualityPreset", url: "quality", kind: enumString(["low", "high"]) },

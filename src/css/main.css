@@ -65,6 +65,33 @@ body {
   margin: 5px;
 }
 
+/* A control whose selection a surface model has taken over — the globe's imagery
+   and terrain are not being drawn at all. Dimmed and drained of colour rather
+   than disabled: the row still reports what the user picked and what comes back
+   when they deselect the surface model, and changing it is still allowed. */
+.toolbarSwitch--inert {
+  opacity: 0.25;
+  filter: grayscale(1);
+}
+
+.toolbarTitle--inert {
+  opacity: 0.4;
+}
+
+/* Why nothing happened, for a surface model that cannot apply in this view mode.
+   Zero width with a full-width minimum so the sentence wraps inside the panel
+   instead of widening it: these panels are sized by their content, and the
+   longest row is what should set that width. */
+.toolbarNote {
+  width: 0;
+  min-width: 100%;
+  box-sizing: border-box;
+  padding: 2px 8px 3px 8px;
+  font-size: 11px;
+  line-height: 14px;
+  opacity: 0.6;
+}
+
 .toolbarSwitch {
   background-color: #303336;
   border-radius: 8px;
