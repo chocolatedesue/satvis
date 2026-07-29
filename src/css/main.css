@@ -82,6 +82,14 @@ body {
   display: none;
 }
 
+/* Waiting on the device — a location fix, or the orientation sensor answering a
+   probe. Dimmer than the row's own 0.5 and not clickable, so a second tap cannot
+   queue a second request while the first is still out. */
+.toolbarSwitch:has(input:disabled) {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .slider::before {
   position: absolute;
   content: "";

@@ -13,6 +13,7 @@
 import { JulianDate } from "@cesium/engine";
 import { nextTick, watch } from "vue";
 
+import { currentPosition } from "../composables/useGeolocation";
 import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
@@ -20,7 +21,6 @@ import type { CesiumController } from "./CesiumController";
 import { offlineFallback } from "./CesiumLayerProviders";
 import type { DesiredScene } from "./SatelliteManager";
 import type { Observer } from "./SkyView";
-import { currentPosition } from "./util/geolocation";
 import { toMinuteIso } from "./util/urlCodec";
 
 // Enough to keep a fast clock multiplier from hammering the history api.

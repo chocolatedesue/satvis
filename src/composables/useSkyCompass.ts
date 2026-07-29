@@ -20,6 +20,7 @@ import { useToastProxy } from "./useToastProxy";
 export const compassAvailable = (): boolean => typeof DeviceOrientationEvent !== "undefined" && window.isSecureContext;
 
 const active = ref(false);
+const pending = ref(false);
 
 const FAILURES: Record<string, string> = {
   unsupported: "This browser does not report device orientation.",
@@ -28,7 +29,7 @@ const FAILURES: Record<string, string> = {
   no_heading: "This device reports orientation but cannot tell where north is, so the sky would be aimed at an arbitrary bearing.",
 };
 
-export function useSkyCompass(): { active: Readonly<Ref<boolean>>; toggle: () => Promise<void>; stopped: () => void } {
+export function useSkyCompass(): { active: Readonly<Ref<boolean>>; pending: Readonly<Ref<boolean>>; toggle: () => Promise<void>; stopped: () => void } {
   async function toggle(): Promise<void> {
     const { skyInteraction } = globalThis.cc;
     if (active.value) {
@@ -36,8 +37,20 @@ export function useSkyCompass(): { active: Readonly<Ref<boolean>>; toggle: () =>
       active.value = false;
       return;
     }
+    if (pending.value) {
+      return;
+    }
 
-    const outcome: CompassOutcome = await skyInteraction.enableDeviceOrientation();
+    // Enabling takes a moment — iOS raises a permission prompt, and every platform
+    // gets a sensor probe it has to answer — so the control has something to say
+    // while it waits rather than looking inert.
+    pending.value = true;
+    let outcome: CompassOutcome;
+    try {
+      outcome = await skyInteraction.enableDeviceOrientation();
+    } finally {
+      pending.value = false;
+    }
     active.value = outcome === "aiming" || outcome === "aiming-uncalibrated";
 
     if (outcome === "aiming-uncalibrated") {
@@ -67,5 +80,5 @@ export function useSkyCompass(): { active: Readonly<Ref<boolean>>; toggle: () =>
     active.value = false;
   }
 
-  return { active: readonly(active), toggle, stopped };
+  return { active: readonly(active), pending: readonly(pending), toggle, stopped };
 }

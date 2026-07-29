@@ -19,6 +19,7 @@ import { Viewer } from "@cesium/widgets";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
+import { currentPosition } from "../composables/useGeolocation";
 import { usePostHog } from "../composables/usePostHog";
 import { useToastProxy } from "../composables/useToastProxy";
 import { parseLayer } from "../config/layers";
@@ -39,7 +40,6 @@ import { SkyInteraction } from "./SkyInteraction";
 import { SkyView } from "./SkyView";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
-import { currentPosition } from "./util/geolocation";
 import { PushManager } from "./util/PushManager";
 
 dayjs.extend(utc);

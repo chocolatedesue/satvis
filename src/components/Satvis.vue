@@ -71,8 +71,8 @@
           Pick on globe
         </label>
         <label class="toolbarSwitch">
-          <input type="button" @click="void cc.setGroundStationFromGeolocation()" />
-          Set from geolocation
+          <input type="button" :disabled="locating" @click="void locate()" />
+          {{ locating ? "Set from geolocation — locating…" : "Set from geolocation" }}
         </label>
         <label class="toolbarSwitch">
           <input type="button" @click="cc.sats.focusGroundStation()" />
@@ -124,8 +124,9 @@
         <template v-if="inSkyView && compassOffered">
           <div class="toolbarTitle">Aiming</div>
           <label class="toolbarSwitch">
-            <input type="button" @click="useCompass" />
-            {{ compassActive ? "Stop using compass" : "Use compass" }}
+            <input type="checkbox" :checked="compassActive" :disabled="compassPending" @change="onCompassToggle" />
+            <span class="slider"></span>
+            {{ compassPending ? "Use compass — starting…" : "Use compass" }}
           </label>
         </template>
       </div>
@@ -224,6 +225,7 @@
 import { storeToRefs } from "pinia";
 import { computed, onMounted, reactive, ref } from "vue";
 
+import { useGeolocation } from "../composables/useGeolocation";
 import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
 import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
@@ -262,16 +264,25 @@ const layerSelection = computed({
 const satStore = useSatStore();
 const { enabledComponents, overpassMode } = storeToRefs(satStore);
 
-// Handing the aim to the device is an action with an outcome, not a setting, so
-// it is a button rather than a switch — and enabling must happen inside the click
-// to satisfy iOS's user-gesture requirement for the permission prompt.
+const { pending: locating, locate } = useGeolocation();
+
 const compassOffered = compassAvailable();
-const { active: compassActive, toggle: toggleCompass } = useSkyCompass();
+const { active: compassActive, pending: compassPending, toggle: toggleCompass } = useSkyCompass();
 const inSkyView = computed(() => sceneMode.value === SKY_MODE);
 
-async function useCompass(): Promise<void> {
+// Handing the aim to a sensor is an action with an outcome, and the outcome may be
+// "no". The browser's own flip on click is the feedback that something was
+// attempted — and iOS's permission prompt has to be raised from inside the click —
+// so the switch moves first and is corrected afterwards.
+//
+// The correction has to be made by hand. Vue re-syncs a checkbox only when the value
+// bound to it changes, and a refused sensor leaves `compassActive` exactly where it
+// was, so the box would sit there checked and contradicting it.
+async function onCompassToggle(event: Event): Promise<void> {
   await toggleCompass();
-  // The panel covers the sky it was just asked to aim at.
+  (event.target as HTMLInputElement).checked = compassActive.value;
+  // Success closes the panel, which was covering the sky it was just asked to aim
+  // at — so the revert above is only ever seen when it means something.
   if (compassActive.value) {
     menu.view = false;
   }
