@@ -22,9 +22,10 @@
   "kv_namespaces": [{ "binding": "GP_KV", "id": "26a7848ab641416fa518a3df4790a968" }],
   "triggers": {
     // Every 6 h at :23 (>= CelesTrak's ~2 h refresh guidance, off-hour minute).
-    // 6 rather than 3 to halve our share of CelesTrak's 250 MB/day per-IP budget
-    // (~98 -> ~49 MB), which a Worker shares with every other Cloudflare tenant
-    // on the same egress IP. Costs a few hundred metres of SGP4 drift at most.
+    // 6 rather than 3 to halve our share of CelesTrak's 250 MB/day per-IP budget,
+    // which a Worker shares with every other Cloudflare tenant on the same egress
+    // IP. With ~7 MB per run that is ~29 MB/day. Costs a few hundred metres of
+    // SGP4 drift at most.
     "crons": ["23 */6 * * *"],
   },
   "observability": {

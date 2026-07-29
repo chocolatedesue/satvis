@@ -72,7 +72,7 @@ Then `GET /api/groups.json` lists the refreshed groups and
 `GET /api/gp/starlink.json` returns an OMM element-set array.
 
 `POST /api/refresh` runs the same refresh on demand and reports per-source
-diagnostics. It needs a bearer token, since one run pulls ~12 MB from CelesTrak
+diagnostics. It needs a bearer token, since one run pulls ~7 MB from CelesTrak
 against a 250 MB/day per-IP cap:
 
 ```

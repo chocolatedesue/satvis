@@ -28,6 +28,10 @@ async function seedGroup(name: string, records: OmmRecord[], updated = UPDATED):
   await env.GP_KV.put(`gp:${name}`, JSON.stringify(records), { metadata: { updated, count: records.length } });
 }
 
+async function idsOf(group: string): Promise<unknown[]> {
+  return ((await env.GP_KV.get(`gp:${group}`, "json")) as OmmRecord[]).map((r) => r.NORAD_CAT_ID);
+}
+
 describe("GET /api/gp/<group>.json", () => {
   beforeEach(async () => {
     await seedGroup("weather", ommArray(["GOES 16", 41866], ["NOAA 20 (JPSS-1)", 43013]));
@@ -168,6 +172,46 @@ describe("scheduled() refresh", () => {
     expect(issStatus).toBeDefined();
     expect(issStatus?.lastError).toBeUndefined();
     expect(issStatus?.warnings).toEqual(expect.arrayContaining([expect.stringContaining("matched no record")]));
+  });
+
+  it("carves the derived groups out of the shared active source", async () => {
+    // Seven groups are no longer fetched as their own CelesTrak group — they are
+    // selected by name out of the single `active` download. Each record must land
+    // in exactly one group; the anchored patterns must not pick up a name that
+    // merely contains the prefix; and the `satellites` rows must pull in the
+    // members whose names carry no matching prefix (real ids, since those rows
+    // match on NORAD id).
+    interceptCelestrak((source) =>
+      source === "active"
+        ? [
+            { OBJECT_NAME: "STARLINK-1234", NORAD_CAT_ID: 1 },
+            { OBJECT_NAME: "ONEWEB-0042", NORAD_CAT_ID: 2 },
+            { OBJECT_NAME: "GLOBALSTAR M001", NORAD_CAT_ID: 3 },
+            { OBJECT_NAME: "IRIDIUM 100", NORAD_CAT_ID: 4 },
+            { OBJECT_NAME: "FLOCK 4X-1", NORAD_CAT_ID: 5 },
+            { OBJECT_NAME: "PELICAN-11", NORAD_CAT_ID: 6 },
+            { OBJECT_NAME: "LEMUR-2-CLARA", NORAD_CAT_ID: 7 },
+            { OBJECT_NAME: "EUTELSAT 7C", NORAD_CAT_ID: 8 },
+            { OBJECT_NAME: "OTTER SDM", NORAD_CAT_ID: 66678 },
+            { OBJECT_NAME: "EXPRESS-AT1", NORAD_CAT_ID: 39612 },
+            { OBJECT_NAME: "NOT-STARLINK-9", NORAD_CAT_ID: 90 },
+            { OBJECT_NAME: "COSMOS 2251", NORAD_CAT_ID: 91 },
+          ]
+        : [{ OBJECT_NAME: `${source.toUpperCase()}-1`, NORAD_CAT_ID: 900 }],
+    );
+
+    const ctx = createExecutionContext();
+    const controller = createScheduledController({ scheduledTime: Date.now(), cron: "23 */6 * * *" });
+    await worker.scheduled(controller, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(await idsOf("starlink")).toEqual([1]);
+    expect(await idsOf("oneweb")).toEqual([2]);
+    expect(await idsOf("globalstar")).toEqual([3]);
+    expect(await idsOf("iridium-NEXT")).toEqual([4]);
+    expect(await idsOf("planet")).toEqual([5, 6]);
+    expect(await idsOf("spire")).toEqual([7, 66678]);
+    expect(await idsOf("eutelsat")).toEqual([8, 39612]);
   });
 
   it("preserves last-known-good on failure", async () => {

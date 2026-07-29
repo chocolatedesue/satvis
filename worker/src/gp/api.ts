@@ -63,7 +63,7 @@ async function handleIndex(env: Env): Promise<Response> {
 
 // POST /api/refresh — run the same refresh as the cron (fetch every source,
 // evaluate, write KV) and return a per-source diagnostic report. Needs
-// `Authorization: Bearer <REFRESH_TOKEN>`: one run pulls ~12 MB from CelesTrak,
+// `Authorization: Bearer <REFRESH_TOKEN>`: one run pulls ~7 MB from CelesTrak,
 // which firewalls by IP (250 MB/day) — and a Worker's egress IP is shared with
 // other Cloudflare tenants, so an open trigger risks a block that stalls the cron
 // for everyone. Also rate-limited: within REFRESH_COOLDOWN_MS of the last refresh
