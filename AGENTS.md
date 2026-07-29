@@ -33,7 +33,8 @@ CI runs `lint`, then `test` (frontend + worker), then `build`.
 - **Frontend**: Vue 3 + Vite + CesiumJS + Nuxt UI (Tailwind). Single-page app in `src/`.
 - **Worker**: Cloudflare Worker backend in `worker/` — a workspace package (`satvis-worker`) with its own `package.json`, installed by the root `pnpm install`. Uses Wrangler for dev/deploy. Has its own `lint`, `type-check`, `test`, and `generate-types` scripts (run via `pnpm --filter satvis-worker <script>`).
 - **Satellite data (GP element sets)**: fetched from CelesTrak as OMM JSON.
-  - The worker refreshes each group into Workers KV via a cron trigger (every 3 h) and serves `/api/gp/<group>.json` and `/api/groups.json`.
+  - The worker refreshes each group into Workers KV via a cron trigger (every 6 h) and serves `/api/gp/<group>.json` and `/api/groups.json`.
+  - **`POST /api/refresh`** runs the same refresh on demand and needs `Authorization: Bearer <REFRESH_TOKEN>` (a Worker secret; unset ⇒ 503). CelesTrak firewalls by IP (250 MB/day, 50 HTTP errors per 2 h) and Cloudflare's egress IPs are shared across tenants, so an open trigger risks a block that stalls the cron. One run costs ~7 MB (mostly the shared `active` download).
   - Config is declarative and YAML: core config in `worker/src/config/satvis.core.yaml`, plugin config in `data/custom/<plugin>/satvis.yaml`. Each contributes two independent sections — `groups` (`sources`/`satellites`/`select`/`rename`/`include`/`extraRecordsFile`) and `satellites` (static per-satellite facts keyed by NORAD id). `pnpm --filter satvis-worker generate-groups` merges them into the gitignored `worker/src/config/satvis.generated.json`.
   - **Satellite metadata** (swath extents, sensor FOV, model URL, operator) is attached to each matching record **at refresh time**, under a lowercase `metadata` key, from the merged satellite table. There is no metadata endpoint and no browser-side rule matching: a record either carries the bag or the frontend applies its defaults (`src/config/satelliteMetadata.ts`). See `docs/adr/0002-static-satellite-metadata.md`.
   - **Worker-less mode**: `pnpm update-gp` runs the same evaluator and writes a static snapshot into `data/gp/` (gitignored). The app probes `/api/groups.json` and falls back to that snapshot.
@@ -58,12 +59,12 @@ CI runs `lint`, then `test` (frontend + worker), then `build`.
 `pnpm deploy` builds the frontend and deploys the worker. The worker needs a KV
 namespace bound as `GP_KV` (see `worker/wrangler.jsonc`). After the first
 deploy, KV is empty until a cron run fills it — either wait for the cron
-(≤ 3 h) or force a fill now against the deployed KV:
+(≤ 6 h) or force a fill now against the deployed KV:
 
 ```
 cd worker
 wrangler dev --remote --test-scheduled
-curl "http://localhost:8080/__scheduled?cron=23+*%2F3+*+*+*"
+curl "http://localhost:8080/__scheduled?cron=23+*%2F6+*+*+*"
 ```
 
 ### Private plugin config (`data/custom/<plugin>/satvis.yaml`)

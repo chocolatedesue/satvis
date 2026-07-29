@@ -4,35 +4,83 @@
 # Merged with every data/custom/*/satvis.yaml plugin config into
 # satvis.generated.json by scripts/generate-groups.mjs at build time.
 
+# The seven groups below are carved out of `active` by name instead of being
+# fetched as their own CelesTrak group. `active` is already pulled for the plugin
+# groups, and sources are deduped, so they cost nothing extra — dropping their own
+# fetches took a refresh from ~12.2 MB to ~7.2 MB, against CelesTrak's 250 MB/day
+# per-IP budget, and 15 sources down to 8.
+#
+# Verified against a same-cycle `active` snapshot on 2026-07-29. Every derivation
+# below is a superset of the CelesTrak group — nothing upstream serves is lost:
+#
+#   oneweb, globalstar, iridium-NEXT   exact, record for record
+#   starlink    +2  STARLINK-2401/47818, STARLINK-34343/64157
+#   planet      +1  PELICAN-11/69871
+#   eutelsat    +1  EUTELSAT 53A/40277
+#   spire      +12  recent LEMUR-2s (66680, 67366, 68471-68493)
+#
+# The extras are objects CelesTrak keeps in `active` but not in the curated group.
+# Most carry high (recent) NORAD ids, so they read as launches not yet folded into
+# the group rather than deliberate exclusions — but EUTELSAT 53A is a 2014 craft,
+# so some are genuine editorial drops. We serve them either way.
+#
+# `satellites` rows rather than plain select.noradIds for the members that carry no
+# matching prefix: a row's upstreamName is checked against the record, so a rename
+# or decay surfaces as a warning in /api/groups.json instead of silently shrinking
+# the group.
+#
+# Still fetched as their own sources — editorial lists with no name pattern at all:
+# gnss, science, resource, weather, cubesat, stations, last-30-days.
+#
+# Re-check a derivation before widening it. These are curated lists, and a pattern
+# that fits today drifts as operators add product lines (planet needed PELICAN,
+# TANAGER and EDDA appended to FLOCK/SKYSAT for exactly that reason).
 groups:
   - name: cubesat
     sources: [{ celestrak: cubesat }]
   - name: globalstar
-    sources: [{ celestrak: globalstar }]
+    sources: [{ celestrak: active }]
+    select: { namePattern: "^GLOBALSTAR" }
   - name: gnss
     sources: [{ celestrak: gnss }]
   - name: iridium-NEXT
-    sources: [{ celestrak: iridium-NEXT }]
+    sources: [{ celestrak: active }]
+    select: { namePattern: "^IRIDIUM" }
   - name: last-30-days
     sources: [{ celestrak: last-30-days }]
   - name: oneweb
-    sources: [{ celestrak: oneweb }]
+    sources: [{ celestrak: active }]
+    select: { namePattern: "^ONEWEB" }
   - name: planet
-    sources: [{ celestrak: planet }]
+    sources: [{ celestrak: active }]
+    # FLOCK/SKYSAT are the original lines; PELICAN, TANAGER and EDDA are newer and
+    # share no prefix with them.
+    select: { namePattern: "^(FLOCK|SKYSAT|PELICAN|TANAGER|EDDA)" }
   - name: resource
     sources: [{ celestrak: resource }]
   - name: science
     sources: [{ celestrak: science }]
   - name: spire
-    sources: [{ celestrak: spire }]
+    sources: [{ celestrak: active }]
+    select: { namePattern: "^LEMUR" }
+    # Spire craft that are not LEMURs.
+    satellites:
+      - { noradId: 66678, upstreamName: OTTER SDM }
+      - { noradId: 67364, upstreamName: TWILIGHT-1 OBJECT B }
   - name: starlink
-    sources: [{ celestrak: starlink }]
+    sources: [{ celestrak: active }]
+    select: { namePattern: "^STARLINK" }
   - name: stations
     sources: [{ celestrak: stations }]
   - name: weather
     sources: [{ celestrak: weather }]
   - name: eutelsat
-    sources: [{ celestrak: eutelsat }]
+    sources: [{ celestrak: active }]
+    select: { namePattern: "^EUTELSAT" }
+    # Eutelsat-operated, but catalogued under their Express names.
+    satellites:
+      - { noradId: 39612, upstreamName: EXPRESS-AT1 }
+      - { noradId: 39613, upstreamName: EXPRESS-AT2 }
 
 # Static per-satellite facts, matched against a record's NORAD_CAT_ID alone.
 # `name` is documentation only — it never takes part in matching.

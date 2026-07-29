@@ -13,6 +13,9 @@ export default defineConfig({
       miniflare: {
         // Ephemeral in-memory KV for tests (do not touch remote/local data).
         kvNamespaces: ["GP_KV"],
+        // Stand in for the REFRESH_TOKEN Worker secret, which lives outside
+        // wrangler.jsonc and so is not provided by the config above.
+        bindings: { REFRESH_TOKEN: "test-refresh-token" },
         // Point the assets binding at an empty dir so the pool does not walk
         // the real ../dist build (which may contain large local-only model
         // assets exceeding the Workers asset size limit).

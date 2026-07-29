@@ -14,12 +14,22 @@ const SOURCE_COUNT = collectSources((generatedConfig as GroupsConfig).groups).le
 const UPDATED = "2026-07-04T00:00:00.000Z";
 const UPDATED_MS = Date.parse(UPDATED);
 
+// Matches the REFRESH_TOKEN binding in vitest.config.ts. That binding stands in
+// for a Worker secret, which lives outside wrangler.jsonc and so is absent from
+// the generated Env type — hence the local view, mirroring api.ts.
+const AUTH = { Authorization: "Bearer test-refresh-token" };
+const secretEnv = env as typeof env & { REFRESH_TOKEN?: string };
+
 function ommArray(...pairs: [string, number][]): OmmRecord[] {
   return pairs.map(([name, id]) => ({ OBJECT_NAME: name, NORAD_CAT_ID: id }));
 }
 
 async function seedGroup(name: string, records: OmmRecord[], updated = UPDATED): Promise<void> {
   await env.GP_KV.put(`gp:${name}`, JSON.stringify(records), { metadata: { updated, count: records.length } });
+}
+
+async function idsOf(group: string): Promise<unknown[]> {
+  return ((await env.GP_KV.get(`gp:${group}`, "json")) as OmmRecord[]).map((r) => r.NORAD_CAT_ID);
 }
 
 describe("GET /api/gp/<group>.json", () => {
@@ -142,7 +152,7 @@ describe("scheduled() refresh", () => {
     interceptCelestrak((group) => [{ OBJECT_NAME: `${group.toUpperCase()}-1`, NORAD_CAT_ID: 10000 + group.length }]);
 
     const ctx = createExecutionContext();
-    const controller = createScheduledController({ scheduledTime: Date.now(), cron: "23 */3 * * *" });
+    const controller = createScheduledController({ scheduledTime: Date.now(), cron: "23 */6 * * *" });
     await worker.scheduled(controller, env, ctx);
     await waitOnExecutionContext(ctx);
 
@@ -164,6 +174,46 @@ describe("scheduled() refresh", () => {
     expect(issStatus?.warnings).toEqual(expect.arrayContaining([expect.stringContaining("matched no record")]));
   });
 
+  it("carves the derived groups out of the shared active source", async () => {
+    // Seven groups are no longer fetched as their own CelesTrak group — they are
+    // selected by name out of the single `active` download. Each record must land
+    // in exactly one group; the anchored patterns must not pick up a name that
+    // merely contains the prefix; and the `satellites` rows must pull in the
+    // members whose names carry no matching prefix (real ids, since those rows
+    // match on NORAD id).
+    interceptCelestrak((source) =>
+      source === "active"
+        ? [
+            { OBJECT_NAME: "STARLINK-1234", NORAD_CAT_ID: 1 },
+            { OBJECT_NAME: "ONEWEB-0042", NORAD_CAT_ID: 2 },
+            { OBJECT_NAME: "GLOBALSTAR M001", NORAD_CAT_ID: 3 },
+            { OBJECT_NAME: "IRIDIUM 100", NORAD_CAT_ID: 4 },
+            { OBJECT_NAME: "FLOCK 4X-1", NORAD_CAT_ID: 5 },
+            { OBJECT_NAME: "PELICAN-11", NORAD_CAT_ID: 6 },
+            { OBJECT_NAME: "LEMUR-2-CLARA", NORAD_CAT_ID: 7 },
+            { OBJECT_NAME: "EUTELSAT 7C", NORAD_CAT_ID: 8 },
+            { OBJECT_NAME: "OTTER SDM", NORAD_CAT_ID: 66678 },
+            { OBJECT_NAME: "EXPRESS-AT1", NORAD_CAT_ID: 39612 },
+            { OBJECT_NAME: "NOT-STARLINK-9", NORAD_CAT_ID: 90 },
+            { OBJECT_NAME: "COSMOS 2251", NORAD_CAT_ID: 91 },
+          ]
+        : [{ OBJECT_NAME: `${source.toUpperCase()}-1`, NORAD_CAT_ID: 900 }],
+    );
+
+    const ctx = createExecutionContext();
+    const controller = createScheduledController({ scheduledTime: Date.now(), cron: "23 */6 * * *" });
+    await worker.scheduled(controller, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(await idsOf("starlink")).toEqual([1]);
+    expect(await idsOf("oneweb")).toEqual([2]);
+    expect(await idsOf("globalstar")).toEqual([3]);
+    expect(await idsOf("iridium-NEXT")).toEqual([4]);
+    expect(await idsOf("planet")).toEqual([5, 6]);
+    expect(await idsOf("spire")).toEqual([7, 66678]);
+    expect(await idsOf("eutelsat")).toEqual([8, 39612]);
+  });
+
   it("preserves last-known-good on failure", async () => {
     // Seed a good weather value and index first.
     await seedGroup("weather", ommArray(["GOOD SAT", 1]), "2026-01-01T00:00:00.000Z");
@@ -176,7 +226,7 @@ describe("scheduled() refresh", () => {
     interceptCelestrak(() => [], { status: 503 });
 
     const ctx = createExecutionContext();
-    const controller = createScheduledController({ scheduledTime: Date.now(), cron: "23 */3 * * *" });
+    const controller = createScheduledController({ scheduledTime: Date.now(), cron: "23 */6 * * *" });
     await worker.scheduled(controller, env, ctx);
     await waitOnExecutionContext(ctx);
 
@@ -197,7 +247,7 @@ describe("scheduled() refresh", () => {
     await env.GP_KV.put("gp:index", JSON.stringify({ updated: "2020-01-01T00:00:00.000Z", groups: [] } satisfies GroupsIndex));
     interceptCelestrak((group) => [{ OBJECT_NAME: `${group.toUpperCase()}-1`, NORAD_CAT_ID: 42 }]);
 
-    const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST" });
+    const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST", headers: AUTH });
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
 
@@ -224,7 +274,7 @@ describe("scheduled() refresh", () => {
       JSON.stringify({ updated: recent, groups: [{ name: "weather", updated: recent, count: 2, lastError: "source celestrak:weather failed: HTTP 522" }] } satisfies GroupsIndex),
     );
 
-    const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST" });
+    const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST", headers: AUTH });
     expect(res.status).toBe(429);
     expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
     const body = (await res.json()) as { refreshed: boolean; reason: string; retryAfterMs: number; groups: { name: string; lastError?: string }[] };
@@ -239,5 +289,29 @@ describe("scheduled() refresh", () => {
     const res = await SELF.fetch("https://satvis.space/api/refresh");
     expect(res.status).toBe(405);
     expect(res.headers.get("Allow")).toBe("POST");
+  });
+
+  // Both rejections must land before any upstream request — the afterEach fetch
+  // count (expectedFetches stays 0) is what proves the token actually protects
+  // CelesTrak's per-IP budget rather than just the response.
+  it.each([
+    ["no Authorization header", {}],
+    ["a wrong token", { Authorization: "Bearer not-the-token" }],
+  ])("rejects POST /api/refresh with %s", async (_label, headers) => {
+    const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST", headers });
+    expect(res.status).toBe(401);
+  });
+
+  it("fails closed with 503 when REFRESH_TOKEN is not configured", async () => {
+    // A deploy that predates `wrangler secret put` (or follows a secret delete)
+    // must disable the endpoint, never fall back to an open trigger.
+    const configured = secretEnv.REFRESH_TOKEN;
+    delete secretEnv.REFRESH_TOKEN;
+    try {
+      const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST", headers: AUTH });
+      expect(res.status).toBe(503);
+    } finally {
+      secretEnv.REFRESH_TOKEN = configured;
+    }
   });
 });
