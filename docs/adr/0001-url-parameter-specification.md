@@ -41,6 +41,7 @@ Every parameter is optional. An absent parameter means "use the default" (see
 | `overpass` | `sat.overpassMode`       | enum                | `elevation` \| `swath`                                                                                            | `elevation`      |
 | `layers`   | `cesium.layers`          | layer list          | comma-joined; each item `Name` or `Name_<alpha>`; list order is z-order                                           | `OfflineHighres` |
 | `terrain`  | `cesium.terrainProvider` | enum                | `None` \| `CesiumWorldTerrain` \| `Maptiler`                                                                      | `None`           |
+| `surface`  | `cesium.surfaceModel`    | enum                | `None` \| `OsmBuildings` \| `GooglePhotorealistic`                                                                | `None`           |
 | `scene`    | `cesium.sceneMode`       | enum                | `3D` \| `2D` \| `Columbus` \| `Sky`                                                                               | `3D`             |
 | `camera`   | `cesium.cameraMode`      | enum                | `Fixed` \| `Inertial`                                                                                             | `Fixed`          |
 | `quality`  | `cesium.qualityPreset`   | enum                | `low` \| `high`                                                                                                   | `high`           |
@@ -91,6 +92,14 @@ whole and has to hold whatever the source.
 Note `ArcGis` (imagery) and `ArcGIS` (terrain) differ only in capitalisation and are
 different things. The terrain provider is registered `visible: false`, so `?terrain=ArcGIS`
 is not accepted. Do not "correct" either spelling.
+
+`surface` is carried even when the model it names cannot apply in the current `scene` —
+`GooglePhotorealistic` is the sky view only, and neither model applies in 2D or Columbus.
+That is deliberate rather than an oversight in validation: the selection is suppressed, not
+invalid, so `?surface=GooglePhotorealistic&scene=Sky` works and a model can be armed before
+entering the view that uses it. `terrain` is likewise still emitted while a surface model
+overrides it, because it says what the user chose and what returns on deselection. See
+`docs/adr/0005-surface-models.md`.
 
 `catalogRevision` and `pickMode` are store state that is deliberately **not** synced —
 the former is a cache-invalidation counter, the latter a transient UI mode.

@@ -69,7 +69,9 @@ discussion; sharpen them here when they drift.
   inertial. Independent of the view mode.
 - **Sky view**: the view mode that stands at the observer and looks up, showing
   satellites where they actually are in that person's sky. It owns the camera
-  outright, which is why nothing is tracked while it is up.
+  outright, which is why nothing is tracked while it is up. What it stands on is
+  whatever surface is there — terrain, or the top of a surface model, which means
+  a roof where a building stands at the observer.
 - **Aim**: which way the sky view is pointing — azimuth, pitch above the
   horizontal, and roll about the view axis. Pitch, not elevation: the two are
   equal whenever the camera is looking at something, but a camera has an
@@ -98,6 +100,13 @@ discussion; sharpen them here when they drift.
 - **GP source**: where the frontend gets GP data — the worker API when the
   probe succeeds, the static `data/gp/` snapshot otherwise, with a
   per-request API→static fallback mid-session (`src/modules/util/gpSource.ts`).
+- **Surface model**: the 3D representation of the ground and what stands on it,
+  drawn over the globe. At most one, and none by default. Deliberately not
+  symmetric: OSM Buildings adds extruded footprints to the globe's own surface,
+  while Google Photorealistic 3D Tiles _is_ the surface — ground, vegetation and
+  buildings in one mesh — which is why choosing it hides the globe and leaves the
+  imagery and terrain selections describing nothing
+  (`docs/adr/0005-surface-models.md`).
 - **Offline imagery**: the basemap that ships inside the app and is precached, so
   it is the only one guaranteed with no network. The high-resolution copy of the
   same map is data shipped beside the app and cached only as it is viewed: same

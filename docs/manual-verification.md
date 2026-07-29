@@ -103,6 +103,45 @@ to `?layers=Offline`, and the console carried the warning naming
 `git submodule update --init`. With the file present the high-resolution provider is
 used and the globe tiles normally.
 
+## Surface models: the matrix, the eye height, and what drapes on a mesh
+
+The pure part is unit-tested (`src/config/surfaceModels.test.ts`); what needs a browser
+is whether the scene agrees with it. Needs an unrestricted `VITE_CESIUM_ION_TOKEN`.
+
+**Procedure.** With `?layers=ArcGis&gs=48.1372,11.5756,Munich`, walk `surface=` and
+`scene=` through the combinations, reading `cc.surface.active`,
+`scene.globe.show`, `scene.terrainProvider.constructor.name`, the camera's cartographic
+height, and the dimmed groups in the Map panel.
+
+**Result, 2026-07-29, Chrome.**
+
+- `surface=OsmBuildings&scene=3D`: buildings drawn on the globe over Munich, terrain
+  silently `CesiumTerrainProvider` while the radio still reads `None`, Terrain group
+  dimmed and Layers not.
+- `surface=GooglePhotorealistic&scene=Sky`: globe hidden, mesh drawn, both Layers and
+  Terrain dimmed. The camera settled at **563.3 m** ellipsoid height at the observer —
+  the mesh surface plus the 2 m eye height, where without the clamp it would have been
+  2 m, i.e. some 560 m underground.
+- Switching that to `scene=3D`: tileset removed, globe back, nothing dimmed, terrain
+  back to `EllipsoidTerrainProvider`, `?surface=GooglePhotorealistic` still in the url,
+  and the panel reads "Applies in the sky view only".
+- `surface=OsmBuildings&scene=2D`: no tileset, terrain not overridden, panel reads
+  "Applies in the 3D and sky views only".
+- **Ground-clamped overlays under a hidden globe**: a probe corridor with
+  `heightReference: CLAMP_TO_GROUND` through the observer rendered and draped onto the
+  photorealistic mesh, following the street and correctly occluded by the buildings
+  either side. So the Ground track component needs no suppression there.
+- **Failure path**: with `VITE_CESIUM_ION_TOKEN=not-a-real-token`, selecting
+  `GooglePhotorealistic` toasted "GooglePhotorealistic unavailable … Cesium ion needs a
+  token valid for this origin", put the radio back to `None`, and dropped `surface`
+  from the url. `SurfaceModel.apply` was called exactly twice — the attempt and the
+  revert — so the failure is reported once.
+- **Ground station pin**: at the Eiger with `terrain=CesiumWorldTerrain` the pin sits on
+  the ridge, where at its stored height of 0 it had been ~4 km below the surface.
+
+Not exercised: iOS, where the tuned-down `cacheBytes` and `maximumScreenSpaceError`
+apply, and where a phone's memory is the thing being protected.
+
 ## Sky view: what a device is still needed for
 
 Open questions 1 and 2 in `docs/adr/0003-sky-view.md` need a real phone on HTTPS —
