@@ -65,7 +65,7 @@ The worker's cron trigger fills Workers KV. To run it once locally (wrangler
 dev is started with `--test-scheduled`), hit the scheduled endpoint:
 
 ```
-curl "http://localhost:8080/__scheduled?cron=23+*%2F3+*+*+*"
+curl "http://localhost:8080/__scheduled?cron=23+*%2F6+*+*+*"
 ```
 
 Then `GET /api/groups.json` lists the refreshed groups and
@@ -89,7 +89,7 @@ Element sets come from [CelesTrak](https://celestrak.org) as OMM JSON
 (CelesTrak is phasing out TLE for new objects). The Cloudflare Worker in
 `worker/` fetches and serves them:
 
-- A cron trigger (every 3 h) refreshes each group into Workers KV; failed
+- A cron trigger (every 6 h) refreshes each group into Workers KV; failed
   sources keep the last-known-good copy.
 - `GET /api/gp/<group>.json` — one group's element sets (OMM array, with
   per-satellite metadata attached; see below).

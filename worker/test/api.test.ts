@@ -148,7 +148,7 @@ describe("scheduled() refresh", () => {
     interceptCelestrak((group) => [{ OBJECT_NAME: `${group.toUpperCase()}-1`, NORAD_CAT_ID: 10000 + group.length }]);
 
     const ctx = createExecutionContext();
-    const controller = createScheduledController({ scheduledTime: Date.now(), cron: "23 */3 * * *" });
+    const controller = createScheduledController({ scheduledTime: Date.now(), cron: "23 */6 * * *" });
     await worker.scheduled(controller, env, ctx);
     await waitOnExecutionContext(ctx);
 
@@ -182,7 +182,7 @@ describe("scheduled() refresh", () => {
     interceptCelestrak(() => [], { status: 503 });
 
     const ctx = createExecutionContext();
-    const controller = createScheduledController({ scheduledTime: Date.now(), cron: "23 */3 * * *" });
+    const controller = createScheduledController({ scheduledTime: Date.now(), cron: "23 */6 * * *" });
     await worker.scheduled(controller, env, ctx);
     await waitOnExecutionContext(ctx);
 

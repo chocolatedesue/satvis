@@ -47,8 +47,8 @@ against real product footprints — and JSON cannot carry a comment.
 - **Sentinel-3's ground track roughly doubles**, 740 → 1500 km, and other extents
   shift ~1% (Terra 2330 → 2350, Sentinel-2 290 → 300, VIIRS 3000 → 3130) as
   calibrated values replace nominal ones.
-- **Up to 3 h of defaults after a deploy**, until the cron refresh (`23 */3 * * *`)
-  rewrites KV, or a `POST /api/refresh` does it sooner.
+- **Up to one cron interval of defaults after a deploy** (`23 */6 * * *`, so 6 h),
+  until the refresh rewrites KV or an authenticated `POST /api/refresh` does it sooner.
 - **`/api/metadata.json` is gone**, along with the browser-side rule matcher, the
   revision counter, and the per-entry memo it invalidated.
 
