@@ -38,11 +38,17 @@ export interface TapeTick {
  * 3 exists only to break the 5-to-1 jump, without which a span of 15° would skip
  * from three marks to fifteen.
  *
+ * 15° is the coarsest deliberately. A 45° rung would only ever be reached above a
+ * 135° span — unreachable until the zoom ceiling went to 100° — and crossing into
+ * it thinned the tape from nine marks to three in the space of a few degrees of
+ * zoom. Losing it costs nothing anyone has seen and removes the one place the
+ * density jumped by 3x.
+ *
  * A fixed 15° step used to empty both tapes out when zoomed: at maximum zoom a
  * portrait viewport spans about 4.6° of azimuth, so the nearest 15° mark was
  * usually off screen and the tape showed nothing at all.
  */
-const STEP_LADDER = [45, 15, 5, 3, 1];
+const STEP_LADDER = [15, 5, 3, 1];
 
 /**
  * How many marks the span should hold before a finer step is chosen. Three keeps
@@ -57,8 +63,8 @@ export const TICKS_WANTED = 3;
 /** The coarsest step that still populates the span. */
 export const stepFor = (spanDegrees: number): number => STEP_LADDER.find((step) => spanDegrees / step >= TICKS_WANTED) ?? 1;
 
-/** Majors carry the labels. At 45° every tick is a compass point, so all are. */
-export const majorStep = (step: number): number => (step === 45 ? 45 : step * 3);
+/** Majors carry the labels. Three steps apart, which every rung keeps a divisor of 45. */
+export const majorStep = (step: number): number => step * 3;
 
 /**
  * Ticks closer together than this are thinned away. Thinning by screen distance

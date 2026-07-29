@@ -9,6 +9,7 @@ const span = (fovy: number, width: number, height: number): number => CesiumMath
 
 const PHONE = [390, 844] as const;
 const DESKTOP = [1600, 900] as const;
+const WIDE = [2560, 1080] as const;
 
 describe("stepFor", () => {
   test("leaves a landscape desktop at the default zoom where it always was", () => {
@@ -29,15 +30,23 @@ describe("stepFor", () => {
     expect(stepFor(span(MIN_FOVY, ...DESKTOP))).toBe(5);
   });
 
-  test("stays between three and nine marks across the whole zoom range", () => {
-    // The upper bound is what the ladder's spacing buys: no rung is more than
-    // three times the next, so the count cannot exceed three times the minimum.
-    for (const [width, height] of [PHONE, DESKTOP, [1000, 1000] as const]) {
+  test("never asks for fewer than three marks anywhere in the zoom range", () => {
+    for (const [width, height] of [PHONE, DESKTOP, WIDE, [1000, 1000] as const]) {
       for (let fovy = MIN_FOVY; fovy <= MAX_FOVY; fovy += 0.5) {
         const across = span(fovy, width, height);
-        const label = `${width}x${height} at ${fovy}°`;
-        expect(across / stepFor(across), label).toBeGreaterThanOrEqual(TICKS_WANTED);
-        expect(across / stepFor(across), label).toBeLessThan(TICKS_WANTED * 3);
+        expect(across / stepFor(across), `${width}x${height} at ${fovy}°`).toBeGreaterThanOrEqual(TICKS_WANTED);
+      }
+    }
+  });
+
+  test("and no more than ten on any viewport it will meet", () => {
+    // Not a property of the ladder's spacing: 15° is the coarsest rung, so above a
+    // 45° span the count simply grows with the span and the ceiling is whatever the
+    // widest reachable view produces. At fovy 100 on 21:9 that is 141°/15 = 9.4.
+    for (const [width, height] of [PHONE, DESKTOP, WIDE, [1000, 1000] as const]) {
+      for (let fovy = MIN_FOVY; fovy <= MAX_FOVY; fovy += 0.5) {
+        const across = span(fovy, width, height);
+        expect(across / stepFor(across), `${width}x${height} at ${fovy}°`).toBeLessThan(10);
       }
     }
   });
@@ -47,16 +56,12 @@ describe("majorStep", () => {
   test("keeps the compass points among the majors at every rung", () => {
     // The label rule depends on this: a major spacing that did not divide 45 would
     // drop N/E/S/W off the tape.
-    for (const step of [45, 15, 5, 3, 1]) {
+    for (const step of [15, 5, 3, 1]) {
       expect(45 % majorStep(step), `step ${step}`).toBe(0);
     }
   });
 
-  test("labels every tick when the step is already 45", () => {
-    expect(majorStep(45)).toBe(45);
-  });
-
-  test("labels every third tick otherwise", () => {
+  test("labels every third tick", () => {
     expect(majorStep(15)).toBe(45);
     expect(majorStep(5)).toBe(15);
     expect(majorStep(1)).toBe(3);

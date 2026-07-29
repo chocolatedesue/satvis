@@ -96,7 +96,7 @@ guarantee they exist to provide is **`pitch < fovy/2`** **on entry** — which i
 there are no per-orientation numbers and no pixel arithmetic to go stale.
 
 That is a statement about the defaults and not a standing invariant. Wheel and pinch
-now move `fovy` within 10–90°, and zooming in on something high in the sky is
+now move `fovy` within 10–100°, and zooming in on something high in the sky is
 _supposed_ to take the horizon off screen; clamping pitch to preserve the inequality
 would silently tilt the view down as the user zoomed. The range is clamped in the
 `fovy` setter rather than at each gesture, because it is a property of the view and
