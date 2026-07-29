@@ -44,7 +44,7 @@ body {
   display: flex;
   flex-direction: column;
   margin: 2px 3px;
-  background-color: #30333680;
+  background-color: #303336b3;
   border-radius: 8px;
 }
 
@@ -66,16 +66,18 @@ body {
 }
 
 /* A control whose selection a surface model has taken over — the globe's imagery
-   and terrain are not being drawn at all. Dimmed and drained of colour rather
-   than disabled: the row still reports what the user picked and what comes back
-   when they deselect the surface model, and changing it is still allowed. */
+   and terrain are not being drawn at all. Dimmed rather than disabled: the row
+   still reports what the user picked and what comes back when they deselect the
+   surface model, and changing it is still allowed.
+   Opacity only, deliberately. A `grayscale` filter here read as a broken panel
+   rather than an inert one: the red/green dot is the only state a row carries,
+   and draining its colour left a column of switches saying nothing at all. */
 .toolbarSwitch--inert {
-  opacity: 0.25;
-  filter: grayscale(1);
+  opacity: 0.3;
 }
 
 .toolbarTitle--inert {
-  opacity: 0.4;
+  opacity: 0.5;
 }
 
 /* Why nothing happened, for a surface model that cannot apply in this view mode.
@@ -100,7 +102,7 @@ body {
   height: 24px;
   line-height: 24px;
   margin: 1px 0px 1px 0px;
-  opacity: 0.5;
+  opacity: 0.7;
   padding-left: 50px;
   position: relative;
 }

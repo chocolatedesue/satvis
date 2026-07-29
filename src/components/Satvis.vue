@@ -101,12 +101,17 @@
           <span class="slider"></span>
           {{ name }}
         </label>
+        <div v-if="inertReason('layers')" class="toolbarNote">{{ inertReason("layers") }}</div>
         <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('terrain') }">Terrain</div>
         <label v-for="name in cc.terrainProviderNames" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('terrain') }">
           <input v-model="terrainProvider" type="radio" :value="name" />
           <span class="slider"></span>
           {{ name }}
         </label>
+        <!-- Dimming says a group is not describing the picture; this says what is.
+             Without it the Terrain group is the confusing case: the selected row is
+             not what is in force, and nothing on screen names what is. -->
+        <div v-if="inertReason('terrain')" class="toolbarNote">{{ inertReason("terrain") }}</div>
         <div class="toolbarTitle">Surface</div>
         <label v-for="name in cc.surfaceModelNames" :key="name" class="toolbarSwitch">
           <input v-model="surfaceModel" type="radio" :value="name" />
@@ -244,7 +249,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { useGeolocation } from "../composables/useGeolocation";
 import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
-import { type SurfaceModel, surfaceEffects } from "../config/surfaceModels";
+import { type MapGroup, type SurfaceModel, surfaceEffects } from "../config/surfaceModels";
 import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
@@ -275,6 +280,20 @@ const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, qualityPre
 // too — so a dimmed group and an unlit tileset cannot disagree.
 const effects = computed(() => surfaceEffects(surfaceModel.value, sceneMode.value));
 const inert = computed(() => effects.value.inert);
+
+// Why a group stopped describing the picture. Two different answers, and the
+// distinction matters: an overridden terrain is still being drawn, just not the
+// one the radio says, while a hidden globe is drawing neither.
+function inertReason(group: MapGroup): string {
+  if (!inert.value.includes(group)) {
+    return "";
+  }
+  const forced = effects.value.terrain;
+  if (group === "terrain" && forced) {
+    return `${surfaceModel.value} needs ${forced}`;
+  }
+  return `Hidden by ${surfaceModel.value}`;
+}
 
 // Named rather than merely flagged: "nothing happened" is the question this
 // answers, and which view mode would have worked is the answer.
