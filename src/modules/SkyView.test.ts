@@ -1,7 +1,7 @@
 import { Cartesian3, Math as CesiumMath, type Scene } from "@cesium/engine";
 import { describe, expect, test } from "vitest";
 
-import { type Aim, defaultAzimuth, DEFAULT_FOVY, DEFAULT_PITCH, fovFromFovy, isPlausibleGroundHeight, MAX_FOVY, MIN_FOVY, skyBasis, SkyView } from "./SkyView";
+import { type Aim, defaultAzimuth, DEFAULT_FOVY, DEFAULT_PITCH, fovFromFovy, fovyFromFov, isPlausibleGroundHeight, MAX_FOVY, MIN_FOVY, skyBasis, SkyView } from "./SkyView";
 
 const aim = (azimuth: number, pitch: number, roll = 0): Aim => ({ azimuth, pitch, roll });
 
@@ -107,6 +107,25 @@ describe("fovFromFovy", () => {
   test("survives a viewport with no height yet", () => {
     const fovy = CesiumMath.toRadians(75);
     expect(fovFromFovy(fovy, Number.NaN)).toBe(fovy);
+  });
+});
+
+describe("fovyFromFov", () => {
+  // The way in: a flight from the globe starts at whatever the globe camera's
+  // frustum held, and everything the sky view interpolates is vertical.
+  test("undoes fovFromFovy at every aspect ratio", () => {
+    for (const fovyDegrees of [36, 45, 60, 75, 100]) {
+      for (const aspectRatio of [0.46, 1, 16 / 9, 21 / 9, Number.NaN]) {
+        const fovy = CesiumMath.toRadians(fovyDegrees);
+        expect(fovyFromFov(fovFromFovy(fovy, aspectRatio), aspectRatio)).toBeCloseTo(fovy, 12);
+      }
+    }
+  });
+
+  test("reads Cesium's default 60° fov as a narrower vertical angle on a wide window", () => {
+    // Which is why entering widens as well as descends: the globe is seen
+    // through about 36° of vertical angle on a 16:9 window, the sky through 75°.
+    expect(CesiumMath.toDegrees(fovyFromFov(CesiumMath.toRadians(60), 16 / 9))).toBeCloseTo(36, 1);
   });
 });
 

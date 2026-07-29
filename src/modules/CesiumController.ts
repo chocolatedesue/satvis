@@ -7,6 +7,7 @@ import {
   JulianDate,
   Math as CesiumMath,
   Matrix4,
+  PerspectiveFrustum,
   type Scene,
   SceneMode,
   ScreenSpaceEventHandler,
@@ -49,6 +50,25 @@ declare global {
     cc?: CesiumController;
   }
 }
+
+/**
+ * Where the globe opens: Europe's meridian, a little north of the equator.
+ *
+ * Cesium's own default is `Rectangle.fromDegrees(-95, -20, -70, 90)`, a slice up
+ * the Americas, which is why the camera used to start over the Carolinas.
+ *
+ * North of the equator rather than on it so that Europe is clear of the limb,
+ * and only a little, because orbits culminate toward the equator and a view that
+ * climbs much further north starts cutting off the southern hemisphere.
+ */
+const DEFAULT_VIEW_LON = 15;
+const DEFAULT_VIEW_LAT = 25;
+
+/**
+ * How much of the screen's narrower axis the globe spans on opening. Under one so
+ * the whole disc is in frame with room around it, rather than touching two edges.
+ */
+const DEFAULT_VIEW_FILL = 0.82;
 
 export class CesiumController {
   viewer: Viewer;
@@ -118,6 +138,7 @@ export class CesiumController {
     this.viewer.scene.highDynamicRange = true;
     this.viewer.scene.maximumRenderTimeChange = 1 / 30;
     this.viewer.scene.requestRenderMode = true;
+    this.setDefaultView();
 
     // Export CesiumController for debugger
     window.cc = this;
@@ -160,6 +181,41 @@ export class CesiumController {
     }
 
     this.activeLayers = [];
+  }
+
+  /**
+   * Open on the default view, far enough out that the whole globe is in frame.
+   *
+   * `Camera.DEFAULT_VIEW_RECTANGLE` — what Cesium places the camera by while
+   * constructing the viewer, and what put it over the Americas — cannot express
+   * this. It frames a *rectangle* in the current frustum, and Cesium's `fov` is
+   * the horizontal angle on a landscape viewport and the vertical one otherwise,
+   * so a single rectangle means very different distances on different shapes of
+   * screen: the 25°-by-110° default lands at 12,700 km on a phone and 23,200 km on
+   * a desktop window. On the phone that is not far enough. The globe spans 39° of
+   * the 30° the narrow axis has to give and is clipped left and right — Cesium's
+   * own default does this too, so the app has always been cutting the globe off
+   * there.
+   *
+   * Framing the globe instead of a rectangle is one line of trigonometry and is
+   * the same picture at every aspect ratio. Called after the viewer exists, which
+   * is when there is a canvas to measure; Cesium has placed the camera once by
+   * then, but no frame has been drawn, so there is nothing to see move.
+   */
+  setDefaultView(): void {
+    const { camera, canvas, globe } = this.viewer.scene;
+    if (!(camera.frustum instanceof PerspectiveFrustum) || camera.frustum.fov === undefined) {
+      return;
+    }
+    const aspectRatio = canvas.clientHeight > 0 ? canvas.clientWidth / canvas.clientHeight : 1;
+    // Whichever angle Cesium is *not* reporting is the narrow one, by the rule
+    // above — so the derived angle is always the one the globe has to fit inside.
+    const { fov } = camera.frustum;
+    const narrow = aspectRatio > 1 ? 2 * Math.atan(Math.tan(fov / 2) / aspectRatio) : 2 * Math.atan(Math.tan(fov / 2) * aspectRatio);
+    // The equatorial radius, because that is the widest the disc can be.
+    const radius = globe.ellipsoid.maximumRadius;
+    const height = radius / Math.sin((narrow / 2) * DEFAULT_VIEW_FILL) - radius;
+    camera.setView({ destination: Cartesian3.fromDegrees(DEFAULT_VIEW_LON, DEFAULT_VIEW_LAT, height) });
   }
 
   preloadReferenceFrameData(): void {

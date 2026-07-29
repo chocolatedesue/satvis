@@ -98,7 +98,16 @@ export function startSceneSync(cc: CesiumController): void {
 
     if (mode !== SKY_MODE) {
       cc.skyInteraction.stop();
-      cc.skyView.exit();
+      // The flight back up to the globe is the descent reversed, and until it
+      // lands the camera is still the sky view's. Morphing the projection or
+      // handing the camera back to the camera mode mid-flight would take it away
+      // underneath, so both wait — and a switch straight back into the sky turns
+      // the flight around, which makes this answer one about a view that never
+      // left.
+      await cc.skyView.exit();
+      if (generation !== viewModeGeneration) {
+        return;
+      }
       cc.releaseCameraMode();
       cc.morphTo(mode);
       return;
@@ -123,7 +132,14 @@ export function startSceneSync(cc: CesiumController): void {
     // eyes on the ground, so there is nothing to come back to.
     cc.suppressCameraMode();
     satStore.trackedSatellite = "";
-    cc.skyView.enter(observer);
+    // Looking around waits for the descent to land. Both the drag and the device
+    // sensor write the aim, and the aim is the flight's destination — a gesture
+    // during the descent would steer it rather than move a view that has
+    // arrived, and there is nothing recognisable on screen to aim with yet.
+    await cc.skyView.enter(observer);
+    if (generation !== viewModeGeneration) {
+      return;
+    }
     cc.skyInteraction.start();
   }
 
@@ -157,7 +173,9 @@ export function startSceneSync(cc: CesiumController): void {
     () => satStore.groundStations[0],
     (station) => {
       if (station && cc.skyView.active) {
-        cc.skyView.enter({ lat: station.lat, lon: station.lon });
+        // A move, which `enter` does without flying — the promise is only about
+        // a flight, and there is none to wait for here.
+        void cc.skyView.enter({ lat: station.lat, lon: station.lon });
       }
     },
     { deep: true },

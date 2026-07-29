@@ -6,13 +6,18 @@
 // other things that want to drive the camera, belong to the caller
 // (src/modules/sceneSync.ts). Rationale: docs/adr/0003-sky-view.md.
 //
+// Entering and leaving are flights rather than cuts, which is why the pose the
+// camera is given each frame is not always the pose the aim asks for — see
+// `#apply`, and src/modules/skyFlight.ts for the interpolation itself.
+//
 // Two Cesium behaviours shape the implementation:
 //
 //   - `camera.setView` cannot express this. It converts direction/up back into
 //     heading/pitch/roll, and `getHeading` switches formula within EPSILON3 of
 //     straight up — above about 87.4° of elevation the roll comes back wrong by
 //     up to 180°, which mirrors the whole sky. So the basis is assigned
-//     directly and Cesium is kept out of Euler angles entirely.
+//     directly and Cesium is kept out of Euler angles entirely. The same
+//     applies to `camera.flyTo`, which is why the flight is ours.
 //   - `ScreenSpaceCameraController` runs its collision detection *outside* the
 //     `enableInputs` check, so clearing that flag alone still leaves
 //     `adjustHeightForTerrain` free to lift the camera off the observer on any
@@ -20,6 +25,7 @@
 
 import { Cartesian3, Cartographic, Math as CesiumMath, Matrix3, Matrix4, PerspectiveFrustum, type Scene, SceneMode, Transforms } from "@cesium/engine";
 
+import { flightDuration, type FlightPath, flightPose, newPose, type Pose } from "./skyFlight";
 import { type Aim, enuDirection, type Observer, type ObserverFrame, observerFrame, rollBasis } from "./skyGeometry";
 
 export type { Aim, Observer } from "./skyGeometry";
@@ -119,25 +125,86 @@ export function fovFromFovy(fovyRadians: number, aspectRatio: number): number {
   return fovxFromFovy(fovyRadians, aspectRatio);
 }
 
+/**
+ * The vertical angle behind a Cesium `fov`, and the exact inverse of
+ * `fovFromFovy`. Needed on the way in: a flight starts at whatever the globe
+ * camera's frustum was set to, and the flight interpolates vertical angles.
+ */
+export function fovyFromFov(fovRadians: number, aspectRatio: number): number {
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 1) {
+    return fovRadians;
+  }
+  return 2 * Math.atan(Math.tan(fovRadians * 0.5) / aspectRatio);
+}
+
 interface SavedState {
-  position: Cartesian3;
-  direction: Cartesian3;
-  up: Cartesian3;
-  right: Cartesian3;
+  pose: Pose;
+  /** Cesium's own `fov`, put back verbatim; NaN when the frustum had none. */
   fov: number;
   requestRenderMode: boolean;
   enableInputs: boolean;
   enableCollisionDetection: boolean;
 }
 
+/**
+ * Where the view is between the globe and the ground.
+ *
+ * `active` covers all three of the non-off states, because the sky view owns the
+ * camera for the whole of them. `settled` is the narrower question the HUD and
+ * the crosshair have to ask instead: is the camera where the aim says it is, or
+ * is it still on its way there?
+ */
+type Phase = "off" | "entering" | "live" | "leaving";
+
+interface Flight {
+  /**
+   * The globe end, the sky end and the straight-down attitude between them. The
+   * same three objects for as long as the view is up: the sky end and the
+   * attitude are rewritten under the flight each frame, because the ground under
+   * the observer is only known once its tiles are in and the aim can still move
+   * while the camera is on its way.
+   */
+  path: FlightPath;
+  /** Leaving is the flight in played backwards, so it is one path and a sign. */
+  reverse: boolean;
+  startedAt: number;
+  durationMs: number;
+  finished: Promise<void>;
+  /** Resolves `finished`, on landing or on another flight taking over. */
+  finish: () => void;
+}
+
+function beginFlight(path: FlightPath, reverse: boolean, durationMs: number, elapsedMs: number): Flight {
+  let finish = (): void => {};
+  const finished = new Promise<void>((resolve) => {
+    finish = () => resolve();
+  });
+  return { path, reverse, startedAt: performance.now() - elapsedMs, durationMs, finished, finish };
+}
+
 export class SkyView {
   #scene: Scene;
+
+  #phase: Phase = "off";
+
+  #flight: Flight | undefined;
 
   // Present exactly while the view is active, and the record of what has to be
   // put back. Restoring only what was actually changed is what lets the sky
   // view coexist with `?bg=false`, which has already destroyed the sky objects
   // a blanket restore would try to bring back.
   #saved: SavedState | undefined;
+
+  // The pose the aim asks for, the same pose tipped all the way down, and the
+  // pose actually given to the camera. Separate objects because during a flight
+  // all three differ; the first two are the flight's destination and the
+  // attitude it aims with, rewritten in place each frame so the descent keeps
+  // re-aiming at ground that only shows up as tiles load.
+  #sky: Pose = newPose();
+
+  #over: Pose = newPose();
+
+  #blended: Pose = newPose();
 
   #observer: Observer | undefined;
 
@@ -163,8 +230,18 @@ export class SkyView {
     this.#scene = scene;
   }
 
+  /** Whether the sky view owns the camera — true throughout both flights. */
   get active(): boolean {
-    return this.#saved !== undefined;
+    return this.#phase !== "off";
+  }
+
+  /**
+   * Whether the camera has arrived. Anything that reads the aim to say something
+   * about the picture — the HUD's tapes, the crosshair — has to wait for this:
+   * during a flight the aim is the destination, not where the camera is looking.
+   */
+  get settled(): boolean {
+    return this.#phase === "live";
   }
 
   get observer(): Observer | undefined {
@@ -196,13 +273,30 @@ export class SkyView {
     this.#apply();
   }
 
-  enter(observer: Observer): void {
-    if (this.active) {
-      // Re-entering with a different observer is a move, not a second entry:
-      // the saved globe state is the one from the original entry.
+  /**
+   * Stand at the observer and look up, arriving by flight rather than by cut.
+   *
+   * The promise resolves when the camera has landed, or when another flight
+   * takes over from this one. That is what lets the caller hold the interaction
+   * back until the aim and the picture agree — see src/modules/sceneSync.ts.
+   */
+  enter(observer: Observer): Promise<void> {
+    if (this.#phase === "entering" || this.#phase === "live") {
+      // Re-entering with a different observer is a move, not a second entry: the
+      // saved globe state is the one from the original entry, and a move that
+      // flew would turn dragging a ground station marker into a slideshow.
       this.#setObserver(observer);
       this.#apply();
-      return;
+      return this.#flight?.finished ?? Promise.resolve();
+    }
+
+    if (this.#phase === "leaving") {
+      // Turned around rather than started afresh: the camera is mid-air, and
+      // `#saved` is still the globe this flight was on its way back to.
+      this.#reset(observer);
+      const arrival = this.#fly("entering");
+      this.#apply();
+      return arrival;
     }
 
     // The sky view is 3D, so entering from 2D or Columbus has to morph first —
@@ -216,59 +310,61 @@ export class SkyView {
 
     const { camera, screenSpaceCameraController: controller } = this.#scene;
     this.#saved = {
-      position: Cartesian3.clone(camera.position, new Cartesian3()),
-      direction: Cartesian3.clone(camera.direction, new Cartesian3()),
-      up: Cartesian3.clone(camera.up, new Cartesian3()),
-      right: Cartesian3.clone(camera.right, new Cartesian3()),
+      pose: this.#cameraPose(),
       fov: (camera.frustum instanceof PerspectiveFrustum ? camera.frustum.fov : undefined) ?? Number.NaN,
       requestRenderMode: this.#scene.requestRenderMode,
       enableInputs: controller.enableInputs,
       enableCollisionDetection: controller.enableCollisionDetection,
     };
 
-    this.#setObserver(observer);
-    this.#aim = { azimuth: defaultAzimuth(observer), pitch: DEFAULT_PITCH, roll: 0 };
-    this.#fovy = DEFAULT_FOVY;
+    this.#reset(observer);
 
     // A leftover reference frame — from `jumpTo`, or from tracking — would
     // reinterpret every vector assigned below.
     camera.lookAtTransform(Matrix4.IDENTITY);
+    // Off for the flight as well as for the view: the descent is not something
+    // to wrestle with, and collision detection would fight it all the way down.
     controller.enableInputs = false;
     controller.enableCollisionDetection = false;
     // The camera is driven from outside Cesium's own input handling, so there
     // is nothing for request-render mode to notice.
     this.#scene.requestRenderMode = false;
 
+    const arrival = this.#fly("entering");
     // Re-asserted every frame rather than set once: the ground height under the
     // observer is only known after a render, the viewport aspect can change at
     // any time, and anything else that grabs the camera loses on the next frame.
     this.#removePreRender = this.#scene.preRender.addEventListener(() => this.#apply());
     this.#apply();
+    return arrival;
   }
 
-  exit(): void {
-    const saved = this.#saved;
-    if (!saved) {
-      return;
+  /**
+   * Fly back to the globe the camera was taken from, and hand it back.
+   *
+   * The promise resolves once the globe state is restored — the caller must wait
+   * for it before morphing the projection or releasing the camera mode, because
+   * until then this view is still flying the camera.
+   */
+  exit(): Promise<void> {
+    if (this.#phase === "off") {
+      return Promise.resolve();
     }
-    this.#removePreRender?.();
-    this.#removePreRender = undefined;
-    this.#saved = undefined;
-    this.#observer = undefined;
-    this.#frame = undefined;
+    if (this.#phase === "leaving") {
+      return this.#flight?.finished ?? Promise.resolve();
+    }
+    if (!this.#saved) {
+      // Unreachable: every non-off phase has a saved globe to go back to.
+      this.#restore();
+      return Promise.resolve();
+    }
+    return this.#fly("leaving");
+  }
 
-    const { camera, screenSpaceCameraController: controller } = this.#scene;
-    camera.lookAtTransform(Matrix4.IDENTITY);
-    Cartesian3.clone(saved.position, camera.position);
-    Cartesian3.clone(saved.direction, camera.direction);
-    Cartesian3.clone(saved.up, camera.up);
-    Cartesian3.clone(saved.right, camera.right);
-    if (camera.frustum instanceof PerspectiveFrustum && !Number.isNaN(saved.fov)) {
-      camera.frustum.fov = saved.fov;
-    }
-    controller.enableInputs = saved.enableInputs;
-    controller.enableCollisionDetection = saved.enableCollisionDetection;
-    this.#scene.requestRenderMode = saved.requestRenderMode;
+  #reset(observer: Observer): void {
+    this.#setObserver(observer);
+    this.#aim = { azimuth: defaultAzimuth(observer), pitch: DEFAULT_PITCH, roll: 0 };
+    this.#fovy = DEFAULT_FOVY;
   }
 
   #setObserver(observer: Observer): void {
@@ -279,12 +375,112 @@ export class SkyView {
     this.#frame = undefined;
   }
 
-  #apply(): void {
-    const observer = this.#observer;
-    if (!observer || !this.active) {
+  /** Fly the one path, forwards to enter and backwards to leave. */
+  #fly(phase: "entering" | "leaving"): Promise<void> {
+    const previous = this.#flight;
+    this.#phase = phase;
+
+    const durationMs = flightDuration();
+    if (durationMs <= 0) {
+      // Reduced motion asked for the cut this replaced, so give exactly that
+      // rather than a brisk version of the flight.
+      this.#flight = undefined;
+      previous?.finish();
+      if (phase === "leaving") {
+        this.#restore();
+      } else {
+        this.#phase = "live";
+      }
+      return Promise.resolve();
+    }
+
+    // Turning around resumes the progress already made rather than starting
+    // over: the path is the one thing both directions share, so playing it the
+    // other way from here is exactly retracing the trip, and the camera carries
+    // on from where it is instead of snapping to an end it is nowhere near.
+    const covered = previous ? CesiumMath.clamp((performance.now() - previous.startedAt) / previous.durationMs, 0, 1) : 1;
+    const path: FlightPath = previous?.path ?? { from: this.#savedPose(), to: this.#sky, over: this.#over };
+    this.#flight = beginFlight(path, phase === "leaving", durationMs, durationMs * (1 - covered));
+    // After the new flight is in place: whoever was awaiting the old one checks
+    // where things stand the moment this resolves.
+    previous?.finish();
+    return this.#flight.finished;
+  }
+
+  /** The globe pose to return to. Only ever called with `#saved` present. */
+  #savedPose(): Pose {
+    return this.#saved?.pose ?? this.#cameraPose();
+  }
+
+  #land(): void {
+    const flight = this.#flight;
+    this.#flight = undefined;
+    if (this.#phase === "leaving") {
+      this.#restore();
+    } else {
+      this.#phase = "live";
+    }
+    flight?.finish();
+  }
+
+  /** Put the globe back exactly as it was found, and stop touching the camera. */
+  #restore(): void {
+    const saved = this.#saved;
+    // Cesium's Event defers removals raised from inside a dispatch, so this is
+    // safe even though the landing frame is itself a preRender callback.
+    this.#removePreRender?.();
+    this.#removePreRender = undefined;
+    this.#flight = undefined;
+    this.#saved = undefined;
+    this.#observer = undefined;
+    this.#frame = undefined;
+    this.#phase = "off";
+    if (!saved) {
       return;
     }
+
+    const { camera, screenSpaceCameraController: controller } = this.#scene;
+    camera.lookAtTransform(Matrix4.IDENTITY);
+    Cartesian3.clone(saved.pose.position, camera.position);
+    Cartesian3.clone(saved.pose.direction, camera.direction);
+    Cartesian3.clone(saved.pose.up, camera.up);
+    Cartesian3.clone(saved.pose.right, camera.right);
+    // The saved `fov` rather than the pose's vertical angle: this is the number
+    // that was taken, and putting it back is not a question of aspect ratio.
+    if (camera.frustum instanceof PerspectiveFrustum && !Number.isNaN(saved.fov)) {
+      camera.frustum.fov = saved.fov;
+    }
+    controller.enableInputs = saved.enableInputs;
+    controller.enableCollisionDetection = saved.enableCollisionDetection;
+    this.#scene.requestRenderMode = saved.requestRenderMode;
+  }
+
+  #aspectRatio(): number {
+    const { clientWidth, clientHeight } = this.#scene.canvas;
+    return clientHeight > 0 ? clientWidth / clientHeight : 1;
+  }
+
+  /** Where the camera is right now, as a flight endpoint. */
+  #cameraPose(): Pose {
     const { camera } = this.#scene;
+    const fov = (camera.frustum instanceof PerspectiveFrustum ? camera.frustum.fov : undefined) ?? Number.NaN;
+    return {
+      position: Cartesian3.clone(camera.position, new Cartesian3()),
+      direction: Cartesian3.clone(camera.direction, new Cartesian3()),
+      up: Cartesian3.clone(camera.up, new Cartesian3()),
+      right: Cartesian3.clone(camera.right, new Cartesian3()),
+      // A frustum with no `fov` gives the flight nothing to interpolate, so it
+      // starts at the angle it will end on and only the pose moves.
+      fovy: Number.isNaN(fov) ? this.#fovy : CesiumMath.toDegrees(fovyFromFov(fov, this.#aspectRatio())),
+    };
+  }
+
+  /**
+   * The pose the aim asks for, written into `#sky`, and the same aim tipped all
+   * the way down, written into `#over`. Refreshes the ground and the frame.
+   */
+  #skyPose(observer: Observer): Pose {
+    const pose = this.#sky;
 
     // Stand on the ground rather than on the ellipsoid, which is hundreds of
     // metres out in the mountains. The last believable answer is kept, so an
@@ -295,20 +491,67 @@ export class SkyView {
       this.#groundHeight = measured;
       this.#frame = undefined;
     }
-    Cartesian3.fromDegrees(observer.lon, observer.lat, this.#groundHeight + EYE_HEIGHT, undefined, camera.position);
-    this.#frame ??= observerFrame(camera.position);
+    Cartesian3.fromDegrees(observer.lon, observer.lat, this.#groundHeight + EYE_HEIGHT, undefined, pose.position);
+    // Built from where the observer stands, never from `camera.position`, which
+    // during a flight is somewhere over the ocean on the way here.
+    this.#frame ??= observerFrame(pose.position);
 
-    const enu = Transforms.eastNorthUpToFixedFrame(camera.position, undefined, new Matrix4());
+    const enu = Transforms.eastNorthUpToFixedFrame(pose.position, undefined, new Matrix4());
     const rotation = Matrix4.getMatrix3(enu, new Matrix3());
-    const { direction, up, right } = skyBasis(this.#aim);
-    Matrix3.multiplyByVector(rotation, direction, camera.direction);
-    Matrix3.multiplyByVector(rotation, up, camera.up);
-    Matrix3.multiplyByVector(rotation, right, camera.right);
+    this.#orient(rotation, this.#aim, pose);
+    pose.fovy = this.#fovy;
 
+    // Straight down at the observer's feet, on the same azimuth and roll — the
+    // attitude the descent aims with and the one the rise starts from. Built
+    // through `skyBasis` like every other attitude here rather than as some
+    // convenient nadir, because that is what makes the rise a pitch sweep from
+    // -90° and nothing else: no roll creeps in, and `skyBasis` is continuous
+    // through straight down, so -90° is an aim like any other.
+    Cartesian3.clone(pose.position, this.#over.position);
+    this.#orient(rotation, { ...this.#aim, pitch: -90 }, this.#over);
+    return pose;
+  }
+
+  /** An east-north-up aim written into a pose, in world coordinates. */
+  #orient(enuToFixed: Matrix3, aim: Aim, into: Pose): void {
+    const { direction, up, right } = skyBasis(aim);
+    Matrix3.multiplyByVector(enuToFixed, direction, into.direction);
+    Matrix3.multiplyByVector(enuToFixed, up, into.up);
+    Matrix3.multiplyByVector(enuToFixed, right, into.right);
+  }
+
+  #assign(pose: Pose): void {
+    const { camera } = this.#scene;
+    Cartesian3.clone(pose.position, camera.position);
+    Cartesian3.clone(pose.direction, camera.direction);
+    Cartesian3.clone(pose.up, camera.up);
+    Cartesian3.clone(pose.right, camera.right);
     if (camera.frustum instanceof PerspectiveFrustum) {
-      const { clientWidth, clientHeight } = this.#scene.canvas;
-      const aspectRatio = clientHeight > 0 ? clientWidth / clientHeight : 1;
-      camera.frustum.fov = fovFromFovy(CesiumMath.toRadians(this.#fovy), aspectRatio);
+      camera.frustum.fov = fovFromFovy(CesiumMath.toRadians(pose.fovy), this.#aspectRatio());
+    }
+  }
+
+  #apply(): void {
+    const observer = this.#observer;
+    if (!observer || this.#phase === "off") {
+      return;
+    }
+
+    // Computed even while leaving, and even though the camera is elsewhere: it
+    // is what keeps `frame` answerable for as long as the view is active.
+    const sky = this.#skyPose(observer);
+    const flight = this.#flight;
+    if (!flight) {
+      this.#assign(sky);
+      return;
+    }
+
+    const progress = (performance.now() - flight.startedAt) / flight.durationMs;
+    // Leaving runs the same path from the far end, so the trip out retraces the
+    // trip in exactly: look down at your feet, take off, and swing away.
+    this.#assign(flightPose(flight.path, flight.reverse ? 1 - progress : progress, this.#blended));
+    if (progress >= 1) {
+      this.#land();
     }
   }
 }
