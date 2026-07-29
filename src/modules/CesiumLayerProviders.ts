@@ -2,6 +2,7 @@ import {
   ArcGisMapServerImageryProvider,
   ArcGISTiledElevationTerrainProvider,
   CesiumTerrainProvider,
+  createWorldTerrainAsync,
   EllipsoidTerrainProvider,
   type ImageryProvider,
   OpenStreetMapImageryProvider,
@@ -164,6 +165,15 @@ export const imageryProviders: Record<string, ImageryProviderEntry> = {
 export const terrainProviders: Record<string, TerrainProviderEntry> = {
   None: {
     create: () => new EllipsoidTerrainProvider(),
+  },
+  // The terrain OSM Buildings was authored against, which is why selecting that
+  // surface model forces this one — see src/config/surfaceModels.ts. Needs the
+  // ion token, so it is the one terrain that can fail for a reason other than
+  // the network.
+  CesiumWorldTerrain: {
+    // Vertex normals because `globe.enableLighting` is on: without them the
+    // terrain is shaded off the ellipsoid normal and the relief goes flat.
+    create: () => createWorldTerrainAsync({ requestVertexNormals: true }),
   },
   Maptiler: {
     create: () =>

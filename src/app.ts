@@ -1,9 +1,11 @@
+import { Ion } from "@cesium/engine";
 import ui from "@nuxt/ui/vue-plugin";
 import { createPinia } from "pinia";
 import { createApp, markRaw } from "vue";
 
 import App from "./App.vue";
 import { usePWAUpdate } from "./composables/usePWAUpdate";
+import { ionAccessToken } from "./config/ion";
 import { getConfigPreset } from "./config/presets";
 import { CesiumController } from "./modules/CesiumController";
 import { startSceneSync } from "./modules/sceneSync";
@@ -18,6 +20,10 @@ declare module "vue" {
 
 // Register Service Worker with automatic reload on update
 usePWAUpdate({ autoUpdate: true });
+
+// Before the viewer: everything ion-backed resolves through this one token, and
+// nothing here can pass it per asset. See src/config/ion.ts.
+Ion.defaultAccessToken = ionAccessToken;
 
 // Setup Vue app
 const app = createApp(App);

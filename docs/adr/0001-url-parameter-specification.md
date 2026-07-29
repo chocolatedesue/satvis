@@ -40,7 +40,7 @@ Every parameter is optional. An absent parameter means "use the default" (see
 | `track`    | `sat.trackedSatellite`   | string              | one satellite name; empty means nothing tracked                                                                   | empty            |
 | `overpass` | `sat.overpassMode`       | enum                | `elevation` \| `swath`                                                                                            | `elevation`      |
 | `layers`   | `cesium.layers`          | layer list          | comma-joined; each item `Name` or `Name_<alpha>`; list order is z-order                                           | `OfflineHighres` |
-| `terrain`  | `cesium.terrainProvider` | enum                | `None` \| `Maptiler`                                                                                              | `None`           |
+| `terrain`  | `cesium.terrainProvider` | enum                | `None` \| `CesiumWorldTerrain` \| `Maptiler`                                                                      | `None`           |
 | `scene`    | `cesium.sceneMode`       | enum                | `3D` \| `2D` \| `Columbus` \| `Sky`                                                                               | `3D`             |
 | `camera`   | `cesium.cameraMode`      | enum                | `Fixed` \| `Inertial`                                                                                             | `Fixed`          |
 | `quality`  | `cesium.qualityPreset`   | enum                | `low` \| `high`                                                                                                   | `high`           |
