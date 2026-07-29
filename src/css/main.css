@@ -44,7 +44,9 @@ body {
   display: flex;
   flex-direction: column;
   margin: 2px 3px;
-  background-color: #303336b3;
+  /* Carries the group titles, which have no surface of their own — the rows do,
+     so the panel is what has to hold them legible against a bright globe. */
+  background-color: #303336d9;
   border-radius: 8px;
 }
 
