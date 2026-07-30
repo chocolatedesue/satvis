@@ -116,8 +116,12 @@ height, and the dimmed groups in the Map panel.
 **Result, 2026-07-29, Chrome.**
 
 - `surface=OsmBuildings&scene=3D`: buildings drawn on the globe over Munich, terrain
-  silently `CesiumTerrainProvider` while the radio still reads `None`, Terrain group
-  dimmed and Layers not.
+  `CesiumTerrainProvider` while the store still holds `None`, Terrain group dimmed and
+  Layers not. The Terrain radio reads `CesiumWorldTerrain` — the terrain in force, not the
+  stored choice — its rows are disabled, and the note names what returns
+  ("OsmBuildings needs CesiumWorldTerrain, None returns"). Re-checked 2026-07-30 after
+  the radio was rebound; before that it read `None` and said nothing, which is what the
+  rebinding fixed.
 - `surface=GooglePhotorealistic&scene=Sky`: globe hidden, mesh drawn, both Layers and
   Terrain dimmed. The camera settled at **563.3 m** ellipsoid height at the observer —
   the mesh surface plus the 2 m eye height, where without the clamp it would have been

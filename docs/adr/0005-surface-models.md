@@ -31,6 +31,21 @@ store and the URL keep what the user chose, deselecting gives back exactly what 
 and no history entry is pushed for a change nobody asked for. The menu dims the inert
 groups instead, so it never claims to describe a picture it is not describing.
 
+### An inert control shows what is in force, and an imposed one declines the click
+
+Dimming alone turned out not to be enough for terrain, and the difference is worth
+recording because it looks like an inconsistency.
+
+A hidden globe leaves the imagery and terrain choices **still the user's** — they simply
+are not being drawn — so those controls stay live and only dim. An **imposed** terrain is
+different in kind: the radio was still reporting the stored choice, so selecting OSM
+Buildings left a green dot on `None` while World Terrain was what the globe was drawing.
+That is not a stale label, it is a control stating something untrue. So while a terrain is
+imposed, the dot follows the terrain **in force** and the rows are disabled: a control that
+accepts a click and changes nothing visible is worse than one that declines it. The note
+beneath then names both the imposition and the terrain that returns, because the stored
+choice is no longer shown by the radio and would otherwise be stated nowhere.
+
 The terrain provider is deliberately left assigned while the globe is hidden, which looks
 like an omission and is not: a hidden globe short-circuits `Globe.update`, `beginFrame`,
 `render` and `endFrame`, so not one terrain tile is selected, requested or drawn. There is
@@ -87,6 +102,12 @@ Everything above is one pure function, `surfaceEffects(surfaceModel, viewMode)`,
 the same call, so a rule cannot hold in the renderer and quietly not in the UI.
 `src/modules/SurfaceModel.ts` is then a thin executor: create, add, hide, measure, destroy.
 
+The menu's _sentences_ are derived as well, by `viewModeNote`, and that is not fussiness.
+The note explaining why a model did not apply was first written out by hand in the
+template — which made "widening `viewModes` is one line" false, since the second line was
+a sentence elsewhere that would then assert a restriction no longer in force. A rule stated
+twice is a rule that will disagree with itself.
+
 ### An ion token is committed
 
 `src/config/ion.ts` carries a token restricted at ion to satvis.space, so production works
@@ -105,8 +126,11 @@ token of ours.
 Unlike the offline-imagery fallback there is no equivalent asset to swap in, so a tileset
 that fails to create puts the selection back to `None` and says why in a toast. The
 commonest cause is a token this origin is not allowed to use, and nothing else in the UI
-would explain that. Per-tile failures only warn: one 403 tile is not grounds for tearing
-the whole surface down.
+would explain that.
+
+Per-tile failures only warn — one 403 tile is not grounds for tearing the whole surface
+down — and only once per tileset. The causes that produce one failed tile produce hundreds,
+and a console flooded with them says no more than a console with a single line in it.
 
 ## Consequences
 
@@ -114,7 +138,11 @@ the whole surface down.
   plus a 1 GB overflow is sized for a desktop flying the globe, not a phone standing still.
   It also runs with `dynamicScreenSpaceError`, which Cesium recommends for photogrammetry,
   and `showCreditsOnScreen: true`, following Google's Map Tiles policies rather than
-  Cesium's reading of them. `enableCollision` stays at Cesium's default `true`: with the
+  Cesium's reading of them. "Constrained" is iOS **or a coarse pointer** — the pointer test
+  is what catches Android, which an iOS check alone silently gave the desktop budget to —
+  and it is not an iframe test, because an embed on a desktop has a desktop's memory. The
+  screen-space error is relaxed on those devices only; the desktop keeps Cesium's default,
+  so the desktop is not asked to give up any detail. `enableCollision` stays at Cesium's default `true`: with the
   globe hidden, the mesh is the only thing stopping the camera dropping through the ground.
 - **Ground-clamped overlays still work under the mesh.** Verified rather than assumed: the
   ground-track corridor's `classificationType` defaults to `BOTH`, and with no globe depth
@@ -125,8 +153,12 @@ the whole surface down.
   the pin sat below any real surface. It was already wrong under terrain; the mesh made it
   obvious. Now clamped.
 - **Every visitor can spend our ion quota**, bounded by the sky-view restriction and
-  observable through a PostHog event on load. If that proves too generous the restriction
-  tightens in `surfaceModels.ts`; if it proves cheap, 3D opens up the same way.
+  observable through a PostHog event on **selection**, carrying the view mode. On selection
+  rather than on load, because a choice that failed, or one armed in a view mode that
+  cannot honour it, is exactly the kind of thing worth seeing — and a load-time event both
+  missed those and fired again on every re-entry to the sky view. If the quota proves too
+  generous the restriction tightens in `surfaceModels.ts`; if it proves cheap, 3D opens up
+  the same way.
 - **`?surface=` is carried even where it cannot apply**, so a model can be armed before
   entering the sky view and `?surface=GooglePhotorealistic&scene=Sky` is a working link.
   The menu annotates the selected-but-inactive case rather than disabling the control.

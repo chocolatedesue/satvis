@@ -107,6 +107,16 @@ discussion; sharpen them here when they drift.
   buildings in one mesh — which is why choosing it hides the globe and leaves the
   imagery and terrain selections describing nothing
   (`docs/adr/0005-surface-models.md`).
+- **Inert**: said of a control whose selection is no longer describing what is on
+  screen, because a surface model has taken over what it describes. Not the same
+  as suppressed: suppression is about the store keeping a value that is not in
+  force, inert is about the menu admitting it. A control can be inert and still be
+  the user's to change — a hidden globe leaves the imagery choice theirs — or
+  inert and not, where a terrain has been imposed.
+- **Ground height source**: where the sky view's eye height comes from when the
+  globe cannot say. The globe answers from loaded tiles every frame for free; a
+  surface model has to be asked, once per observer, and answers with the top of
+  whatever stands there (`SkyView.setGroundHeightSource`).
 - **Offline imagery**: the basemap that ships inside the app and is precached, so
   it is the only one guaranteed with no network. The high-resolution copy of the
   same map is data shipped beside the app and cached only as it is viewed: same
