@@ -58,6 +58,22 @@ function googleTilesetOptions(): Cesium3DTileset.ConstructorOptions {
 }
 
 /**
+ * How high above the ground buildings stop being worth loading at all, on the globe.
+ *
+ * A hard gate rather than another turn of the screen-space-error screw, because
+ * `show = false` is the one setting Cesium treats as *nothing to do*: it skips the
+ * whole traversal (`Cesium3DTileset.updateForPass`), and `preloadWhenHidden` is off
+ * by default, so a hidden tileset issues no requests at all rather than merely
+ * fewer. Squeezing the error tolerance can only ever reduce.
+ *
+ * 2 km because that is roughly where a building stops being legible looking down —
+ * a five-storey block is about ten pixels tall — so above it the tiles are spent on
+ * a grey haze. Below it they fill in at Cesium's usual radius, which is what makes
+ * an ordinary 3D city view still worth having.
+ */
+const GLOBE_BUILDING_CEILING = 2000;
+
+/**
  * How each model is built. Here rather than beside the imagery and terrain
  * registries: a surface model is not a layer provider (see CONTEXT.md), this is
  * its only consumer, and creation and lifetime belong to the same owner.
@@ -89,6 +105,14 @@ export class SurfaceModel {
    * that answer is then about a scene that no longer wants it.
    */
   #generation = 0;
+
+  /**
+   * The altitude above which the tileset is hidden, or undefined to always show it.
+   * Set from the view mode; enforced per frame, because it is the camera that moves.
+   */
+  #ceiling: number | undefined;
+
+  #removeCeilingWatch: (() => void) | undefined;
 
   constructor(deps: SurfaceModelDeps) {
     this.#deps = deps;
@@ -183,6 +207,45 @@ export class SurfaceModel {
     const onTheGround = viewMode === SKY_MODE;
     tileset.dynamicScreenSpaceErrorDensity = onTheGround ? 8.0e-4 : 2.0e-4;
     tileset.dynamicScreenSpaceErrorFactor = onTheGround ? 48 : 24;
+    // No ceiling standing on the ground: the sky view is below any of them by
+    // definition, and a gate that can never close is a per-frame check for nothing.
+    this.#setCeiling(onTheGround ? undefined : GLOBE_BUILDING_CEILING);
+  }
+
+  /**
+   * Hide the tileset above an altitude, watching the camera for as long as there is
+   * one to enforce.
+   *
+   * A `preRender` listener rather than something reactive: the trigger is the camera
+   * moving, which no store knows about, and the check is one cached property read.
+   */
+  #setCeiling(ceiling: number | undefined): void {
+    this.#ceiling = ceiling;
+    if (ceiling === undefined) {
+      this.#removeCeilingWatch?.();
+      this.#removeCeilingWatch = undefined;
+      if (this.#tileset) {
+        this.#tileset.show = true;
+      }
+      return;
+    }
+    this.#applyCeiling();
+    this.#removeCeilingWatch ??= this.#deps.scene.preRender.addEventListener(() => this.#applyCeiling());
+  }
+
+  #applyCeiling(): void {
+    const tileset = this.#tileset;
+    const ceiling = this.#ceiling;
+    if (!tileset || ceiling === undefined) {
+      return;
+    }
+    const show = this.#deps.scene.camera.positionCartographic.height < ceiling;
+    if (tileset.show !== show) {
+      tileset.show = show;
+      // Coming back into view has to be drawn, and request-render mode has no way
+      // of knowing a property changed.
+      this.#deps.scene.requestRender();
+    }
   }
 
   /**
@@ -251,6 +314,9 @@ export class SurfaceModel {
     const tileset = this.#tileset;
     this.#tileset = undefined;
     this.#name = undefined;
+    this.#removeCeilingWatch?.();
+    this.#removeCeilingWatch = undefined;
+    this.#ceiling = undefined;
     if (tileset) {
       // `remove` destroys it, which is what releases the tile cache — up to half
       // a gigabyte for the photorealistic mesh.

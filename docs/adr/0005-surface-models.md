@@ -129,9 +129,22 @@ the edge distant buildings are absent rather than coarse. It is invisible at str
 because the near buildings occlude that distance anyway, and it would not be invisible from
 a rooftop.
 
-Not applied on the globe, where the wider radius is the point, and not applied to the
-photorealistic mesh, which _is_ the ground — capping its radius would delete the horizon
-rather than some buildings behind other buildings.
+Not applied to the photorealistic mesh, which _is_ the ground — capping its radius would
+delete the horizon rather than some buildings behind other buildings.
+
+On the globe the roll-off stays at Cesium's defaults, and a **hard ceiling** does the
+withholding instead: above 2 km the OSM Buildings tileset is simply hidden. That is a
+different mechanism on purpose. `show = false` is the one setting Cesium treats as nothing
+to do — it skips the whole of `Cesium3DTileset.updateForPass`, and `preloadWhenHidden` is
+off by default — so a hidden tileset issues _no_ requests, where turning the error screw
+can only ever issue fewer. 2 km is roughly where a five-storey block stops being legible
+looking down, at about ten pixels tall.
+
+Verified at three altitudes, same city: 9,261 km hidden with 0 tiles visited and 0 MB;
+2,500 m hidden, 0 and 0; 1,400 m shown, 35 tiles, 44 MB. Below the ceiling buildings fill
+in at the usual radius, which is what keeps an ordinary 3D city view worth having, and the
+ceiling is lifted entirely in the sky view rather than merely satisfied by standing on the
+ground.
 
 ### The matrix is Cesium-free and tested
 

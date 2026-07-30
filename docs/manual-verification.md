@@ -180,6 +180,13 @@ ground. In the sky view at Marienplatz, settled, the neighbourhood costs 34.38 M
 tiles with the sky-view roll-off, against 39.73 MB across 40 tiles at Cesium's defaults:
 a 13% saving from capping the radius at ~800 m. The eye sat at 573 m, i.e. ground + 2 m.
 
+The globe's 2 km ceiling, same city, three altitudes: at 9,261 km and at 2,500 m the
+tileset was hidden with 0 tiles visited and 0 MB; dropping to 1,400 m showed it and
+streamed 35 tiles for 44 MB. Entering the sky view from there kept it shown with the
+ground-level roll-off (density 8.0e-4, factor 48) and the eye at 573 m. Note the ceiling
+is re-evaluated on `preRender`, so a camera moved from the console in a stalled render loop
+will read as stuck hidden — force a frame before believing it.
+
 Not exercised: iOS, where the photorealistic mesh's tuned-down `cacheBytes` and
 `maximumScreenSpaceError` apply, and where a phone's memory is the thing being protected.
 
