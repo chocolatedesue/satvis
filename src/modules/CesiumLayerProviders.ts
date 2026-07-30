@@ -24,8 +24,8 @@ const HIGHRES_NATURAL_EARTH = "data/cesium-assets/imagery/NaturalEarthII";
 let highresProbe: Promise<boolean> | undefined;
 
 /**
- * The layer stack with `OfflineHighres` swapped for `Offline` when its tiles are
- * not there, or undefined when nothing needs changing.
+ * Whether the high-resolution offline imagery is absent, so a caller can put the
+ * bundled `Offline` layer in its place.
  *
  * Cesium cannot report the absence itself: `TileMapServiceImageryProvider.fromUrl`
  * treats a missing `tilemapresource.xml` as "carry on with defaults" and resolves
@@ -38,30 +38,41 @@ let highresProbe: Promise<boolean> | undefined;
  * situation an offline layer exists for. The answer is cached, since it cannot
  * change within a session.
  *
- * The manifest has to be **read**, not merely asked for. A status code says nothing
- * here, because nothing this app is served by answers a missing file with one: the
- * dev server and the deployed Worker both fall back to `index.html` with a 200
- * (`not_found_handling: "single-page-application"` in worker/wrangler.jsonc). This
- * probe existed for a year and never once fired, on exactly the checkouts it was
- * written for, because `response.ok` was true and the body was a web page.
+ * The manifest has to be **read**, not merely asked for. `pnpm dev` answers a missing
+ * file with `index.html` and a 200, so a status check reports the imagery present when
+ * it is absent — which is why this probe existed for a year and never once fired, on
+ * exactly the checkouts it was written for. The deployed Worker used to do the same and
+ * now 404s honestly (`not_found_handling: "404-page"`), but reading the body is what
+ * makes the answer independent of however any given server is configured.
  *
  * Hardcoded to the one pair rather than expressed as a general capability of the
  * registry: this is the only provider backed by data that `pnpm install` does not
  * guarantee, and a framework for a single case is harder to read than the case.
  */
-export async function offlineFallback(layers: readonly string[]): Promise<string[] | undefined> {
-  if (!layers.some((token) => parseLayer(token)?.provider === "OfflineHighres")) {
-    return undefined;
-  }
+export async function highresImageryMissing(): Promise<boolean> {
   highresProbe ??= fetch(`${HIGHRES_NATURAL_EARTH}/tilemapresource.xml`)
     // `<TileMap` rather than a parse: the question is whether this is the manifest
     // or somebody else's answer, and the tag settles it without a DOMParser.
     .then(async (response) => response.ok && (await response.text()).includes("<TileMap"))
     .catch(() => false);
-  if (await highresProbe) {
+  return !(await highresProbe);
+}
+
+/**
+ * The same stack with `OfflineHighres` swapped for `Offline`, or undefined when it
+ * holds no high-resolution layer to swap.
+ *
+ * Pure, and deliberately separate from the probe above. It used to be one function
+ * taking the stack and awaiting the probe in the middle, which meant the swap was
+ * computed from the stack as it had been *before* the await — so a probe answering
+ * after the route's preset had hydrated wrote back a swap of the old default and
+ * silently discarded the preset's choice of basemap. Splitting them is what lets the
+ * caller read the store after waiting rather than before.
+ */
+export function withoutHighresImagery(layers: readonly string[]): string[] | undefined {
+  if (!layers.some((token) => parseLayer(token)?.provider === "OfflineHighres")) {
     return undefined;
   }
-  console.warn("High-resolution offline imagery is missing, falling back to Offline. Run `git submodule update --init` to fetch data/cesium-assets.");
   // Through the codec so an opacity survives: the user asked for a base map at a
   // given opacity, and only the source of its tiles turned out to be wrong.
   return layers.map((token) => {

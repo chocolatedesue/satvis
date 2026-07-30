@@ -18,7 +18,7 @@ import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import type { CesiumController } from "./CesiumController";
-import { offlineFallback } from "./CesiumLayerProviders";
+import { highresImageryMissing, withoutHighresImagery } from "./CesiumLayerProviders";
 import type { DesiredScene } from "./SatelliteManager";
 import type { Observer } from "./SkyView";
 import { toMinuteIso } from "./util/urlCodec";
@@ -49,11 +49,16 @@ export function startSceneSync(cc: CesiumController): void {
   );
 
   async function correctMissingImagery(): Promise<void> {
-    const swapped = await offlineFallback(cesiumStore.layers);
-    // Reading the store again rather than trusting the stack this was called for:
-    // the user may have picked something else while the probe was in flight, and
-    // that answer is simply about a stack that no longer exists.
+    if (!(await highresImageryMissing())) {
+      return;
+    }
+    // Read *after* waiting, not before. This watcher is immediate, so it first runs
+    // on the store's own default — and by the time a probe answers, the route's
+    // preset has hydrated and the user may have picked something else. Swapping a
+    // stack captured before the await wrote `Offline` over the OT preset's basemap.
+    const swapped = withoutHighresImagery(cesiumStore.layers);
     if (swapped) {
+      console.warn("High-resolution offline imagery is missing, falling back to Offline. Run `git submodule update --init` to fetch data/cesium-assets.");
       cesiumStore.setLayers(swapped);
     }
   }
