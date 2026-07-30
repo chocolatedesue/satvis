@@ -92,6 +92,46 @@ its marks pointing at the zenith. Before the change, 15° of azimuth spanned 147
 eye level and 1691 px at 85° of pitch, and the visible window collapsed from ±15° to
 nothing.
 
+## Worker: missing files 404, and none of it is billed
+
+**Why it matters.** `not_found_handling: "single-page-application"` answered every
+unmatched path with `index.html` and a 200, which is what made `response.ok` meaningless
+for the imagery probe and let the service worker cache the app shell under tile urls. The
+constraint on any fix is that it must not turn asset traffic into billed Worker
+invocations.
+
+**Procedure.** `pnpm build`, `pnpm dev:worker`, then request each path and read the status.
+For the billing half, put `console.log("BILLED", new URL(request.url).pathname)` at the top
+of the Worker's `fetch` and watch which requests appear.
+
+**Result, 2026-07-30, wrangler dev on the built dist.**
+
+| path                                                 | status                                                                   |
+| ---------------------------------------------------- | ------------------------------------------------------------------------ |
+| `/`, `/ot`                                           | 200 text/html                                                            |
+| `/embedded.html`, `/test.html`                       | 307 to `/embedded`, `/test` (asset router `html_handling`, pre-existing) |
+| `/typo-route`                                        | 404 text/html (the 404 page)                                             |
+| `/api/groups.json`                                   | 200 application/json                                                     |
+| `/cesium/…/tilemapresource.xml` (exists)             | 200 application/xml                                                      |
+| `/data/cesium-assets/…/tilemapresource.xml` (absent) | **404**                                                                  |
+| `/data/gp/weather.json` (absent)                     | **404**                                                                  |
+
+Of those six requests, **only `/api/groups.json` logged `BILLED`** — routes, unknown paths
+and missing files are all answered by the asset router. Two combinations that are _not_
+free, both measured: `404-page` with no `404.html` falls through to the Worker, and
+`not_found_handling: "none"` invokes it for every unmatched path.
+
+`/ot` returning 200 depends on `ot.html` existing as a real page. Without it the route
+404s, which is how this was found.
+
+For comparison, production before this change answered a missing data asset with
+`200 text/html`.
+
+**One inconsistency worth knowing:** with the service worker installed, a navigation to an
+unknown route is answered from precache by `navigateFallback`, so it shows the app rather
+than the 404 page. The server and the service worker disagree there, deliberately — offline
+that is the behaviour you want.
+
 ## Layers: the offline imagery fallback
 
 **Procedure.** Open a checkout whose `data/cesium-assets` submodule is genuinely

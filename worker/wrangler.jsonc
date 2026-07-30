@@ -12,11 +12,25 @@
   ],
   "assets": {
     "directory": "../dist",
-    "not_found_handling": "single-page-application",
-    // Route /api/* to the Worker first; otherwise the SPA not_found_handling
-    // fallback swallows the API routes and serves index.html.
-    // /__scheduled is the wrangler-dev cron test endpoint (--test-scheduled);
-    // it must also bypass the SPA fallback to reach the Worker.
+    // "404-page", not "single-page-application": the latter answered *every*
+    // unmatched path with index.html and a 200, which made `response.ok`
+    // meaningless — the offline-imagery probe read a missing tile set as present
+    // and left a blank globe — and let the service worker cache the app shell
+    // under tile urls for thirty days.
+    //
+    // This costs nothing. Measured against `wrangler dev` with a log in the fetch
+    // handler: with a 404.html present the asset router answers and the Worker is
+    // never invoked, exactly as with the SPA setting. *Without* 404.html it falls
+    // through to the Worker and every missing file becomes a billed request, so
+    // public/404.html is load-bearing rather than decoration.
+    //
+    // The other half of the bargain is that every path which must serve the app
+    // has to be a real file: index.html, ot.html, embedded.html, test.html. What
+    // is left over is genuinely missing, and now says so.
+    "not_found_handling": "404-page",
+    // Route /api/* to the Worker before the asset router looks, so an api path can
+    // never be shadowed by a file that happens to share its name.
+    // /__scheduled is the wrangler-dev cron test endpoint (--test-scheduled).
     "run_worker_first": ["/api/*", "/__scheduled"],
   },
   "kv_namespaces": [{ "binding": "GP_KV", "id": "26a7848ab641416fa518a3df4790a968" }],
