@@ -446,8 +446,13 @@ export class SkyView {
   #setObserver(observer: Observer): void {
     this.#observer = observer;
     Cartographic.fromDegrees(observer.lon, observer.lat, 0, this.#observerCartographic);
-    // A different place has a different ground under it, and a different frame.
-    this.#groundHeight = 0;
+    // A different place has a different ground under it, and a different frame — but
+    // the height it had is kept until the new one is measured, rather than reset to
+    // sea level. Resetting looks harmless and is not: the observer moves while the
+    // view is up (dragging a station, or a geolocation fix arriving), and anywhere
+    // above sea level the eye would spend the measurement underneath the ground.
+    // From under a surface you see its underside, textured with the same imagery,
+    // which does not read as a wrong height. It reads as the world inverted.
     this.#frame = undefined;
     this.#measureGround();
   }
@@ -461,9 +466,10 @@ export class SkyView {
    */
   #measureGround(): void {
     const generation = ++this.#groundGeneration;
-    // Dropped up front rather than on the answer: until this one lands, the globe
-    // is a better guess than a height measured somewhere else.
-    this.#groundMeasured = false;
+    // `#groundMeasured` deliberately survives this. A height measured a moment ago,
+    // even somewhere slightly else, beats what the globe can offer while tiles are
+    // still arriving — which is a coarse approximation, then a better one, then a
+    // better one, each of which would move the camera.
     const source = this.#groundSource;
     const observer = this.#observer;
     if (!source || !observer) {

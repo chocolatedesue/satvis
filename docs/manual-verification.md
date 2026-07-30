@@ -153,6 +153,25 @@ inside terrain you see its underside), followed by a step per terrain refinement
 `getHeight` improved its answer — including one reading of -76639, which the plausibility
 guard rejected.
 
+## Sky view: moving the observer must not drop the eye underground
+
+**Why it cannot be a unit test.** The symptom is a camera position across frames while an
+asynchronous height measurement is in flight.
+
+**Procedure.** Settle the sky view over Munich with OsmBuildings, then move the observer —
+`cc.skyView.enter({ lat, lon })`, which is exactly what a station drag or an arriving
+geolocation fix does — recording `camera.position` every `preRender`.
+
+**Result, 2026-07-30, Chrome.** One height throughout, 572.8 m, `up.z` constant at 0.979.
+Before the fix the move reset the ground height to sea level, putting the eye at 2 m while
+Munich's ground is 570 m — 568 m underground for as long as the measurement took.
+
+Worth knowing what that looks like, because it does not look like a wrong height: from
+under a surface you see its underside wearing the same imagery, so the frame fills with
+what reads as a plan view of the city, a horizon-like edge where the mesh ends, and black
+below. It was reported as the world flipping. Reproduce it deliberately with
+`cc.skyView.setGroundHeight(0)` over any city.
+
 ## Surface models: the matrix, the eye height, and what drapes on a mesh
 
 The pure part is unit-tested (`src/config/surfaceModels.test.ts`); what needs a browser
