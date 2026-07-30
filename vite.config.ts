@@ -112,7 +112,16 @@ const config: ViteConfigWithTest = {
         globIgnores: ["cesium/ThirdParty/**/*", "cesium/Widgets/**/*", "cesium/Workers/**/*", "cesium/Assets/Textures/maki/*", "**/*.map"],
         sourcemap: true,
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/\.(css|js|png|svg|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|txt|glb)$/],
+        // Matched against `pathname + search`, and only for requests whose mode is
+        // `navigate` — Workbox's NavigationRoute rejects everything else before it
+        // consults this list, so it has no bearing on what `fetch()` receives.
+        //
+        // The extension list alone let `/api/groups.json` be answered with the app
+        // shell, because `.json` is not in it: opening an API url in the address bar
+        // is a navigation, and the service worker was happily serving index.html for
+        // it. The three prefixes are the paths that hold data rather than routes, so
+        // navigating to one should reach the network and get the real thing.
+        navigateFallbackDenylist: [/\.(css|js|png|svg|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|txt|glb)$/, /^\/api\//, /^\/data\//, /^\/cesium\//],
         runtimeCaching: [
           {
             urlPattern: /cesium\/(Assets|Widgets|Workers)\/.*\.(css|js|json|jpg)$/,

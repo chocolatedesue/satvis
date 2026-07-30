@@ -119,6 +119,25 @@ falls through to the SPA fallback. That is inference, not measurement, but it is
 enough that this check must be run on a genuinely unpopulated checkout rather than a
 simulated one.
 
+## PWA: a data url in the address bar must not serve the app shell
+
+**Why it is here.** The two halves are checkable separately but the whole needs a
+deployed Worker plus an installed service worker, which no local setup reproduces: served
+by `pnpm preview` there is no `/api` backend, so a denied navigation and a served shell
+look identical.
+
+**What was checked, 2026-07-30.** `https://satvis.space/api/groups.json` answers
+`content-type: application/json` with the real index, with or without an HTML `Accept`
+header — so the server was never the problem; the app shell came from the service worker.
+`workbox-routing/NavigationRoute._match` rejects any request whose `mode !== "navigate"`
+before consulting the denylist, and then tests `pathname + search`, which is why `.json`
+missing from the extension list was enough to hand `/api/groups.json` to
+`createHandlerBoundToURL("/index.html")`. The built `dist/sw.js` now carries
+`denylist:[/\.(css|js|...)$/,/^\/api\//,/^\/data\//,/^\/cesium\//]`.
+
+**Not checked:** a live navigation against a deployed Worker with the new service worker
+installed. Worth doing after the next deploy — open the url in a tab and confirm JSON.
+
 ## Map menu: the Basemap/Overlays split, and Re:Earth terrain
 
 **Procedure.** Open `?layers=ArcGis_0.5,Nextrad&terrain=ReEarth`, read the two imagery
