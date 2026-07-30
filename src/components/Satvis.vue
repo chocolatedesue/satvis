@@ -103,8 +103,14 @@
         </label>
         <div v-if="inertReason('layers')" class="toolbarNote">{{ inertReason("layers") }}</div>
         <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('terrain') }">Terrain</div>
+        <!-- `:checked` against what the globe is using rather than `v-model` against
+             the store: while a surface model imposes a terrain, the stored choice is
+             not the terrain being drawn, and a radio's dot is the app saying what
+             is. Disabled only when imposed — the choice is genuinely not the user's
+             then, and a control that accepts a click and shows nothing is worse than
+             one that declines it. The store still remembers, and still comes back. -->
         <label v-for="name in cc.terrainProviderNames" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('terrain') }">
-          <input v-model="terrainProvider" type="radio" :value="name" />
+          <input type="radio" name="terrain" :value="name" :checked="activeTerrain === name" :disabled="terrainImposed" @change="terrainProvider = name" />
           <span class="slider"></span>
           {{ name }}
         </label>
@@ -280,6 +286,12 @@ const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, qualityPre
 // too — so a dimmed group and an unlit tileset cannot disagree.
 const effects = computed(() => surfaceEffects(surfaceModel.value, sceneMode.value));
 const inert = computed(() => effects.value.inert);
+
+// The terrain the globe is actually using, and whether the user still owns the
+// choice. A surface model that imposes one takes it over completely; a hidden
+// globe does not — that choice is still theirs, it just is not being drawn yet.
+const activeTerrain = computed(() => effects.value.terrain ?? terrainProvider.value);
+const terrainImposed = computed(() => effects.value.terrain !== undefined);
 
 // Why a group stopped describing the picture. Two different answers, and the
 // distinction matters: an overridden terrain is still being drawn, just not the

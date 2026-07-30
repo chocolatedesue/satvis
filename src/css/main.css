@@ -97,14 +97,18 @@ body {
 }
 
 .toolbarSwitch {
-  background-color: #303336;
+  /* Lighter than the panel it sits on, not the same colour. These were both
+     #303336, which was invisible while the panel was translucent enough to show
+     the globe through the gaps — and once the panel was made opaque, the rows and
+     their surface merged into one flat slab with no edges at all. */
+  background-color: #464b50;
   border-radius: 8px;
   cursor: pointer;
   display: inline-block;
   height: 24px;
   line-height: 24px;
   margin: 1px 0px 1px 0px;
-  opacity: 0.7;
+  opacity: 0.85;
   padding-left: 50px;
   position: relative;
 }
