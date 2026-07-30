@@ -117,6 +117,11 @@ discussion; sharpen them here when they drift.
   globe cannot say. The globe answers from loaded tiles every frame for free; a
   surface model has to be asked, once per observer, and answers with the top of
   whatever stands there (`SkyView.setGroundHeightSource`).
+- **Basemap and overlay**: the two kinds of imagery layer. A basemap is the map of
+  the world itself, so at most one is drawn; an overlay is data laid on top of it,
+  and any number can be. Which kind a layer is, is a fact about the layer rather
+  than about the selection (`base` on its registry entry), and it decides both the
+  invariant and the control the menu offers.
 - **Offline imagery**: the basemap that ships inside the app and is precached, so
   it is the only one guaranteed with no network. The high-resolution copy of the
   same map is data shipped beside the app and cached only as it is viewed: same

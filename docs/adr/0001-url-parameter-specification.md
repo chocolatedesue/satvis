@@ -40,7 +40,7 @@ Every parameter is optional. An absent parameter means "use the default" (see
 | `track`    | `sat.trackedSatellite`   | string              | one satellite name; empty means nothing tracked                                                                   | empty            |
 | `overpass` | `sat.overpassMode`       | enum                | `elevation` \| `swath`                                                                                            | `elevation`      |
 | `layers`   | `cesium.layers`          | layer list          | comma-joined; each item `Name` or `Name_<alpha>`; list order is z-order                                           | `OfflineHighres` |
-| `terrain`  | `cesium.terrainProvider` | enum                | `None` \| `CesiumWorldTerrain` \| `Maptiler`                                                                      | `None`           |
+| `terrain`  | `cesium.terrainProvider` | enum                | `None` \| `CesiumWorldTerrain` \| `ReEarth` \| `Maptiler`                                                         | `None`           |
 | `surface`  | `cesium.surfaceModel`    | enum                | `None` \| `OsmBuildings` \| `GooglePhotorealistic`                                                                | `None`           |
 | `scene`    | `cesium.sceneMode`       | enum                | `3D` \| `2D` \| `Columbus` \| `Sky`                                                                               | `3D`             |
 | `camera`   | `cesium.cameraMode`      | enum                | `Fixed` \| `Inertial`                                                                                             | `Fixed`          |
@@ -78,10 +78,18 @@ production caller is `SatelliteManager.loadElementSets(preset.elements)`, and ev
 encode as `+` — but it must never be escaped as `-`.
 
 `layers` items are validated against the leading segment before `_`. Base layers:
-`Offline`, `OfflineHighres`, `ArcGis`, `OSM`, `Topo`, `BlackMarble`. Overlays: `Tiles`,
-`GOES-IR`, `Nextrad`. The optional `_<alpha>` suffix sets that layer's opacity and has no
+`Offline`, `OfflineHighres`, `ArcGis`, `OSM`, `BlackMarble`. Overlays: `Tiles`,
+`GOES-IR`, `Nextrad`. The split is also how the Map menu presents them — one basemap on
+radios, any number of overlays on checkboxes — and `base` on the registry entry is the one
+place it is decided. The optional `_<alpha>` suffix sets that layer's opacity and has no
 UI control. The accepted set is derived from the imagery-provider registry
 (`imageryProviderNames`), not restated, so it cannot drift.
+
+Retiring a provider is the one way this contract is not read-compatible: `?layers=Topo`
+worked until the MapTiler-keyed `Topo` basemap was removed, and now names an unknown member
+of a closed vocabulary, so it is dropped and the basemap falls back to the default. That is
+the documented rule doing its job rather than an exception to it — but it does mean a link
+older than the registry can open on a different map, which is the price of retiring one.
 
 At most one base layer may be active. When a URL supplies several, the **last in list
 order wins** and earlier base layers are dropped; all overlays are preserved regardless.

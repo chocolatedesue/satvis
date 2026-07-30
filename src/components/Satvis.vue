@@ -92,13 +92,25 @@
         </label>
       </div>
       <div v-show="menu.map" class="toolbarSwitches">
-        <!-- A group goes inert when a surface model has taken over what it
-             describes. Dimmed, and still live: this selection is still the user's,
+        <!-- The imagery is two groups rather than one list, each with the control
+             its invariant deserves: at most one basemap, so radios, and any number
+             of overlays, so checkboxes. Both bind by *provider* rather than by
+             token, so a layer carrying an opacity (`ArcGis_0.5`, which only a url
+             can set) still shows as the layer it is.
+
+             Either group goes inert when a surface model has taken over what it
+             describes. Dimmed, and still live: the selection is still the user's,
              it simply is not being drawn while the globe is hidden. The Terrain
              group below is the one exception, and says why. -->
-        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('layers') }">Layers</div>
-        <label v-for="name in cc.imageryProviderNames" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('layers') }">
-          <input v-model="layerSelection" type="checkbox" :value="name" />
+        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('layers') }">Basemap</div>
+        <label v-for="name in cc.baseLayers" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('layers') }">
+          <input type="radio" name="basemap" :value="name" :checked="baseLayer === name" @change="setBaseLayer(name)" />
+          <span class="slider"></span>
+          {{ name }}
+        </label>
+        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('layers') }">Overlays</div>
+        <label v-for="name in cc.overlayLayers" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('layers') }">
+          <input type="checkbox" :checked="hasOverlay(name)" @change="toggleOverlay(name, ($event.target as HTMLInputElement).checked)" />
           <span class="slider"></span>
           {{ name }}
         </label>
@@ -256,6 +268,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { useGeolocation } from "../composables/useGeolocation";
 import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
+import { layerProvider } from "../config/layers";
 import { type MapGroup, SURFACE_MODELS, type SurfaceModelName, surfaceEffects, viewModeNote } from "../config/surfaceModels";
 import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
@@ -323,13 +336,31 @@ const surfaceUnavailable = computed(() => {
   return viewModeNote(surfaceModel.value);
 });
 
-// The checkbox list writes the whole array back. layers is read-only because
-// "at most one base layer" is an invariant of the list, so the write is routed
-// through the action that enforces it.
-const layerSelection = computed({
-  get: () => layers.value,
-  set: (next: string[]) => cesiumStore.setLayers(next),
+// The imagery stack, read and written a group at a time. `layers` is read-only
+// because "at most one base layer" is an invariant of the list rather than of any
+// one entry, so every write goes through the action that enforces it — and list
+// order is z-order, which is why a basemap goes under and an overlay goes on top.
+const isBaseToken = (token: string): boolean => {
+  const provider = layerProvider(token);
+  return provider !== undefined && cc.baseLayers.includes(provider);
+};
+
+/** The basemap in the stack, by provider name, or "" when a url left none. */
+const baseLayer = computed(() => {
+  const token = layers.value.find(isBaseToken);
+  return token === undefined ? "" : (layerProvider(token) ?? "");
 });
+
+const hasOverlay = (name: string): boolean => layers.value.some((token) => layerProvider(token) === name);
+
+function setBaseLayer(name: string): void {
+  cesiumStore.setLayers([name, ...layers.value.filter((token) => !isBaseToken(token))]);
+}
+
+function toggleOverlay(name: string, enabled: boolean): void {
+  const without = layers.value.filter((token) => layerProvider(token) !== name);
+  cesiumStore.setLayers(enabled ? [...without, name] : without);
+}
 
 const satStore = useSatStore();
 const { enabledComponents, overpassMode } = storeToRefs(satStore);

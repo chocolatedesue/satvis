@@ -9,7 +9,6 @@ import {
   type TerrainProvider,
   TileCoordinatesImageryProvider,
   TileMapServiceImageryProvider,
-  UrlTemplateImageryProvider,
   WebMapServiceImageryProvider,
 } from "@cesium/engine";
 
@@ -103,15 +102,6 @@ export const imageryProviders: Record<string, ImageryProviderEntry> = {
     alpha: 1,
     base: true,
   },
-  Topo: {
-    create: () =>
-      new UrlTemplateImageryProvider({
-        url: "https://api.maptiler.com/maps/topo-v2/{z}/{x}/{y}@2x.png?key=tiHE8Ed08u6ZoFjbE32Z",
-        credit: `<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>`,
-      }),
-    alpha: 1,
-    base: true,
-  },
   BlackMarble: {
     create: () =>
       new WebMapServiceImageryProvider({
@@ -174,6 +164,21 @@ export const terrainProviders: Record<string, TerrainProviderEntry> = {
     // Vertex normals because `globe.enableLighting` is on: without them the
     // terrain is shaded off the ellipsoid normal and the relief goes flat.
     create: () => createWorldTerrainAsync({ requestVertexNormals: true }),
+  },
+  // Free and keyless, which is the point of it. Best-effort uptime and no SLA, so
+  // it is offered beside the two hosted options rather than instead of them.
+  //
+  // The `ellipsoid` variant, matching every other terrain here: Cesium wants
+  // heights above the ellipsoid, and the geoid variant would sit tens of metres
+  // out. The water mask is advertised but not requested — it would oblige a second
+  // attribution line ("Protomaps · © OpenStreetMap contributors") for an effect on
+  // the oceans that this app never looks at.
+  ReEarth: {
+    create: () =>
+      CesiumTerrainProvider.fromUrl("https://terrain.reearth.land/cesium-mesh/ellipsoid", {
+        credit: '<a href="https://terrain.reearth.land/" target="_blank">Re:Earth Terrain</a> · Mapterhorn (CC BY 4.0)',
+        requestVertexNormals: true,
+      }),
   },
   Maptiler: {
     create: () =>

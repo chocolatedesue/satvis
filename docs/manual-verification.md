@@ -103,6 +103,27 @@ to `?layers=Offline`, and the console carried the warning naming
 `git submodule update --init`. With the file present the high-resolution provider is
 used and the globe tiles normally.
 
+## Map menu: the Basemap/Overlays split, and Re:Earth terrain
+
+**Procedure.** Open `?layers=ArcGis_0.5,Nextrad&terrain=ReEarth`, read the two imagery
+groups, switch basemap, toggle an overlay, and fly somewhere with relief.
+
+**Result, 2026-07-30, Chrome.** Basemap radios listed `Offline`, `OfflineHighres`,
+`ArcGis`, `OSM`, `BlackMarble` with **ArcGis checked** — bound by provider, so the `_0.5`
+token still reads as the layer it is, which the old flat checkbox list did not. Overlays
+listed `Tiles`, `GOES-IR`, `Nextrad` with Nextrad checked. Switching to OSM rewrote
+`?layers=OSM,Nextrad`, keeping the overlay and dropping the old basemap's opacity, which
+belonged to a layer no longer in the stack. Toggling `Tiles` gave `OSM,Nextrad,Tiles` and
+three imagery layers, and untoggling gave back two.
+
+Re:Earth terrain resolved `https://terrain.reearth.land/cesium-mesh/ellipsoid/` and
+rendered the Bernese Alps with correct relief. Its required credit — "Re:Earth Terrain ·
+Mapterhorn (CC BY 4.0)" — appears in the "Data attribution" display, alongside the
+service's own layer.json credits (Mapterhorn, EGM2008, Protomaps, OpenStreetMap).
+
+Worth re-running if the terrain looks flat: this is a free, keyless service on
+best-effort uptime with no SLA, so it is the one terrain that can simply stop answering.
+
 ## Surface models: the matrix, the eye height, and what drapes on a mesh
 
 The pure part is unit-tested (`src/config/surfaceModels.test.ts`); what needs a browser
