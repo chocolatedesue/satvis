@@ -61,6 +61,17 @@ selecting it imposes `CesiumWorldTerrain` for as long as it is up, through the s
 suppression path. World Terrain is also offered as an ordinary terrain option, which is
 what makes the imposition legible rather than mysterious.
 
+The imposition survived being questioned, and the answer is measured rather than assumed.
+Sampling both terrains at ten cities, Re:Earth's ground sits consistently _lower_ than
+World Terrain's — Denver −0.1 m, San Francisco +0.1 m, Zurich −2.5 m, Innsbruck −2.8 m,
+Tokyo −4.3 m, Cape Town −5.4 m, Munich −9.0 m, Grindelwald −9.5 m, La Paz −10.1 m, Berlin
+−12.9 m. Since the buildings' feet are baked at World Terrain height, pairing them with
+Re:Earth leaves them hovering by that amount: about four storeys in Berlin, at eye level,
+in the one view this feature exists for. The gap could be corrected by shifting the tileset
+by the difference sampled at the observer, and that was considered and declined — it would
+fetch World Terrain even for someone who chose Re:Earth to stay off ion, and it would only
+hold near the observer.
+
 ### Where each model applies is data, and one of the two rules is about money
 
 Neither model applies in 2D or Columbus. Cesium does not refuse a tileset there —
@@ -94,6 +105,33 @@ consequences worth stating:
 - The plausibility guard that existed for `getHeight` now earns its keep twice: the clamp
   answers against any scene geometry above the point, and a satellite's own 3D model
   passing overhead is scene geometry.
+
+### On the ground, buildings are only worth loading as far as you can see
+
+Cesium rolls a tileset's screen-space error off with camera distance —
+`dynamicScreenSpaceError`, on by default in 1.143 — but its defaults are sized for looking
+_down_ at a city. From a fixed point two metres above the pavement they keep refining
+buildings out to some 5.2 km, which buys tiles behind buildings you cannot see past.
+
+In the sky view, and only there, OSM Buildings gets a sharper roll-off: density 8.0e-4 and
+factor 48 instead of 2.0e-4 and 24. The numbers are derived, not chosen — the reduction at
+distance `d` is `factor * (1 - exp(-(d * density)^2))` and refinement stops once that
+reaches the 16-pixel maximum error, which puts the edge at about 800 m.
+
+Measured on the same camera at Marienplatz, both settled: 34.38 MB of geometry across 34
+tiles capped, against 39.73 MB across 40 tiles at the defaults. **A 13% saving, not a
+transformation** — worth having, and worth stating plainly, because the remaining 34 MB is
+the neighbourhood you are standing in and there is no way to cut that without deleting
+buildings you can see.
+
+The cost is real and was accepted knowingly: OSM Buildings refines _additively_, so beyond
+the edge distant buildings are absent rather than coarse. It is invisible at street level
+because the near buildings occlude that distance anyway, and it would not be invisible from
+a rooftop.
+
+Not applied on the globe, where the wider radius is the point, and not applied to the
+photorealistic mesh, which _is_ the ground — capping its radius would delete the horizon
+rather than some buildings behind other buildings.
 
 ### The matrix is Cesium-free and tested
 

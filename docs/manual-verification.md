@@ -173,8 +173,15 @@ height, and the dimmed groups in the Map panel.
 - **Ground station pin**: at the Eiger with `terrain=CesiumWorldTerrain` the pin sits on
   the ridge, where at its stored height of 0 it had been ~4 km below the surface.
 
-Not exercised: iOS, where the tuned-down `cacheBytes` and `maximumScreenSpaceError`
-apply, and where a phone's memory is the thing being protected.
+**Loading cost, 2026-07-30, Chrome.** Measured because "load the buildings later" turned
+out to have nothing to defer: at globe altitude OSM Buildings loads _nothing_ — 0 tiles
+visited, 0 ready, 0 MB — so Cesium already withholds it until the camera is near the
+ground. In the sky view at Marienplatz, settled, the neighbourhood costs 34.38 MB across 34
+tiles with the sky-view roll-off, against 39.73 MB across 40 tiles at Cesium's defaults:
+a 13% saving from capping the radius at ~800 m. The eye sat at 573 m, i.e. ground + 2 m.
+
+Not exercised: iOS, where the photorealistic mesh's tuned-down `cacheBytes` and
+`maximumScreenSpaceError` apply, and where a phone's memory is the thing being protected.
 
 ## Sky view: what a device is still needed for
 

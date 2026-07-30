@@ -14,6 +14,7 @@
 import { Cartesian3, Cartographic, type Cesium3DTileset, createGooglePhotorealistic3DTileset, createOsmBuildingsAsync, type Scene } from "@cesium/engine";
 
 import { type SurfaceEffects, surfaceEffects, type SurfaceTileset } from "../config/surfaceModels";
+import { SKY_MODE } from "../config/viewModes";
 import type { Observer } from "./skyGeometry";
 import { DeviceDetect } from "./util/DeviceDetect";
 
@@ -112,10 +113,11 @@ export class SurfaceModel {
     this.#deps.setTerrainOverride(effects.terrain);
 
     if (effects.tileset === this.#name) {
-      // Already right. The globe still has to be re-asserted, because this may be
-      // the call that hid it — `hideGlobe` can change with the view mode while
-      // the tileset stays exactly as it was.
+      // Already right. Two things still have to be re-asserted, because both depend
+      // on the view mode and it can change while the tileset stays exactly as it
+      // was: whether the globe is hidden, and how far buildings are worth loading.
       this.#syncGlobe(effects);
+      this.#tuneForViewMode(viewMode);
       return;
     }
 
@@ -144,10 +146,43 @@ export class SurfaceModel {
     this.#deps.scene.primitives.add(tileset);
     this.#watchTileFailures(tileset, effects.tileset);
     this.#syncGlobe(effects);
+    this.#tuneForViewMode(viewMode);
     // The stack arrived asynchronously and `requestRenderMode` is on, so without
     // this the tileset is never traversed and nothing appears — the same reason
     // the imagery setter ends this way.
     this.#deps.scene.requestRender();
+  }
+
+  /**
+   * How far OSM Buildings are worth loading, which depends on where you stand.
+   *
+   * Cesium already rolls a tileset's screen-space error off with distance for a
+   * ground-level camera — `dynamicScreenSpaceError` is on by default — but its
+   * defaults are sized for looking *down* at a city. At the defaults (density
+   * 2.0e-4, factor 24) buildings keep refining out to some 5.2 km from the eye,
+   * which from a fixed point two metres above the pavement buys tiles behind
+   * buildings you cannot see past.
+   *
+   * The numbers are derived, not picked. The reduction at distance d is
+   * `factor * (1 - exp(-(d * density)^2))`, and refinement stops once that reaches
+   * `maximumScreenSpaceError` (16), so density 8.0e-4 with factor 48 puts the edge
+   * at about 800 m — further than a street view reaches.
+   *
+   * Only in the sky view, and only for this model. On the globe the wider radius is
+   * the point, and the photorealistic mesh *is* the ground, so capping its radius
+   * would delete the horizon rather than some buildings behind other buildings.
+   *
+   * The cost is the one named when this was chosen: OSM Buildings refines
+   * additively, so beyond the edge distant buildings are absent rather than coarse.
+   */
+  #tuneForViewMode(viewMode: string): void {
+    const tileset = this.#tileset;
+    if (!tileset || this.#name !== "OsmBuildings") {
+      return;
+    }
+    const onTheGround = viewMode === SKY_MODE;
+    tileset.dynamicScreenSpaceErrorDensity = onTheGround ? 8.0e-4 : 2.0e-4;
+    tileset.dynamicScreenSpaceErrorFactor = onTheGround ? 48 : 24;
   }
 
   /**
