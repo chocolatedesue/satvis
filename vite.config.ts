@@ -41,9 +41,6 @@ const config: ViteConfigWithTest = {
     rolldownOptions: {
       input: {
         index: fileURLToPath(new URL("index.html", import.meta.url)),
-        // A page of its own so that /ot is a file the asset router can serve, which
-        // is what keeps `not_found_handling: "404-page"` viable — see worker/wrangler.jsonc.
-        ot: fileURLToPath(new URL("ot.html", import.meta.url)),
         embedded: fileURLToPath(new URL("embedded.html", import.meta.url)),
         test: fileURLToPath(new URL("test.html", import.meta.url)),
       },

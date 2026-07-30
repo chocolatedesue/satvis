@@ -121,8 +121,18 @@ and missing files are all answered by the asset router. Two combinations that ar
 free, both measured: `404-page` with no `404.html` falls through to the Worker, and
 `not_found_handling: "none"` invokes it for every unmatched path.
 
-`/ot` returning 200 depends on `ot.html` existing as a real page. Without it the route
-404s, which is how this was found.
+`/ot` returning 200 depends on the `_redirects` rewrite `/ot / 200`. Two details it is
+easy to get wrong, both found by testing: the target must be `/` and not `/index.html`,
+because the asset router strips the extension and answers with a 307 to `/`, which would
+send the route to the default preset; and wrangler warns that a static rule placed after a
+dynamic one cannot be matched as cheaply, so it goes above the splat rule.
+
+**A trap when checking this in a browser.** The app writes its state into the query, so
+re-visiting the bare path in the same tab can land on the previously written url — `/ot`
+became `/ot?layers=Offline` from an earlier visit, which looked exactly like the OT preset
+failing to apply. Navigate with a distinct query (`/ot?v=clean`) to be sure of a fresh
+state. Verified that way: `/ot` selects VersaTiles and adds no `layers=` to the url, while
+`/` falls back to `Offline` as it should.
 
 For comparison, production before this change answered a missing data asset with
 `200 text/html`.
