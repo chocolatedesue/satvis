@@ -24,7 +24,7 @@ const queryString = (params: Readonly<Record<string, string>>): string => {
   const query = new URLSearchParams(params).toString().replaceAll("%2C", ",");
   return query === "" ? "" : `?${query}`;
 };
-const providers = () => ["Offline", "OfflineHighres", "ArcGis", "OSM", "BlackMarble", "Tiles", "GOES-IR", "Nextrad"];
+const providers = () => ["Offline", "OfflineHighres", "ArcGis", "VersaTiles", "OSM", "BlackMarble", "Tiles", "GOES-IR", "Nextrad"];
 
 describe("boolean", () => {
   const kind = boolean();

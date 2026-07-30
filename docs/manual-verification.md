@@ -121,6 +121,15 @@ rendered the Bernese Alps with correct relief. Its required credit — "Re:Earth
 Mapterhorn (CC BY 4.0)" — appears in the "Data attribution" display, alongside the
 service's own layer.json credits (Mapterhorn, EGM2008, Protomaps, OpenStreetMap).
 
+VersaTiles rendered the whole globe the right way up (no `{reverseY}` needed, since its
+TileJSON declares no `scheme`) and resolved to sharp orthophoto over central Munich, with
+tile requests observed from level 7 to 14 and no errors. "VersaTiles sources" is in the
+attribution display. **Note for whoever runs this next:** an unfocused browser tab
+throttles `requestAnimationFrame` to a standstill, so Cesium stops refining and the globe
+sits on whatever coarse level it had — which looks exactly like broken imagery. Front the
+tab, or drive `cc.viewer.scene.render()` in a loop, before concluding a provider is at
+fault.
+
 Worth re-running if the terrain looks flat: this is a free, keyless service on
 best-effort uptime with no SLA, so it is the one terrain that can simply stop answering.
 

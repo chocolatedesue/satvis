@@ -9,6 +9,7 @@ import {
   type TerrainProvider,
   TileCoordinatesImageryProvider,
   TileMapServiceImageryProvider,
+  UrlTemplateImageryProvider,
   WebMapServiceImageryProvider,
 } from "@cesium/engine";
 
@@ -90,6 +91,28 @@ export const imageryProviders: Record<string, ImageryProviderEntry> = {
     create: () =>
       ArcGisMapServerImageryProvider.fromUrl("https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer", {
         enablePickFeatures: false,
+      }),
+    alpha: 1,
+    base: true,
+  },
+  // Satellite and orthophoto imagery merged from several providers, free and
+  // keyless. Served as TileJSON, which Cesium cannot consume, so the template and
+  // the tile size below are transcribed from
+  // https://tiles.versatiles.org/tiles/satellite/tiles.json — the one thing worth
+  // re-checking if the imagery ever comes back wrong.
+  VersaTiles: {
+    create: () =>
+      new UrlTemplateImageryProvider({
+        // No `scheme` in the TileJSON, so the default `xyz` applies and Cesium's
+        // own `{y}` is already the right way up; `{reverseY}` would invert it.
+        url: "https://tiles.versatiles.org/tiles/satellite/{z}/{x}/{y}",
+        // 512 px, measured from a fetched tile rather than assumed: at the default
+        // 256 Cesium would request four tiles where one will do and still resolve
+        // each of them at half the detail it holds.
+        tileWidth: 512,
+        tileHeight: 512,
+        maximumLevel: 19,
+        credit: `<a href="https://versatiles.org/sources/" target="_blank">VersaTiles sources</a>`,
       }),
     alpha: 1,
     base: true,

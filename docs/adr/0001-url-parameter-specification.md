@@ -78,7 +78,7 @@ production caller is `SatelliteManager.loadElementSets(preset.elements)`, and ev
 encode as `+` — but it must never be escaped as `-`.
 
 `layers` items are validated against the leading segment before `_`. Base layers:
-`Offline`, `OfflineHighres`, `ArcGis`, `OSM`, `BlackMarble`. Overlays: `Tiles`,
+`Offline`, `OfflineHighres`, `ArcGis`, `VersaTiles`, `OSM`, `BlackMarble`. Overlays: `Tiles`,
 `GOES-IR`, `Nextrad`. The split is also how the Map menu presents them — one basemap on
 radios, any number of overlays on checkboxes — and `base` on the registry entry is the one
 place it is decided. The optional `_<alpha>` suffix sets that layer's opacity and has no
