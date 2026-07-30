@@ -92,9 +92,10 @@
         </label>
       </div>
       <div v-show="menu.map" class="toolbarSwitches">
-        <!-- Dimmed, not disabled: a group goes inert when a surface model has
-             taken over what it describes, and the controls still say what the
-             user picked and what they will get back. -->
+        <!-- A group goes inert when a surface model has taken over what it
+             describes. Dimmed, and still live: this selection is still the user's,
+             it simply is not being drawn while the globe is hidden. The Terrain
+             group below is the one exception, and says why. -->
         <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('layers') }">Layers</div>
         <label v-for="name in cc.imageryProviderNames" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('layers') }">
           <input v-model="layerSelection" type="checkbox" :value="name" />
@@ -119,7 +120,7 @@
              not what is in force, and nothing on screen names what is. -->
         <div v-if="inertReason('terrain')" class="toolbarNote">{{ inertReason("terrain") }}</div>
         <div class="toolbarTitle">Surface</div>
-        <label v-for="name in cc.surfaceModelNames" :key="name" class="toolbarSwitch">
+        <label v-for="name in SURFACE_MODELS" :key="name" class="toolbarSwitch">
           <input v-model="surfaceModel" type="radio" :value="name" />
           <span class="slider"></span>
           {{ name }}
@@ -255,7 +256,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { useGeolocation } from "../composables/useGeolocation";
 import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
-import { type MapGroup, type SurfaceModel, surfaceEffects } from "../config/surfaceModels";
+import { type MapGroup, SURFACE_MODELS, type SurfaceModelName, surfaceEffects, viewModeNote } from "../config/surfaceModels";
 import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
@@ -296,24 +297,30 @@ const terrainImposed = computed(() => effects.value.terrain !== undefined);
 // Why a group stopped describing the picture. Two different answers, and the
 // distinction matters: an overridden terrain is still being drawn, just not the
 // one the radio says, while a hidden globe is drawing neither.
+//
+// The imposed case also names the terrain that comes back, because the radio is
+// showing what is in force rather than what the user picked — so without this
+// their own choice would be stated nowhere at all.
 function inertReason(group: MapGroup): string {
   if (!inert.value.includes(group)) {
     return "";
   }
   const forced = effects.value.terrain;
   if (group === "terrain" && forced) {
-    return `${surfaceModel.value} needs ${forced}`;
+    return forced === terrainProvider.value ? `${surfaceModel.value} needs ${forced}` : `${surfaceModel.value} needs ${forced}, ${terrainProvider.value} returns`;
   }
   return `Hidden by ${surfaceModel.value}`;
 }
 
 // Named rather than merely flagged: "nothing happened" is the question this
-// answers, and which view mode would have worked is the answer.
+// answers, and which view modes would have worked is the answer — derived from
+// the rules themselves, never written out here, so widening one cannot leave this
+// sentence asserting a restriction that is gone.
 const surfaceUnavailable = computed(() => {
-  if (surfaceModel.value === "None" || !effects.value.unavailable.includes(surfaceModel.value as SurfaceModel)) {
+  if (surfaceModel.value === "None" || !effects.value.unavailable.includes(surfaceModel.value as SurfaceModelName)) {
     return "";
   }
-  return surfaceModel.value === "GooglePhotorealistic" ? "Applies in the sky view only" : "Applies in the 3D and sky views only";
+  return viewModeNote(surfaceModel.value);
 });
 
 // The checkbox list writes the whole array back. layers is read-only because

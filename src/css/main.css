@@ -67,10 +67,10 @@ body {
   margin: 5px;
 }
 
-/* A control whose selection a surface model has taken over — the globe's imagery
-   and terrain are not being drawn at all. Dimmed rather than disabled: the row
-   still reports what the user picked and what comes back when they deselect the
-   surface model, and changing it is still allowed.
+/* A control whose selection a surface model has taken over, so it is no longer
+   describing what is on screen. Dimming says only that; whether the row is still
+   the user's to change is a separate question the markup answers per group (a
+   hidden globe leaves the choice theirs, an imposed terrain does not).
    Opacity only, deliberately. A `grayscale` filter here read as a broken panel
    rather than an inert one: the red/green dot is the only state a row carries,
    and draining its colour left a column of switches saying nothing at all. */

@@ -2,7 +2,7 @@
 // SurfaceModel executes comes from here, so this is where the rules are pinned.
 import { describe, expect, test } from "vitest";
 
-import { surfaceEffects } from "./surfaceModels";
+import { surfaceEffects, viewModeNote } from "./surfaceModels";
 
 describe("surfaceEffects", () => {
   test("None draws nothing and takes nothing away", () => {
@@ -84,5 +84,33 @@ describe("surfaceEffects", () => {
     const effects = surfaceEffects("OsmBuildings", "Garbage");
     expect(effects.tileset).toBeUndefined();
     expect(effects.unavailable).toEqual(["None", "OsmBuildings", "GooglePhotorealistic"]);
+  });
+});
+
+// The menu's explanation has to come from the rules, not from a sentence written
+// out beside them: a hardcoded one silently lies the moment `viewModes` widens,
+// which is the drift the pure matrix exists to prevent.
+describe("viewModeNote", () => {
+  test("names the single view mode a model applies in", () => {
+    expect(viewModeNote("GooglePhotorealistic")).toBe("Applies in the sky view only");
+  });
+
+  test("names several, and pluralises", () => {
+    expect(viewModeNote("OsmBuildings")).toBe("Applies in the 3D and sky views only");
+  });
+
+  test("tracks the rules rather than restating them", () => {
+    // The note must mention every mode the model is actually allowed in. Derived
+    // from surfaceEffects so this test cannot pass by agreeing with a constant.
+    const allowed = ["3D", "2D", "Columbus", "Sky"].filter((viewMode) => !surfaceEffects("OsmBuildings", viewMode).unavailable.includes("OsmBuildings"));
+    const note = viewModeNote("OsmBuildings");
+    expect(allowed.length).toBeGreaterThan(0);
+    for (const viewMode of allowed) {
+      expect(note.toLowerCase()).toContain(viewMode === "Sky" ? "sky" : viewMode.toLowerCase());
+    }
+  });
+
+  test("has nothing to say about a name it does not know", () => {
+    expect(viewModeNote("Garbage")).toBe("");
   });
 });

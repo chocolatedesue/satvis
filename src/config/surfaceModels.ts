@@ -14,10 +14,13 @@
 import { SKY_MODE } from "./viewModes";
 
 export const SURFACE_MODELS = ["None", "OsmBuildings", "GooglePhotorealistic"] as const;
-export type SurfaceModel = (typeof SURFACE_MODELS)[number];
+// Named for what it is — a name — because `SurfaceModel` is also the class that
+// owns the tileset (src/modules/SurfaceModel.ts), and one import trap of that
+// kind is enough (see the note on SceneMode in src/config/viewModes.ts).
+export type SurfaceModelName = (typeof SURFACE_MODELS)[number];
 
 /** Everything but the absence of one — the names that name a tileset. */
-export type SurfaceTileset = Exclude<SurfaceModel, "None">;
+export type SurfaceTileset = Exclude<SurfaceModelName, "None">;
 
 /** The Map menu groups whose selection a surface model can render meaningless. */
 export type MapGroup = "layers" | "terrain";
@@ -43,7 +46,7 @@ interface SurfaceModelRules {
   terrain?: string;
 }
 
-const RULES: Record<SurfaceModel, SurfaceModelRules> = {
+const RULES: Record<SurfaceModelName, SurfaceModelRules> = {
   None: {
     viewModes: ["3D", "2D", "Columbus", SKY_MODE],
     hidesGlobe: false,
@@ -77,10 +80,10 @@ export interface SurfaceEffects {
    * makes `?surface=GooglePhotorealistic&scene=Sky` a working link — so the menu
    * annotates them rather than disabling them.
    */
-  unavailable: readonly SurfaceModel[];
+  unavailable: readonly SurfaceModelName[];
 }
 
-export function isSurfaceModel(value: string): value is SurfaceModel {
+export function isSurfaceModelName(value: string): value is SurfaceModelName {
   return (SURFACE_MODELS as readonly string[]).includes(value);
 }
 
@@ -93,7 +96,7 @@ export function isSurfaceModel(value: string): value is SurfaceModel {
  */
 export function surfaceEffects(surfaceModel: string, viewMode: string): SurfaceEffects {
   const unavailable = SURFACE_MODELS.filter((name) => !RULES[name].viewModes.includes(viewMode));
-  const selected: SurfaceModel = isSurfaceModel(surfaceModel) ? surfaceModel : "None";
+  const selected: SurfaceModelName = isSurfaceModelName(surfaceModel) ? surfaceModel : "None";
   const rules = RULES[selected];
   // Suppressed, never deselected: an unavailable model keeps its place in the
   // store and the url, so leaving 2D or entering the sky view brings it back
@@ -119,7 +122,37 @@ export function surfaceEffects(surfaceModel: string, viewMode: string): SurfaceE
   };
 }
 
-/** The names a user may select, for the url schema and the menu. */
-export function surfaceModelNames(): readonly string[] {
-  return SURFACE_MODELS;
+/**
+ * How a view mode is said in a sentence, where that differs from its name. "Sky"
+ * is the app's own name for a vantage point rather than a projection, and reads
+ * as "the sky view" in prose.
+ */
+const VIEW_MODE_PROSE: Record<string, string> = { [SKY_MODE]: "sky" };
+
+/**
+ * The menu's explanation for a model that cannot apply in the current view mode,
+ * built from the same `viewModes` the suppression is built from.
+ *
+ * Derived rather than written out, because a sentence written out is a second
+ * place the rule lives: widening `viewModes` would leave the menu asserting a
+ * restriction that no longer exists, which is worse than saying nothing. It also
+ * keeps the claim in docs/adr/0005-surface-models.md true — widening really is
+ * the one line.
+ */
+export function viewModeNote(surfaceModel: string): string {
+  if (!isSurfaceModelName(surfaceModel)) {
+    return "";
+  }
+  const modes = RULES[surfaceModel].viewModes.map((mode) => VIEW_MODE_PROSE[mode] ?? mode);
+  if (modes.length === 0) {
+    return "Applies in no view mode";
+  }
+  const last = modes[modes.length - 1] as string;
+  const list = modes.length === 1 ? last : `${modes.slice(0, -1).join(", ")} and ${last}`;
+  return `Applies in the ${list} view${modes.length === 1 ? "" : "s"} only`;
 }
+
+// No name accessor here, unlike the imagery and terrain registries: those exist
+// to *filter* what is selectable (base vs overlay, visible vs hidden), and every
+// surface model is selectable. `SURFACE_MODELS` is the list; a function returning
+// it verbatim, behind a getter returning that, was two layers of nothing.
