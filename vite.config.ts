@@ -151,6 +151,30 @@ const config: ViteConfigWithTest = {
             },
           },
           {
+            // Cesium ion assets: OSM Buildings tiles and World Terrain. ion already
+            // serves them `public, max-age=86400`, so the browser covers a day on its
+            // own; this survives eviction and works offline, which is what makes a
+            // second sky-view session over the same city cost nothing.
+            //
+            // Scoped to this host on purpose. Google's photorealistic tiles come from
+            // tile.googleapis.com, and their Map Tiles policies restrict caching — so
+            // the one rule that must never widen into a path or a file extension is
+            // this one.
+            urlPattern: /^https:\/\/assets\.ion\.cesium\.com\/.*/i,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "ion-asset-cache",
+              expiration: {
+                maxEntries: 4000,
+                maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+                purgeOnQuotaError: true,
+              },
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+            },
+          },
+          {
             urlPattern: /data\/models\/.*\.glb$/,
             handler: "CacheFirst",
             options: {

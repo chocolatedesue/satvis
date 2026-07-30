@@ -51,7 +51,7 @@ CI runs `lint`, then `test` (frontend + worker), then `build`.
 - **Linting**: `pnpm lint` runs frontend `oxlint`, `oxfmt --check`, and `vue-tsc`, then the worker's own lint script.
 - **Env files**: `.env.development` / `.env.production` — PostHog keys (`VITE_POSTHOG_*`) and an optional `VITE_CESIUM_ION_TOKEN`. See `.env.example`.
 - **Cesium ion**: `src/config/ion.ts` carries a committed token **restricted to satvis.space**, set once as `Ion.defaultAccessToken`. It backs Cesium World Terrain and both surface models, and ion rejects it on localhost, on `deploy:preview` origins, and in foreign iframes — so local work on those features needs an unrestricted token in `VITE_CESIUM_ION_TOKEN`. Without one they fail loudly (a toast, and the surface model reverts to `None`) rather than silently. See `docs/adr/0005-surface-models.md`.
-- **PWA**: Service worker via `vite-plugin-pwa` with Workbox caching strategies.
+- **PWA**: Service worker via `vite-plugin-pwa` with Workbox caching strategies. One rule is load-bearing beyond performance: `assets.ion.cesium.com` is cached for 30 days, and it is scoped to that host because Google's photorealistic tiles come from `tile.googleapis.com` and their Map Tiles policies restrict caching. Do not widen that pattern.
 - **TypeScript**: Strict mode, `noUnusedLocals`, `noUncheckedIndexedAccess`. Unused vars must be prefixed with `_`.
 - **Vue conventions**: Component names in templates must use kebab-case.
 

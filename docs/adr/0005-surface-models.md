@@ -146,6 +146,47 @@ in at the usual radius, which is what keeps an ordinary 3D city view worth havin
 ceiling is lifted entirely in the sky view rather than merely satisfied by standing on the
 ground.
 
+### What else the bandwidth went on
+
+Four further savings, in descending order of what they are worth.
+
+**The mesh waits for the descent to land.** Entering the sky view is a flight from
+wherever the camera was down to the pavement, and the photorealistic mesh was added the
+moment the view mode changed — so it streamed a corridor of photogrammetry for altitudes
+the camera passes through in two seconds. It is now withheld until `SkyView.settled`, and
+the globe stands in until then, which is why `#syncGlobe` asks whether the tileset is
+_shown_ rather than whether it exists. Measured: 0 MB of mesh during the descent, requests
+starting on landing.
+
+**The mesh skips intermediate levels of detail.** `skipLevelOfDetail` with
+`immediatelyLoadDesiredLevelOfDetail` — "only tiles that meet the maximum screen space
+error will ever be downloaded" — so the chain of coarser tiles that would be fetched and
+then discarded is never fetched. On a tileset some twenty levels deep that should be most
+of the bytes, though the saving is reasoned rather than measured: a clean before-and-after
+needs an uncached city and Google quota. The cost is that a view resolves out of nothing
+rather than out of a blurry stand-in.
+
+**The mesh's error tolerance is 24 everywhere**, up from Cesium's 16, on phones and
+desktops alike. This is the one saving here that costs picture quality rather than only
+patience, and it is acceptable only because the mesh degrades — blurrier, never absent —
+where the same change to OSM Buildings would delete buildings outright.
+
+**ion assets are cached by the service worker** for 30 days
+(`assets.ion.cesium.com`, CacheFirst), covering both OSM Buildings and World Terrain, so a
+second sky-view session over the same city costs nothing. ion already sends
+`public, max-age=86400`, so this buys reuse across days and offline rather than within a
+session. Scoped to that host deliberately: Google's tiles come from `tile.googleapis.com`
+and their Map Tiles policies restrict caching, so this is the one rule that must never
+widen into a path or a file extension.
+
+The OSM ceiling is 1 km rather than 2, and it is measured above the _ground_. That is not
+pedantry: from the ellipsoid, a ceiling of one kilometre puts La Paz permanently 2.6 km
+over it and its buildings permanently absent. The last believable ground height is kept,
+the way the sky view keeps its own, because while terrain is still arriving `getHeight`
+answers either nothing or nonsense — a coarse tile under the camera has been observed
+returning -76594 — and treating that as sea level would make the gate strictest exactly
+while it is least informed.
+
 ### The matrix is Cesium-free and tested
 
 Everything above is one pure function, `surfaceEffects(surfaceModel, viewMode)`, in

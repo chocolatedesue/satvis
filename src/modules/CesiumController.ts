@@ -183,6 +183,7 @@ export class CesiumController {
     this.surface = new SurfaceModel({
       scene: this.viewer.scene,
       setTerrainOverride: (name) => (name === undefined ? this.releaseTerrain() : this.suppressTerrain(name)),
+      skyLanded: () => this.skyView.settled,
       onFailure: (name, error) => {
         // The selection goes back to None so the radio, the url and the scene
         // cannot disagree — the same correction the imagery fallback makes — and

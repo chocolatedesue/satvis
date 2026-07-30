@@ -187,6 +187,26 @@ ground-level roll-off (density 8.0e-4, factor 48) and the eye at 573 m. Note the
 is re-evaluated on `preRender`, so a camera moved from the console in a stalled render loop
 will read as stuck hidden — force a frame before believing it.
 
+**The mesh waits for the descent, 2026-07-30, Chrome.** Entering the sky view with
+`surface=GooglePhotorealistic` from the default globe view: mid-flight the tileset was
+present but `show: false` with **0 MB** of geometry and the globe still visible, so the
+descent costs nothing and is not black. On landing, `settled: true` flipped it to
+`show: true`, hid the globe, and started requests. The tileset carried
+`maximumScreenSpaceError: 24`, `skipLevelOfDetail: true` and
+`immediatelyLoadDesiredLevelOfDetail: true`.
+
+The skip-LOD saving itself is **not measured** — a clean before-and-after needs an uncached
+city and burns Google quota — so it is reasoned from Cesium's documented behaviour only.
+
+The service-worker rule was checked in the build output rather than at runtime: `dist/sw.js`
+contains `ion-asset-cache` and the pattern `ion\.cesium\.com`, and `googleapis` appears
+zero times in it, which is the property that matters — Google's tiles must not be cached.
+
+The 1 km OSM ceiling's above-ground behaviour is **unverified here**: this environment
+never refines terrain past level 0, so `globe.getHeight` returns either nothing or
+implausible values (-76594 was observed) and the sticky-last-believable fallback keeps the
+gate on ellipsoid height. Worth re-checking in a real browser over a high city.
+
 Not exercised: iOS, where the photorealistic mesh's tuned-down `cacheBytes` and
 `maximumScreenSpaceError` apply, and where a phone's memory is the thing being protected.
 

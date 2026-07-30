@@ -13,9 +13,10 @@
 
 import { Cartesian3, Cartographic, type Cesium3DTileset, createGooglePhotorealistic3DTileset, createOsmBuildingsAsync, type Scene } from "@cesium/engine";
 
-import { type SurfaceEffects, surfaceEffects, type SurfaceTileset } from "../config/surfaceModels";
+import { surfaceEffects, type SurfaceTileset } from "../config/surfaceModels";
 import { SKY_MODE } from "../config/viewModes";
 import type { Observer } from "./skyGeometry";
+import { isPlausibleGroundHeight } from "./SkyView";
 import { DeviceDetect } from "./util/DeviceDetect";
 
 export interface SurfaceModelDeps {
@@ -24,6 +25,13 @@ export interface SurfaceModelDeps {
   setTerrainOverride: (name: string | undefined) => void;
   /** A selection that could not be loaded, and is therefore not in effect. */
   onFailure: (name: SurfaceTileset, error: unknown) => void;
+  /**
+   * Whether the sky view has arrived. The photorealistic mesh waits for it: the
+   * descent passes through every altitude between orbit and the pavement, and
+   * streaming a corridor of photogrammetry for viewpoints that last two seconds is
+   * the largest avoidable cost in this feature.
+   */
+  skyLanded: () => boolean;
 }
 
 /**
@@ -44,9 +52,19 @@ function googleTilesetOptions(): Cesium3DTileset.ConstructorOptions {
     cacheBytes: (constrained ? 192 : 512) * 1024 * 1024,
     maximumCacheOverflowBytes: (constrained ? 64 : 256) * 1024 * 1024,
     dynamicScreenSpaceError: true,
-    // Relaxed on constrained devices only; the desktop value is Cesium's own
-    // default, which is to say the desktop is not asked to give up any detail.
-    maximumScreenSpaceError: constrained ? 24 : 16,
+    // Above Cesium's default of 16 everywhere, not just on phones. This is the one
+    // saving here that costs picture quality rather than only patience, and it is
+    // the mesh degrading — blurrier, never absent — which is why it is acceptable
+    // where the same move would be wrong for OSM Buildings.
+    maximumScreenSpaceError: 24,
+    // Load the tiles wanted and not the chain of coarser ones that would be thrown
+    // away on arrival: "only tiles that meet the maximum screen space error will
+    // ever be downloaded". On a tileset some twenty levels deep that is most of the
+    // bytes. The cost is that a view resolves out of nothing rather than out of a
+    // coarse stand-in, which is a fair trade from a fixed viewpoint that is not
+    // being flown around.
+    skipLevelOfDetail: true,
+    immediatelyLoadDesiredLevelOfDetail: true,
     // Google's Map Tiles policies ask for the attributions on screen, in a line
     // along the bottom, rather than behind the collapsed "Data attribution" link
     // Cesium defaults to. Cesium reads its own default as the minimum compliant
@@ -66,12 +84,11 @@ function googleTilesetOptions(): Cesium3DTileset.ConstructorOptions {
  * by default, so a hidden tileset issues no requests at all rather than merely
  * fewer. Squeezing the error tolerance can only ever reduce.
  *
- * 2 km because that is roughly where a building stops being legible looking down —
- * a five-storey block is about ten pixels tall — so above it the tiles are spent on
- * a grey haze. Below it they fill in at Cesium's usual radius, which is what makes
- * an ordinary 3D city view still worth having.
+ * Above the *ground*, not above the ellipsoid, which is not pedantry: measured from
+ * the ellipsoid, a ceiling this low would put La Paz at 3.6 km permanently over it
+ * and its buildings permanently absent.
  */
-const GLOBE_BUILDING_CEILING = 2000;
+const GLOBE_BUILDING_CEILING = 1000;
 
 /**
  * How each model is built. Here rather than beside the imagery and terrain
@@ -107,12 +124,19 @@ export class SurfaceModel {
   #generation = 0;
 
   /**
-   * The altitude above which the tileset is hidden, or undefined to always show it.
-   * Set from the view mode; enforced per frame, because it is the camera that moves.
+   * Whether the tileset should be drawn right now, or undefined for "always".
+   * Set from the view mode; asked per frame, because what it depends on — the camera,
+   * the flight — is not something a store can announce.
    */
-  #ceiling: number | undefined;
+  #gate: (() => boolean) | undefined;
 
-  #removeCeilingWatch: (() => void) | undefined;
+  #removeGateWatch: (() => void) | undefined;
+
+  /** Whether the current selection wants the globe hidden, from the last effects. */
+  #hideGlobe = false;
+
+  /** The last believable ground height under the camera. Sea level until one arrives. */
+  #groundHeight = 0;
 
   constructor(deps: SurfaceModelDeps) {
     this.#deps = deps;
@@ -134,20 +158,21 @@ export class SurfaceModel {
     const effects = surfaceEffects(surfaceModel, viewMode);
     const generation = ++this.#generation;
 
+    this.#hideGlobe = effects.hideGlobe;
     this.#deps.setTerrainOverride(effects.terrain);
 
     if (effects.tileset === this.#name) {
       // Already right. Two things still have to be re-asserted, because both depend
       // on the view mode and it can change while the tileset stays exactly as it
       // was: whether the globe is hidden, and how far buildings are worth loading.
-      this.#syncGlobe(effects);
+      this.#syncGlobe();
       this.#tuneForViewMode(viewMode);
       return;
     }
 
     this.#remove();
     if (!effects.tileset) {
-      this.#syncGlobe(effects);
+      this.#syncGlobe();
       return;
     }
 
@@ -161,7 +186,7 @@ export class SurfaceModel {
       return;
     }
     if (!tileset) {
-      this.#syncGlobe(effects);
+      this.#syncGlobe();
       return;
     }
 
@@ -169,7 +194,7 @@ export class SurfaceModel {
     this.#name = effects.tileset;
     this.#deps.scene.primitives.add(tileset);
     this.#watchTileFailures(tileset, effects.tileset);
-    this.#syncGlobe(effects);
+    this.#syncGlobe();
     this.#tuneForViewMode(viewMode);
     // The stack arrived asynchronously and `requestRenderMode` is on, so without
     // this the tileset is never traversed and nothing appears — the same reason
@@ -201,49 +226,82 @@ export class SurfaceModel {
    */
   #tuneForViewMode(viewMode: string): void {
     const tileset = this.#tileset;
-    if (!tileset || this.#name !== "OsmBuildings") {
+    if (!tileset) {
+      return;
+    }
+    if (this.#name === "GooglePhotorealistic") {
+      // Not an altitude gate: measured against the ground it would be open for the
+      // whole descent anyway, and the thing worth waiting for is not a height but an
+      // arrival. Until then the globe stands in — see `#syncGlobe`.
+      this.#setGate(() => this.#deps.skyLanded());
+      return;
+    }
+    if (this.#name !== "OsmBuildings") {
       return;
     }
     const onTheGround = viewMode === SKY_MODE;
     tileset.dynamicScreenSpaceErrorDensity = onTheGround ? 8.0e-4 : 2.0e-4;
     tileset.dynamicScreenSpaceErrorFactor = onTheGround ? 48 : 24;
-    // No ceiling standing on the ground: the sky view is below any of them by
+    // No gate standing on the ground: the sky view is under any ceiling by
     // definition, and a gate that can never close is a per-frame check for nothing.
-    this.#setCeiling(onTheGround ? undefined : GLOBE_BUILDING_CEILING);
+    this.#setGate(onTheGround ? undefined : () => this.#heightAboveGround() < GLOBE_BUILDING_CEILING);
   }
 
   /**
-   * Hide the tileset above an altitude, watching the camera for as long as there is
-   * one to enforce.
+   * The camera's height over whatever is under it. `getHeight` is a lookup into tiles
+   * already loaded, so this is cheap enough to ask every frame.
    *
-   * A `preRender` listener rather than something reactive: the trigger is the camera
-   * moving, which no store knows about, and the check is one cached property read.
+   * The last believable answer is kept, the way the sky view keeps its own: while
+   * terrain is still coming in, `getHeight` answers either nothing or nonsense — a
+   * coarse tile under the camera has been seen returning -76594 — and treating that
+   * as sea level would make the gate strictest exactly while it is least informed.
+   * Anywhere high up that would read as far below the ceiling forever: measured from
+   * the ellipsoid, La Paz sits 3.6 km over a ceiling of one.
    */
-  #setCeiling(ceiling: number | undefined): void {
-    this.#ceiling = ceiling;
-    if (ceiling === undefined) {
-      this.#removeCeilingWatch?.();
-      this.#removeCeilingWatch = undefined;
+  #heightAboveGround(): number {
+    const cartographic = this.#deps.scene.camera.positionCartographic;
+    const measured = this.#deps.scene.globe.getHeight(cartographic);
+    if (isPlausibleGroundHeight(measured)) {
+      this.#groundHeight = measured;
+    }
+    return cartographic.height - this.#groundHeight;
+  }
+
+  /**
+   * Withhold the tileset until a condition holds, re-asking every frame while there
+   * is a condition to ask about.
+   *
+   * A `preRender` listener rather than something reactive: what the gates depend on —
+   * the camera's height, whether a flight has landed — is not state any store holds,
+   * and each check is a property read.
+   */
+  #setGate(gate: (() => boolean) | undefined): void {
+    this.#gate = gate;
+    if (gate === undefined) {
+      this.#removeGateWatch?.();
+      this.#removeGateWatch = undefined;
       if (this.#tileset) {
         this.#tileset.show = true;
       }
+      this.#syncGlobe();
       return;
     }
-    this.#applyCeiling();
-    this.#removeCeilingWatch ??= this.#deps.scene.preRender.addEventListener(() => this.#applyCeiling());
+    this.#applyGate();
+    this.#removeGateWatch ??= this.#deps.scene.preRender.addEventListener(() => this.#applyGate());
   }
 
-  #applyCeiling(): void {
+  #applyGate(): void {
     const tileset = this.#tileset;
-    const ceiling = this.#ceiling;
-    if (!tileset || ceiling === undefined) {
+    const gate = this.#gate;
+    if (!tileset || !gate) {
       return;
     }
-    const show = this.#deps.scene.camera.positionCartographic.height < ceiling;
+    const show = gate();
     if (tileset.show !== show) {
       tileset.show = show;
-      // Coming back into view has to be drawn, and request-render mode has no way
-      // of knowing a property changed.
+      // The globe is what stands in while a surface model is withheld, so the two
+      // move together — and request-render mode cannot notice a property changing.
+      this.#syncGlobe();
       this.#deps.scene.requestRender();
     }
   }
@@ -314,9 +372,9 @@ export class SurfaceModel {
     const tileset = this.#tileset;
     this.#tileset = undefined;
     this.#name = undefined;
-    this.#removeCeilingWatch?.();
-    this.#removeCeilingWatch = undefined;
-    this.#ceiling = undefined;
+    this.#removeGateWatch?.();
+    this.#removeGateWatch = undefined;
+    this.#gate = undefined;
     if (tileset) {
       // `remove` destroys it, which is what releases the tile cache — up to half
       // a gigabyte for the photorealistic mesh.
@@ -328,15 +386,17 @@ export class SurfaceModel {
   /**
    * The globe is visible unless a surface model is actually standing in for it —
    * asked of the tileset rather than of the selection, so a model that failed to
-   * load, or has not arrived yet, leaves a globe rather than a black void.
+   * load, has not arrived yet, or is being withheld by its gate leaves a globe
+   * rather than a black void. That last case is what lets the mesh wait for the
+   * descent to land: on the way down you are looking at the globe.
    *
    * Only ever driven from here, so there is no one else's `show` to preserve.
    */
-  #syncGlobe(effects: SurfaceEffects): void {
-    const show = !(effects.hideGlobe && this.#tileset !== undefined);
+  #syncGlobe(): void {
+    const standingIn = this.#hideGlobe && this.#tileset !== undefined && this.#tileset.show;
     const { globe } = this.#deps.scene;
-    if (globe.show !== show) {
-      globe.show = show;
+    if (globe.show !== !standingIn) {
+      globe.show = !standingIn;
       this.#deps.scene.requestRender();
     }
   }
