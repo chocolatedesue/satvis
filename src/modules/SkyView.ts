@@ -316,6 +316,40 @@ export class SkyView {
   }
 
   /**
+   * Ask again what the observer is standing on, because it changed under them — a
+   * terrain swapped, a surface model arriving or going away.
+   */
+  remeasureGround(): void {
+    this.#measureGround();
+  }
+
+  /**
+   * Stand on a height somebody else measured, now.
+   *
+   * For the one case an asynchronous source cannot cover: the terrain under the
+   * observer is being *replaced*, and the height has to change in the same breath as
+   * the ground does. Left to arrive on its own it lands a beat late, and for that
+   * beat the eye is under the new surface — 570 m under it in Munich, switching from
+   * the ellipsoid to World Terrain — which does not read as a lag. It reads as the
+   * world flipping inside out.
+   */
+  setGroundHeight(height: number): void {
+    if (!isPlausibleGroundHeight(height)) {
+      return;
+    }
+    // Counted as a measurement so the per-frame globe reads stay out of it: those
+    // are what turn one honest move into a stagger of them as tiles refine.
+    this.#groundGeneration += 1;
+    this.#groundMeasured = true;
+    if (height !== this.#groundHeight) {
+      this.#groundHeight = height;
+      this.#frame = undefined;
+    }
+    this.#apply();
+    this.#scene.requestRender();
+  }
+
+  /**
    * Stand at the observer and look up, arriving by flight rather than by cut.
    *
    * The promise resolves when the camera has landed, or when another flight

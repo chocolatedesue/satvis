@@ -133,6 +133,26 @@ fault.
 Worth re-running if the terrain looks flat: this is a free, keyless service on
 best-effort uptime with no SLA, so it is the one terrain that can simply stop answering.
 
+## Sky view: enabling a surface model must not lurch or flip
+
+**Why it cannot be a unit test.** The symptom is a sequence of camera positions across
+frames while terrain streams, which needs a live globe and a real network.
+
+**Procedure.** Enter the sky view with `?scene=Sky&gs=48.1372,11.5756,Munich` and no
+surface model, then enable OsmBuildings while recording `camera.position` and `camera.up`
+on every `preRender`.
+
+**Result, 2026-07-30, Chrome.** Two distinct eye heights, 2 m then 572.8 m — one
+transition, in the same frame the terrain provider becomes World Terrain — and `up.z`
+constant at 0.979 throughout, i.e. no orientation change. 572.8 m is CWT's Munich ground of
+570.8 m plus the 2 m eye height.
+
+Before the fix the same trace showed the eye stuck at 2 m while the provider had already
+become World Terrain, leaving the camera ~570 m under the new ground (the reported flip:
+inside terrain you see its underside), followed by a step per terrain refinement as
+`getHeight` improved its answer — including one reading of -76639, which the plausibility
+guard rejected.
+
 ## Surface models: the matrix, the eye height, and what drapes on a mesh
 
 The pure part is unit-tested (`src/config/surfaceModels.test.ts`); what needs a browser

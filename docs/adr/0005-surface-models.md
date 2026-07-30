@@ -106,6 +106,22 @@ consequences worth stating:
   answers against any scene geometry above the point, and a satellite's own 3D model
   passing overhead is scene geometry.
 
+That source is now permanent and covers every case — surface model, terrain, bare
+ellipsoid — rather than being installed only while a model is up, and it is asked again
+whenever what the observer stands on changes. The per-frame `globe.getHeight` is a fallback
+of last resort, because _following_ it is what made enabling OSM Buildings in the sky view
+lurch: it answers from whichever tile is loaded, so the eye rose in steps as terrain
+refined, once per better answer.
+
+The flip was worse and had a different cause. Imposing World Terrain replaces the ground
+under the observer, and a height that arrives a beat after the terrain does leaves the eye
+_under_ the new surface for that beat — 570 m under it in Munich, coming from the
+ellipsoid. Inside the terrain you are looking at its underside, which does not read as a
+lag but as the world turning inside out. So the terrain swap now measures the new provider
+at the observer _before_ handing it to the viewer, and sets the height in the same breath.
+Traced across the change: two eye heights, 2 m then 572.8 m, one transition, in the same
+frame the provider changes.
+
 ### On the ground, buildings are only worth loading as far as you can see
 
 Cesium rolls a tileset's screen-space error off with camera distance —

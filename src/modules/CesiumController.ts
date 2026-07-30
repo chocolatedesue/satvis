@@ -9,9 +9,11 @@ import {
   Matrix4,
   PerspectiveFrustum,
   type Scene,
+  sampleTerrainMostDetailed,
   SceneMode,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
+  type TerrainProvider,
   TimeInterval,
   Transforms,
   defined,
@@ -38,7 +40,7 @@ import {
 } from "./CesiumLayerProviders";
 import { SatelliteManager } from "./SatelliteManager";
 import { SkyInteraction } from "./SkyInteraction";
-import { SkyView } from "./SkyView";
+import { type Observer, SkyView } from "./SkyView";
 import { SurfaceModel } from "./SurfaceModel";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
@@ -197,6 +199,11 @@ export class CesiumController {
         });
       },
     });
+
+    // Permanent, and asked again whenever what the observer stands on changes. The
+    // sky view then has a measured height for every case — terrain, surface model,
+    // bare ellipsoid — instead of following whichever tile has loaded so far.
+    this.skyView.setGroundHeightSource((observer) => this.#observerGroundHeight(observer));
 
     this.pm = new PushManager();
 
@@ -380,7 +387,19 @@ export class CesiumController {
       if (generation !== this.#terrainGeneration) {
         return;
       }
+      // Measured before the swap, not after: the sky view stands on this terrain, and
+      // a height that arrives a beat later leaves the eye under the new ground for
+      // that beat. Nothing is standing on it if the sky view is not up, so the
+      // round trip is only spent when it buys something.
+      const observer = this.skyView.active ? this.skyView.observer : undefined;
+      const groundHeight = observer ? await this.#terrainHeightAt(provider, observer) : undefined;
+      if (generation !== this.#terrainGeneration) {
+        return;
+      }
       this.viewer.terrainProvider = provider;
+      if (groundHeight !== undefined) {
+        this.skyView.setGroundHeight(groundHeight);
+      }
     } catch (error) {
       // Terrain can fail for a reason the network is not responsible for now that
       // one of them is ion-backed. The previous terrain stays, and the next
@@ -398,6 +417,42 @@ export class CesiumController {
    * model can measure a height and the sky view needs one, and wiring them is
    * exactly what this class is for.
    */
+  /**
+   * What the observer is standing on, measured rather than guessed: the surface model
+   * when one is drawing, otherwise the terrain in force.
+   *
+   * The sky view's own per-frame `globe.getHeight` is a fallback of last resort. It
+   * answers from whatever tile happens to be loaded, so while terrain streams it
+   * reports a coarse approximation, then a better one, then a better one — and the eye
+   * follows each, which is a stagger of jumps rather than a move.
+   */
+  async #observerGroundHeight(observer: Observer): Promise<number | undefined> {
+    if (this.surface.active) {
+      return this.surface.surfaceHeight(observer);
+    }
+    return this.#terrainHeightAt(this.viewer.terrainProvider, observer);
+  }
+
+  /**
+   * The height a given terrain provider puts under a point, at its most detailed.
+   *
+   * `sampleTerrainMostDetailed` needs the provider's availability metadata, which the
+   * ellipsoid provider has none of because it does not need any: its surface is height
+   * zero everywhere, and that is the answer rather than a missing one.
+   */
+  async #terrainHeightAt(provider: TerrainProvider, observer: Observer): Promise<number | undefined> {
+    if (!provider.availability) {
+      return 0;
+    }
+    try {
+      const [sample] = await sampleTerrainMostDetailed(provider, [Cartographic.fromDegrees(observer.lon, observer.lat)]);
+      return sample?.height;
+    } catch (error) {
+      console.warn("Could not sample the terrain under the observer", error);
+      return undefined;
+    }
+  }
+
   async applySurfaceModel(surfaceModel: string, viewMode: string): Promise<void> {
     // On selection, not on load: what the quota is exposed to is people choosing
     // this, and a choice that fails or that lands in a view mode it cannot apply
@@ -412,13 +467,11 @@ export class CesiumController {
 
     const before = this.surface.active;
     await this.surface.apply(surfaceModel, viewMode);
-    const after = this.surface.active;
-    if (after === before) {
-      return;
+    // Only on a change: what the observer stands on is the same as it was otherwise,
+    // and re-measuring it is a needless round trip.
+    if (this.surface.active !== before) {
+      this.skyView.remeasureGround();
     }
-    // Only on a change: setting a source re-measures, and re-measuring for a
-    // model that is already the one being stood on is a needless round trip.
-    this.skyView.setGroundHeightSource(after ? (observer) => this.surface.surfaceHeight(observer) : undefined);
   }
 
   /**
