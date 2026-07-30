@@ -94,14 +94,30 @@ nothing.
 
 ## Layers: the offline imagery fallback
 
-**Procedure.** Move `data/cesium-assets/imagery/NaturalEarthII/tilemapresource.xml`
-aside to simulate an unpopulated submodule, reload, then put it back.
+**Procedure.** Open a checkout whose `data/cesium-assets` submodule is genuinely
+unpopulated — a fresh `git worktree add` is one — and load the default route. Read the
+basemap selection, the url, and the console. Do **not** simulate it by deleting the file
+from a running dev server: see below.
 
-**Result, 2026-07-28, Chrome.** The base layer became
-`/cesium/Assets/Textures/NaturalEarthII/...` (the bundled set), the url was rewritten
-to `?layers=Offline`, and the console carried the warning naming
-`git submodule update --init`. With the file present the high-resolution provider is
-used and the globe tiles normally.
+**Result, 2026-07-30, Chrome, in a worktree.** Basemap `Offline`, url rewritten to
+`?layers=Offline`, the console warning naming `git submodule update --init`, and the globe
+tiling normally from `/cesium/Assets/Textures/NaturalEarthII/...`. The fallback target was
+checked directly and is sound: its manifest answers `text/xml` beginning `<?xml`, and its
+tiles answer `image/jpeg`.
+
+**The earlier result recorded here for 2026-07-28 was wrong**, and worth keeping as a
+warning about the method. It reported the fallback firing, but the probe tested only
+`response.ok`, and in a real unpopulated checkout the request for the missing manifest is
+answered by the SPA fallback with **200 and `index.html`** — measured, `content-type:
+text/html`, 1065 bytes of markup. So the probe concluded the imagery was present and the
+globe stayed blank, which is what was being reported from worktrees all along. The probe
+now reads the body and requires `<TileMap`.
+
+Deleting the file from a running dev server most likely produced a 404 instead — the
+static-copy middleware owns that path and fails outright, where a file that never existed
+falls through to the SPA fallback. That is inference, not measurement, but it is reason
+enough that this check must be run on a genuinely unpopulated checkout rather than a
+simulated one.
 
 ## Map menu: the Basemap/Overlays split, and Re:Earth terrain
 

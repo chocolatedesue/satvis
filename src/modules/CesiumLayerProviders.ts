@@ -38,6 +38,13 @@ let highresProbe: Promise<boolean> | undefined;
  * situation an offline layer exists for. The answer is cached, since it cannot
  * change within a session.
  *
+ * The manifest has to be **read**, not merely asked for. A status code says nothing
+ * here, because nothing this app is served by answers a missing file with one: the
+ * dev server and the deployed Worker both fall back to `index.html` with a 200
+ * (`not_found_handling: "single-page-application"` in worker/wrangler.jsonc). This
+ * probe existed for a year and never once fired, on exactly the checkouts it was
+ * written for, because `response.ok` was true and the body was a web page.
+ *
  * Hardcoded to the one pair rather than expressed as a general capability of the
  * registry: this is the only provider backed by data that `pnpm install` does not
  * guarantee, and a framework for a single case is harder to read than the case.
@@ -47,7 +54,9 @@ export async function offlineFallback(layers: readonly string[]): Promise<string
     return undefined;
   }
   highresProbe ??= fetch(`${HIGHRES_NATURAL_EARTH}/tilemapresource.xml`)
-    .then((response) => response.ok)
+    // `<TileMap` rather than a parse: the question is whether this is the manifest
+    // or somebody else's answer, and the tag settles it without a DOMParser.
+    .then(async (response) => response.ok && (await response.text()).includes("<TileMap"))
     .catch(() => false);
   if (await highresProbe) {
     return undefined;
