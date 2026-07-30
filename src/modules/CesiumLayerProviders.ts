@@ -1,10 +1,7 @@
 import {
   ArcGisMapServerImageryProvider,
   ArcGISTiledElevationTerrainProvider,
-  type Cesium3DTileset,
   CesiumTerrainProvider,
-  createGooglePhotorealistic3DTileset,
-  createOsmBuildingsAsync,
   createWorldTerrainAsync,
   EllipsoidTerrainProvider,
   type ImageryProvider,
@@ -17,8 +14,6 @@ import {
 } from "@cesium/engine";
 
 import { formatLayer, parseLayer } from "../config/layers";
-import type { SurfaceTileset } from "../config/surfaceModels";
-import { DeviceDetect } from "./util/DeviceDetect";
 
 // The high-resolution offline tiles live in the `data/cesium-assets` submodule,
 // which `git worktree add` does not populate — so in a fresh worktree they are
@@ -191,53 +186,6 @@ export const terrainProviders: Record<string, TerrainProviderEntry> = {
   ArcGIS: {
     create: () => ArcGISTiledElevationTerrainProvider.fromUrl("https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer"),
     visible: false,
-  },
-};
-
-export interface SurfaceModelEntry {
-  create: () => Promise<Cesium3DTileset>;
-}
-
-/**
- * What the photorealistic mesh is allowed to spend.
- *
- * Cesium's defaults for this tileset are 1.5 GB of tile cache plus a 1 GB
- * overflow, sized for a desktop flying the globe. The sky view is the opposite
- * case — one viewpoint, a neighbourhood of tiles, frequently a phone — so the
- * budget comes down and `dynamicScreenSpaceError`, which Cesium recommends for
- * photogrammetry, drops the detail of tiles further from the camera.
- */
-function googleTilesetOptions(): Cesium3DTileset.ConstructorOptions {
-  const constrained = DeviceDetect.isIos() || DeviceDetect.inIframe();
-  return {
-    cacheBytes: (constrained ? 192 : 512) * 1024 * 1024,
-    maximumCacheOverflowBytes: (constrained ? 64 : 256) * 1024 * 1024,
-    dynamicScreenSpaceError: true,
-    maximumScreenSpaceError: constrained ? 24 : 16,
-    // Google's Map Tiles policies ask for the attributions on screen, in a line
-    // along the bottom, rather than behind the collapsed "Data attribution" link
-    // Cesium defaults to. Cesium reads its own default as the minimum compliant
-    // behaviour; this follows Google's wording instead.
-    showCreditsOnScreen: true,
-    // Left at Cesium's default `true` deliberately: with the globe hidden, the
-    // mesh is the only thing stopping the camera from dropping through the ground.
-  };
-}
-
-export const surfaceModelTilesets: Record<SurfaceTileset, SurfaceModelEntry> = {
-  OsmBuildings: {
-    // No options: this helper takes styling only, and its default style is the
-    // one worth having — it colours each building from the tileset's own
-    // `cesium#color` property. Its "© OpenStreetMap contributors" credit is
-    // applied by Cesium in the attribution display, which is where an ion asset's
-    // credits belong; only Google's policies ask for more than that.
-    create: () => createOsmBuildingsAsync(),
-  },
-  GooglePhotorealistic: {
-    // No Google Maps API key of our own, so this resolves ion asset 2275207 with
-    // `Ion.defaultAccessToken`. `onlyUsingWithGoogleGeocoder` only silences a
-    // one-time console warning about geocoders; this app has none at all.
-    create: () => createGooglePhotorealistic3DTileset({ onlyUsingWithGoogleGeocoder: true }, googleTilesetOptions()),
   },
 };
 

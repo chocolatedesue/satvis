@@ -24,7 +24,6 @@ import { currentPosition } from "../composables/useGeolocation";
 import { usePostHog } from "../composables/usePostHog";
 import { useToastProxy } from "../composables/useToastProxy";
 import { parseLayer } from "../config/layers";
-import { surfaceModelNames } from "../config/surfaceModels";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
@@ -112,9 +111,11 @@ export class CesiumController {
 
   #terrainOverride: string | undefined;
 
-  #appliedTerrain: string | undefined;
-
   #terrainGeneration = 0;
+
+  // The last surface model the store asked for, so the selection is reported once
+  // rather than every time the view mode makes it re-apply.
+  #selectedSurfaceModel: string | undefined;
 
   constructor() {
     this.preloadReferenceFrameData();
@@ -181,7 +182,7 @@ export class CesiumController {
 
     this.surface = new SurfaceModel({
       scene: this.viewer.scene,
-      setTerrainOverride: (name) => this.suppressTerrain(name),
+      setTerrainOverride: (name) => (name === undefined ? this.releaseTerrain() : this.suppressTerrain(name)),
       onFailure: (name, error) => {
         // The selection goes back to None so the radio, the url and the scene
         // cannot disagree — the same correction the imagery fallback makes — and
@@ -193,9 +194,6 @@ export class CesiumController {
           description: `${error instanceof Error ? error.message : "The tileset could not be loaded"}. Cesium ion needs a token valid for this origin.`,
           color: "warning",
         });
-      },
-      onLoad: (name) => {
-        usePostHog().posthog.capture("surface_model_loaded", { surface_model: name });
       },
     });
 
@@ -320,23 +318,37 @@ export class CesiumController {
       return;
     }
     this.#terrainProvider = terrainProviderName;
-    void this.#applyTerrain();
+    // Recorded but not applied while a surface model is imposing a terrain: this
+    // is the choice that comes back on release, and building it now would only
+    // fetch a provider nothing is going to show.
+    if (this.#terrainOverride === undefined) {
+      void this.#applyTerrain();
+    }
   }
 
   /**
-   * Impose a terrain over the user's choice, or pass `undefined` to honour it
-   * again. Suppression rather than a write, the way the camera mode is
-   * suppressed: OSM Buildings needs the terrain it was authored against, and the
-   * user's own terrain has to come back untouched the moment it is deselected.
+   * Impose a terrain over the user's choice. Suppression rather than a write, the
+   * way the camera mode is suppressed: OSM Buildings needs the terrain it was
+   * authored against, and the user's own terrain has to come back untouched the
+   * moment it is deselected.
    *
    * Validated against every registered provider, not just the selectable ones, so
    * an override may name a terrain a url is not allowed to.
    */
-  suppressTerrain(terrainProviderName: string | undefined): void {
-    if (terrainProviderName !== undefined && !(terrainProviderName in terrainProviders)) {
+  suppressTerrain(terrainProviderName: string): void {
+    if (!(terrainProviderName in terrainProviders)) {
       console.error("Unknown terrain provider override");
       return;
     }
+    this.#setTerrainOverride(terrainProviderName);
+  }
+
+  /** Honour the user's own terrain again. */
+  releaseTerrain(): void {
+    this.#setTerrainOverride(undefined);
+  }
+
+  #setTerrainOverride(terrainProviderName: string | undefined): void {
     if (terrainProviderName === this.#terrainOverride) {
       return;
     }
@@ -351,13 +363,16 @@ export class CesiumController {
    * changes in quick succession — which is exactly what selecting a surface model
    * does, since it overrides the terrain in the same tick — can resolve out of
    * order and leave the loser applied.
+   *
+   * Deliberately no "already applied" short-circuit. There was one, remembering the
+   * name before awaiting the provider, and it turned a provider that never resolved
+   * — a terrain host that hangs rather than refusing — into a terrain that could
+   * never be selected again: the marker said applied, the viewer showed something
+   * else, and every later request for it returned early. The callers already avoid
+   * redundant work, so the only thing the marker bought was a way to lie.
    */
   async #applyTerrain(): Promise<void> {
     const name = this.#terrainOverride ?? this.#terrainProvider;
-    if (name === this.#appliedTerrain) {
-      return;
-    }
-    this.#appliedTerrain = name;
     const generation = ++this.#terrainGeneration;
     try {
       const provider = await (terrainProviders[name] as TerrainProviderEntry).create();
@@ -367,17 +382,10 @@ export class CesiumController {
       this.viewer.terrainProvider = provider;
     } catch (error) {
       // Terrain can fail for a reason the network is not responsible for now that
-      // one of them is ion-backed. The previous terrain stays, and forgetting that
-      // this one was applied is what lets a later selection try again.
+      // one of them is ion-backed. The previous terrain stays, and the next
+      // selection is free to try again.
       console.error(`Terrain provider ${name} failed to load`, error);
-      if (generation === this.#terrainGeneration) {
-        this.#appliedTerrain = undefined;
-      }
     }
-  }
-
-  get surfaceModelNames(): readonly string[] {
-    return surfaceModelNames();
   }
 
   /**
@@ -390,6 +398,17 @@ export class CesiumController {
    * exactly what this class is for.
    */
   async applySurfaceModel(surfaceModel: string, viewMode: string): Promise<void> {
+    // On selection, not on load: what the quota is exposed to is people choosing
+    // this, and a choice that fails or that lands in a view mode it cannot apply
+    // in is exactly the kind of thing worth seeing. The view mode goes along so
+    // the two are still distinguishable.
+    if (surfaceModel !== this.#selectedSurfaceModel) {
+      this.#selectedSurfaceModel = surfaceModel;
+      if (surfaceModel !== "None") {
+        usePostHog().posthog.capture("surface_model_selected", { surface_model: surfaceModel, view_mode: viewMode });
+      }
+    }
+
     const before = this.surface.active;
     await this.surface.apply(surfaceModel, viewMode);
     const after = this.surface.active;
