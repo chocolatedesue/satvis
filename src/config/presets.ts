@@ -69,7 +69,7 @@ export const presets: Record<string, Preset> = {
         overpassMode: "swath",
       },
       cesium: {
-        layers: ["ArcGis"],
+        layers: ["VersaTiles"],
       },
     },
     elements: [
