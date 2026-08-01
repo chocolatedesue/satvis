@@ -33,9 +33,9 @@ Then the panel, or the console:
 
 ```js
 bench.quick(); // 3 counts × 7 isolated sets — checks the harness
-bench.run(); // 9 counts × 7 isolated sets: each component's own cost
-bench.cumulative(); // 9 counts × 8 growing sets: cost on top of what is already drawn
-bench.clock(); // 9 counts × 4 clock rates: the propagation axis
+bench.run(); // 5 counts × 7 isolated sets: each component's own cost
+bench.cumulative(); // 5 counts × 8 growing sets: cost on top of what is already drawn
+bench.clock(); // 5 counts × 4 clock rates: the propagation axis
 bench.run({ satelliteCounts: [0, 500, 5000], componentSets: [["Point", "Orbit"]] });
 bench.run({ clockMultipliers: [1, 100] }); // any sweep can take the clock axis
 bench.run({ groundStation: { lat: 48.18, lon: 11.75 } }); // switches pass prediction on
@@ -50,7 +50,7 @@ bench.text();
 
 Every sweep closes by re-running its first step, so the step count is one more
 than the axes multiply out to. A step costs `warmupMs + sampleMs` (2 s + 4 s by
-default) plus its build, so a full `bench.run()` is a coffee break, not a moment.
+default) plus its build, which is what keeps the default counts down to five.
 
 Keep the tab in the foreground. A background tab presents no frames at all and
 every row becomes a lie — see the first caveat below.
@@ -130,9 +130,10 @@ per-satellite propagation and nothing else.
 - **Render-on-demand is switched off as soon as the panel opens**, and put back when
   it closes. With it on, the gap between frames measures how idle the loop is rather
   than what a scene costs, so there is no reading to be had — which is why this is
-  not offered as a choice. The clock is likewise forced to run for the duration of a
-  sweep: a stopped clock means no position updates, and position updates are most of
-  the cost.
+  not offered as a choice. Switching it back on from the debug menu while the panel
+  is open puts a warning across the top of the panel, beside the readout it
+  invalidates. The clock is likewise forced to run for the duration of a sweep: a
+  stopped clock means no position updates, and position updates are most of the cost.
 - **`buildMs` is always measured at ×1**, whatever the step's clock rate. A step at
   ×1000 would otherwise sweep the sample window forward mid-build, so the build would
   carry propagation belonging to the measurement after it. The rate is applied once

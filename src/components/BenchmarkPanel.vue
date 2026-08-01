@@ -18,10 +18,19 @@
   (`window.bench`), so the panel and `bench.log()` cannot disagree.
 -->
 <template>
-  <div class="bench">
+  <div class="bench" :class="{ 'bench--below-fps': showFps }">
     <div class="bench__bar">
       <span class="bench__title">BENCHMARK</span>
       <button type="button" class="bench__x" title="Close" @click="emit('close')">×</button>
+    </div>
+
+    <!-- Pinned with the readout it invalidates rather than filed away in the
+         body: opening the panel switches render-on-demand off, so seeing this at
+         all means something switched it back on, and every figure below is the
+         gap between requested frames instead of a frame rate. -->
+    <div v-if="renderOnDemand" class="bench__alert">
+      render-on-demand is on — these are gaps between requested frames, not a frame rate.
+      <button type="button" @click="disableRenderOnDemand()">turn off</button>
     </div>
 
     <div class="bench__live">
@@ -48,41 +57,54 @@
 
     <div class="bench__body">
       <div class="bench__block">
-        <label class="bench__field">
-          <span>counts</span>
-          <input v-model="countsText" type="text" spellcheck="false" :disabled="running" />
-        </label>
-        <div class="bench__field">
-          <span>sat comps</span>
-          <div class="bench__modes">
-            <label v-for="option in MODES" :key="option.value" class="bench__mode" :title="option.hint">
-              <input v-model="mode" type="radio" :value="option.value" :disabled="running" />
-              {{ option.label }}
-            </label>
+        <!-- Collapsible, because the settings are touched once and the results
+             are read many times. Run, Cancel and the status line stay out of the
+             fold: they are what the panel is doing rather than how it was asked
+             to do it, and hiding a running sweep's Cancel button would be a trap.
+             The summary keeps the collapsed settings legible, so folding them
+             away never means forgetting what is about to run. -->
+        <button type="button" class="bench__fold" :aria-expanded="settingsOpen" @click="settingsOpen = !settingsOpen">
+          <span class="bench__chevron">{{ settingsOpen ? "▾" : "▸" }}</span>
+          settings
+          <span v-if="!settingsOpen" class="bench__dim">{{ settingsSummary }}</span>
+        </button>
+        <template v-if="settingsOpen">
+          <label class="bench__field">
+            <span>counts</span>
+            <input v-model="countsText" type="text" spellcheck="false" :disabled="running" />
+          </label>
+          <div class="bench__field">
+            <span>sat comps</span>
+            <div class="bench__modes">
+              <label v-for="option in MODES" :key="option.value" class="bench__mode" :title="option.hint">
+                <input v-model="mode" type="radio" :value="option.value" :disabled="running" />
+                {{ option.label }}
+              </label>
+            </div>
           </div>
-        </div>
-        <!-- The propagation axis. Drawing does not care what the clock is doing;
-           the sampled trajectory refreshes on a simulation-time schedule, so a
-           faster clock re-propagates the same satellites more often. -->
-        <label class="bench__field">
-          <span>clock</span>
-          <input v-model="clocksText" type="text" spellcheck="false" :disabled="running" />
-          <span class="bench__dim">×</span>
-        </label>
-        <div class="bench__field">
-          <span>timing</span>
-          <div class="bench__inline">
-            <label>warmup <input v-model.number="warmupMs" type="number" min="0" step="250" :disabled="running" /></label>
-            <label>sample <input v-model.number="sampleMs" type="number" min="250" step="250" :disabled="running" /></label>
-            <span class="bench__dim">ms</span>
+          <!-- The propagation axis. Drawing does not care what the clock is doing;
+               the sampled trajectory refreshes on a simulation-time schedule, so a
+               faster clock re-propagates the same satellites more often. -->
+          <label class="bench__field">
+            <span>clock</span>
+            <input v-model="clocksText" type="text" spellcheck="false" :disabled="running" />
+            <span class="bench__dim">×</span>
+          </label>
+          <div class="bench__field">
+            <span>timing</span>
+            <div class="bench__inline">
+              <label>warmup <input v-model.number="warmupMs" type="number" min="0" step="250" :disabled="running" /></label>
+              <label>sample <input v-model.number="sampleMs" type="number" min="250" step="250" :disabled="running" /></label>
+              <span class="bench__dim">ms</span>
+            </div>
           </div>
-        </div>
-        <div class="bench__field">
-          <span>extras</span>
-          <div class="bench__inline">
-            <label><input v-model="withGroundStation" type="checkbox" :disabled="running" /> ground station (pass prediction)</label>
+          <div class="bench__field">
+            <span>extras</span>
+            <div class="bench__inline">
+              <label><input v-model="withGroundStation" type="checkbox" :disabled="running" /> ground station (pass prediction)</label>
+            </div>
           </div>
-        </div>
+        </template>
         <div class="bench__row">
           <button type="button" class="bench__run" :disabled="running || plan.length === 0" @click="void start()">Run {{ plan.length }} steps</button>
           <button type="button" :disabled="!running" @click="cancel()">Cancel</button>
@@ -232,6 +254,7 @@
 </template>
 
 <script setup lang="ts">
+import { storeToRefs } from "pinia";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import { useController } from "../composables/useController";
@@ -269,6 +292,10 @@ const emit = defineEmits<{ close: [] }>();
 const cc = useController();
 const cesiumStore = useCesiumStore();
 const satStore = useSatStore();
+// Both reactive now that the store owns them, which is what lets the warning
+// appear the moment someone switches render-on-demand back on, and the panel
+// step aside only for an FPS counter that is actually drawn.
+const { showFps, requestRenderMode: renderOnDemand } = storeToRefs(cesiumStore);
 // Opening the panel is what installs the framework, which is also what puts
 // `window.bench` there. Idempotent, so a second open reuses the same handle and
 // the console and the panel are never measuring different things.
@@ -295,6 +322,9 @@ const withGroundStation = ref(false);
 const running = ref(false);
 const status = ref("idle");
 const copied = ref("");
+// Open to begin with: the settings are the first thing anyone touches, and a
+// panel that opens showing nothing but a Run button hides what it would run.
+const settingsOpen = ref(true);
 // Bumped as each row lands so the tables recompute off the live run object,
 // which the runner mutates in place rather than replacing.
 const revision = ref(0);
@@ -331,6 +361,18 @@ const plan = computed(() => buildPlan(spec.value));
 const estimateText = computed(() => {
   const seconds = Math.round(estimateDurationMs(plan.value, warmupMs.value + sampleMs.value) / 1000);
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+});
+
+/** What the folded settings say, so collapsing them is not the same as losing them. */
+const settingsSummary = computed(() => {
+  const parts = [`${counts.value.length} counts`, mode.value];
+  if (clocks.value.length > 1 || (clocks.value[0] ?? 1) !== 1) {
+    parts.push(`${clocks.value.length} clocks`);
+  }
+  if (withGroundStation.value) {
+    parts.push("ground station");
+  }
+  return `· ${parts.join(" · ")}`;
 });
 
 const run = (): BenchmarkRun | undefined => bench.runner.run ?? finished.value;
@@ -405,6 +447,11 @@ const EMPTY_LIVE: Live = {
 const live = ref<Live>(EMPTY_LIVE);
 
 const fpsClass = computed(() => (live.value.fps < 30 ? "bench__bad" : live.value.fps < 55 ? "bench__warn" : "bench__good"));
+
+/** The warning's own way out, so the fix is where the complaint is. */
+function disableRenderOnDemand(): void {
+  cesiumStore.requestRenderMode = false;
+}
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -557,22 +604,18 @@ watch(
 </script>
 
 <style scoped>
-/* Top right, in the same column as the entity info panel, but starting below
-   Cesium's own FPS counter rather than on top of it.
-   `debugShowFramesPerSecond` puts that counter at top 50px / right 10px — the
-   entity panel's exact coordinates — and it is the independent second opinion
-   this panel's own figures get checked against, so covering it would hide the
-   one reading nobody here computed. 110px clears its three lines. */
+/* Top right, on the entity info panel's own coordinates so the two read as one
+   slot. */
 .bench {
   position: fixed;
-  top: 110px;
+  top: 50px;
   right: 5px;
   z-index: 2000;
   display: flex;
   flex-direction: column;
   width: 480px;
   max-width: calc(100vw - 10px);
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - 60px);
   border: 1px solid #ffb000;
   border-radius: 4px;
   background: rgba(12, 14, 18, 0.94);
@@ -582,13 +625,35 @@ watch(
   line-height: 1.5;
 }
 
-/* The frame: bar and live readout pinned, body scrolls. `min-height: 0` is what
-   makes the body shrink instead of pushing the panel past its max-height — a
-   flex item defaults to its content's size and would otherwise scroll the whole
-   panel, taking the readout with it. */
+/* Cesium draws its FPS counter at top 50px / right 10px — exactly here — and it
+   is the independent second opinion this panel's headline figure gets checked
+   against, computed by code the framework does not own. So step below it, but
+   only while it is actually on screen: giving up 60px to a counter nobody
+   switched on would be paying for it twice. */
+.bench--below-fps {
+  top: 110px;
+  max-height: calc(100vh - 120px);
+}
+
+/* The frame: bar, alert and live readout pinned, body scrolls. `min-height: 0`
+   is what makes the body shrink instead of pushing the panel past its
+   max-height — a flex item defaults to its content's size and would otherwise
+   scroll the whole panel, taking the readout with it. */
 .bench__bar,
+.bench__alert,
 .bench__live {
   flex: none;
+}
+
+.bench__alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: rgba(255, 176, 0, 0.15);
+  border-bottom: 1px solid #ffb000;
+  color: #ffb000;
 }
 
 .bench__body {
@@ -776,5 +841,29 @@ watch(
 .bench__caption {
   color: #7a8291;
   margin-bottom: 2px;
+}
+
+/* Full width and left-aligned so the whole header row is the hit target, rather
+   than a chevron nobody can hit. Beats `.bench button` on specificity for the
+   same reason the close button has to. */
+.bench .bench__fold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #7a8291;
+  text-align: left;
+}
+
+.bench .bench__fold:hover {
+  color: #d8dee9;
+}
+
+.bench__chevron {
+  width: 8px;
 }
 </style>

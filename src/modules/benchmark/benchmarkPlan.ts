@@ -37,8 +37,14 @@ export interface PlanSpec {
  * Roughly log-spaced, and 0 is a step rather than an omission: it is the only
  * row that says what the globe costs on its own, which every other row is
  * measured against.
+ *
+ * Five, not the nine this used to be. Each count costs the better part of ten
+ * seconds, and the ones that were dropped sat between neighbours close enough
+ * that the fit barely moved — a sweep short enough to actually be run beats a
+ * denser one nobody waits out. Widen it by hand when a particular stretch of the
+ * curve is the question.
  */
-export const DEFAULT_SATELLITE_COUNTS: readonly number[] = [0, 10, 50, 100, 250, 500, 1000, 2500, 5000];
+export const DEFAULT_SATELLITE_COUNTS: readonly number[] = [0, 100, 500, 1000, 5000];
 
 /**
  * Clock rates for the propagation axis.
