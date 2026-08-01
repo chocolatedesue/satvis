@@ -2,6 +2,9 @@ node_modules/
 /dist/
 /dev-dist/
 
+# OS
+.DS_Store
+
 # Generated GP element-set snapshot (pnpm update-gp)
 /data/gp/
 
@@ -13,9 +16,8 @@ report/
 
 # Environment variables
 .env
-.env.local
-.env.development
-.env.production
+.env.*
+!.env.example
 
 # Claude Code: track only the launch.json blueprint (worktrees/ stays ignored)
 .claude/*

@@ -6,18 +6,11 @@ import { fileURLToPath } from "node:url";
 
 import ui from "@nuxt/ui/vite";
 import vue from "@vitejs/plugin-vue";
-import { defineConfig, type UserConfig } from "vite";
+import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import { viteStaticCopy } from "vite-plugin-static-copy";
-import type { InlineConfig as VitestInlineConfig } from "vitest/node";
 
 // vitest reads its config from the `test` key here (no separate vitest.config.ts).
-// On vitest 3 + vite 8 the `/// <reference types="vitest/config" />` module
-// augmentation doesn't reach vite's own UserConfig, so type the config through a
-// const carrying the `test` field explicitly (excess-property checks skip a
-// variable). Drop the const/type once vitest is on v4, where the augmentation
-// applies and the object literal can be passed to defineConfig directly.
-type ViteConfigWithTest = UserConfig & { test?: VitestInlineConfig };
 
 const cesiumEngineSource = "node_modules/@cesium/engine";
 const cesiumWidgetsSource = "node_modules/@cesium/widgets";
@@ -33,7 +26,7 @@ try {
 
 const port = process.env.PORT ? Number(process.env.PORT) : undefined;
 
-const config: ViteConfigWithTest = {
+export default defineConfig({
   base: "",
   build: {
     sourcemap: true,
@@ -43,11 +36,6 @@ const config: ViteConfigWithTest = {
         index: fileURLToPath(new URL("index.html", import.meta.url)),
         embedded: fileURLToPath(new URL("embedded.html", import.meta.url)),
         test: fileURLToPath(new URL("test.html", import.meta.url)),
-      },
-      // Silence @vueuse/core's misplaced /* #__PURE__ */ annotation warning
-      onLog(level, log, handler) {
-        if (log.code === "INVALID_ANNOTATION" && log.id?.includes("@vueuse/core")) return;
-        handler(level, log);
       },
       output: {
         // Separate vendor chunks for better caching
@@ -246,6 +234,4 @@ const config: ViteConfigWithTest = {
   worker: {
     format: "es",
   },
-};
-
-export default defineConfig(config);
+});
