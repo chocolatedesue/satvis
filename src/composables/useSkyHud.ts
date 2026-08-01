@@ -15,6 +15,7 @@
 import { type Cartesian3, Math as CesiumMath, JulianDate, type Scene, SceneTransforms } from "@cesium/engine";
 import { shallowRef, type ShallowRef } from "vue";
 
+import type { CesiumController } from "../modules/CesiumController";
 import { normalizeAzimuth } from "../modules/skyGeometry";
 import { compassPoint, directionToWindow, lookAngles, type ObserverFrame, type SkyTarget } from "../modules/SkyTargets";
 import { fovxFromFovy } from "../modules/SkyView";
@@ -130,7 +131,7 @@ function thin(ticks: TapeTick[]): TapeTick[] {
   return kept.toSorted((a, b) => a.offset - b.offset);
 }
 
-export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void } {
+export function useSkyHud(cc: CesiumController): SkyHudState & { start: () => void; stop: () => void } {
   const compass = shallowRef<TapeTick[]>([]);
   const elevation = shallowRef<TapeTick[]>([]);
   const locked = shallowRef<SkyTarget | undefined>(undefined);
@@ -147,7 +148,7 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
   let samples: Cartesian3[] = [];
 
   function refresh(time: JulianDate): void {
-    const { viewer, skyView, skyInteraction } = globalThis.cc;
+    const { viewer, skyView, skyInteraction } = cc;
     const { scene } = viewer;
     const frame = skyView.frame;
     settled.value = skyView.settled;
@@ -293,7 +294,7 @@ export function useSkyHud(): SkyHudState & { start: () => void; stop: () => void
       if (removePreRender) {
         return;
       }
-      removePreRender = globalThis.cc.viewer.scene.preRender.addEventListener((_scene, time: JulianDate) => refresh(time));
+      removePreRender = cc.viewer.scene.preRender.addEventListener((_scene, time: JulianDate) => refresh(time));
     },
     stop(): void {
       removePreRender?.();

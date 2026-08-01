@@ -10,6 +10,7 @@
 
 import { readonly, type Ref, ref } from "vue";
 
+import type { CesiumController } from "../modules/CesiumController";
 import type { CompassOutcome } from "../modules/SkyInteraction";
 import { useToastProxy } from "./useToastProxy";
 
@@ -29,9 +30,9 @@ const FAILURES: Record<string, string> = {
   no_heading: "This device reports orientation but cannot tell where north is, so the sky would be aimed at an arbitrary bearing.",
 };
 
-export function useSkyCompass(): { active: Readonly<Ref<boolean>>; pending: Readonly<Ref<boolean>>; toggle: () => Promise<void>; stopped: () => void } {
+export function useSkyCompass(cc: CesiumController): { active: Readonly<Ref<boolean>>; pending: Readonly<Ref<boolean>>; toggle: () => Promise<void>; stopped: () => void } {
   async function toggle(): Promise<void> {
-    const { skyInteraction } = globalThis.cc;
+    const { skyInteraction } = cc;
     if (active.value) {
       skyInteraction.disableDeviceOrientation();
       active.value = false;

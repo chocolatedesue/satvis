@@ -18,7 +18,7 @@ import {
   Transforms,
   defined,
 } from "@cesium/engine";
-import { Viewer } from "@cesium/widgets";
+import type { Viewer } from "@cesium/widgets";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
@@ -47,12 +47,6 @@ import { DeviceDetect } from "./util/DeviceDetect";
 import { PushManager } from "./util/PushManager";
 
 dayjs.extend(utc);
-
-declare global {
-  interface Window {
-    cc?: CesiumController;
-  }
-}
 
 /**
  * Where the globe opens: Europe's meridian, a little north of the equator.
@@ -119,46 +113,21 @@ export class CesiumController {
   // rather than every time the view mode makes it re-apply.
   #selectedSurfaceModel: string | undefined;
 
-  constructor() {
+  /**
+   * Takes the viewer rather than making one (see src/modules/createViewer.ts).
+   *
+   * The constructor used to call `new Viewer("cesiumContainer", …)`, which meant
+   * the class could not be brought into existence outside a browser and neither
+   * could anything holding one. Everything here is now wiring: constructing the
+   * managers and connecting them to each other, against a viewer that is
+   * somebody else's problem to produce.
+   */
+  constructor(viewer: Viewer) {
     this.preloadReferenceFrameData();
-    this.minimalUI = DeviceDetect.inIframe() || DeviceDetect.isIos();
+    this.minimalUI = DeviceDetect.minimalUI();
 
-    this.viewer = new Viewer("cesiumContainer", {
-      animation: !this.minimalUI,
-      // No base layer here: the store's layer stack is the only default, and it
-      // arrives through sceneSync's immediate watcher a tick later. Naming one
-      // here as well meant two defaults that could drift, and it created the
-      // layer without the availability probe that watcher applies.
-      baseLayer: false,
-      baseLayerPicker: false,
-      fullscreenButton: !this.minimalUI,
-      fullscreenElement: document.body,
-      geocoder: false,
-      homeButton: false,
-      infoBox: false,
-      navigationHelpButton: false,
-      navigationInstructionsInitiallyVisible: false,
-      sceneModePicker: false,
-      selectionIndicator: false,
-      timeline: !this.minimalUI,
-      vrButton: !this.minimalUI,
-      contextOptions: {
-        webgl: {
-          alpha: true,
-        },
-      },
-    });
-
-    // Cesium default settings
-    this.viewer.clock.shouldAnimate = true;
-    this.viewer.scene.globe.enableLighting = true;
-    this.viewer.scene.highDynamicRange = true;
-    this.viewer.scene.maximumRenderTimeChange = 1 / 30;
-    this.viewer.scene.requestRenderMode = true;
+    this.viewer = viewer;
     this.setDefaultView();
-
-    // Export CesiumController for debugger
-    window.cc = this;
 
     // CesiumController config
     this.sceneModes = [...SCENE_MODES];

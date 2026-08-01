@@ -19,6 +19,7 @@
 
 import { readonly, type Ref, ref } from "vue";
 
+import type { CesiumController } from "../modules/CesiumController";
 import type { Observer } from "../modules/skyGeometry";
 
 // Long, because a cold fix genuinely takes this long. Cutting it short would turn a
@@ -57,7 +58,7 @@ export async function currentPosition(): Promise<Observer | undefined> {
 const pending = ref(false);
 
 /** A location request a component can drive, and say something about while it waits. */
-export function useGeolocation(): { pending: Readonly<Ref<boolean>>; locate: () => Promise<void> } {
+export function useGeolocation(cc: CesiumController): { pending: Readonly<Ref<boolean>>; locate: () => Promise<void> } {
   async function locate(): Promise<void> {
     if (pending.value) {
       return;
@@ -67,7 +68,7 @@ export function useGeolocation(): { pending: Readonly<Ref<boolean>>; locate: () 
       // Through the controller rather than writing the store from here: it owns the
       // ground station write and the name that goes on it, so there is still exactly
       // one writer of ground stations.
-      await globalThis.cc.setGroundStationFromGeolocation();
+      await cc.setGroundStationFromGeolocation();
     } finally {
       pending.value = false;
     }

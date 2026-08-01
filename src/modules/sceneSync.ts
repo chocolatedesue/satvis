@@ -17,7 +17,6 @@ import { currentPosition } from "../composables/useGeolocation";
 import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
-import type { CesiumController } from "./CesiumController";
 import { highresImageryMissing, withoutHighresImagery } from "./CesiumLayerProviders";
 import type { DesiredScene } from "./SatelliteManager";
 import type { Observer } from "./SkyView";
@@ -26,7 +25,50 @@ import { toMinuteIso } from "./util/urlCodec";
 // Enough to keep a fast clock multiplier from hammering the history api.
 const MIN_CLOCK_WRITE_MS = 1000;
 
-export function startSceneSync(cc: CesiumController): void {
+/**
+ * Everything this file touches on the globe, and nothing else.
+ *
+ * Declared structurally rather than as `CesiumController`, which is a 43-member
+ * class that cannot be constructed without a WebGL context. What crosses this
+ * seam is eighteen members, and writing them down is what says which parts of the
+ * controller are load-bearing here — and what a test would have to stand in for.
+ */
+export interface SceneTarget {
+  imageryLayers: string[];
+  terrainProvider: string;
+  cameraMode: string;
+  qualityPreset: string;
+  showFps: boolean;
+  background: boolean;
+  readonly skyView: {
+    readonly active: boolean;
+    enter(observer: Observer): Promise<void>;
+    exit(): Promise<void>;
+  };
+  readonly skyInteraction: {
+    start(): void;
+    stop(): void;
+  };
+  readonly sats: {
+    reconcile(desired: DesiredScene): void;
+    onTrackedChange(callback: (name: string) => void): void;
+    onCatalogChange(callback: () => void): void;
+  };
+  readonly viewer: {
+    readonly clock: {
+      readonly currentTime: JulianDate;
+      readonly onTick: { addEventListener(listener: () => void): () => void };
+    };
+    readonly timeline?: unknown;
+  };
+  applySurfaceModel(surfaceModel: string, viewMode: string): Promise<void>;
+  suppressCameraMode(): void;
+  releaseCameraMode(): void;
+  morphTo(mode: string): void;
+  setTime(time: string): void;
+}
+
+export function startSceneSync(cc: SceneTarget): void {
   const cesiumStore = useCesiumStore();
   const satStore = useSatStore();
 
