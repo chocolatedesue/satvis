@@ -449,7 +449,7 @@ export class SatelliteComponentCollection {
   }
 
   createGroundTrack(): void {
-    const description = groundTrackDescription(this.props.orbit.orbitalPeriod, this.props.swath);
+    const description = groundTrackDescription(this.props.orbitClass, this.props.swath);
     if (!description) {
       // Ground track unavailable for non-LEO satellites
       return;
@@ -467,7 +467,7 @@ export class SatelliteComponentCollection {
   }
 
   createCone(fov = this.props.coneFovDeg): void {
-    const description = coneDescription(this.props.orbit.orbitalPeriod, fov);
+    const description = coneDescription(this.props.orbitClass, fov);
     if (!description) {
       // Cone graphic unavailable for non-LEO satellites
       return;
