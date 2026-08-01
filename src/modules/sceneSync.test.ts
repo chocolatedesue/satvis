@@ -13,6 +13,7 @@ import { nextTick } from "vue";
 
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
+import type { CatalogEntry } from "./SatelliteCatalog";
 import type { DesiredScene } from "./SatelliteManager";
 import { type SceneTarget, startSceneSync } from "./sceneSync";
 import type { Observer } from "./SkyView";
@@ -39,6 +40,9 @@ function fakeTarget() {
     reconciled: [] as DesiredScene[],
     surfaceModels: [] as [string, string][],
   };
+
+  // Mutable so a test can grow the catalog the way a lazily-loaded group does.
+  const catalog = { entries: [] as CatalogEntry[] };
 
   const target: SceneTarget & { skyView: { active: boolean } } = {
     imageryLayers: [],
@@ -74,6 +78,7 @@ function fakeTarget() {
       },
       onTrackedChange: () => {},
       onCatalogChange: () => {},
+      catalog,
     },
     viewer: {
       clock: {
@@ -98,7 +103,12 @@ function fakeTarget() {
     setTime: () => {},
   };
 
-  return { target, calls };
+  return { target, calls, catalog };
+}
+
+/** `count` catalog entries, all carrying `tag`, as the browser would see them. */
+function entriesWithTag(tag: string, count: number): CatalogEntry[] {
+  return Array.from({ length: count }, (_, i) => ({ key: `k${i}`, name: `SAT ${i}`, tags: [tag] }) as unknown as CatalogEntry);
 }
 
 /**
@@ -205,5 +215,79 @@ describe("startSceneSync", () => {
     // Copies, not the store's own arrays: the manager diffs against what it was
     // last given, and a live reference would compare equal to itself.
     expect(last?.enabledTags).not.toBe(satStore.enabledTags);
+  });
+
+  describe("the label budget", () => {
+    // Enabling a tag counts nothing until its group's entries land, so every
+    // test here fills the catalog and bumps the revision the way a load does.
+    function loadGroup(catalog: { entries: CatalogEntry[] }, tag: string, count: number): void {
+      catalog.entries = entriesWithTag(tag, count);
+      useSatStore().catalogRevision += 1;
+    }
+
+    test("switches labels off once the activation crosses the threshold", async () => {
+      const { target, catalog } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+      expect(satStore.enabledComponents).toContain("Label");
+
+      satStore.setActivation({ enabledTags: ["Starlink"] });
+      loadGroup(catalog, "Starlink", 201);
+      await settle();
+
+      expect(satStore.enabledComponents).not.toContain("Label");
+      // Only the labels — the point is what is left to see 201 satellites by.
+      expect(satStore.enabledComponents).toContain("Point");
+    });
+
+    test("leaves labels alone at the threshold", async () => {
+      const { target, catalog } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      satStore.setActivation({ enabledTags: ["Weather"] });
+      loadGroup(catalog, "Weather", 200);
+      await settle();
+
+      expect(satStore.enabledComponents).toContain("Label");
+    });
+
+    test("re-enabling sticks while the count stays over", async () => {
+      const { target, catalog } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      satStore.setActivation({ enabledTags: ["Starlink"] });
+      loadGroup(catalog, "Starlink", 201);
+      await settle();
+      expect(satStore.enabledComponents).not.toContain("Label");
+
+      // The user turns them back on, then activates more satellites. The rule is
+      // a crossing, not a cap, so it must not fire a second time.
+      satStore.enabledComponents = [...satStore.enabledComponents, "Label"];
+      loadGroup(catalog, "Starlink", 5000);
+      await settle();
+
+      expect(satStore.enabledComponents).toContain("Label");
+    });
+
+    test("fires again after the count drops back under and crosses anew", async () => {
+      const { target, catalog } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      satStore.setActivation({ enabledTags: ["Starlink"] });
+      loadGroup(catalog, "Starlink", 201);
+      await settle();
+      satStore.enabledComponents = [...satStore.enabledComponents, "Label"];
+
+      satStore.setActivation({ enabledTags: [] });
+      await settle();
+      expect(satStore.enabledComponents).toContain("Label");
+
+      satStore.setActivation({ enabledTags: ["Starlink"] });
+      await settle();
+      expect(satStore.enabledComponents).not.toContain("Label");
+    });
   });
 });
