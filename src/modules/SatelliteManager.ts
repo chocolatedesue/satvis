@@ -11,6 +11,7 @@ import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
 import { sameValue } from "./util/equality";
 import type { GpRecord } from "./util/gp";
 import { OrbitBatch } from "./util/OrbitBatch";
+import { SuppressibleSet } from "./util/Suppressible";
 
 /**
  * Everything the globe should be showing. The manager holds no opinion of its
@@ -40,9 +41,16 @@ export class SatelliteManager {
   // The last scene handed to reconcile. Nothing else mirrors store state.
   #desired: DesiredScene = EMPTY_SCENE;
 
-  // Components hidden for the duration of a scene morph, which is a Cesium
-  // concern and must not be mistaken for the user turning them off.
-  #suppressed = new Set<string>();
+  /**
+   * Which components are drawn. The user's choice comes from the desired scene;
+   * a scene morph hides Orbit for its duration, which is a Cesium concern and
+   * must not be mistaken for the user turning it off. The set remembers what it
+   * last put on screen, so nothing here has to reconstruct it to find the diff.
+   */
+  #components = new SuppressibleSet(({ show, hide }) => {
+    show.forEach((name) => this.#showComponent(name));
+    hide.forEach((name) => this.#hideComponent(name));
+  });
 
   #stations: GroundStationEntity[] = [];
 
@@ -104,7 +112,7 @@ export class SatelliteManager {
   #onCatalogChange: (() => void) | undefined;
 
   #effectiveComponents(): string[] {
-    return this.#desired.components.filter((name) => !this.#suppressed.has(name));
+    return this.#components.inForce;
   }
 
   /**
@@ -133,7 +141,7 @@ export class SatelliteManager {
     }
 
     if (!sameValue(previous.components, desired.components)) {
-      this.#applyComponents(previous.components);
+      this.#components.choose(desired.components);
     }
 
     if (previous.trackedSatellite !== desired.trackedSatellite) {
@@ -141,21 +149,6 @@ export class SatelliteManager {
     }
 
     this.#reconcileActive();
-  }
-
-  #applyComponents(previousComponents: string[]): void {
-    const next = new Set(this.#effectiveComponents());
-    const current = new Set(previousComponents.filter((name) => !this.#suppressed.has(name)));
-    for (const name of next) {
-      if (!current.has(name)) {
-        this.#showComponent(name);
-      }
-    }
-    for (const name of current) {
-      if (!next.has(name)) {
-        this.#hideComponent(name);
-      }
-    }
   }
 
   #applyOverpassMode(mode: string): void {
@@ -353,21 +346,11 @@ export class SatelliteManager {
    * so the toolbar must go on showing it enabled.
    */
   suppressComponent(componentName: string): boolean {
-    if (this.#suppressed.has(componentName) || !this.#desired.components.includes(componentName)) {
-      return false;
-    }
-    this.#suppressed.add(componentName);
-    this.#hideComponent(componentName);
-    return true;
+    return this.#components.suppress(componentName);
   }
 
   releaseComponent(componentName: string): void {
-    if (!this.#suppressed.delete(componentName)) {
-      return;
-    }
-    if (this.#desired.components.includes(componentName)) {
-      this.#showComponent(componentName);
-    }
+    this.#components.release(componentName);
   }
 
   #showComponent(componentName: string): void {
