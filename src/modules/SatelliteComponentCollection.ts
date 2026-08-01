@@ -35,6 +35,7 @@ import type { Viewer } from "@cesium/widgets";
 import CesiumSensorVolumes from "cesium-sensor-volumes";
 
 import { SATELLITE_COMPONENTS } from "../config/components";
+import { ORBIT_CLASS_COLOR, type OrbitClass } from "../config/orbitClass";
 import type { GroundStation } from "./PassPredictor";
 import type { CatalogEntry } from "./SatelliteCatalog";
 import { coneDescription, groundTrackDescription, modelUri, orbitPathTimes, orbitTrackTimes, orbitUsesPathGraphic } from "./satelliteGraphics";
@@ -50,6 +51,10 @@ type SatelliteComponentName = string;
  * to draw to, so it is a component this class creates for itself.
  */
 const GROUND_STATION_LINK = "Ground station link";
+
+// The palette converted once, not per satellite: with ~10,000 points on screen
+// these are shared instances, the same way Cesium shares its own Color constants.
+const POINT_COLOR = Object.fromEntries(Object.entries(ORBIT_CLASS_COLOR).map(([orbitClass, hex]) => [orbitClass, Color.fromCssColorString(hex)])) as Record<OrbitClass, Color>;
 
 /**
  * How each component is made. Keyed against the config list rather than written
@@ -351,10 +356,12 @@ export class SatelliteComponentCollection {
     this.createCesiumEntity(entityName, entityKey, entityValue, this.props.name, this.props.trajectory.fixed, true);
   }
 
+  // Coloured by orbit regime, matching the badge the satellite browser shows on
+  // the same satellite's row — so the menu reads as the legend for the globe.
   createPoint(): void {
     const point = new PointGraphics({
       pixelSize: 6,
-      color: Color.WHITE,
+      color: POINT_COLOR[this.props.orbitClass],
       outlineColor: Color.DIMGREY,
       outlineWidth: 1,
     });
