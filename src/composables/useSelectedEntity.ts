@@ -140,7 +140,7 @@ function update(time?: JulianDate): void {
   if (selectionTarget(next) !== previousTarget) {
     selection.value = next;
     elements.value = next?.kind === "satellite" ? getElementsInfo(next.sat.props.orbit) : null;
-    satelliteInfo.value = next?.kind === "satellite" ? getSatelliteInfo(next.sat.props.orbit, next.sat.props.metadata) : [];
+    satelliteInfo.value = next?.kind === "satellite" ? getSatelliteInfo(next.sat.props.orbitClass, next.sat.props.metadata) : [];
     if (next && !removeTickCallback) {
       removeTickCallback = CesiumCallbackHelper.createPeriodicTimeCallback(viewer, 1, (tickTime) => update(tickTime));
     } else if (!next && removeTickCallback) {

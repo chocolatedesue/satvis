@@ -1,6 +1,9 @@
-// Per-satellite metadata: the static facts a served GP record carries alongside
-// its element set, attached by the worker at refresh time from the satellite
-// table in worker/src/config/satvis.core.yaml (and plugin configs).
+// Per-satellite metadata: the static facts a GP record carries alongside its
+// element set. Most are attached by the worker at refresh time from the
+// satellite table in worker/src/config/satvis.core.yaml (and plugin configs);
+// `orbitClass` is instead derived from the element set by the frontend at parse
+// time, because it follows from the record every satellite already has rather
+// than from a table that names 19 of them.
 //
 // The worker treats the bag as opaque and only copies it, so this file is the
 // single place where it acquires meaning. Adding a field costs a declaration here,
@@ -10,6 +13,8 @@
 // exception is the swath pair, whose both-or-neither rule the generator enforces.
 //
 // This module must stay Cesium-free (node-env vitest exercises it).
+
+import type { OrbitClass } from "./orbitClass";
 
 // Static facts about one satellite. Every field is optional: a record either
 // carries a value or the consumer applies its own default (see the DEFAULT_*
@@ -27,6 +32,10 @@ export interface SatelliteMetadata {
   // Display-only, free text, shown verbatim in the entity info panel.
   operator?: string;
   missionType?: string;
+  // The one derived member of the bag, cached by `parseGpPayload` for every
+  // record rather than supplied by the satellite table. Read through
+  // `CatalogEntry.orbitClass`, which is the only place its absence is handled.
+  orbitClass?: OrbitClass;
 }
 
 // Total swath width for a satellite with no extents of its own. Kept as a total

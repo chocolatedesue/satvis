@@ -1,13 +1,23 @@
 import { Math as CesiumMath } from "@cesium/engine";
 
+import type { OrbitClass } from "../config/orbitClass";
+
 // satelliteGraphics — the geometry decisions behind the satellite's visual
 // components, as pure functions of plain inputs so they are testable without
 // a Cesium scene. SatelliteComponentCollection adapts these descriptions into
 // Cesium entities and primitives.
 
-/** Ground track and sensor cone are only rendered for LEO satellites. */
-export function isLeo(orbitalPeriodMin: number): boolean {
-  return orbitalPeriodMin <= 60 * 2;
+/**
+ * Ground track and sensor cone are only rendered for LEO satellites.
+ *
+ * The same "LEO" the info panel and the browser badge name, rather than a
+ * period threshold of its own: the two used to disagree by 8 minutes, so a
+ * satellite could be labelled LEO and still be refused a ground track. It also
+ * picks up the eccentricity test for free — a highly elliptical orbit that dips
+ * to a short period is not something to draw a swath corridor under.
+ */
+export function isLeo(orbitClass: OrbitClass): boolean {
+  return orbitClass === "LEO";
 }
 
 export interface OrbitPathTimes {
@@ -30,8 +40,8 @@ export interface GroundTrackDescription {
   widthMeters: number;
 }
 
-export function groundTrackDescription(orbitalPeriodMin: number, swathKm: number): GroundTrackDescription | undefined {
-  if (!isLeo(orbitalPeriodMin)) {
+export function groundTrackDescription(orbitClass: OrbitClass, swathKm: number): GroundTrackDescription | undefined {
+  if (!isLeo(orbitClass)) {
     return undefined;
   }
   return { widthMeters: swathKm * 1000 };
@@ -43,8 +53,8 @@ export interface ConeDescription {
   outerHalfAngleRad: number;
 }
 
-export function coneDescription(orbitalPeriodMin: number, fovDeg: number): ConeDescription | undefined {
-  if (!isLeo(orbitalPeriodMin)) {
+export function coneDescription(orbitClass: OrbitClass, fovDeg: number): ConeDescription | undefined {
+  if (!isLeo(orbitClass)) {
     return undefined;
   }
   return {

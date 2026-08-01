@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { createSatrec, parseGpPayload, recordName, recordSatnum, recordTleLines, type GpRecord } from "./gp";
+import { createSatrec, orbitClassOf, parseGpPayload, recordName, recordSatnum, recordTleLines, type GpRecord } from "./gp";
 
 const OMM_ARRAY = JSON.stringify([
   {
@@ -186,7 +186,7 @@ describe("metadata lifting", () => {
   test("lifts an OMM record's metadata off the element set", () => {
     const payload = JSON.stringify([{ ...OMM_ISS, metadata: { swathStarboardKm: 1000, swathPortKm: 500 } }]);
     const record = parseGpPayload(payload)[0]!;
-    expect(record.metadata).toEqual({ swathStarboardKm: 1000, swathPortKm: 500 });
+    expect(record.metadata).toEqual({ swathStarboardKm: 1000, swathPortKm: 500, orbitClass: "LEO" });
     // The bag must not remain in `omm`: that object is handed to json2satrec and
     // rendered as the satellite's element set in the info panel.
     expect(record.kind).toBe("omm");
@@ -204,23 +204,64 @@ describe("metadata lifting", () => {
     ]);
     const record = parseGpPayload(payload)[0]!;
     expect(record.kind).toBe("tle");
-    expect(record.metadata).toEqual({ coneFovDeg: 45 });
+    expect(record.metadata).toEqual({ coneFovDeg: 45, orbitClass: "LEO" });
   });
 
-  test("leaves no metadata property on an unenriched record", () => {
+  test("carries nothing but the derived class on an unenriched record", () => {
+    // The bag always exists after parsing, because the class is derived for every
+    // record. Which OTHER keys are present is still what says the satellite table
+    // had something to say about it.
     const record = parseGpPayload(JSON.stringify([OMM_ISS]))[0]!;
-    expect("metadata" in record).toBe(false);
+    expect(record.metadata).toEqual({ orbitClass: "LEO" });
   });
 
   test("ignores a metadata value that is not an object", () => {
     for (const bad of ["nope", 42, [1, 2], null]) {
       const record = parseGpPayload(JSON.stringify([{ ...OMM_ISS, metadata: bad }]))[0]!;
-      expect(record.metadata, JSON.stringify(bad)).toBeUndefined();
+      expect(record.metadata, JSON.stringify(bad)).toEqual({ orbitClass: "LEO" });
     }
   });
 
   test("does not lift metadata out of legacy TLE text (no place to carry it)", () => {
     const record = parseGpPayload(`ISS\n${TLE_LINE1}\n${TLE_LINE2}`)[0]!;
-    expect(record.metadata).toBeUndefined();
+    expect(record.metadata).toEqual({ orbitClass: "LEO" });
+  });
+});
+
+describe("orbitClassOf", () => {
+  // Mean motion (rev/day) and eccentricity are the only fields the classification
+  // reads; these element sets differ in nothing else.
+  function ommWithElements(meanMotion: number, eccentricity = 0.0001): GpRecord {
+    const omm = JSON.stringify([{ ...(JSON.parse(OMM_ARRAY)[0] as Record<string, unknown>), MEAN_MOTION: meanMotion, ECCENTRICITY: eccentricity }]);
+    return parseGpPayload(omm)[0]!;
+  }
+
+  test("classifies the regimes from mean motion", () => {
+    expect(orbitClassOf(ommWithElements(15.5))).toBe("LEO"); // ISS-like, ~93 min
+    expect(orbitClassOf(ommWithElements(2.0))).toBe("MEO"); // GPS-like, ~720 min
+    expect(orbitClassOf(ommWithElements(1.0027))).toBe("GEO"); // geosynchronous, ~1436 min
+  });
+
+  test("eccentricity wins over period — a Molniya orbit is HEO, not MEO", () => {
+    // ~12 h period like a MEO satellite, but e=0.72 puts it nowhere near one.
+    expect(orbitClassOf(ommWithElements(2.0, 0.72))).toBe("HEO");
+  });
+
+  test("reads the same elements out of a TLE, off the fixed columns of line 2", () => {
+    // Same satellite as OMM_ARRAY, so the two arms must agree.
+    expect(orbitClassOf(parseGpPayload(TLE_3LINE)[0]!)).toBe("LEO");
+    // Molniya 1-91: e=0.7168, mean motion 2.00612 rev/day — the TLE arm has to
+    // supply the implied leading decimal point on eccentricity to get this right.
+    const molniya = [
+      "MOLNIYA 1-91",
+      "1 25485U 98054A   26185.00000000  .00000000  00000-0  00000-0 0  9990",
+      "2 25485  63.4000 000.0000 7168000 270.0000 000.0000  2.00612000000000",
+    ].join("\n");
+    expect(orbitClassOf(parseGpPayload(molniya)[0]!)).toBe("HEO");
+  });
+
+  test("covers every satellite, not only those in the satellite table", () => {
+    // The point of deriving rather than configuring: an arbitrary record classifies.
+    expect(orbitClassOf(parseGpPayload(WORKER_TLE_ARRAY)[0]!)).toBe("LEO");
   });
 });

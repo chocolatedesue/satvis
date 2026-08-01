@@ -18,12 +18,19 @@ import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import { highresImageryMissing, withoutHighresImagery } from "./CesiumLayerProviders";
+import { activeTargetEntries } from "./satelliteActivation";
+import type { CatalogEntry } from "./SatelliteCatalog";
 import type { DesiredScene } from "./SatelliteManager";
 import type { Observer } from "./SkyView";
 import { toMinuteIso } from "./util/urlCodec";
 
 // Enough to keep a fast clock multiplier from hammering the history api.
 const MIN_CLOCK_WRITE_MS = 1000;
+
+// Above this many active satellites the name labels are switched off for the
+// user (see the watcher that applies it). Roughly where they stop resolving
+// into readable text on a 1080p globe.
+const MAX_LABELLED_SATELLITES = 200;
 
 /**
  * Everything this file touches on the globe, and nothing else.
@@ -53,6 +60,10 @@ export interface SceneTarget {
     reconcile(desired: DesiredScene): void;
     onTrackedChange(callback: (name: string) => void): void;
     onCatalogChange(callback: () => void): void;
+    // Read to size an activation before it is reconciled — how many satellites
+    // a set of tags implies is a question about the catalog, not about what is
+    // currently on the globe.
+    readonly catalog: { readonly entries: readonly CatalogEntry[] };
   };
   readonly viewer: {
     readonly clock: {
@@ -265,6 +276,45 @@ export function startSceneSync(cc: SceneTarget): void {
   );
 
   // --- the scene ------------------------------------------------------------
+
+  // How many satellites the current activation implies, asked of the catalog
+  // rather than of the globe so the answer is available before anything is
+  // built. Touches catalogRevision so a lazily-loaded group re-runs it as its
+  // entries land — enabling a tag counts 0 until then.
+  const activeSatelliteCount = (): number => {
+    void satStore.catalogRevision;
+    return activeTargetEntries({
+      entries: cc.sats.catalog.entries,
+      enabledTags: satStore.enabledTags,
+      enabledSatellites: satStore.enabledSatellites,
+      disabledSatellites: satStore.disabledSatellites,
+      trackedName: satStore.trackedSatellite || undefined,
+    }).size;
+  };
+
+  // Labels stop being readable long before they stop being drawn: past a couple
+  // of hundred they overlap into a mass that hides the globe and says nothing.
+  // Switch them off as the count crosses the threshold.
+  //
+  // A real store write, not a suppression — the checkbox unticks, the url
+  // follows, and turning labels back on at 5,000 satellites is the user's call
+  // to make and it sticks. Edge-triggered for exactly that reason: it fires on
+  // the crossing, so re-enabling survives every later change that leaves the
+  // count above the threshold, and only a drop back under and a fresh crossing
+  // switches them off again.
+  let overLabelBudget = false;
+  watch(
+    activeSatelliteCount,
+    (count) => {
+      const over = count > MAX_LABELLED_SATELLITES;
+      if (over && !overLabelBudget) {
+        satStore.enabledComponents = satStore.enabledComponents.filter((component) => component !== "Label");
+      }
+      overLabelBudget = over;
+    },
+    { immediate: true },
+  );
+
   const desired = (): DesiredScene => ({
     enabledTags: [...satStore.enabledTags],
     enabledSatellites: [...satStore.enabledSatellites],

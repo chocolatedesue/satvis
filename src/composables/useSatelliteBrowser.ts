@@ -22,6 +22,7 @@
 import { storeToRefs } from "pinia";
 import { computed, ref } from "vue";
 
+import type { OrbitClass } from "../config/orbitClass";
 import { isEnabledByTag } from "../modules/satelliteActivation";
 import type { CatalogEntry, SatelliteCatalog } from "../modules/SatelliteCatalog";
 import { useSatStore } from "../stores/sat";
@@ -42,6 +43,9 @@ export type BrowserRow =
       name: string;
       satnum: string;
       checked: boolean;
+      // The colour here is the one the satellite's point is drawn in, so the
+      // list reads as the legend for the globe.
+      orbitClass: OrbitClass;
       // Only populated in search mode (tree-mode rows sit under their group).
       groupsLabel?: string;
     };
@@ -199,6 +203,7 @@ export function useSatelliteBrowser(catalog: SatelliteCatalog) {
               name: member.name,
               satnum: member.satnum,
               checked: active.has(member.name),
+              orbitClass: member.orbitClass,
             });
           }
         }
@@ -235,6 +240,7 @@ export function useSatelliteBrowser(catalog: SatelliteCatalog) {
         name: entry.name,
         satnum: entry.satnum,
         checked: active.has(entry.name),
+        orbitClass: entry.orbitClass,
         groupsLabel: entry.tags.length > 0 ? entry.tags.join(", ") : undefined,
       });
     }

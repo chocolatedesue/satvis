@@ -10,12 +10,18 @@
 
 import { json2satrec, twoline2satrec, type OMMJsonObject, type SatRec } from "satellite.js";
 
+import type { OrbitClass } from "../../config/orbitClass";
 import type { SatelliteMetadata } from "../../config/satelliteMetadata";
 
 // `metadata` is common to both arms: the worker attaches it to OMM and pseudo-TLE
 // records alike, and parseGpPayload lifts it OUT of the payload so the `omm`
-// object handed to json2satrec stays a pure element set. Absent when the
-// satellite has no entry in the satellite table.
+// object handed to json2satrec stays a pure element set.
+//
+// Optional on the type because a hand-built record has no bag, but every record
+// out of parseGpPayload carries one: `orbitClass` is derived there for all of
+// them, whether or not the satellite table had anything to say. Which keys are
+// present still says where they came from — a satellite absent from the table
+// carries the derived class and nothing else.
 export type GpRecord = ({ kind: "omm"; omm: OMMJsonObject } | { kind: "tle"; name: string; line1: string; line2: string }) & {
   metadata?: SatelliteMetadata;
 };
@@ -54,13 +60,67 @@ function normalizeSatnum(raw: string): string {
   return trimmed;
 }
 
+const MINUTES_PER_DAY = 1440;
+
+// The two elements the regime follows from, whichever arm carries them. TLE
+// line 2 is fixed-column (1-indexed in the spec, sliced 0-indexed here):
+// eccentricity in 27-33 with an assumed leading decimal point, mean motion
+// (rev/day) in 53-63.
+function classifyingElements(r: GpRecord): { meanMotionRevPerDay: number; eccentricity: number } {
+  if (r.kind === "omm") {
+    return { meanMotionRevPerDay: Number(r.omm.MEAN_MOTION), eccentricity: Number(r.omm.ECCENTRICITY) };
+  }
+  return { meanMotionRevPerDay: Number(r.line2.substring(52, 63)), eccentricity: Number(`0.${r.line2.substring(26, 33).trim()}`) };
+}
+
+/**
+ * The orbit's regime, read straight off the element set.
+ *
+ * Deliberately not via a satrec: this runs for every record at parse time, and
+ * ~10,000 SGP4 initialisations to recover a three-letter string would be paid on
+ * the main thread during a catalog load. The raw mean motion differs from the
+ * SGP4-recovered one by ~1 part in 10,000 — a hundredth of a minute at the
+ * LEO/MEO boundary — which no classification depends on.
+ *
+ * Eccentricity is checked first because a highly elliptical orbit can have an
+ * MEO-looking period while spending its time nowhere near a circular MEO.
+ */
+export function orbitClassOf(r: GpRecord): OrbitClass {
+  const { meanMotionRevPerDay, eccentricity } = classifyingElements(r);
+  if (eccentricity > 0.25) {
+    return "HEO";
+  }
+  const periodMin = MINUTES_PER_DAY / meanMotionRevPerDay;
+  if (periodMin <= 128) {
+    return "LEO";
+  }
+  // Geosynchronous period is 1436 min; allow a band for drifting and inclined
+  // geosynchronous orbits, which are still GEO for display purposes.
+  if (periodMin >= 1400 && periodMin <= 1470) {
+    return "GEO";
+  }
+  return "MEO";
+}
+
+// Cache the derived class onto each record's metadata bag, so the ~10,000
+// catalog entries can be classified without any of them building an Orbit.
+// Derived at load rather than served: it costs nothing over the wire and is
+// recomputed from the element set every time, so it cannot go stale against the
+// orbit printed beside it (docs/adr/0002-static-satellite-metadata.md).
+function cacheOrbitClass(records: GpRecord[]): GpRecord[] {
+  for (const record of records) {
+    record.metadata = { ...record.metadata, orbitClass: orbitClassOf(record) };
+  }
+  return records;
+}
+
 // Parse a payload (worker JSON array or legacy TLE text) into GpRecords.
 // Never throws on malformed input: bad TLE blocks are skipped with a warning.
 export function parseGpPayload(text: string): GpRecord[] {
   const trimmed = text.trimStart();
   const firstChar = trimmed[0];
   if (firstChar === "[" || firstChar === "{") {
-    return parseJsonPayload(text);
+    return cacheOrbitClass(parseJsonPayload(text));
   }
   // A missing group served by an SPA fallback (dev/static hosts) returns the
   // index HTML with a 200 status. Detect it and bail without per-line warnings.
@@ -68,7 +128,7 @@ export function parseGpPayload(text: string): GpRecord[] {
     console.warn("Skipping GP payload that looks like HTML (missing group?)");
     return [];
   }
-  return parseTleText(text);
+  return cacheOrbitClass(parseTleText(text));
 }
 
 function parseJsonPayload(text: string): GpRecord[] {

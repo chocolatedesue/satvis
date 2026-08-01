@@ -16,10 +16,13 @@
     <span class="browser-badge">{{ row.activeCount }}/{{ row.count }}</span>
   </div>
 
-  <!-- Satellite row: indent + checkbox + name + dimmed satnum (+ dimmed group labels in search mode). -->
+  <!-- Satellite row: indent + checkbox + name + orbit class badge + dimmed satnum (+ dimmed group labels in search mode). -->
   <div v-else class="browser-row browser-row--sat">
     <input class="browser-checkbox" type="checkbox" :checked="row.checked" :aria-label="`Toggle ${row.name}`" @click.stop="emit('toggle-sat', row.name)" />
     <span class="browser-label browser-label--sat" @click="emit('toggle-sat', row.name)">{{ row.name }}</span>
+    <span class="browser-orbit" :style="{ color: ORBIT_CLASS_COLOR[row.orbitClass] }" :title="`${row.orbitClass} — the colour this satellite's point is drawn in`">{{
+      row.orbitClass
+    }}</span>
     <span class="browser-satnum">{{ row.satnum }}</span>
     <span v-if="row.groupsLabel" class="browser-groups">{{ row.groupsLabel }}</span>
   </div>
@@ -29,6 +32,7 @@
 import { onMounted, ref, watch } from "vue";
 
 import type { BrowserRow } from "../composables/useSatelliteBrowser";
+import { ORBIT_CLASS_COLOR } from "../config/orbitClass";
 
 const props = defineProps<{ row: BrowserRow }>();
 const emit = defineEmits<{
@@ -117,6 +121,16 @@ watch(() => (props.row.kind === "group" ? props.row.state : undefined), syncInde
   font-weight: 400;
   color: #b8c4c4;
   font-variant-numeric: tabular-nums;
+}
+
+/* Colour comes from the orbit-class palette, inline — the same value the point
+   on the globe is drawn in. Fixed width so the satnums stay in one column. */
+.browser-orbit {
+  flex: 0 0 auto;
+  width: 26px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
 }
 
 .browser-satnum {

@@ -103,13 +103,31 @@ velocity vector: `positionGeodetic` returns only the speed magnitude, and rotati
 the ECI velocity into ECF without the ω × r term skews the bearing by a few
 degrees — enough to flip the side for a station nearly along-track.
 
-## Orbit class is derived, not stored
+## Orbit class is derived, not configured
 
 `operator` and `missionType` are genuinely static: CelesTrak's GP records carry no
 such fields. `orbitClass` is not — it follows from `MEAN_MOTION` and
-`ECCENTRICITY`, which every record has. Storing it would cover 39 satellites
-instead of 10,000 and would eventually contradict the orbit printed beside it, so
-it is computed in `Orbit.orbitClass`.
+`ECCENTRICITY`, which every record has. Putting it in the satellite table would
+cover 39 satellites instead of 10,000 and would eventually contradict the orbit
+printed beside it, so it never goes there.
+
+It is nonetheless cached in the metadata bag, by `orbitClassOf` in
+`parseGpPayload` rather than by the worker. Both objections above are about the
+served payload and the table, and neither survives the move to the client: the
+frontend classifies every record it parses, not the 39 the table names, and it
+reclassifies from the element set on every load, so the value cannot age against
+the orbit it describes. Nothing is added to what goes over the wire.
+
+The cache exists because the satellite browser classifies whole catalog pages at
+a time, and a `CatalogEntry` holds a record with no satrec behind it. Deriving
+from the record is two number reads; deriving via a satrec would have been
+~10,000 SGP4 initialisations on the main thread during a catalog load. The raw
+mean motion differs from the SGP4-recovered one by ~1 part in 10,000 — a
+hundredth of a minute at the LEO/MEO boundary — which no classification depends
+on, so `Orbit.orbitClass` is gone and `orbitClassOf` is the only definition.
+
+This is the one field whose presence in the bag does not mean "the satellite
+table had something to say". Provenance is read per field, not per bag.
 
 ## Alternatives rejected
 
@@ -128,4 +146,11 @@ it is computed in `Orbit.orbitClass`.
 - **Enriching every record with a default bag** so `metadata` is always present.
   Rejected: ~10,000 records would each carry a copy of the same defaults to say
   nothing. Defaults live in the frontend, and an absent key means "not in the
-  table".
+  table". (The derived `orbitClass` does leave every parsed record with a bag —
+  but it is written client-side and says something different per satellite, so
+  neither half of this objection applies to it.)
+- **Reading `orbitClassOf` at each call site instead of caching it**, leaving the
+  bag untouched and the glossary term narrower. Rejected on the reader side: the
+  browser would classify the same entry on every recompute of the row list, and
+  the class would have no single owner to fall back through. `CatalogEntry.orbitClass`
+  is now that owner, and it is the only place a missing cache entry is handled.
