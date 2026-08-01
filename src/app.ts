@@ -8,6 +8,7 @@ import { controllerKey } from "./composables/useController";
 import { usePWAUpdate } from "./composables/usePWAUpdate";
 import { ionAccessToken } from "./config/ion";
 import { getConfigPreset } from "./config/presets";
+import { benchmarkEnabled } from "./modules/benchmark/enabled";
 import { CesiumController } from "./modules/CesiumController";
 import { createViewer } from "./modules/createViewer";
 import { startSceneSync } from "./modules/sceneSync";
@@ -64,3 +65,11 @@ app.use(ui);
 
 // Mount the app
 app.mount("#app");
+
+// PROTOTYPE: the benchmarking framework (src/modules/benchmark). Off unless
+// `?bench` is in the url or this is a dev server, and dynamically imported so
+// the sweep and its report tables stay out of the main chunk. Installing it is
+// what puts `window.bench` there; the panel shares that same handle.
+if (benchmarkEnabled()) {
+  void import("./modules/benchmark").then(({ installBenchmark }) => installBenchmark(cc));
+}

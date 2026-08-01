@@ -12,6 +12,7 @@
     "dev:worker": "pnpm --filter satvis-worker dev",
     "build": "vite build",
     "preview": "vite preview",
+    "bench": "vite build && vite preview --open \"/?bench=1\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "type-check": "vue-tsc --noEmit",

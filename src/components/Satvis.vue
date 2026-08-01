@@ -241,6 +241,13 @@
           <input type="button" @click="cc.jumpTo('HalfDome')" />
           Jump to HalfDome
         </label>
+        <!-- PROTOTYPE: src/modules/benchmark. Absent unless the framework is
+             enabled, so there is no switch here that cannot do anything. -->
+        <label v-if="benchmarkAvailable" class="toolbarSwitch">
+          <input v-model="showBenchmark" type="checkbox" />
+          <span class="slider"></span>
+          Benchmark
+        </label>
       </div>
     </div>
     <div id="toolbarRight">
@@ -259,12 +266,15 @@
          Cesium InfoBox, which was visible with hidden UI and in minimalUI. -->
     <entity-info-panel />
     <sky-hud />
+    <!-- PROTOTYPE: src/modules/benchmark. Async so nothing about it is in the
+         bundle a normal visitor downloads. -->
+    <benchmark-panel v-if="showBenchmark" @close="showBenchmark = false" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, defineAsyncComponent, onMounted, reactive, ref } from "vue";
 
 import { useController } from "../composables/useController";
 import { useGeolocation } from "../composables/useGeolocation";
@@ -272,6 +282,7 @@ import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
 import { layerProvider } from "../config/layers";
 import { type MapGroup, SURFACE_MODELS, type SurfaceModelName, surfaceEffects, viewModeNote } from "../config/surfaceModels";
 import { SKY_MODE } from "../config/viewModes";
+import { benchmarkEnabled } from "../modules/benchmark/enabled";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
@@ -280,6 +291,12 @@ import SatelliteBrowser from "./SatelliteBrowser.vue";
 import SkyHud from "./SkyHud.vue";
 
 type MenuKey = "cat" | "sat" | "gs" | "map" | "view" | "ios" | "dbg";
+
+// PROTOTYPE: src/modules/benchmark. `?bench` opens the panel straight away, so a
+// benchmarking session is one url rather than a url and two clicks.
+const BenchmarkPanel = defineAsyncComponent(() => import("./BenchmarkPanel.vue"));
+const benchmarkAvailable = benchmarkEnabled();
+const showBenchmark = ref(benchmarkAvailable && new URLSearchParams(window.location.search).has("bench"));
 
 const cc = useController();
 
