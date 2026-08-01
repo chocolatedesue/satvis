@@ -17,17 +17,22 @@ discussion; sharpen them here when they drift.
   merged from every config that contributes to it, so a fact is stated once no
   matter how many groups carry the satellite
   (`worker/src/config/satvis.core.yaml`).
-- **Satellite metadata**: the bag of static facts the worker attaches to a served
-  GP record at refresh time, from the satellite table. Opaque to the worker,
-  interpreted by the frontend (`src/config/satelliteMetadata.ts`). A satellite
-  absent from the table carries no metadata and falls back to app defaults.
+- **Satellite metadata**: the bag of static facts a GP record carries beside its
+  element set, interpreted by the frontend (`src/config/satelliteMetadata.ts`).
+  Most are attached by the worker at refresh time from the satellite table and
+  are opaque to it; the orbit class is instead derived by the frontend as it
+  parses, because it follows from the element set every satellite already has.
+  Provenance is per field, not per bag: a satellite absent from the table still
+  carries its orbit class, and falls back to app defaults for the rest.
 - **Swath extent**: the cross-track distance from the ground track to the edge of
   a sensor's footprint, held per side (starboard = velocity bearing + 90°). Not
   half a width: the sides differ when a sensor is tilted, so a swath is a pair of
   extents, and their sum is the total width.
 - **Orbit class**: the orbit's regime — LEO, MEO, GEO or HEO — derived from the
   element set, never configured, so every satellite has one and it cannot
-  contradict its own orbit (`Orbit.orbitClass`).
+  contradict its own orbit (`orbitClassOf`). One class, three readers: it decides
+  the colour of the satellite's point, the badge on its row in the browser, and
+  whether it is drawn a ground track and a sensor cone at all.
 - **Tag**: a label attached to satellites by the group that supplied them, and
   the unit the user activates ("enable Weather"). One satellite may carry tags
   from several groups. Tag names must not contain a comma.
