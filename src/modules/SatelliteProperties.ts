@@ -1,3 +1,4 @@
+import type { OrbitClass } from "../config/orbitClass";
 import { DEFAULT_CONE_FOV_DEG, DEFAULT_SWATH_KM, swathExtentsOf, type SatelliteMetadata, type SwathExtents } from "../config/satelliteMetadata";
 import Orbit from "./Orbit";
 import { PassPredictor } from "./PassPredictor";
@@ -43,6 +44,12 @@ export class SatelliteProperties {
   // walking down to the catalog entry.
   get metadata(): SatelliteMetadata {
     return this.entry.metadata;
+  }
+
+  // The orbit's regime. Decides the point's colour and gates the ground track
+  // and sensor cone (see satelliteGraphics.isLeo).
+  get orbitClass(): OrbitClass {
+    return this.entry.orbitClass;
   }
 
   // Per-side cross-track swath extents (km). A satellite with no extents of its

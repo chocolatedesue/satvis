@@ -2,6 +2,7 @@ import { JulianDate } from "@cesium/engine";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
+import type { OrbitClass } from "../../config/orbitClass";
 import { swathExtentsOf, type SatelliteMetadata } from "../../config/satelliteMetadata";
 import type Orbit from "../Orbit";
 import { recordTleLines } from "./gp";
@@ -20,9 +21,13 @@ export type ElementsInfo = { kind: "tle"; epoch: string; lines: string } | { kin
  * carries the field — a satellite absent from the satellite table shows nothing
  * rather than the fallback values the renderer happens to use, which would read
  * as data about the satellite when it is really a default.
+ *
+ * Takes the class rather than reading it off the metadata bag, so the caller
+ * resolves the one cache miss (`CatalogEntry.orbitClass`) instead of this
+ * function needing a second opinion about how to derive it.
  */
-export function getSatelliteInfo(orbit: Orbit, metadata: SatelliteMetadata): [string, string][] {
-  const rows: [string, string][] = [["Orbit", orbit.orbitClass]];
+export function getSatelliteInfo(orbitClass: OrbitClass, metadata: SatelliteMetadata): [string, string][] {
+  const rows: [string, string][] = [["Orbit", orbitClass]];
 
   const { coneFovDeg, operator, missionType } = metadata;
   const extents = swathExtentsOf(metadata);

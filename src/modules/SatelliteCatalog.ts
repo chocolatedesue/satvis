@@ -4,8 +4,9 @@
 //
 // This module must stay Cesium-free (node-env vitest exercises it).
 
+import type { OrbitClass } from "../config/orbitClass";
 import type { SatelliteMetadata } from "../config/satelliteMetadata";
-import { parseGpPayload, recordName, recordSatnum, type GpRecord } from "./util/gp";
+import { orbitClassOf, parseGpPayload, recordName, recordSatnum, type GpRecord } from "./util/gp";
 import { fetchGpGroup, fetchGpIndex } from "./util/gpSource";
 
 // A single known satellite. Created by SatelliteCatalog.addRecords, which owns
@@ -35,11 +36,19 @@ export class CatalogEntry {
   }
 
   // Static per-satellite facts (swath extents, cone FOV, model URL, operator),
-  // attached to the record by the worker at refresh time. Empty for a satellite
-  // absent from the satellite table — consumers apply their own defaults. No
-  // resolution or memoization: the record either carries the bag or it does not.
+  // attached to the record by the worker at refresh time, plus the derived
+  // orbit class cached by parseGpPayload. Empty for a hand-built record —
+  // consumers apply their own defaults. No resolution or memoization: the
+  // record either carries the bag or it does not.
   get metadata(): SatelliteMetadata {
     return this.record.metadata ?? {};
+  }
+
+  // The single place the cache miss is handled: every record out of
+  // parseGpPayload carries the class, so this falls back only for records built
+  // by hand. Deriving it again is two number reads, not a satrec.
+  get orbitClass(): OrbitClass {
+    return this.metadata.orbitClass ?? orbitClassOf(this.record);
   }
 }
 
