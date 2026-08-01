@@ -358,9 +358,14 @@ export class SatelliteComponentCollection {
 
   // Coloured by orbit regime, matching the badge the satellite browser shows on
   // the same satellite's row — so the menu reads as the legend for the globe.
+  //
+  // Small on purpose: a whole constellation at 6 px merges into a sheet that
+  // hides the globe under it. 5 px still leaves the globe legible under a full
+  // Starlink activation, and the outline is what keeps a point visible against
+  // bright imagery rather than its size.
   createPoint(): void {
     const point = new PointGraphics({
-      pixelSize: 6,
+      pixelSize: 5,
       color: POINT_COLOR[this.props.orbitClass],
       outlineColor: Color.DIMGREY,
       outlineWidth: 1,
@@ -377,10 +382,14 @@ export class SatelliteComponentCollection {
     this.createCesiumSatelliteEntity("3D model", "model", model);
   }
 
+  // Drawn in the neutral the LEO point uses, not white: a label is chrome next
+  // to the marker it names, and at white it outshouted the very points it was
+  // meant to identify.
   createLabel(): void {
     const label = new LabelGraphics({
       text: this.props.name,
-      font: "15px Arial",
+      font: "13px Arial",
+      fillColor: POINT_COLOR.LEO,
       style: LabelStyle.FILL_AND_OUTLINE,
       outlineColor: Color.DIMGREY,
       outlineWidth: 2,
