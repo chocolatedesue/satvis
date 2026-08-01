@@ -29,7 +29,7 @@
   "dependencies": {
     "@cesium/engine": "^26.1.0",
     "@cesium/widgets": "^16.1.0",
-    "@nuxt/ui": "https://pkg.pr.new/@nuxt/ui@6635",
+    "@nuxt/ui": "^4.10.0",
     "@tanstack/vue-virtual": "^3.13.35",
     "cesium": "^1.143.0",
     "cesium-sensor-volumes": "github:Flowm/cesium-sensor-volumes#1.140.0",

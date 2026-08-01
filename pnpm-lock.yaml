@@ -27,8 +27,8 @@ importers:
         specifier: ^16.1.0
         version: 16.1.0
       '@nuxt/ui':
-        specifier: https://pkg.pr.new/@nuxt/ui@6635
-        version: https://pkg.pr.new/@nuxt/ui@6635(779dfd3da80c0a2bd4686f9f8d6b73e9)
+        specifier: ^4.10.0
+        version: 4.10.0(779dfd3da80c0a2bd4686f9f8d6b73e9)
       '@tanstack/vue-virtual':
         specifier: ^3.13.35
         version: 3.13.35(vue@3.5.40(typescript@6.0.3))
@@ -1429,9 +1429,8 @@ packages:
     resolution: {integrity: sha512-RDdu0BBg9y+Eiyu95LUDJ57YrejJ5v1/VA2r5oBLYiiSiLrlVt33HN9ut4qSyUN8gRTOXnFADery8AyJpTjdWA==}
     engines: {node: ^14.18.0 || >=16.10.0}
 
-  '@nuxt/ui@https://pkg.pr.new/@nuxt/ui@6635':
-    resolution: {integrity: sha512-7vPXYcOd7Tw3aryrV7MMbYc0BIbvbwthvEXYNTu93IVlFu9Rbp1VSg2H56iT2LsHZBzC9+N7A+Z+El5R648sVA==, tarball: https://pkg.pr.new/@nuxt/ui@6635}
-    version: 4.9.0
+  '@nuxt/ui@4.10.0':
+    resolution: {integrity: sha512-f6eFtHZ958XIVnbpGz7OeVRjuEXdmQWgNKWBppNlh/lP790KDi8IXTZ6lndJ72lpp7hC8Wo2BbSL9zo9fwywWQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -6184,7 +6183,7 @@ snapshots:
       pkg-types: 2.3.1
       std-env: 4.2.0
 
-  '@nuxt/ui@https://pkg.pr.new/@nuxt/ui@6635(779dfd3da80c0a2bd4686f9f8d6b73e9)':
+  '@nuxt/ui@4.10.0(779dfd3da80c0a2bd4686f9f8d6b73e9)':
     dependencies:
       '@floating-ui/dom': 1.8.0
       '@iconify/vue': 5.0.1(vue@3.5.40(typescript@6.0.3))
