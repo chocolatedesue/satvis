@@ -1,10 +1,9 @@
-// PROTOTYPE — see ./README.md.
-//
-// Turning a run into the four answers it was collected for: the raw rows, how
-// the frame time scales with the satellite count, what each component costs on
-// top of what was already being drawn, and what running the clock faster costs.
-// Pure — a run in, strings and numbers out — so the console output and the
-// panel's table cannot disagree.
+// Turning a run into the answers it was collected for: the raw rows, how the
+// frame time scales with the satellite count, what each component costs on top
+// of what was already being drawn, what running the clock faster costs, and
+// whether the app drifted while all of that was being measured. Pure — a run in,
+// strings and numbers out — so the console output and the panel's table cannot
+// disagree.
 
 import { formatComponents, formatSeries } from "./benchmarkPlan";
 import type { BenchmarkResult, BenchmarkRun } from "./benchmarkRunner";
@@ -17,11 +16,20 @@ const cpuMs = (result: BenchmarkResult): number => result.frames.cpu?.mean ?? 0;
 /** What varies within a series: the component set and the clock rate together. */
 const seriesOf = (result: BenchmarkResult): string => formatSeries(result.applied.componentsRequested, result.applied.clockMultiplier);
 
+/**
+ * Every derived table works off these — the closing re-run of the first step is
+ * a second sample of a scene already in the set, so averaging it in would weight
+ * one point twice and hide the very drift it was measured to expose.
+ */
+const measured = (run: BenchmarkRun): BenchmarkResult[] => run.results.filter((result) => !result.step.repeat);
+
 export interface ReportRow {
   sats: number;
   components: string;
   /** The clock rate, as a multiple of real time. */
   clock: number;
+  /** True for the closing re-run of the first step. */
+  repeat: boolean;
   /** Blank unless the app drew something other than what was asked for. */
   drawn: string;
   visible: number;
@@ -53,6 +61,7 @@ export function reportRows(run: BenchmarkRun): ReportRow[] {
       sats: result.applied.satellitesRequested,
       components: requested,
       clock: result.applied.clockMultiplier,
+      repeat: result.step.repeat,
       drawn: drawn === requested ? "" : drawn,
       visible: result.applied.satellitesVisible,
       frames: result.frames.frames,
@@ -114,7 +123,7 @@ const FRAME_BUDGET_60FPS_MS = 1000 / 60;
  */
 export function scalingFits(run: BenchmarkRun): ScalingFit[] {
   const bySeries = new Map<string, BenchmarkResult[]>();
-  for (const result of run.results) {
+  for (const result of measured(run)) {
     const key = seriesOf(result);
     bySeries.set(key, [...(bySeries.get(key) ?? []), result]);
   }
@@ -163,7 +172,7 @@ export interface MarginalCost {
  */
 export function marginalCosts(run: BenchmarkRun): MarginalCost[] {
   const byCondition = new Map<string, BenchmarkResult[]>();
-  for (const result of run.results) {
+  for (const result of measured(run)) {
     const key = `${result.applied.satellitesRequested}@${result.applied.clockMultiplier}`;
     byCondition.set(key, [...(byCondition.get(key) ?? []), result]);
   }
@@ -226,7 +235,7 @@ export interface PropagationCost {
  */
 export function propagationCosts(run: BenchmarkRun): PropagationCost[] {
   const byScene = new Map<string, BenchmarkResult[]>();
-  for (const result of run.results) {
+  for (const result of measured(run)) {
     const key = `${result.applied.satellitesRequested}|${formatComponents(result.applied.componentsRequested)}`;
     byScene.set(key, [...(byScene.get(key) ?? []), result]);
   }
@@ -258,6 +267,65 @@ export function propagationCosts(run: BenchmarkRun): PropagationCost[] {
   return costs.sort((a, b) => a.sats - b.sats || a.clock - b.clock);
 }
 
+export interface RepeatCheck {
+  sats: number;
+  components: string;
+  clock: number;
+  firstCpuMs: number;
+  repeatCpuMs: number;
+  /** Positive means the app got slower over the course of the run. */
+  cpuDriftPct: number;
+  firstBuildMs: number;
+  repeatBuildMs: number;
+  /** Usually strongly negative: the first build pays for warming the app up. */
+  buildDriftPct: number;
+}
+
+/** Above this the run measured a moving target, not a scene. */
+export const MAX_TRUSTWORTHY_DRIFT_PCT = 10;
+
+const driftPct = (first: number, repeat: number): number => (first === 0 ? 0 : round(((repeat - first) / first) * 100, 1));
+
+/**
+ * The first step against its re-run at the end of the sweep.
+ *
+ * A sweep is minutes long and the app it measures does not hold still: shader
+ * caches fill, the JIT settles, the heap grows. Measuring one scene at the start
+ * and again at the finish is the only thing in the run that can tell a rising
+ * line that is the scene from a rising line that is the clock — so a small
+ * `cpuDriftPct` is what licenses reading the rest of the tables at all.
+ *
+ * `buildDriftPct` is usually the louder of the two and is expected to be
+ * negative: the first build of a population pays for warming it up, which is why
+ * `buildMs` is not comparable across component sets.
+ */
+export function repeatChecks(run: BenchmarkRun): RepeatCheck[] {
+  const checks: RepeatCheck[] = [];
+  for (const repeat of run.results.filter((result) => result.step.repeat)) {
+    const first = measured(run).find(
+      (candidate) =>
+        candidate.applied.satellitesRequested === repeat.applied.satellitesRequested &&
+        candidate.applied.clockMultiplier === repeat.applied.clockMultiplier &&
+        formatComponents(candidate.applied.componentsRequested) === formatComponents(repeat.applied.componentsRequested),
+    );
+    if (!first) {
+      continue;
+    }
+    checks.push({
+      sats: repeat.applied.satellitesRequested,
+      components: formatComponents(repeat.applied.componentsRequested),
+      clock: repeat.applied.clockMultiplier,
+      firstCpuMs: round(cpuMs(first)),
+      repeatCpuMs: round(cpuMs(repeat)),
+      cpuDriftPct: driftPct(cpuMs(first), cpuMs(repeat)),
+      firstBuildMs: round(first.applied.buildMs),
+      repeatBuildMs: round(repeat.applied.buildMs),
+      buildDriftPct: driftPct(first.applied.buildMs, repeat.applied.buildMs),
+    });
+  }
+  return checks;
+}
+
 const pad = (value: string | number, width: number): string => String(value).padStart(width);
 
 /** A fixed-width table, for pasting into an issue. */
@@ -282,7 +350,8 @@ export function formatTable(run: BenchmarkRun): string {
       row.buildMs,
       row.heapMb,
     ];
-    lines.push(`${values.map((value, index) => pad(value, widths[index] as number)).join("")} ${row.components}${row.drawn ? ` (drew ${row.drawn})` : ""}`);
+    const suffix = `${row.repeat ? " (repeat)" : ""}${row.drawn ? ` (drew ${row.drawn})` : ""}`;
+    lines.push(`${values.map((value, index) => pad(value, widths[index] as number)).join("")} ${row.components}${suffix}`);
   }
   return lines.join("\n");
 }
@@ -294,7 +363,7 @@ export function toCsv(run: BenchmarkRun): string {
     return "";
   }
   const keys = Object.keys(first) as (keyof ReportRow)[];
-  const escape = (value: string | number): string =>
+  const escape = (value: string | number | boolean): string =>
     typeof value === "string" && (value.includes(",") || value.includes('"')) ? `"${value.replaceAll('"', '""')}"` : String(value);
   return [keys.join(","), ...rows.map((row) => keys.map((key) => escape(row[key])).join(","))].join("\n");
 }
@@ -311,6 +380,7 @@ export function toJson(run: BenchmarkRun): string {
       scaling: scalingFits(run),
       marginal: marginalCosts(run),
       propagation: propagationCosts(run),
+      repeat: repeatChecks(run),
       componentInstances: run.results.map((result) => ({
         sats: result.applied.satellitesRequested,
         components: formatComponents(result.applied.componentsRequested),
@@ -356,6 +426,21 @@ export function logRun(run: BenchmarkRun): void {
   if (propagation.length > 0) {
     console.log("%ccost of running the clock faster (propagation)", "font-weight:bold");
     console.table(propagation);
+  }
+  const repeats = repeatChecks(run);
+  if (repeats.length > 0) {
+    console.log("%cfirst step re-run at the end (drift)", "font-weight:bold");
+    console.table(repeats);
+    // Said out loud rather than left to be spotted in a column: this is the one
+    // number that says whether the rest of the run measured a scene or a
+    // moving target.
+    const drifted = repeats.filter((check) => Math.abs(check.cpuDriftPct) > MAX_TRUSTWORTHY_DRIFT_PCT);
+    if (drifted.length > 0) {
+      console.warn(
+        `The first step measured ${drifted.map((check) => `${check.cpuDriftPct > 0 ? "+" : ""}${check.cpuDriftPct}%`).join(", ")} differently when re-run at the end — ` +
+          `over ${MAX_TRUSTWORTHY_DRIFT_PCT}%, so the app moved under the sweep and the trends above are that as much as the scenes.`,
+      );
+    }
   }
   console.groupEnd();
 }

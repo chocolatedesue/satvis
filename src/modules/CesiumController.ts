@@ -673,6 +673,20 @@ export class CesiumController {
     }
   }
 
+  /**
+   * Render-on-demand. Owned by the store rather than poked on the scene, because
+   * more than one thing turns it off — the debug toggle and the benchmark panel —
+   * and a plain scene property is not reactive, so a control bound straight to it
+   * goes on showing the old value after anything else has written it.
+   */
+  set requestRenderMode(value: boolean) {
+    this.viewer.scene.requestRenderMode = value;
+    // One render either way. Switching render-on-demand *on* otherwise leaves
+    // whatever was last drawn on screen until something happens to ask for a
+    // frame, which makes the change look like a freeze.
+    this.viewer.scene.requestRender();
+  }
+
   set showFps(value: boolean) {
     this.viewer.scene.debugShowFramesPerSecond = value;
   }

@@ -1,8 +1,5 @@
-// PROTOTYPE — see ./README.md.
-//
 // Frame timing collection. Free of Cesium and the DOM: whoever has the
-// timestamps pushes them in, which is what makes this the piece worth keeping
-// if the framework earns its place.
+// timestamps pushes them in.
 
 /** Below 30 fps a frame is felt rather than merely measured. */
 export const JANK_MS = 1000 / 30;

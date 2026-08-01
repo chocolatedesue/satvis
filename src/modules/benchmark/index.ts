@@ -1,5 +1,3 @@
-// PROTOTYPE — see ./README.md.
-//
 // The console half of the framework, and the handle the panel shares with it so
 // the two cannot be measuring different things.
 
@@ -85,12 +83,13 @@ export function installBenchmark(cc: CesiumController): BenchmarkHandle {
   };
 
   async function start(defaults: PlanSpec, overrides: RunOverrides = {}): Promise<BenchmarkRun> {
-    const { satelliteCounts, componentSets, clockMultipliers, warmupMs, sampleMs, ...targetOptions } = overrides;
+    const { satelliteCounts, componentSets, clockMultipliers, repeatFirstStep, warmupMs, sampleMs, ...targetOptions } = overrides;
     target.options = targetOptions;
     const spec: PlanSpec = {
       satelliteCounts: satelliteCounts ?? defaults.satelliteCounts,
       componentSets: componentSets ?? defaults.componentSets,
       clockMultipliers: clockMultipliers ?? defaults.clockMultipliers,
+      repeatFirstStep: repeatFirstStep ?? defaults.repeatFirstStep,
     };
     const options: BenchmarkOptions = { warmupMs: warmupMs ?? DEFAULT_OPTIONS.warmupMs, sampleMs: sampleMs ?? DEFAULT_OPTIONS.sampleMs };
     const steps = buildPlan(spec);
@@ -145,9 +144,7 @@ export function installBenchmark(cc: CesiumController): BenchmarkHandle {
   };
 
   (window as unknown as { bench?: BenchmarkHandle }).bench = handle;
-  console.log(
-    "[bench] PROTOTYPE benchmarking framework ready — `bench.quick()`, `bench.run()`, `bench.cumulative()`, `bench.clock()`, `bench.watch()`. See src/modules/benchmark/README.md.",
-  );
+  console.log("[bench] ready — `bench.quick()`, `bench.run()`, `bench.cumulative()`, `bench.clock()`, `bench.watch()`. See src/modules/benchmark/README.md.");
   return handle;
 }
 

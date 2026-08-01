@@ -1,8 +1,8 @@
-# Benchmarking framework — PROTOTYPE
+# Benchmarking framework
 
-**Throwaway.** This exists to answer three questions, not to be maintained:
+Three questions about satvis's performance, answered repeatably:
 
-> How does satvis's frame cost scale with the number of satellites, what does each
+> How does the frame cost scale with the number of satellites, what does each
 > satellite component cost on top of the ones already being drawn, and what does
 > running the clock faster — that is, propagating more often — cost?
 
@@ -10,8 +10,8 @@ It replaces the console-paste script that used to be `src/modules/benchmark.ts`,
 which measured average and worst frame time and printed one line per step. The
 same idea, with the parts that made its numbers hard to trust fixed: percentiles
 instead of an average and a max, warmup frames discarded, a build torn down
-before the next one is timed, and what was _actually drawn_ recorded next to what
-was asked for.
+before the next one is timed, the first step re-run at the end to catch drift,
+and what was _actually drawn_ recorded next to what was asked for.
 
 ## Run it
 
@@ -32,13 +32,14 @@ pnpm build && pnpm preview
 Then the panel, or the console:
 
 ```js
-bench.quick(); // 3 counts × 7 isolated sets — checks the harness, ~2 min
+bench.quick(); // 3 counts × 7 isolated sets — checks the harness
 bench.run(); // 9 counts × 7 isolated sets: each component's own cost
 bench.cumulative(); // 9 counts × 8 growing sets: cost on top of what is already drawn
 bench.clock(); // 9 counts × 4 clock rates: the propagation axis
 bench.run({ satelliteCounts: [0, 500, 5000], componentSets: [["Point", "Orbit"]] });
 bench.run({ clockMultipliers: [1, 100] }); // any sweep can take the clock axis
 bench.run({ groundStation: { lat: 48.18, lon: 11.75 } }); // switches pass prediction on
+bench.run({ repeatFirstStep: false }); // skip the closing drift check
 bench.watch(); // log a live line every 2 s; returns a stop function
 bench.cancel();
 bench.log();
@@ -46,6 +47,10 @@ bench.csv();
 bench.json();
 bench.text();
 ```
+
+Every sweep closes by re-running its first step, so the step count is one more
+than the axes multiply out to. A step costs `warmupMs + sampleMs` (2 s + 4 s by
+default) plus its build, so a full `bench.run()` is a coffee break, not a moment.
 
 Keep the tab in the foreground. A background tab presents no frames at all and
 every row becomes a lie — see the first caveat below.
@@ -83,6 +88,16 @@ And derived, across steps:
 - **propagation** — each clock rate differenced against ×1 for the same satellites
   and components. Only present when the clock was actually swept, because an empty
   table would read as "propagation is free" rather than "nobody asked".
+- **drift** — the first step, re-run as the last step, against its original.
+  A sweep is minutes long and the app it measures does not hold still: shader
+  caches fill, the JIT settles, the heap grows. This is the only figure in the run
+  that can tell a rising line that is the scene from a rising line that is the
+  clock, so a small `cpuDriftPct` is what licenses reading the other tables at
+  all — over 10% and both the panel and `logRun` say so. The repeat step is
+  excluded from every other table: it is a second sample of a scene already in the
+  set, and averaging it in would weight one point twice and hide the drift it was
+  measured to expose. `buildDriftPct` is usually the louder of the two and
+  expected to be strongly negative — see the `buildMs` caveat below.
 
 ### Why the clock rate is a propagation axis
 
@@ -129,9 +144,11 @@ per-satellite propagation and nothing else.
   population pays for whatever it warms up; a measured run had `Point` at 500
   satellites cost 3,245 ms to build and `Point + Orbit` at the same 500 cost
   399 ms — more drawing, an eighth of the time, because it was second. Compare
-  `buildMs` down a column (rising counts within one set), never across sets.
-  Whether that first-pass cost is satellite.js, the trajectory sampling or plain
-  JIT warmup is the first thing this framework is worth pointing at.
+  `buildMs` down a column (rising counts within one set), never across sets. The
+  drift table quantifies it directly: `buildDriftPct` is that same first-pass cost,
+  measured rather than argued about. Whether it is satellite.js, the trajectory
+  sampling or plain JIT warmup is the first thing this framework is worth pointing
+  at.
 - **`visible` may exceed the count requested.** Activation matches by _name_ and
   two catalog entries can share one, so asking for 500 drew 501. That is why the
   fits are computed against `visible` rather than the requested count.
@@ -150,22 +167,25 @@ per-satellite propagation and nothing else.
 
 ## Shape
 
-The Cesium-bound part is one file. Everything else is portable, and is the part
-worth lifting if this earns a permanent place:
+One file knows about Cesium. Everything else is pure and unit-tested
+(`benchmark.test.ts`), which is what lets the analysis be trusted without a
+browser in the loop:
 
 - `frameSampler.ts` — timestamps in, percentiles out. No Cesium, no DOM.
 - `benchmarkPlan.ts` — the three-axis sweep matrix, pure.
-- `report.ts` — rows, the linear fits, the marginal-cost and propagation
+- `report.ts` — rows, the linear fits, the marginal-cost, propagation and drift
   differencing, csv/json.
 - `benchmarkRunner.ts` — the loop, over a `BenchmarkTarget` interface.
 - `cesiumBenchmarkTarget.ts` — the only file that knows what a viewer is.
 - `index.ts` — the console handle, `window.bench`.
-- `../../components/BenchmarkPanel.vue` — the in-browser half. Throwaway.
+- `../../components/BenchmarkPanel.vue` — the in-browser half.
 
 Nothing here is in the bundle a normal visitor downloads: the panel is an async
 component, so the whole framework is a chunk that loads only when the switch goes
-on, and the chunks are excluded from the PWA precache (`vite.config.ts`) so the
-glob does not pull them down anyway.
+on, and it is excluded from the PWA precache (`vite.config.ts`) so the glob does
+not pull it down anyway.
 
-`CesiumPerformanceStats` (used by the `showFps` toggle) is untouched and still
-does its own thing.
+`CesiumPerformanceStats` (behind the `showFps` toggle) is separate and untouched.
+It is deliberately not replaced: Cesium's own FPS counter is an independent second
+opinion on the panel's headline figure, computed by code this framework does not
+own, which is why the panel is positioned to leave it visible.

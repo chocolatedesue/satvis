@@ -203,7 +203,7 @@
           <span class="slider"></span>
           FPS
         </label>
-        <!-- PROTOTYPE: src/modules/benchmark. Beneath FPS because it is the same
+        <!-- The benchmarking framework (src/modules/benchmark). Beneath FPS because it is the same
              question asked in more depth, and url-synced like the rest of this
              menu, so a benchmarking session is a link. -->
         <label class="toolbarSwitch">
@@ -212,7 +212,7 @@
           Benchmark
         </label>
         <label class="toolbarSwitch">
-          <input v-model="cc.viewer.scene.requestRenderMode" type="checkbox" />
+          <input v-model="requestRenderMode" type="checkbox" />
           <span class="slider"></span>
           RequestRender
         </label>
@@ -267,7 +267,7 @@
          Cesium InfoBox, which was visible with hidden UI and in minimalUI. -->
     <entity-info-panel />
     <sky-hud />
-    <!-- PROTOTYPE: src/modules/benchmark. Async so nothing about it is in the
+    <!-- Async, so nothing about it is in the
          bundle a normal visitor downloads. -->
     <benchmark-panel v-if="showBenchmark" @close="showBenchmark = false" />
   </div>
@@ -292,7 +292,7 @@ import SkyHud from "./SkyHud.vue";
 
 type MenuKey = "cat" | "sat" | "gs" | "map" | "view" | "ios" | "dbg";
 
-// PROTOTYPE: src/modules/benchmark. Async, so nothing about it — the sweep, the
+// The benchmarking framework. Async, so nothing about it — the sweep, the
 // report tables, the panel — is in the bundle a normal visitor downloads.
 const BenchmarkPanel = defineAsyncComponent(() => import("./BenchmarkPanel.vue"));
 
@@ -310,7 +310,7 @@ const menu = reactive<Record<MenuKey, boolean>>({
 const showUI = ref(true);
 
 const cesiumStore = useCesiumStore();
-const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, qualityPreset, showFps, showBenchmark, pickMode } = storeToRefs(cesiumStore);
+const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, qualityPreset, showFps, showBenchmark, requestRenderMode, pickMode } = storeToRefs(cesiumStore);
 
 // What the selection means here and now, from the one function the globe reads
 // too — so a dimmed group and an unlit tileset cannot disagree.

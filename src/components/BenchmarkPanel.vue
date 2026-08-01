@@ -1,11 +1,14 @@
 <!--
-  PROTOTYPE — see src/modules/benchmark/README.md.
+  The in-browser half of the benchmarking framework (see
+  src/modules/benchmark/README.md): a live readout of what the globe is costing
+  right now, and a sweep over satellite counts × component sets × clock rates.
 
-  The in-browser half of the benchmarking framework: a live readout of what the
-  globe is costing right now, and a sweep over satellite counts × component sets ×
-  clock rates. Deliberately plain CSS rather than Nuxt UI — a throwaway panel
-  should not be arguing with the design system, and it has to be obvious on sight
-  that it is not part of the app.
+  Plain CSS rather than Nuxt UI, and a dense monospace layout: this is an
+  instrument, and it has to fit a dozen numbers where a card would fit two.
+
+  The title bar and the live readout are pinned and only the rest scrolls — the
+  same frame-and-scrolling-body shape the entity info panel uses. Watching a
+  figure while scrolling to the control that changes it is the whole job.
 
   Opening it switches render-on-demand off, because with it on the gap between
   frames measures how idle the loop is and every figure here would be meaningless.
@@ -18,11 +21,10 @@
   <div class="bench">
     <div class="bench__bar">
       <span class="bench__title">BENCHMARK</span>
-      <span class="bench__tag">prototype</span>
       <button type="button" class="bench__x" title="Close" @click="emit('close')">×</button>
     </div>
 
-    <div class="bench__block">
+    <div class="bench__live">
       <div class="bench__row bench__row--big">
         <span :class="['bench__fps', fpsClass]">{{ live.fps.toFixed(1) }}</span>
         <span class="bench__unit">fps</span>
@@ -44,153 +46,187 @@
       </div>
     </div>
 
-    <div class="bench__block">
-      <label class="bench__field">
-        <span>counts</span>
-        <input v-model="countsText" type="text" spellcheck="false" :disabled="running" />
-      </label>
-      <div class="bench__field">
-        <span>sets</span>
-        <div class="bench__modes">
-          <label v-for="option in MODES" :key="option.value" class="bench__mode">
-            <input v-model="mode" type="radio" :value="option.value" :disabled="running" />
-            {{ option.label }}
-          </label>
+    <div class="bench__body">
+      <div class="bench__block">
+        <label class="bench__field">
+          <span>counts</span>
+          <input v-model="countsText" type="text" spellcheck="false" :disabled="running" />
+        </label>
+        <div class="bench__field">
+          <span>sat comps</span>
+          <div class="bench__modes">
+            <label v-for="option in MODES" :key="option.value" class="bench__mode" :title="option.hint">
+              <input v-model="mode" type="radio" :value="option.value" :disabled="running" />
+              {{ option.label }}
+            </label>
+          </div>
         </div>
-      </div>
-      <!-- The propagation axis. Drawing does not care what the clock is doing;
+        <!-- The propagation axis. Drawing does not care what the clock is doing;
            the sampled trajectory refreshes on a simulation-time schedule, so a
            faster clock re-propagates the same satellites more often. -->
-      <label class="bench__field">
-        <span>clock</span>
-        <input v-model="clocksText" type="text" spellcheck="false" :disabled="running" />
-        <span class="bench__dim">×</span>
-      </label>
-      <div class="bench__field">
-        <span>timing</span>
-        <div class="bench__inline">
-          <label>warmup <input v-model.number="warmupMs" type="number" min="0" step="250" :disabled="running" /></label>
-          <label>sample <input v-model.number="sampleMs" type="number" min="250" step="250" :disabled="running" /></label>
-          <span class="bench__dim">ms</span>
+        <label class="bench__field">
+          <span>clock</span>
+          <input v-model="clocksText" type="text" spellcheck="false" :disabled="running" />
+          <span class="bench__dim">×</span>
+        </label>
+        <div class="bench__field">
+          <span>timing</span>
+          <div class="bench__inline">
+            <label>warmup <input v-model.number="warmupMs" type="number" min="0" step="250" :disabled="running" /></label>
+            <label>sample <input v-model.number="sampleMs" type="number" min="250" step="250" :disabled="running" /></label>
+            <span class="bench__dim">ms</span>
+          </div>
         </div>
-      </div>
-      <div class="bench__field">
-        <span>extras</span>
-        <div class="bench__inline">
-          <label><input v-model="withGroundStation" type="checkbox" :disabled="running" /> ground station (pass prediction)</label>
+        <div class="bench__field">
+          <span>extras</span>
+          <div class="bench__inline">
+            <label><input v-model="withGroundStation" type="checkbox" :disabled="running" /> ground station (pass prediction)</label>
+          </div>
         </div>
+        <div class="bench__row">
+          <button type="button" class="bench__run" :disabled="running || plan.length === 0" @click="void start()">Run {{ plan.length }} steps</button>
+          <button type="button" :disabled="!running" @click="cancel()">Cancel</button>
+          <span class="bench__dim">≈ {{ estimateText }}</span>
+        </div>
+        <div class="bench__row bench__dim">{{ status }}</div>
       </div>
-      <div class="bench__row">
-        <button type="button" class="bench__run" :disabled="running || plan.length === 0" @click="void start()">Run {{ plan.length }} steps</button>
-        <button type="button" :disabled="!running" @click="cancel()">Cancel</button>
-        <span class="bench__dim">≈ {{ estimateText }}</span>
-      </div>
-      <div class="bench__row bench__dim">{{ status }}</div>
-    </div>
 
-    <!-- Above the tables, not beside the rows: the fits and the propagation
+      <!-- Above the tables, not beside the rows: the fits and the propagation
          deltas are built out of these rows, so a thin sample makes every table
          below noise and each one would otherwise read as a result. -->
-    <div v-if="thin > 0" class="bench__block bench__warn">
-      {{ thin }}/{{ rows.length }} steps sampled under {{ MIN_TRUSTWORTHY_FRAMES }} frames — those rows, and everything derived from them, are noise. Keep the tab in front.
-    </div>
+      <div v-if="thin > 0" class="bench__block bench__warn">
+        {{ thin }}/{{ rows.length }} steps sampled under {{ MIN_TRUSTWORTHY_FRAMES }} frames — those rows, and everything derived from them, are noise. Keep the tab in front.
+      </div>
 
-    <div v-if="rows.length > 0" class="bench__block bench__block--table">
-      <table class="bench__table">
-        <thead>
-          <tr>
-            <th class="bench__num">sats</th>
-            <th class="bench__num">vis</th>
-            <th v-if="clockSwept" class="bench__num">clock</th>
-            <th class="bench__num">fps</th>
-            <th class="bench__num">frame</th>
-            <th class="bench__num">p95</th>
-            <th class="bench__num">cpu</th>
-            <th class="bench__num">build</th>
-            <th class="bench__num">heap</th>
-            <th>components</th>
-          </tr>
-        </thead>
-        <tbody>
-          <!-- A row averaged over a handful of frames is struck through rather
+      <div v-if="rows.length > 0" class="bench__block bench__block--table">
+        <table class="bench__table">
+          <thead>
+            <tr>
+              <th class="bench__num">sats</th>
+              <th class="bench__num">vis</th>
+              <th v-if="clockSwept" class="bench__num">clock</th>
+              <th class="bench__num">fps</th>
+              <th class="bench__num">frame</th>
+              <th class="bench__num">p95</th>
+              <th class="bench__num">cpu</th>
+              <th class="bench__num">build</th>
+              <th class="bench__num">heap</th>
+              <th>components</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- A row averaged over a handful of frames is struck through rather
                than dropped: that it was attempted and came back worthless is
                itself the finding. -->
-          <tr v-for="(row, index) in rows" :key="index" :class="{ bench__thin: row.frames < MIN_TRUSTWORTHY_FRAMES }">
-            <td class="bench__num">{{ row.sats }}</td>
-            <td class="bench__num">{{ row.visible }}</td>
-            <td v-if="clockSwept" class="bench__num">×{{ row.clock }}</td>
-            <td :class="['bench__num', row.fps < 30 ? 'bench__bad' : row.fps < 55 ? 'bench__warn' : '']" :title="`${row.frames} frames sampled`">{{ row.fps.toFixed(1) }}</td>
-            <td class="bench__num">{{ row.frameMs.toFixed(2) }}</td>
-            <td class="bench__num">{{ row.p95Ms.toFixed(2) }}</td>
-            <td class="bench__num">{{ row.cpuMs.toFixed(2) }}</td>
-            <td class="bench__num">{{ row.buildMs.toFixed(0) }}</td>
-            <td class="bench__num">{{ row.heapMb === "" ? "—" : row.heapMb }}</td>
-            <td>
-              {{ row.components }}<span v-if="row.drawn" class="bench__warn"> → drew {{ row.drawn }}</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+            <tr v-for="(row, index) in rows" :key="index" :class="{ bench__thin: row.frames < MIN_TRUSTWORTHY_FRAMES }">
+              <td class="bench__num">{{ row.sats }}</td>
+              <td class="bench__num">{{ row.visible }}</td>
+              <td v-if="clockSwept" class="bench__num">×{{ row.clock }}</td>
+              <td :class="['bench__num', row.fps < 30 ? 'bench__bad' : row.fps < 55 ? 'bench__warn' : '']" :title="`${row.frames} frames sampled`">{{ row.fps.toFixed(1) }}</td>
+              <td class="bench__num">{{ row.frameMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ row.p95Ms.toFixed(2) }}</td>
+              <td class="bench__num">{{ row.cpuMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ row.buildMs.toFixed(0) }}</td>
+              <td class="bench__num">{{ row.heapMb === "" ? "—" : row.heapMb }}</td>
+              <td>
+                {{ row.components }}<span v-if="row.drawn" class="bench__warn"> → drew {{ row.drawn }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-    <div v-if="fits.length > 0" class="bench__block bench__block--table">
-      <div class="bench__caption">scaling (cpu ms per 1,000 satellites, and where 60 fps runs out)</div>
-      <table class="bench__table">
-        <thead>
-          <tr>
-            <th>series</th>
-            <th class="bench__num">ms/1k</th>
-            <th class="bench__num">base</th>
-            <th class="bench__num">r²</th>
-            <th class="bench__num">sats@60</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="fit in fits" :key="fit.series">
-            <td>{{ fit.series }}</td>
-            <td class="bench__num">{{ fit.cpuMsPer1000.toFixed(2) }}</td>
-            <td class="bench__num">{{ fit.baseCpuMs.toFixed(2) }}</td>
-            <td :class="['bench__num', fit.r2 < 0.9 ? 'bench__warn' : '']">{{ fit.r2.toFixed(3) }}</td>
-            <td class="bench__num">{{ fit.satsAt60fps === "" ? "—" : fit.satsAt60fps }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+      <div v-if="fits.length > 0" class="bench__block bench__block--table">
+        <div class="bench__caption">scaling (cpu ms per 1,000 satellites, and where 60 fps runs out)</div>
+        <table class="bench__table">
+          <thead>
+            <tr>
+              <th>series</th>
+              <th class="bench__num">ms/1k</th>
+              <th class="bench__num">base</th>
+              <th class="bench__num">r²</th>
+              <th class="bench__num">sats@60</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="fit in fits" :key="fit.series">
+              <td>{{ fit.series }}</td>
+              <td class="bench__num">{{ fit.cpuMsPer1000.toFixed(2) }}</td>
+              <td class="bench__num">{{ fit.baseCpuMs.toFixed(2) }}</td>
+              <td :class="['bench__num', fit.r2 < 0.9 ? 'bench__warn' : '']">{{ fit.r2.toFixed(3) }}</td>
+              <td class="bench__num">{{ fit.satsAt60fps === "" ? "—" : fit.satsAt60fps }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-    <!-- Only when the clock was swept: an empty table here would read as
+      <!-- Only when the clock was swept: an empty table here would read as
          "propagation is free" rather than "nobody asked". -->
-    <div v-if="propagation.length > 0" class="bench__block bench__block--table">
-      <div class="bench__caption">propagation (cpu ms over the same scene at ×1)</div>
-      <table class="bench__table">
-        <thead>
-          <tr>
-            <th class="bench__num">sats</th>
-            <th class="bench__num">clock</th>
-            <th class="bench__num">cpu</th>
-            <th class="bench__num">Δ</th>
-            <th class="bench__num">µs/sat</th>
-            <th>components</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(cost, index) in propagation" :key="index">
-            <td class="bench__num">{{ cost.sats }}</td>
-            <td class="bench__num">×{{ cost.clock }}</td>
-            <td class="bench__num">{{ cost.cpuMs.toFixed(2) }}</td>
-            <td class="bench__num">{{ cost.deltaCpuMs.toFixed(2) }}</td>
-            <td class="bench__num">{{ cost.usPerSatellite.toFixed(1) }}</td>
-            <td>{{ cost.components }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+      <div v-if="propagation.length > 0" class="bench__block bench__block--table">
+        <div class="bench__caption">propagation (cpu ms over the same scene at ×1)</div>
+        <table class="bench__table">
+          <thead>
+            <tr>
+              <th class="bench__num">sats</th>
+              <th class="bench__num">clock</th>
+              <th class="bench__num">cpu</th>
+              <th class="bench__num">Δ</th>
+              <th class="bench__num">µs/sat</th>
+              <th>components</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(cost, index) in propagation" :key="index">
+              <td class="bench__num">{{ cost.sats }}</td>
+              <td class="bench__num">×{{ cost.clock }}</td>
+              <td class="bench__num">{{ cost.cpuMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ cost.deltaCpuMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ cost.usPerSatellite.toFixed(1) }}</td>
+              <td>{{ cost.components }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-    <div class="bench__block bench__row">
-      <button type="button" :disabled="rows.length === 0" @click="logToConsole()">Log</button>
-      <button type="button" :disabled="rows.length === 0" @click="void copy('csv')">Copy CSV</button>
-      <button type="button" :disabled="rows.length === 0" @click="void copy('json')">Copy JSON</button>
-      <button type="button" :disabled="rows.length === 0" @click="void copy('text')">Copy table</button>
-      <span v-if="copied" class="bench__dim">{{ copied }}</span>
+      <!-- The first step, re-run once the sweep is over. Its own table because it
+         says something about the run rather than about a scene: if this scene
+         measured differently the second time, the app moved under the sweep and
+         every trend above is partly that. -->
+      <div v-if="repeats.length > 0" class="bench__block bench__block--table">
+        <div class="bench__caption">first step re-run at the end (drift)</div>
+        <table class="bench__table">
+          <thead>
+            <tr>
+              <th class="bench__num">sats</th>
+              <th class="bench__num">cpu 1st</th>
+              <th class="bench__num">cpu again</th>
+              <th class="bench__num">drift</th>
+              <th class="bench__num">build 1st</th>
+              <th class="bench__num">build again</th>
+              <th class="bench__num">drift</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(check, index) in repeats" :key="index">
+              <td class="bench__num">{{ check.sats }}</td>
+              <td class="bench__num">{{ check.firstCpuMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ check.repeatCpuMs.toFixed(2) }}</td>
+              <td :class="['bench__num', Math.abs(check.cpuDriftPct) > MAX_TRUSTWORTHY_DRIFT_PCT ? 'bench__bad' : 'bench__good']">{{ signed(check.cpuDriftPct) }}</td>
+              <td class="bench__num">{{ check.firstBuildMs.toFixed(0) }}</td>
+              <td class="bench__num">{{ check.repeatBuildMs.toFixed(0) }}</td>
+              <td class="bench__num">{{ signed(check.buildDriftPct) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="bench__block bench__row">
+        <button type="button" :disabled="rows.length === 0" @click="logToConsole()">Log</button>
+        <button type="button" :disabled="rows.length === 0" @click="void copy('csv')">Copy CSV</button>
+        <button type="button" :disabled="rows.length === 0" @click="void copy('json')">Copy JSON</button>
+        <button type="button" :disabled="rows.length === 0" @click="void copy('text')">Copy table</button>
+        <span v-if="copied" class="bench__dim">{{ copied }}</span>
+      </div>
     </div>
   </div>
 </template>
@@ -213,30 +249,38 @@ import {
   propagationCosts,
   reportRows,
   scalingFits,
+  repeatChecks,
   toCsv,
   toJson,
   formatTable,
+  MAX_TRUSTWORTHY_DRIFT_PCT,
   MIN_TRUSTWORTHY_FRAMES,
   type BenchmarkRun,
   type PropagationCost,
+  type RepeatCheck,
   type ReportRow,
   type ScalingFit,
 } from "../modules/benchmark";
+import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 
 const emit = defineEmits<{ close: [] }>();
 
 const cc = useController();
+const cesiumStore = useCesiumStore();
 const satStore = useSatStore();
 // Opening the panel is what installs the framework, which is also what puts
 // `window.bench` there. Idempotent, so a second open reuses the same handle and
 // the console and the panel are never measuring different things.
 const bench = installBenchmark(cc);
 
+// `current` first and selected: the everyday question is how the components the
+// user actually has switched on scale, and it is also the only choice that costs
+// one pass rather than seven or eight.
 const MODES = [
-  { value: "isolated", label: "isolated" },
-  { value: "cumulative", label: "cumulative" },
-  { value: "current", label: "current" },
+  { value: "current", label: "current", hint: "Only the components currently switched on" },
+  { value: "isolated", label: "isolated", hint: "Point, plus each other component on its own" },
+  { value: "cumulative", label: "cumulative", hint: "One component added at a time, on top of the last" },
 ] as const;
 type Mode = (typeof MODES)[number]["value"];
 
@@ -244,7 +288,7 @@ const countsText = ref(DEFAULT_SATELLITE_COUNTS.join(", "));
 // Real time only by default: the clock axis multiplies the step count, and most
 // sessions are asking about drawing rather than about propagation.
 const clocksText = ref("1");
-const mode = ref<Mode>("isolated");
+const mode = ref<Mode>("current");
 const warmupMs = ref(DEFAULT_OPTIONS.warmupMs);
 const sampleMs = ref(DEFAULT_OPTIONS.sampleMs);
 const withGroundStation = ref(false);
@@ -311,6 +355,13 @@ const propagation = computed<PropagationCost[]>(() => {
   const current = run();
   return current ? propagationCosts(current) : [];
 });
+const repeats = computed<RepeatCheck[]>(() => {
+  void revision.value;
+  const current = run();
+  return current ? repeatChecks(current) : [];
+});
+
+const signed = (percent: number): string => `${percent > 0 ? "+" : ""}${percent.toFixed(1)}%`;
 
 /**
  * Whether the clock column earns its width — asked of the rows on screen, not of
@@ -405,8 +456,13 @@ onMounted(() => {
   // Switched off on open rather than offered as a button: there is no reading to
   // be had with it on, so there was nothing for the button to be a choice
   // between.
-  savedRequestRenderMode = cc.viewer.scene.requestRenderMode;
-  cc.viewer.scene.requestRenderMode = false;
+  //
+  // Through the store, not `scene.requestRenderMode`. Writing the scene left the
+  // debug menu's own RequestRender switch showing the old value — a plain scene
+  // property is not reactive — so the first time the panel was opened it looked
+  // as though nothing had happened.
+  savedRequestRenderMode = cesiumStore.requestRenderMode;
+  cesiumStore.requestRenderMode = false;
   refresh();
   // Twice a second: often enough to read as live, rarely enough that reading it
   // is not itself part of what is being measured.
@@ -417,7 +473,7 @@ onUnmounted(() => {
     clearInterval(timer);
   }
   if (savedRequestRenderMode !== undefined) {
-    cc.viewer.scene.requestRenderMode = savedRequestRenderMode;
+    cesiumStore.requestRenderMode = savedRequestRenderMode;
   }
 });
 
@@ -501,19 +557,22 @@ watch(
 </script>
 
 <style scoped>
-/* Top right, on the entity info panel's own coordinates (see
-   EntityInfoPanel.vue) so the two read as the same slot rather than two
-   near-misses. They overlap when both are open, which is fine: they answer
-   different questions and nobody needs both at once. */
+/* Top right, in the same column as the entity info panel, but starting below
+   Cesium's own FPS counter rather than on top of it.
+   `debugShowFramesPerSecond` puts that counter at top 50px / right 10px — the
+   entity panel's exact coordinates — and it is the independent second opinion
+   this panel's own figures get checked against, so covering it would hide the
+   one reading nobody here computed. 110px clears its three lines. */
 .bench {
   position: fixed;
-  top: 50px;
+  top: 110px;
   right: 5px;
   z-index: 2000;
+  display: flex;
+  flex-direction: column;
   width: 480px;
   max-width: calc(100vw - 10px);
-  max-height: calc(100vh - 60px);
-  overflow-y: auto;
+  max-height: calc(100vh - 120px);
   border: 1px solid #ffb000;
   border-radius: 4px;
   background: rgba(12, 14, 18, 0.94);
@@ -521,6 +580,22 @@ watch(
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px;
   line-height: 1.5;
+}
+
+/* The frame: bar and live readout pinned, body scrolls. `min-height: 0` is what
+   makes the body shrink instead of pushing the panel past its max-height — a
+   flex item defaults to its content's size and would otherwise scroll the whole
+   panel, taking the readout with it. */
+.bench__bar,
+.bench__live {
+  flex: none;
+}
+
+.bench__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .bench__bar {
@@ -534,10 +609,9 @@ watch(
   letter-spacing: 0.08em;
 }
 
-.bench__tag {
-  font-weight: 400;
-  text-transform: uppercase;
-  opacity: 0.7;
+.bench__live {
+  padding: 6px;
+  border-bottom: 1px solid #2a2f3a;
 }
 
 /* `.bench .bench__x`, not `.bench__x`: the generic `.bench button` rule below is

@@ -1,5 +1,3 @@
-// PROTOTYPE — see ./README.md.
-//
 // The sweep loop, over an injected target. Nothing here knows about Cesium,
 // Vue or the DOM: it decides what to measure and in what order, and the target
 // decides what "apply this scene" means.
@@ -61,7 +59,14 @@ export interface BenchmarkOptions {
   sampleMs: number;
 }
 
-export const DEFAULT_OPTIONS: BenchmarkOptions = { warmupMs: 1500, sampleMs: 3000 };
+/**
+ * Long enough that a step is a measurement rather than a glance. The warmup has
+ * to outlast the shader compiles and buffer uploads that follow a build, and the
+ * sample has to span several of the sampled-trajectory refreshes that arrive on
+ * a schedule of their own — a short sample either catches one or misses it, and
+ * the row swings either way.
+ */
+export const DEFAULT_OPTIONS: BenchmarkOptions = { warmupMs: 2000, sampleMs: 4000 };
 
 export interface BenchmarkResult {
   step: BenchmarkStep;

@@ -1,8 +1,7 @@
-// PROTOTYPE — see ./README.md.
-//
 // The one Cesium-bound piece: it turns "draw N satellites with these
 // components" into a reconcile, and the render loop into frame samples.
 
+import { useCesiumStore } from "../../stores/cesium";
 import { useSatStore } from "../../stores/sat";
 import type { CesiumController } from "../CesiumController";
 import type { DesiredScene } from "../SatelliteManager";
@@ -172,13 +171,18 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
   }
 
   async prepare(): Promise<void> {
-    const { scene, clock } = this.#cc.viewer;
-    this.#saved ??= { requestRenderMode: scene.requestRenderMode, shouldAnimate: clock.shouldAnimate, multiplier: clock.multiplier, scene: this.#storeScene() };
+    const { clock } = this.#cc.viewer;
+    const cesiumStore = useCesiumStore();
+    this.#saved ??= { requestRenderMode: cesiumStore.requestRenderMode, shouldAnimate: clock.shouldAnimate, multiplier: clock.multiplier, scene: this.#storeScene() };
     // requestRenderMode skips frames when nothing moved, which would make the
     // frame deltas measure how idle the render loop is rather than how much a
     // scene costs. The clock has to run for the same reason: a stopped clock
     // means no position updates, and position updates are most of the cost.
-    scene.requestRenderMode = false;
+    //
+    // Through the store so the debug menu's switch follows: a sweep started from
+    // the console with the panel closed still changes this, and a control showing
+    // the opposite of what is in force is worse than no control.
+    cesiumStore.requestRenderMode = false;
     clock.shouldAnimate = true;
     // Every count is sliced out of the loaded catalog, so the whole catalog has
     // to be there first — otherwise the sweep measures group downloads.
@@ -260,8 +264,8 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     if (!saved) {
       return;
     }
-    const { scene, clock } = this.#cc.viewer;
-    scene.requestRenderMode = saved.requestRenderMode;
+    const { clock } = this.#cc.viewer;
+    useCesiumStore().requestRenderMode = saved.requestRenderMode;
     clock.shouldAnimate = saved.shouldAnimate;
     clock.multiplier = saved.multiplier;
     // The sweep drove the manager directly, so the store's scene has to be put
