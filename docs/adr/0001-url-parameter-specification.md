@@ -46,6 +46,7 @@ Every parameter is optional. An absent parameter means "use the default" (see
 | `camera`   | `cesium.cameraMode`      | enum                | `Fixed` \| `Inertial`                                                                                             | `Fixed`          |
 | `quality`  | `cesium.qualityPreset`   | enum                | `low` \| `high`                                                                                                   | `high`           |
 | `fps`      | `cesium.showFps`         | boolean             | `true` \| `false`                                                                                                 | `false`          |
+| `bench`    | `cesium.showBenchmark`   | boolean             | `true` \| `false`                                                                                                 | `false`          |
 | `bg`       | `cesium.background`      | boolean             | `true` \| `false`                                                                                                 | `true`           |
 | `time`     | clock time               | timestamp           | emitted as ISO-8601 at minute precision (`2026-07-26T20:46Z`); any `dayjs`-parseable value accepted               | absent (live)    |
 

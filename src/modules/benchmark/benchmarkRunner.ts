@@ -10,6 +10,7 @@ import type { FrameSample } from "./frameSampler";
 export interface SceneRequest {
   satelliteCount: number;
   components: readonly string[];
+  clockMultiplier: number;
 }
 
 /**
@@ -25,6 +26,8 @@ export interface SceneApplied {
   componentsRequested: string[];
   componentsDrawn: string[];
   componentInstances: Record<string, number>;
+  /** Recorded rather than read back off the step: the clock is the app's to refuse. */
+  clockMultiplier: number;
   entities: number;
   primitives: number;
   /** Tearing the previous scene down, so a build is never a diff from one. */
@@ -141,7 +144,7 @@ export class BenchmarkRunner {
         // Sequential is the whole point: two steps measured at once would be
         // measuring each other.
         // eslint-disable-next-line no-await-in-loop
-        const applied = await this.#target.apply({ satelliteCount: step.satelliteCount, components: step.components });
+        const applied = await this.#target.apply({ satelliteCount: step.satelliteCount, components: step.components, clockMultiplier: step.clockMultiplier });
         // eslint-disable-next-line no-await-in-loop
         const frames = await this.#target.measure({ ...options, signal: abort.signal });
         if (abort.signal.aborted) {

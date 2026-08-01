@@ -1,11 +1,12 @@
 // PROTOTYPE — see ./README.md.
 //
-// Turning a run into the three answers it was collected for: the raw rows, how
-// the frame time scales with the satellite count, and what each component costs
-// on top of what was already being drawn. Pure — a run in, strings and numbers
-// out — so the console output and the panel's table cannot disagree.
+// Turning a run into the four answers it was collected for: the raw rows, how
+// the frame time scales with the satellite count, what each component costs on
+// top of what was already being drawn, and what running the clock faster costs.
+// Pure — a run in, strings and numbers out — so the console output and the
+// panel's table cannot disagree.
 
-import { formatComponents } from "./benchmarkPlan";
+import { formatComponents, formatSeries } from "./benchmarkPlan";
 import type { BenchmarkResult, BenchmarkRun } from "./benchmarkRunner";
 
 const round = (value: number, digits = 2): number => Number(value.toFixed(digits));
@@ -13,9 +14,14 @@ const round = (value: number, digits = 2): number => Number(value.toFixed(digits
 /** The frame time a row is judged by: the work done, not the vsync wait. */
 const cpuMs = (result: BenchmarkResult): number => result.frames.cpu?.mean ?? 0;
 
+/** What varies within a series: the component set and the clock rate together. */
+const seriesOf = (result: BenchmarkResult): string => formatSeries(result.applied.componentsRequested, result.applied.clockMultiplier);
+
 export interface ReportRow {
   sats: number;
   components: string;
+  /** The clock rate, as a multiple of real time. */
+  clock: number;
   /** Blank unless the app drew something other than what was asked for. */
   drawn: string;
   visible: number;
@@ -46,6 +52,7 @@ export function reportRows(run: BenchmarkRun): ReportRow[] {
     return {
       sats: result.applied.satellitesRequested,
       components: requested,
+      clock: result.applied.clockMultiplier,
       drawn: drawn === requested ? "" : drawn,
       visible: result.applied.satellitesVisible,
       frames: result.frames.frames,
@@ -66,7 +73,8 @@ export function reportRows(run: BenchmarkRun): ReportRow[] {
 }
 
 export interface ScalingFit {
-  components: string;
+  /** The component set and, where it is not real time, the clock rate. */
+  series: string;
   points: number;
   /** Least-squares slope, restated per 1,000 satellites to be readable. */
   cpuMsPer1000: number;
@@ -99,15 +107,19 @@ function leastSquares(points: readonly { x: number; y: number }[]): { slope: num
 
 const FRAME_BUDGET_60FPS_MS = 1000 / 60;
 
-/** One row per component set: how its cost grows with the satellite count. */
+/**
+ * One row per series: how its cost grows with the satellite count. Keyed by
+ * component set *and* clock rate, so a sweep over both does not average a fit
+ * across clocks and report a slope belonging to neither.
+ */
 export function scalingFits(run: BenchmarkRun): ScalingFit[] {
-  const bySet = new Map<string, BenchmarkResult[]>();
+  const bySeries = new Map<string, BenchmarkResult[]>();
   for (const result of run.results) {
-    const key = formatComponents(result.applied.componentsRequested);
-    bySet.set(key, [...(bySet.get(key) ?? []), result]);
+    const key = seriesOf(result);
+    bySeries.set(key, [...(bySeries.get(key) ?? []), result]);
   }
   const fits: ScalingFit[] = [];
-  for (const [components, results] of bySet) {
+  for (const [series, results] of bySeries) {
     // Against the satellites actually drawn, not the ones asked for — the two
     // part company as soon as a component does not apply to every satellite.
     const fit = leastSquares(results.map((result) => ({ x: result.applied.satellitesVisible, y: cpuMs(result) })));
@@ -116,7 +128,7 @@ export function scalingFits(run: BenchmarkRun): ScalingFit[] {
     }
     const headroom = FRAME_BUDGET_60FPS_MS - fit.intercept;
     fits.push({
-      components,
+      series,
       points: results.length,
       cpuMsPer1000: round(fit.slope * 1000, 3),
       baseCpuMs: round(fit.intercept),
@@ -129,6 +141,7 @@ export function scalingFits(run: BenchmarkRun): ScalingFit[] {
 
 export interface MarginalCost {
   sats: number;
+  clock: number;
   /** The components this row adds over the set it is compared against. */
   added: string;
   over: string;
@@ -137,23 +150,28 @@ export interface MarginalCost {
 }
 
 /**
- * What each component costs, by differencing rows at the same satellite count.
+ * What each component costs, by differencing rows measured under identical
+ * conditions — same satellite count *and* same clock rate. Differencing across
+ * clocks would attribute propagation to whichever component happened to be
+ * added, which is the one thing this table must not do.
  *
- * Every set is compared against the largest set in the run that is a strict
+ * Every set is compared against the largest set in the bucket that is a strict
  * subset of it. That makes the cumulative sweep report the cost of each
  * component on top of the ones before it, and the isolated sweep report each
  * component's cost over a bare point — from one function, so neither sweep
  * needs its own reader.
  */
 export function marginalCosts(run: BenchmarkRun): MarginalCost[] {
-  const byCount = new Map<number, BenchmarkResult[]>();
+  const byCondition = new Map<string, BenchmarkResult[]>();
   for (const result of run.results) {
-    const count = result.applied.satellitesRequested;
-    byCount.set(count, [...(byCount.get(count) ?? []), result]);
+    const key = `${result.applied.satellitesRequested}@${result.applied.clockMultiplier}`;
+    byCondition.set(key, [...(byCondition.get(key) ?? []), result]);
   }
   const costs: MarginalCost[] = [];
+  const buckets = [...byCondition.values()];
   // eslint-disable-next-line unicorn/no-array-sort -- already a fresh array
-  for (const [sats, results] of [...byCount].sort((a, b) => a[0] - b[0])) {
+  buckets.sort((a, b) => (a[0]?.applied.satellitesRequested ?? 0) - (b[0]?.applied.satellitesRequested ?? 0));
+  for (const results of buckets) {
     for (const result of results) {
       const own = new Set(result.applied.componentsRequested);
       let baseline: BenchmarkResult | undefined;
@@ -173,7 +191,8 @@ export function marginalCosts(run: BenchmarkRun): MarginalCost[] {
       const delta = cpuMs(result) - cpuMs(baseline);
       const drawn = result.applied.satellitesVisible;
       costs.push({
-        sats,
+        sats: result.applied.satellitesRequested,
+        clock: result.applied.clockMultiplier,
         added: formatComponents(result.applied.componentsRequested.filter((component) => !base.has(component))),
         over: formatComponents(baseline.applied.componentsRequested),
         deltaCpuMs: round(delta),
@@ -184,16 +203,85 @@ export function marginalCosts(run: BenchmarkRun): MarginalCost[] {
   return costs;
 }
 
+export interface PropagationCost {
+  sats: number;
+  components: string;
+  clock: number;
+  cpuMs: number;
+  /** Cost over the same scene at real time. */
+  deltaCpuMs: number;
+  /** That delta shared out per satellite, which is what should scale with the count. */
+  usPerSatellite: number;
+}
+
+/**
+ * What running the clock faster costs, by differencing each clock rate against
+ * ×1 for the same satellites and the same components.
+ *
+ * This is the propagation axis: drawing does not care what the clock is doing,
+ * but `SampledTrajectory` refreshes its window on a simulation-time schedule, so
+ * a faster clock re-propagates the same satellites more often per wall second.
+ * A `usPerSatellite` that holds steady across counts at one clock rate says the
+ * cost is per-satellite propagation and nothing else.
+ */
+export function propagationCosts(run: BenchmarkRun): PropagationCost[] {
+  const byScene = new Map<string, BenchmarkResult[]>();
+  for (const result of run.results) {
+    const key = `${result.applied.satellitesRequested}|${formatComponents(result.applied.componentsRequested)}`;
+    byScene.set(key, [...(byScene.get(key) ?? []), result]);
+  }
+  const costs: PropagationCost[] = [];
+  for (const results of byScene.values()) {
+    const baseline = results.find((result) => result.applied.clockMultiplier === 1);
+    // Without a ×1 row there is nothing to difference against, and a table of
+    // absolute figures under four different clocks answers no question.
+    if (!baseline || results.length < 2) {
+      continue;
+    }
+    for (const result of results) {
+      if (result === baseline) {
+        continue;
+      }
+      const delta = cpuMs(result) - cpuMs(baseline);
+      const drawn = result.applied.satellitesVisible;
+      costs.push({
+        sats: result.applied.satellitesRequested,
+        components: formatComponents(result.applied.componentsRequested),
+        clock: result.applied.clockMultiplier,
+        cpuMs: round(cpuMs(result)),
+        deltaCpuMs: round(delta),
+        usPerSatellite: drawn > 0 ? round((delta * 1000) / drawn, 1) : 0,
+      });
+    }
+  }
+  // eslint-disable-next-line unicorn/no-array-sort -- built locally
+  return costs.sort((a, b) => a.sats - b.sats || a.clock - b.clock);
+}
+
 const pad = (value: string | number, width: number): string => String(value).padStart(width);
 
 /** A fixed-width table, for pasting into an issue. */
 export function formatTable(run: BenchmarkRun): string {
   const rows = reportRows(run);
-  const header = ["sats", "visible", "frames", "fps", "frameMs", "p95", "worst", "cpuMs", "cpuP95", "jank%", "build", "heapMb", "components"];
-  const widths = [6, 8, 7, 7, 8, 7, 8, 7, 7, 6, 8, 8];
+  const header = ["sats", "visible", "clock", "frames", "fps", "frameMs", "p95", "worst", "cpuMs", "cpuP95", "jank%", "build", "heapMb", "components"];
+  const widths = [6, 8, 7, 7, 7, 8, 7, 8, 7, 7, 6, 8, 8];
   const lines = [header.map((name, index) => (index < widths.length ? pad(name, widths[index] as number) : ` ${name}`)).join("")];
   for (const row of rows) {
-    const values = [row.sats, row.visible, row.frames, row.fps, row.frameMs, row.p95Ms, row.worstMs, row.cpuMs, row.cpuP95Ms, row.jankPct, row.buildMs, row.heapMb];
+    const values = [
+      row.sats,
+      row.visible,
+      `x${row.clock}`,
+      row.frames,
+      row.fps,
+      row.frameMs,
+      row.p95Ms,
+      row.worstMs,
+      row.cpuMs,
+      row.cpuP95Ms,
+      row.jankPct,
+      row.buildMs,
+      row.heapMb,
+    ];
     lines.push(`${values.map((value, index) => pad(value, widths[index] as number)).join("")} ${row.components}${row.drawn ? ` (drew ${row.drawn})` : ""}`);
   }
   return lines.join("\n");
@@ -222,9 +310,11 @@ export function toJson(run: BenchmarkRun): string {
       rows: reportRows(run),
       scaling: scalingFits(run),
       marginal: marginalCosts(run),
+      propagation: propagationCosts(run),
       componentInstances: run.results.map((result) => ({
         sats: result.applied.satellitesRequested,
         components: formatComponents(result.applied.componentsRequested),
+        clock: result.applied.clockMultiplier,
         instances: result.applied.componentInstances,
       })),
     },
@@ -239,7 +329,7 @@ export const MIN_TRUSTWORTHY_FRAMES = 20;
 /** Rows whose sample was too thin to be worth reading. */
 export const thinRows = (run: BenchmarkRun): ReportRow[] => reportRows(run).filter((row) => row.frames < MIN_TRUSTWORTHY_FRAMES);
 
-/** The console half of the framework: three tables and the environment behind them. */
+/** The console half of the framework: the tables, and the environment behind them. */
 export function logRun(run: BenchmarkRun): void {
   const title = `satvis benchmark — ${run.results.length} steps${run.cancelled ? " (cancelled)" : ""}`;
   console.group(title);
@@ -260,5 +350,12 @@ export function logRun(run: BenchmarkRun): void {
   console.table(scalingFits(run));
   console.log("%cmarginal cost per component", "font-weight:bold");
   console.table(marginalCosts(run));
+  // Only when the clock was actually swept — an empty table would read as
+  // "propagation costs nothing" rather than "nobody asked".
+  const propagation = propagationCosts(run);
+  if (propagation.length > 0) {
+    console.log("%ccost of running the clock faster (propagation)", "font-weight:bold");
+    console.table(propagation);
+  }
   console.groupEnd();
 }

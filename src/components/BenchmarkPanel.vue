@@ -2,10 +2,14 @@
   PROTOTYPE — see src/modules/benchmark/README.md.
 
   The in-browser half of the benchmarking framework: a live readout of what the
-  globe is costing right now, and a sweep that walks satellite counts against
-  component sets. Deliberately plain CSS rather than Nuxt UI — a throwaway panel
+  globe is costing right now, and a sweep over satellite counts × component sets ×
+  clock rates. Deliberately plain CSS rather than Nuxt UI — a throwaway panel
   should not be arguing with the design system, and it has to be obvious on sight
   that it is not part of the app.
+
+  Opening it switches render-on-demand off, because with it on the gap between
+  frames measures how idle the loop is and every figure here would be meaningless.
+  Closing it puts that back.
 
   Every number here comes from the same handle the console uses
   (`window.bench`), so the panel and `bench.log()` cannot disagree.
@@ -36,15 +40,7 @@
         {{ live.heapMb === undefined ? "n/a" : `${live.heapMb.toFixed(0)} MB` }}
       </div>
       <div class="bench__row bench__dim">
-        {{ live.satellites }} sats · {{ live.components || "no components" }} · {{ live.entities }} entities · {{ live.primitives }} primitives
-      </div>
-      <!-- The live readout is honest about the one thing that makes it not a
-           frame rate: with render-on-demand the gaps between frames measure how
-           idle the loop is. The sweep forces it off; standing here, it is the
-           user's setting and theirs to keep. -->
-      <div v-if="renderOnDemand" class="bench__row bench__warn">
-        render-on-demand is on — this is the gap between requested frames, not a frame rate.
-        <button type="button" @click="forceContinuous()">force continuous</button>
+        {{ live.satellites }} sats · {{ live.components || "no components" }} · ×{{ live.clock }} · {{ live.entities }} entities · {{ live.primitives }} primitives
       </div>
     </div>
 
@@ -62,6 +58,14 @@
           </label>
         </div>
       </div>
+      <!-- The propagation axis. Drawing does not care what the clock is doing;
+           the sampled trajectory refreshes on a simulation-time schedule, so a
+           faster clock re-propagates the same satellites more often. -->
+      <label class="bench__field">
+        <span>clock</span>
+        <input v-model="clocksText" type="text" spellcheck="false" :disabled="running" />
+        <span class="bench__dim">×</span>
+      </label>
       <div class="bench__field">
         <span>timing</span>
         <div class="bench__inline">
@@ -84,12 +88,20 @@
       <div class="bench__row bench__dim">{{ status }}</div>
     </div>
 
+    <!-- Above the tables, not beside the rows: the fits and the propagation
+         deltas are built out of these rows, so a thin sample makes every table
+         below noise and each one would otherwise read as a result. -->
+    <div v-if="thin > 0" class="bench__block bench__warn">
+      {{ thin }}/{{ rows.length }} steps sampled under {{ MIN_TRUSTWORTHY_FRAMES }} frames — those rows, and everything derived from them, are noise. Keep the tab in front.
+    </div>
+
     <div v-if="rows.length > 0" class="bench__block bench__block--table">
       <table class="bench__table">
         <thead>
           <tr>
             <th class="bench__num">sats</th>
             <th class="bench__num">vis</th>
+            <th v-if="clockSwept" class="bench__num">clock</th>
             <th class="bench__num">fps</th>
             <th class="bench__num">frame</th>
             <th class="bench__num">p95</th>
@@ -106,6 +118,7 @@
           <tr v-for="(row, index) in rows" :key="index" :class="{ bench__thin: row.frames < MIN_TRUSTWORTHY_FRAMES }">
             <td class="bench__num">{{ row.sats }}</td>
             <td class="bench__num">{{ row.visible }}</td>
+            <td v-if="clockSwept" class="bench__num">×{{ row.clock }}</td>
             <td :class="['bench__num', row.fps < 30 ? 'bench__bad' : row.fps < 55 ? 'bench__warn' : '']" :title="`${row.frames} frames sampled`">{{ row.fps.toFixed(1) }}</td>
             <td class="bench__num">{{ row.frameMs.toFixed(2) }}</td>
             <td class="bench__num">{{ row.p95Ms.toFixed(2) }}</td>
@@ -125,7 +138,7 @@
       <table class="bench__table">
         <thead>
           <tr>
-            <th>components</th>
+            <th>series</th>
             <th class="bench__num">ms/1k</th>
             <th class="bench__num">base</th>
             <th class="bench__num">r²</th>
@@ -133,12 +146,40 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="fit in fits" :key="fit.components">
-            <td>{{ fit.components }}</td>
+          <tr v-for="fit in fits" :key="fit.series">
+            <td>{{ fit.series }}</td>
             <td class="bench__num">{{ fit.cpuMsPer1000.toFixed(2) }}</td>
             <td class="bench__num">{{ fit.baseCpuMs.toFixed(2) }}</td>
             <td :class="['bench__num', fit.r2 < 0.9 ? 'bench__warn' : '']">{{ fit.r2.toFixed(3) }}</td>
             <td class="bench__num">{{ fit.satsAt60fps === "" ? "—" : fit.satsAt60fps }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Only when the clock was swept: an empty table here would read as
+         "propagation is free" rather than "nobody asked". -->
+    <div v-if="propagation.length > 0" class="bench__block bench__block--table">
+      <div class="bench__caption">propagation (cpu ms over the same scene at ×1)</div>
+      <table class="bench__table">
+        <thead>
+          <tr>
+            <th class="bench__num">sats</th>
+            <th class="bench__num">clock</th>
+            <th class="bench__num">cpu</th>
+            <th class="bench__num">Δ</th>
+            <th class="bench__num">µs/sat</th>
+            <th>components</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(cost, index) in propagation" :key="index">
+            <td class="bench__num">{{ cost.sats }}</td>
+            <td class="bench__num">×{{ cost.clock }}</td>
+            <td class="bench__num">{{ cost.cpuMs.toFixed(2) }}</td>
+            <td class="bench__num">{{ cost.deltaCpuMs.toFixed(2) }}</td>
+            <td class="bench__num">{{ cost.usPerSatellite.toFixed(1) }}</td>
+            <td>{{ cost.components }}</td>
           </tr>
         </tbody>
       </table>
@@ -169,6 +210,7 @@ import {
   installBenchmark,
   logRun,
   marginalCosts,
+  propagationCosts,
   reportRows,
   scalingFits,
   toCsv,
@@ -176,6 +218,7 @@ import {
   formatTable,
   MIN_TRUSTWORTHY_FRAMES,
   type BenchmarkRun,
+  type PropagationCost,
   type ReportRow,
   type ScalingFit,
 } from "../modules/benchmark";
@@ -185,8 +228,9 @@ const emit = defineEmits<{ close: [] }>();
 
 const cc = useController();
 const satStore = useSatStore();
-// Idempotent: the entrypoint has usually installed it already, and this makes
-// the panel work on its own if it has not.
+// Opening the panel is what installs the framework, which is also what puts
+// `window.bench` there. Idempotent, so a second open reuses the same handle and
+// the console and the panel are never measuring different things.
 const bench = installBenchmark(cc);
 
 const MODES = [
@@ -197,6 +241,9 @@ const MODES = [
 type Mode = (typeof MODES)[number]["value"];
 
 const countsText = ref(DEFAULT_SATELLITE_COUNTS.join(", "));
+// Real time only by default: the clock axis multiplies the step count, and most
+// sessions are asking about drawing rather than about propagation.
+const clocksText = ref("1");
 const mode = ref<Mode>("isolated");
 const warmupMs = ref(DEFAULT_OPTIONS.warmupMs);
 const sampleMs = ref(DEFAULT_OPTIONS.sampleMs);
@@ -227,7 +274,15 @@ const componentSets = computed<readonly (readonly string[])[]>(() => {
   }
 });
 
-const plan = computed(() => buildPlan({ satelliteCounts: counts.value, componentSets: componentSets.value }));
+const clocks = computed(() =>
+  clocksText.value
+    .split(/[\s,x×]+/)
+    .map((part) => Number.parseFloat(part))
+    .filter((value) => Number.isFinite(value) && value > 0),
+);
+
+const spec = computed(() => ({ satelliteCounts: counts.value, componentSets: componentSets.value, clockMultipliers: clocks.value }));
+const plan = computed(() => buildPlan(spec.value));
 
 const estimateText = computed(() => {
   const seconds = Math.round(estimateDurationMs(plan.value, warmupMs.value + sampleMs.value) / 1000);
@@ -251,6 +306,21 @@ const fits = computed<ScalingFit[]>(() => {
   const current = run();
   return current && current.results.length > 1 ? scalingFits(current) : [];
 });
+const propagation = computed<PropagationCost[]>(() => {
+  void revision.value;
+  const current = run();
+  return current ? propagationCosts(current) : [];
+});
+
+/**
+ * Whether the clock column earns its width — asked of the rows on screen, not of
+ * the form. Reading the form instead hid the column on a sweep started from the
+ * console, which left three rows differing only in a value that was not shown.
+ */
+const clockSwept = computed(() => new Set(rows.value.map((row) => row.clock)).size > 1 || rows.value.some((row) => row.clock !== 1));
+
+/** Any row too thin to mean anything taints the derived tables built on top of it. */
+const thin = computed(() => rows.value.filter((row) => row.frames < MIN_TRUSTWORTHY_FRAMES).length);
 
 // --- live readout ----------------------------------------------------------
 interface Live {
@@ -263,32 +333,47 @@ interface Live {
   heapMb: number | undefined;
   satellites: number;
   components: string;
+  clock: number;
   entities: number;
   primitives: number;
 }
-const EMPTY_LIVE: Live = { fps: 0, frameMs: 0, p95Ms: 0, worstMs: 0, cpuMs: 0, jankPct: 0, heapMb: undefined, satellites: 0, components: "", entities: 0, primitives: 0 };
+const EMPTY_LIVE: Live = {
+  fps: 0,
+  frameMs: 0,
+  p95Ms: 0,
+  worstMs: 0,
+  cpuMs: 0,
+  jankPct: 0,
+  heapMb: undefined,
+  satellites: 0,
+  components: "",
+  clock: 1,
+  entities: 0,
+  primitives: 0,
+};
 const live = ref<Live>(EMPTY_LIVE);
 
 const fpsClass = computed(() => (live.value.fps < 30 ? "bench__bad" : live.value.fps < 55 ? "bench__warn" : "bench__good"));
 
-const renderOnDemand = ref(false);
-
-function forceContinuous(): void {
-  cc.viewer.scene.requestRenderMode = false;
-  renderOnDemand.value = false;
-}
-
 let timer: ReturnType<typeof setInterval> | undefined;
 
 function refresh(): void {
-  renderOnDemand.value = cc.viewer.scene.requestRenderMode;
   // Read from the shared runner rather than tracking it locally, so a sweep
   // started from the console fills this table too and cannot leave the panel
   // offering a Run button that would throw. Bumping the revision here is what
   // makes the tables follow a run nobody in this component started.
+  const wasRunning = running.value;
   running.value = bench.runner.running;
-  if (running.value && !startedHere) {
-    status.value = "running — started from the console";
+  if (!startedHere) {
+    // A console-driven run has no hooks into this component, so its start *and*
+    // its end have to be noticed here — otherwise the panel goes on saying
+    // "running" over a finished run's results.
+    if (running.value) {
+      status.value = "running — started from the console";
+    } else if (wasRunning) {
+      const finishedRun = bench.runner.run;
+      status.value = finishedRun ? `done — ${finishedRun.results.length} steps (console)` : "idle";
+    }
   }
   revision.value += 1;
   const snapshot = bench.target.live();
@@ -302,12 +387,26 @@ function refresh(): void {
     heapMb: snapshot.heapMb,
     satellites: snapshot.satellitesVisible,
     components: formatComponents(snapshot.componentsDrawn),
+    clock: snapshot.clockMultiplier,
     entities: snapshot.entities,
     primitives: snapshot.primitives,
   };
 }
 
+// What render-on-demand was before the panel took it away, so closing gives it
+// back. Held here rather than in the target: this is the panel's doing, and the
+// target's own save/restore is scoped to a run.
+let savedRequestRenderMode: boolean | undefined;
+
 onMounted(() => {
+  // Render-on-demand skips frames whenever nothing moved, which makes the gap
+  // between frames a measure of how idle the loop is rather than of what a scene
+  // costs — so every figure in this panel would be meaningless while it is on.
+  // Switched off on open rather than offered as a button: there is no reading to
+  // be had with it on, so there was nothing for the button to be a choice
+  // between.
+  savedRequestRenderMode = cc.viewer.scene.requestRenderMode;
+  cc.viewer.scene.requestRenderMode = false;
   refresh();
   // Twice a second: often enough to read as live, rarely enough that reading it
   // is not itself part of what is being measured.
@@ -316,6 +415,9 @@ onMounted(() => {
 onUnmounted(() => {
   if (timer !== undefined) {
     clearInterval(timer);
+  }
+  if (savedRequestRenderMode !== undefined) {
+    cc.viewer.scene.requestRenderMode = savedRequestRenderMode;
   }
 });
 
@@ -331,7 +433,7 @@ async function start(): Promise<void> {
   status.value = "preparing — loading the whole catalog";
   try {
     const result = await bench.runner.start(
-      { satelliteCounts: counts.value, componentSets: componentSets.value },
+      spec.value,
       { warmupMs: warmupMs.value, sampleMs: sampleMs.value },
       {
         onProgress: ({ done, total, step }) => {
@@ -399,14 +501,18 @@ watch(
 </script>
 
 <style scoped>
+/* Top right, on the entity info panel's own coordinates (see
+   EntityInfoPanel.vue) so the two read as the same slot rather than two
+   near-misses. They overlap when both are open, which is fine: they answer
+   different questions and nobody needs both at once. */
 .bench {
   position: fixed;
-  right: 8px;
-  bottom: 8px;
+  top: 50px;
+  right: 5px;
   z-index: 2000;
   width: 480px;
-  max-width: calc(100vw - 16px);
-  max-height: calc(100vh - 16px);
+  max-width: calc(100vw - 10px);
+  max-height: calc(100vh - 60px);
   overflow-y: auto;
   border: 1px solid #ffb000;
   border-radius: 4px;
@@ -434,14 +540,27 @@ watch(
   opacity: 0.7;
 }
 
-.bench__x {
+/* `.bench .bench__x`, not `.bench__x`: the generic `.bench button` rule below is
+   more specific than a bare class and was winning, so the close button was
+   painted with the dark button background on top of the orange bar and all but
+   vanished. Dark ink on the bar's own orange instead, which is the same contrast
+   the title beside it has. */
+.bench .bench__x {
   margin-left: auto;
+  padding: 0 2px;
   border: 0;
+  border-radius: 2px;
   background: transparent;
-  color: inherit;
+  color: #16181d;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 700;
   line-height: 1;
+}
+
+.bench .bench__x:hover {
+  background: rgba(0, 0, 0, 0.25);
+  color: #000;
 }
 
 .bench__block {

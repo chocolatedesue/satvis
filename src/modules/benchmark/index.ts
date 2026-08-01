@@ -4,7 +4,16 @@
 // the two cannot be measuring different things.
 
 import type { CesiumController } from "../CesiumController";
-import { CUMULATIVE_COMPONENT_SETS, DEFAULT_SATELLITE_COUNTS, ISOLATED_COMPONENT_SETS, buildPlan, estimateDurationMs, formatComponents, type PlanSpec } from "./benchmarkPlan";
+import {
+  CUMULATIVE_COMPONENT_SETS,
+  DEFAULT_CLOCK_MULTIPLIERS,
+  DEFAULT_SATELLITE_COUNTS,
+  ISOLATED_COMPONENT_SETS,
+  buildPlan,
+  estimateDurationMs,
+  formatComponents,
+  type PlanSpec,
+} from "./benchmarkPlan";
 import { BenchmarkRunner, DEFAULT_OPTIONS, type BenchmarkOptions, type BenchmarkRun, type RunnerHooks } from "./benchmarkRunner";
 import { CesiumBenchmarkTarget, type TargetOptions } from "./cesiumBenchmarkTarget";
 import { logRun, toCsv, toJson, formatTable } from "./report";
@@ -14,10 +23,16 @@ export * from "./benchmarkRunner";
 export * from "./cesiumBenchmarkTarget";
 export * from "./frameSampler";
 export * from "./report";
-export { benchmarkEnabled } from "./enabled";
 
 /** Three counts and nothing else — a sanity check, not a measurement. */
 export const QUICK_SATELLITE_COUNTS: readonly number[] = [0, 100, 1000];
+
+/**
+ * The component set the clock sweep holds fixed. Point and Orbit, because an
+ * orbit is rebuilt from the sampled trajectory whenever the window refreshes, so
+ * it is where a faster clock shows up most plainly.
+ */
+export const CLOCK_COMPONENT_SETS: readonly (readonly string[])[] = [["Point", "Orbit"]];
 
 export type RunOverrides = Partial<PlanSpec> & Partial<BenchmarkOptions> & TargetOptions;
 
@@ -30,6 +45,8 @@ export interface BenchmarkHandle {
   cumulative(overrides?: RunOverrides): Promise<BenchmarkRun>;
   /** Three counts, for checking the harness rather than the app. */
   quick(overrides?: RunOverrides): Promise<BenchmarkRun>;
+  /** One component set across four clock rates: the propagation axis. */
+  clock(overrides?: RunOverrides): Promise<BenchmarkRun>;
   cancel(): void;
   /** Log a live line every `intervalMs`; returns the stop function. */
   watch(intervalMs?: number): () => void;
@@ -41,6 +58,7 @@ export interface BenchmarkHandle {
   readonly presets: {
     counts: readonly number[];
     quickCounts: readonly number[];
+    clockMultipliers: readonly number[];
     cumulative: readonly (readonly string[])[];
     isolated: readonly (readonly string[])[];
   };
@@ -50,7 +68,9 @@ let handle: BenchmarkHandle | undefined;
 
 /**
  * Build (once) the handle both the console and the panel use, and hang it off
- * `window.bench`. Called from src/app.ts only when the framework is enabled.
+ * `window.bench`. Called by the panel on mount, which is the only thing that
+ * loads this module at all — so opening the panel is what gives the console its
+ * handle, and nothing here costs a normal visitor anything.
  */
 export function installBenchmark(cc: CesiumController): BenchmarkHandle {
   if (handle) {
@@ -64,10 +84,14 @@ export function installBenchmark(cc: CesiumController): BenchmarkHandle {
     onProgress: ({ done, total, step }) => console.log(`[bench] ${done + 1}/${total} — ${step.label}`),
   };
 
-  async function start(defaults: readonly (readonly string[])[], counts: readonly number[], overrides: RunOverrides = {}): Promise<BenchmarkRun> {
-    const { satelliteCounts, componentSets, warmupMs, sampleMs, ...targetOptions } = overrides;
+  async function start(defaults: PlanSpec, overrides: RunOverrides = {}): Promise<BenchmarkRun> {
+    const { satelliteCounts, componentSets, clockMultipliers, warmupMs, sampleMs, ...targetOptions } = overrides;
     target.options = targetOptions;
-    const spec: PlanSpec = { satelliteCounts: satelliteCounts ?? counts, componentSets: componentSets ?? defaults };
+    const spec: PlanSpec = {
+      satelliteCounts: satelliteCounts ?? defaults.satelliteCounts,
+      componentSets: componentSets ?? defaults.componentSets,
+      clockMultipliers: clockMultipliers ?? defaults.clockMultipliers,
+    };
     const options: BenchmarkOptions = { warmupMs: warmupMs ?? DEFAULT_OPTIONS.warmupMs, sampleMs: sampleMs ?? DEFAULT_OPTIONS.sampleMs };
     const steps = buildPlan(spec);
     const seconds = Math.round(estimateDurationMs(steps, options.warmupMs + options.sampleMs) / 1000);
@@ -88,9 +112,10 @@ export function installBenchmark(cc: CesiumController): BenchmarkHandle {
   handle = {
     target,
     runner,
-    run: (overrides) => start(ISOLATED_COMPONENT_SETS, DEFAULT_SATELLITE_COUNTS, overrides),
-    cumulative: (overrides) => start(CUMULATIVE_COMPONENT_SETS, DEFAULT_SATELLITE_COUNTS, overrides),
-    quick: (overrides) => start(ISOLATED_COMPONENT_SETS, QUICK_SATELLITE_COUNTS, overrides),
+    run: (overrides) => start({ satelliteCounts: DEFAULT_SATELLITE_COUNTS, componentSets: ISOLATED_COMPONENT_SETS }, overrides),
+    cumulative: (overrides) => start({ satelliteCounts: DEFAULT_SATELLITE_COUNTS, componentSets: CUMULATIVE_COMPONENT_SETS }, overrides),
+    quick: (overrides) => start({ satelliteCounts: QUICK_SATELLITE_COUNTS, componentSets: ISOLATED_COMPONENT_SETS }, overrides),
+    clock: (overrides) => start({ satelliteCounts: DEFAULT_SATELLITE_COUNTS, componentSets: CLOCK_COMPONENT_SETS, clockMultipliers: DEFAULT_CLOCK_MULTIPLIERS }, overrides),
     cancel: () => runner.cancel(),
     watch(intervalMs = 2000) {
       const timer = setInterval(() => {
@@ -98,7 +123,7 @@ export function installBenchmark(cc: CesiumController): BenchmarkHandle {
         const { wall, cpu } = live.frames;
         console.log(
           `[bench] ${live.frames.fps.toFixed(1).padStart(5)} fps · frame ${(wall?.mean ?? 0).toFixed(2).padStart(6)} ms (p95 ${(wall?.p95 ?? 0).toFixed(2)}) · cpu ${(cpu?.mean ?? 0).toFixed(2).padStart(6)} ms ·`,
-          `${String(live.satellitesVisible).padStart(5)} sats · ${formatComponents(live.componentsDrawn)} · ${live.entities} entities · heap ${live.heapMb === undefined ? "n/a" : `${live.heapMb.toFixed(0)} MB`}`,
+          `${String(live.satellitesVisible).padStart(5)} sats · ${formatComponents(live.componentsDrawn)} @ ×${live.clockMultiplier} · ${live.entities} entities · heap ${live.heapMb === undefined ? "n/a" : `${live.heapMb.toFixed(0)} MB`}`,
         );
       }, intervalMs);
       return () => clearInterval(timer);
@@ -113,13 +138,16 @@ export function installBenchmark(cc: CesiumController): BenchmarkHandle {
     presets: {
       counts: DEFAULT_SATELLITE_COUNTS,
       quickCounts: QUICK_SATELLITE_COUNTS,
+      clockMultipliers: DEFAULT_CLOCK_MULTIPLIERS,
       cumulative: CUMULATIVE_COMPONENT_SETS,
       isolated: ISOLATED_COMPONENT_SETS,
     },
   };
 
   (window as unknown as { bench?: BenchmarkHandle }).bench = handle;
-  console.log("[bench] PROTOTYPE benchmarking framework ready — `bench.quick()`, `bench.run()`, `bench.cumulative()`, `bench.watch()`. See src/modules/benchmark/README.md.");
+  console.log(
+    "[bench] PROTOTYPE benchmarking framework ready — `bench.quick()`, `bench.run()`, `bench.cumulative()`, `bench.clock()`, `bench.watch()`. See src/modules/benchmark/README.md.",
+  );
   return handle;
 }
 

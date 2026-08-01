@@ -24,6 +24,7 @@ export interface LiveSnapshot {
   frames: FrameSample;
   satellitesVisible: number;
   componentsDrawn: string[];
+  clockMultiplier: number;
   entities: number;
   primitives: number;
   heapMb: number | undefined;
@@ -120,7 +121,7 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
    * back. Held until restore rather than per run, because a run that throws
    * still has to give the user their scene back.
    */
-  #saved: { requestRenderMode: boolean; shouldAnimate: boolean; scene: DesiredScene } | undefined;
+  #saved: { requestRenderMode: boolean; shouldAnimate: boolean; multiplier: number; scene: DesiredScene } | undefined;
 
   constructor(cc: CesiumController) {
     this.#cc = cc;
@@ -147,6 +148,7 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       frames: this.#live.snapshot(),
       satellitesVisible: this.#cc.sats.visibleSatellites.length,
       componentsDrawn: this.#cc.sats.enabledComponents,
+      clockMultiplier: this.#cc.viewer.clock.multiplier,
       entities: this.#cc.viewer.entities.values.length,
       primitives: this.#cc.viewer.scene.primitives.length,
       heapMb: bytes === undefined ? undefined : bytes / 1024 / 1024,
@@ -171,7 +173,7 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
 
   async prepare(): Promise<void> {
     const { scene, clock } = this.#cc.viewer;
-    this.#saved ??= { requestRenderMode: scene.requestRenderMode, shouldAnimate: clock.shouldAnimate, scene: this.#storeScene() };
+    this.#saved ??= { requestRenderMode: scene.requestRenderMode, shouldAnimate: clock.shouldAnimate, multiplier: clock.multiplier, scene: this.#storeScene() };
     // requestRenderMode skips frames when nothing moved, which would make the
     // frame deltas measure how idle the render loop is rather than how much a
     // scene costs. The clock has to run for the same reason: a stopped clock
@@ -189,6 +191,13 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
 
   async apply(request: SceneRequest): Promise<SceneApplied> {
     const names = this.#names().slice(0, request.satelliteCount);
+    const { clock } = this.#cc.viewer;
+
+    // The clock is set back to real time for the build. A step at ×1000 would
+    // otherwise sweep the sample window forward while the scene is being
+    // constructed, so `buildMs` would carry a propagation cost belonging to the
+    // measurement that follows it.
+    clock.multiplier = 1;
 
     // Clear first, so buildMs is the cost of building this scene rather than
     // the cost of the diff from the previous one.
@@ -201,6 +210,9 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     this.#cc.sats.reconcile(this.#scene(names, request.components));
     const buildMs = performance.now() - buildStart;
     await nextFrames(2);
+
+    // Only now, so the warmup period absorbs the first refreshes at the new rate.
+    clock.multiplier = request.clockMultiplier;
 
     const satellites = this.#cc.sats.visibleSatellites;
     const componentInstances: Record<string, number> = {};
@@ -215,6 +227,7 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       componentsRequested: [...request.components],
       componentsDrawn: this.#cc.sats.enabledComponents,
       componentInstances,
+      clockMultiplier: clock.multiplier,
       entities: this.#cc.viewer.entities.values.length,
       primitives: this.#cc.viewer.scene.primitives.length,
       clearMs,
@@ -250,6 +263,7 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     const { scene, clock } = this.#cc.viewer;
     scene.requestRenderMode = saved.requestRenderMode;
     clock.shouldAnimate = saved.shouldAnimate;
+    clock.multiplier = saved.multiplier;
     // The sweep drove the manager directly, so the store's scene has to be put
     // back by hand — sceneSync's watcher only fires when the store changes, and
     // the store never changed.

@@ -203,6 +203,14 @@
           <span class="slider"></span>
           FPS
         </label>
+        <!-- PROTOTYPE: src/modules/benchmark. Beneath FPS because it is the same
+             question asked in more depth, and url-synced like the rest of this
+             menu, so a benchmarking session is a link. -->
+        <label class="toolbarSwitch">
+          <input v-model="showBenchmark" type="checkbox" />
+          <span class="slider"></span>
+          Benchmark
+        </label>
         <label class="toolbarSwitch">
           <input v-model="cc.viewer.scene.requestRenderMode" type="checkbox" />
           <span class="slider"></span>
@@ -241,13 +249,6 @@
           <input type="button" @click="cc.jumpTo('HalfDome')" />
           Jump to HalfDome
         </label>
-        <!-- PROTOTYPE: src/modules/benchmark. Absent unless the framework is
-             enabled, so there is no switch here that cannot do anything. -->
-        <label v-if="benchmarkAvailable" class="toolbarSwitch">
-          <input v-model="showBenchmark" type="checkbox" />
-          <span class="slider"></span>
-          Benchmark
-        </label>
       </div>
     </div>
     <div id="toolbarRight">
@@ -282,7 +283,6 @@ import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
 import { layerProvider } from "../config/layers";
 import { type MapGroup, SURFACE_MODELS, type SurfaceModelName, surfaceEffects, viewModeNote } from "../config/surfaceModels";
 import { SKY_MODE } from "../config/viewModes";
-import { benchmarkEnabled } from "../modules/benchmark/enabled";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
@@ -292,11 +292,9 @@ import SkyHud from "./SkyHud.vue";
 
 type MenuKey = "cat" | "sat" | "gs" | "map" | "view" | "ios" | "dbg";
 
-// PROTOTYPE: src/modules/benchmark. `?bench` opens the panel straight away, so a
-// benchmarking session is one url rather than a url and two clicks.
+// PROTOTYPE: src/modules/benchmark. Async, so nothing about it — the sweep, the
+// report tables, the panel — is in the bundle a normal visitor downloads.
 const BenchmarkPanel = defineAsyncComponent(() => import("./BenchmarkPanel.vue"));
-const benchmarkAvailable = benchmarkEnabled();
-const showBenchmark = ref(benchmarkAvailable && new URLSearchParams(window.location.search).has("bench"));
 
 const cc = useController();
 
@@ -312,7 +310,7 @@ const menu = reactive<Record<MenuKey, boolean>>({
 const showUI = ref(true);
 
 const cesiumStore = useCesiumStore();
-const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, qualityPreset, showFps, pickMode } = storeToRefs(cesiumStore);
+const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, qualityPreset, showFps, showBenchmark, pickMode } = storeToRefs(cesiumStore);
 
 // What the selection means here and now, from the one function the globe reads
 // too — so a dimmed group and an unlit tileset cannot disagree.

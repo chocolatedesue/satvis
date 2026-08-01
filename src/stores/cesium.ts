@@ -22,6 +22,11 @@ export const useCesiumStore = defineStore(
     const background = ref(true);
     const showFps = ref(false);
     const pickMode = ref(false);
+    // PROTOTYPE: the benchmarking framework (src/modules/benchmark). URL-synced
+    // like every other debug toggle, so a benchmarking session is a shareable
+    // link and the switch in the menu and the `?bench` parameter are one thing
+    // rather than two ways in.
+    const showBenchmark = ref(false);
 
     // Read-only: "at most one base layer" is an invariant of the list as a
     // whole, so it cannot be enforced from a per-checkbox write.
@@ -77,6 +82,7 @@ export const useCesiumStore = defineStore(
       background,
       showFps,
       pickMode,
+      showBenchmark,
     };
   },
   {
@@ -91,6 +97,7 @@ export const useCesiumStore = defineStore(
         { name: "cameraMode", url: "camera", kind: enumString(CAMERA_MODES) },
         { name: "qualityPreset", url: "quality", kind: enumString(["low", "high"]) },
         { name: "showFps", url: "fps", kind: boolean() },
+        { name: "showBenchmark", url: "bench", kind: boolean() },
         { name: "background", url: "bg", kind: boolean() },
         { name: "time", url: "time", kind: timestamp() },
       ],

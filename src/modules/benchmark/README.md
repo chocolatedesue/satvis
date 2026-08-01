@@ -1,9 +1,10 @@
 # Benchmarking framework — PROTOTYPE
 
-**Throwaway.** This exists to answer one question, not to be maintained:
+**Throwaway.** This exists to answer three questions, not to be maintained:
 
-> How does satvis's frame cost scale with the number of satellites, and what does
-> each satellite component cost on top of the ones already being drawn?
+> How does satvis's frame cost scale with the number of satellites, what does each
+> satellite component cost on top of the ones already being drawn, and what does
+> running the clock faster — that is, propagating more often — cost?
 
 It replaces the console-paste script that used to be `src/modules/benchmark.ts`,
 which measured average and worst frame time and printed one line per step. The
@@ -14,22 +15,29 @@ was asked for.
 
 ## Run it
 
+**Debug menu → Benchmark**, or `?bench=true` in the url. They are the same switch:
+it is `cesium.showBenchmark`, url-synced like every other debug toggle, so a
+benchmarking session is a shareable link.
+
+Opening the panel is what loads the framework, and that is also what puts
+`window.bench` there for console use.
+
+**Measure a production build, not `pnpm dev`** — a dev build is unminified and runs
+Vue in development mode, so its numbers are pessimistic by an unknown factor:
+
 ```bash
-pnpm bench
+pnpm build && pnpm preview
 ```
 
-Builds and previews a production bundle, then opens `/?bench=1` with the panel up.
-**Measure against this, not `pnpm dev`** — a dev build is unminified and runs Vue in
-development mode, so its numbers are pessimistic by an unknown factor. (The panel is
-also on by default under `pnpm dev`, for working on the panel itself.)
-
-Then either use the panel, or the console:
+Then the panel, or the console:
 
 ```js
 bench.quick(); // 3 counts × 7 isolated sets — checks the harness, ~2 min
 bench.run(); // 9 counts × 7 isolated sets: each component's own cost
 bench.cumulative(); // 9 counts × 8 growing sets: cost on top of what is already drawn
+bench.clock(); // 9 counts × 4 clock rates: the propagation axis
 bench.run({ satelliteCounts: [0, 500, 5000], componentSets: [["Point", "Orbit"]] });
+bench.run({ clockMultipliers: [1, 100] }); // any sweep can take the clock axis
 bench.run({ groundStation: { lat: 48.18, lon: 11.75 } }); // switches pass prediction on
 bench.watch(); // log a live line every 2 s; returns a stop function
 bench.cancel();
@@ -39,19 +47,23 @@ bench.json();
 bench.text();
 ```
 
-Keep the tab in the foreground. A background tab is throttled to ~1 fps and every
-row becomes a lie.
+Keep the tab in the foreground. A background tab presents no frames at all and
+every row becomes a lie — see the first caveat below.
 
 ## What it measures
 
-Per step (one satellite count × one component set):
+A step is one point in a three-axis sweep: **satellite count × component set ×
+clock rate**. The clock axis is one value (×1) unless asked for, so it costs
+nothing when the question is only about drawing.
 
 | Column           | Meaning                                                                             |
 | ---------------- | ----------------------------------------------------------------------------------- |
 | `fps`, `frameMs` | Between presented frames. What the user feels; flattens against vsync at 60/120 fps |
 | `cpuMs`          | `preUpdate` → `postRender`. The work done, which keeps moving after fps has capped  |
 | `p95`, `worst`   | Percentiles, not just a max — one 400 ms frame should not define a row              |
+| `frames`         | The sample size. A handful means the row is noise; read this one first              |
 | `jankPct`        | Share of frames slower than 33 ms                                                   |
+| `clock`          | The clock rate the step ran at, as a multiple of real time                          |
 | `buildMs`        | The synchronous cost of building the scene: instantiation plus component creation   |
 | `clearMs`        | Tearing the previous scene down                                                     |
 | `visible`        | Satellites actually drawn, which is **not** always the count requested              |
@@ -61,12 +73,29 @@ Per step (one satellite count × one component set):
 And derived, across steps:
 
 - **scaling** — a least-squares fit of `cpuMs` against the satellites drawn, per
-  component set: ms per 1,000 satellites, the fixed cost at zero, r² (well under
-  1.0 means the cost is _not_ linear in the count), and where 60 fps runs out.
-- **marginal cost** — each set differenced against the largest set in the run that
-  is a strict subset of it. In a cumulative sweep that is the cost of the component
-  just added; in an isolated sweep it is that component's cost over a bare point.
-  One function serves both.
+  _series_ (component set **and** clock rate, so a fit is never averaged across
+  clocks): ms per 1,000 satellites, the fixed cost at zero, r² (well under 1.0
+  means the cost is _not_ linear in the count), and where 60 fps runs out.
+- **marginal cost** — each set differenced against the largest set measured under
+  the same conditions that is a strict subset of it. In a cumulative sweep that is
+  the cost of the component just added; in an isolated sweep it is that component's
+  cost over a bare point. One function serves both.
+- **propagation** — each clock rate differenced against ×1 for the same satellites
+  and components. Only present when the clock was actually swept, because an empty
+  table would read as "propagation is free" rather than "nobody asked".
+
+### Why the clock rate is a propagation axis
+
+Propagation is not paid per frame. `SampledTrajectory.start` refreshes its sample
+window on a **simulation-time** callback — every quarter of an orbital period — and
+each refresh re-propagates 120 SGP4 samples per orbit for that satellite. So
+refreshes per wall second are proportional to the multiplier: at ×1000 a quarter
+orbit goes by in about a second and a half, where at ×1 it takes a quarter of an
+orbit. Drawing does not care what the clock is doing, which is exactly what makes
+the difference between two clock rates attributable to propagation.
+
+A `usPerSatellite` that holds steady across counts at one rate says the cost is
+per-satellite propagation and nothing else.
 
 ## Things that will bite you
 
@@ -83,9 +112,16 @@ And derived, across steps:
   change mid-sweep would overwrite the scene — so don't touch the toolbar while
   it runs. `restore()` puts the store's scene, `requestRenderMode` and
   `shouldAnimate` back afterwards.
-- **`requestRenderMode` is forced off and the clock forced on** for the duration.
-  With render-on-demand, frame deltas measure how idle the loop is; with a stopped
-  clock there are no position updates, which are most of the cost.
+- **Render-on-demand is switched off as soon as the panel opens**, and put back when
+  it closes. With it on, the gap between frames measures how idle the loop is rather
+  than what a scene costs, so there is no reading to be had — which is why this is
+  not offered as a choice. The clock is likewise forced to run for the duration of a
+  sweep: a stopped clock means no position updates, and position updates are most of
+  the cost.
+- **`buildMs` is always measured at ×1**, whatever the step's clock rate. A step at
+  ×1000 would otherwise sweep the sample window forward mid-build, so the build would
+  carry propagation belonging to the measurement after it. The rate is applied once
+  the scene is up, so the warmup absorbs the first refreshes at the new rate.
 - **`cpuMs` excludes the clock tick.** Cesium runs `clock.onTick` — where sampled
   positions update — before `scene.preUpdate`, so per-satellite position work lands
   in `frameMs` but not in `cpuMs`. The gap between the two is the interesting part.
@@ -96,7 +132,7 @@ And derived, across steps:
   `buildMs` down a column (rising counts within one set), never across sets.
   Whether that first-pass cost is satellite.js, the trajectory sampling or plain
   JIT warmup is the first thing this framework is worth pointing at.
-- **`visible` may exceed the count requested.** Activation matches by *name* and
+- **`visible` may exceed the count requested.** Activation matches by _name_ and
   two catalog entries can share one, so asking for 500 drew 501. That is why the
   fits are computed against `visible` rather than the requested count.
 - **Not every component applies to every satellite.** Ground track and sensor cone
@@ -118,12 +154,18 @@ The Cesium-bound part is one file. Everything else is portable, and is the part
 worth lifting if this earns a permanent place:
 
 - `frameSampler.ts` — timestamps in, percentiles out. No Cesium, no DOM.
-- `benchmarkPlan.ts` — the sweep matrix, pure.
-- `report.ts` — rows, the linear fits, the marginal-cost differencing, csv/json.
+- `benchmarkPlan.ts` — the three-axis sweep matrix, pure.
+- `report.ts` — rows, the linear fits, the marginal-cost and propagation
+  differencing, csv/json.
 - `benchmarkRunner.ts` — the loop, over a `BenchmarkTarget` interface.
 - `cesiumBenchmarkTarget.ts` — the only file that knows what a viewer is.
-- `index.ts` — `window.bench`; `enabled.ts` — the `?bench` gate.
+- `index.ts` — the console handle, `window.bench`.
 - `../../components/BenchmarkPanel.vue` — the in-browser half. Throwaway.
+
+Nothing here is in the bundle a normal visitor downloads: the panel is an async
+component, so the whole framework is a chunk that loads only when the switch goes
+on, and the chunks are excluded from the PWA precache (`vite.config.ts`) so the
+glob does not pull them down anyway.
 
 `CesiumPerformanceStats` (used by the `showFps` toggle) is untouched and still
 does its own thing.

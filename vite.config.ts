@@ -103,10 +103,11 @@ export default defineConfig({
           "cesium/Workers/**/*",
           "cesium/Assets/Textures/maki/*",
           "**/*.map",
-          // PROTOTYPE: the benchmarking framework (src/modules/benchmark). Its
-          // chunks are lazy, but the precache glob would pull them down for
-          // every visitor anyway — and only `?bench` ever loads them.
-          "**/benchmark-*.js",
+          // PROTOTYPE: the benchmarking framework (src/modules/benchmark), which
+          // rolls up into the panel's chunk because the panel is its only
+          // importer. The chunk is lazy, but the precache glob above would pull
+          // it down for every visitor anyway — and only the Benchmark switch
+          // ever loads it.
           "**/BenchmarkPanel-*.{js,css}",
         ],
         sourcemap: true,
