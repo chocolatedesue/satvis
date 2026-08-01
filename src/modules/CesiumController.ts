@@ -18,7 +18,7 @@ import {
   Transforms,
   defined,
 } from "@cesium/engine";
-import { Viewer } from "@cesium/widgets";
+import type { Viewer } from "@cesium/widgets";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
@@ -45,14 +45,9 @@ import { SurfaceModel } from "./SurfaceModel";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
 import { PushManager } from "./util/PushManager";
+import { Suppressible } from "./util/Suppressible";
 
 dayjs.extend(utc);
-
-declare global {
-  interface Window {
-    cc?: CesiumController;
-  }
-}
 
 /**
  * Where the globe opens: Europe's meridian, a little north of the equator.
@@ -98,67 +93,41 @@ export class CesiumController {
 
   oldBottomContainerStyleLeft: string = "";
 
-  // What the store last asked for, and whether anything is currently overriding
-  // it. Held separately so releasing a suppression restores the user's choice
-  // rather than a guess at it.
-  #cameraMode: string = "Fixed";
-
-  #cameraModeSuppressed = false;
-
   #removeCameraTrackEci: (() => void) | undefined;
 
-  // The same split for terrain, which a surface model can insist on: what the
-  // user picked, what is overriding it, and what is actually in the viewer.
-  #terrainProvider: string = "None";
+  /**
+   * The reference frame the camera is pinned to. Suppressed by the sky view,
+   * which drives the camera itself — expressed as an override with "Fixed",
+   * since that is what "do not track the inertial frame" means in force, while
+   * the user's own choice stays untouched underneath.
+   */
+  readonly camera: Suppressible<string>;
 
-  #terrainOverride: string | undefined;
-
-  #terrainGeneration = 0;
+  /** The terrain, which a surface model can insist on. See ADR-0005. */
+  readonly terrain: Suppressible<string>;
 
   // The last surface model the store asked for, so the selection is reported once
   // rather than every time the view mode makes it re-apply.
   #selectedSurfaceModel: string | undefined;
 
-  constructor() {
+  /**
+   * Takes the viewer rather than making one (see src/modules/createViewer.ts).
+   *
+   * The constructor used to call `new Viewer("cesiumContainer", …)`, which meant
+   * the class could not be brought into existence outside a browser and neither
+   * could anything holding one. Everything here is now wiring: constructing the
+   * managers and connecting them to each other, against a viewer that is
+   * somebody else's problem to produce.
+   */
+  constructor(viewer: Viewer) {
     this.preloadReferenceFrameData();
-    this.minimalUI = DeviceDetect.inIframe() || DeviceDetect.isIos();
+    this.minimalUI = DeviceDetect.minimalUI();
 
-    this.viewer = new Viewer("cesiumContainer", {
-      animation: !this.minimalUI,
-      // No base layer here: the store's layer stack is the only default, and it
-      // arrives through sceneSync's immediate watcher a tick later. Naming one
-      // here as well meant two defaults that could drift, and it created the
-      // layer without the availability probe that watcher applies.
-      baseLayer: false,
-      baseLayerPicker: false,
-      fullscreenButton: !this.minimalUI,
-      fullscreenElement: document.body,
-      geocoder: false,
-      homeButton: false,
-      infoBox: false,
-      navigationHelpButton: false,
-      navigationInstructionsInitiallyVisible: false,
-      sceneModePicker: false,
-      selectionIndicator: false,
-      timeline: !this.minimalUI,
-      vrButton: !this.minimalUI,
-      contextOptions: {
-        webgl: {
-          alpha: true,
-        },
-      },
-    });
-
-    // Cesium default settings
-    this.viewer.clock.shouldAnimate = true;
-    this.viewer.scene.globe.enableLighting = true;
-    this.viewer.scene.highDynamicRange = true;
-    this.viewer.scene.maximumRenderTimeChange = 1 / 30;
-    this.viewer.scene.requestRenderMode = true;
+    this.viewer = viewer;
     this.setDefaultView();
 
-    // Export CesiumController for debugger
-    window.cc = this;
+    this.camera = new Suppressible<string>("Fixed", (mode) => this.#applyCameraMode(mode));
+    this.terrain = new Suppressible<string>("None", (name, isCurrent) => this.#applyTerrain(name, isCurrent));
 
     // CesiumController config
     this.sceneModes = [...SCENE_MODES];
@@ -325,13 +294,15 @@ export class CesiumController {
       console.error("Unknown terrain provider");
       return;
     }
-    this.#terrainProvider = terrainProviderName;
     // Recorded but not applied while a surface model is imposing a terrain: this
     // is the choice that comes back on release, and building it now would only
-    // fetch a provider nothing is going to show.
-    if (this.#terrainOverride === undefined) {
-      void this.#applyTerrain();
-    }
+    // fetch a provider nothing is going to show. `choose` is what knows that.
+    this.terrain.choose(terrainProviderName);
+  }
+
+  /** The terrain the user picked, whether or not it is the one being drawn. */
+  get terrainProvider(): string {
+    return this.terrain.chosen;
   }
 
   /**
@@ -348,29 +319,23 @@ export class CesiumController {
       console.error("Unknown terrain provider override");
       return;
     }
-    this.#setTerrainOverride(terrainProviderName);
+    this.terrain.suppress(terrainProviderName);
   }
 
   /** Honour the user's own terrain again. */
   releaseTerrain(): void {
-    this.#setTerrainOverride(undefined);
-  }
-
-  #setTerrainOverride(terrainProviderName: string | undefined): void {
-    if (terrainProviderName === this.#terrainOverride) {
-      return;
-    }
-    this.#terrainOverride = terrainProviderName;
-    void this.#applyTerrain();
+    this.terrain.release();
   }
 
   /**
    * Build the terrain that is actually in force and hand it to the viewer.
    *
-   * The generation guard is not ceremony: creating a provider is a fetch, and two
+   * The staleness check is not ceremony: creating a provider is a fetch, and two
    * changes in quick succession — which is exactly what selecting a surface model
    * does, since it overrides the terrain in the same tick — can resolve out of
-   * order and leave the loser applied.
+   * order and leave the loser applied. `isCurrent` is Suppressible's generation
+   * guard; this used to be a counter kept here, and one of four written separately
+   * across the codebase.
    *
    * Deliberately no "already applied" short-circuit. There was one, remembering the
    * name before awaiting the provider, and it turned a provider that never resolved
@@ -379,12 +344,10 @@ export class CesiumController {
    * else, and every later request for it returned early. The callers already avoid
    * redundant work, so the only thing the marker bought was a way to lie.
    */
-  async #applyTerrain(): Promise<void> {
-    const name = this.#terrainOverride ?? this.#terrainProvider;
-    const generation = ++this.#terrainGeneration;
+  async #applyTerrain(name: string, isCurrent: () => boolean): Promise<void> {
     try {
       const provider = await (terrainProviders[name] as TerrainProviderEntry).create();
-      if (generation !== this.#terrainGeneration) {
+      if (!isCurrent()) {
         return;
       }
       // Measured before the swap, not after: the sky view stands on this terrain, and
@@ -393,7 +356,7 @@ export class CesiumController {
       // round trip is only spent when it buys something.
       const observer = this.skyView.active ? this.skyView.observer : undefined;
       const groundHeight = observer ? await this.#terrainHeightAt(provider, observer) : undefined;
-      if (generation !== this.#terrainGeneration) {
+      if (!isCurrent()) {
         return;
       }
       this.viewer.terrainProvider = provider;
@@ -507,15 +470,12 @@ export class CesiumController {
       };
       this.viewer.scene.morphComplete.addEventListener(enableOrbits);
 
-      // wait until orbit elements are removed
-      const checkPending = (): void => {
-        if (!this.sats.pendingUpdate) {
-          morph();
-        } else {
-          requestAnimationFrame(checkPending);
-        }
-      };
-      checkPending();
+      // Suppressing Orbit drops every geometry from the shared batch, and the
+      // batch rebuilds asynchronously — morphing before it has caught up would
+      // rebuild it into the projection being left behind. One await, where this
+      // used to poll a static flag re-exported from the collections' base class
+      // through a requestAnimationFrame loop.
+      void this.sats.orbits.settled().then(morph);
     } else {
       morph();
     }
@@ -547,8 +507,12 @@ export class CesiumController {
       console.error("Unknown camera mode");
       return;
     }
-    this.#cameraMode = cameraMode;
-    this.#applyCameraMode();
+    this.camera.choose(cameraMode);
+  }
+
+  /** The camera mode the user picked, whether or not it is being honoured. */
+  get cameraMode(): string {
+    return this.camera.chosen;
   }
 
   /**
@@ -556,22 +520,21 @@ export class CesiumController {
    * the camera itself, and inertial tracking re-parents it on every frame, so
    * the two cannot share it.
    *
-   * Suppressed rather than forced back to Fixed, the way a morph suppresses the
-   * Orbit component: the user's choice stands and the toolbar keeps saying so,
-   * and no history entry is pushed for a change nobody asked for.
+   * Suppressed rather than forced back to Fixed: "Fixed" is what is in force, but
+   * `camera.chosen` still says Inertial, so the toolbar keeps saying so, no history
+   * entry is pushed for a change nobody asked for, and `?camera=Inertial` survives
+   * the round trip.
    */
   suppressCameraMode(): void {
-    this.#cameraModeSuppressed = true;
-    this.#applyCameraMode();
+    this.camera.suppress("Fixed");
   }
 
   releaseCameraMode(): void {
-    this.#cameraModeSuppressed = false;
-    this.#applyCameraMode();
+    this.camera.release();
   }
 
-  #applyCameraMode(): void {
-    const trackEci = this.#cameraMode === "Inertial" && !this.#cameraModeSuppressed;
+  #applyCameraMode(mode: string): void {
+    const trackEci = mode === "Inertial";
     // Tracked by its removal callback rather than by re-deriving it: Cesium's
     // Event happily registers the same listener twice, so asking for Inertial
     // while already inertial would otherwise stack a second one.

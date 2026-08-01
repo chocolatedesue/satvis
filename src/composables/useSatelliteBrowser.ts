@@ -8,18 +8,22 @@
 // entries). Instead the store exposes `catalogRevision`, bumped whenever the
 // catalog changes. Every computed here touches `catalogRevision.value` so it
 // recomputes as groups arrive, while reading the actual entries imperatively
-// from `cc.sats.catalog`.
+// from the catalog it is given.
 //
 // Writes only ever target the Pinia store, replacing the whole array (the
 // url-sync plugin's $subscribe requires a new array reference to detect the
-// change). Satvis.vue's watchers propagate store -> cc.sats — this composable
-// never writes cc.sats directly.
+// change). sceneSync propagates store -> cc.sats — this composable never writes
+// cc.sats directly.
+//
+// The catalog arrives as an argument rather than through the controller: it is
+// the only thing here that is not the store, it is Cesium-free, and taking it
+// directly is what keeps this file constructible without a viewer.
 
 import { storeToRefs } from "pinia";
 import { computed, ref } from "vue";
 
 import { isEnabledByTag } from "../modules/satelliteActivation";
-import type { CatalogEntry } from "../modules/SatelliteCatalog";
+import type { CatalogEntry, SatelliteCatalog } from "../modules/SatelliteCatalog";
 import { useSatStore } from "../stores/sat";
 
 export type BrowserRow =
@@ -62,11 +66,9 @@ function scheduleDebounce(): void {
   }, SEARCH_DEBOUNCE_MS);
 }
 
-export function useSatelliteBrowser() {
+export function useSatelliteBrowser(catalog: SatelliteCatalog) {
   const satStore = useSatStore();
   const { catalogRevision, enabledSatellites, enabledTags, disabledSatellites } = storeToRefs(satStore);
-  // The catalog reference is stable for the lifetime of the app; grab it once.
-  const { catalog } = globalThis.cc.sats;
 
   // Group list with counts, derived from the non-reactive catalog and kept
   // fresh via catalogRevision (same { tag, count }[] shape the store held).

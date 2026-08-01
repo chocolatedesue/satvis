@@ -1,10 +1,9 @@
-import { BillboardGraphics, type Cartesian3, HeightReference, HorizontalOrigin, JulianDate, NearFarScalar, VerticalOrigin } from "@cesium/engine";
+import { BillboardGraphics, Cartesian3, Entity, HeightReference, HorizontalOrigin, JulianDate, NearFarScalar, VerticalOrigin } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 
 import icon from "../images/icons/pin.svg";
 import { stationPasses, type Pass } from "./PassPredictor";
 import type { SatelliteManager } from "./SatelliteManager";
-import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
 
 export interface GroundStationPositionData {
   latitude: number;
@@ -13,7 +12,19 @@ export interface GroundStationPositionData {
   cartesian: Cartesian3;
 }
 
-export class GroundStationEntity extends CesiumComponentCollection {
+/**
+ * A named position on the ground, drawn as one pin.
+ *
+ * One Entity, made once and never rebuilt — which is why this no longer extends
+ * CesiumComponentCollection. It had a single component the whole time, so the
+ * map of components, the lazy flag, the shared geometry array and the batch
+ * rebuilding were all inherited and none of them were ever used.
+ */
+export class GroundStationEntity {
+  readonly #viewer: Viewer;
+
+  readonly #entity: Entity;
+
   sats: SatelliteManager;
 
   position: GroundStationPositionData;
@@ -21,19 +32,11 @@ export class GroundStationEntity extends CesiumComponentCollection {
   givenName: string;
 
   constructor(viewer: Viewer, sats: SatelliteManager, position: GroundStationPositionData, givenName: string = "") {
-    super(viewer);
+    this.#viewer = viewer;
     this.sats = sats;
     this.position = position;
     this.givenName = givenName;
 
-    this.createEntities();
-  }
-
-  createEntities(): void {
-    this.createGroundStation();
-  }
-
-  createGroundStation(): void {
     const billboard = new BillboardGraphics({
       image: icon,
       horizontalOrigin: HorizontalOrigin.CENTER,
@@ -50,7 +53,35 @@ export class GroundStationEntity extends CesiumComponentCollection {
       // pin is 96 px square, giving roughly 38 px up close and 21 px from orbit.
       scaleByDistance: new NearFarScalar(1e2, 0.4, 4e7, 0.22),
     });
-    this.createCesiumEntity("Groundstation", "billboard", billboard, this.name, this.position.cartesian, false);
+    this.#entity = new Entity({
+      name: this.name,
+      position: position.cartesian,
+      // Where the camera sits when this is tracked.
+      viewFrom: new Cartesian3(0, -3600000, 4200000),
+      billboard,
+    });
+  }
+
+  show(): void {
+    if (!this.#viewer.entities.contains(this.#entity)) {
+      this.#viewer.entities.add(this.#entity);
+    }
+  }
+
+  hide(): void {
+    this.#viewer.entities.remove(this.#entity);
+  }
+
+  get isSelected(): boolean {
+    return this.#viewer.selectedEntity === this.#entity;
+  }
+
+  get isTracked(): boolean {
+    return this.#viewer.trackedEntity === this.#entity;
+  }
+
+  track(): void {
+    this.#viewer.trackedEntity = this.#entity;
   }
 
   get hasName(): boolean {

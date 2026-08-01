@@ -266,6 +266,7 @@
 import { storeToRefs } from "pinia";
 import { computed, onMounted, reactive, ref } from "vue";
 
+import { useController } from "../composables/useController";
 import { useGeolocation } from "../composables/useGeolocation";
 import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
 import { layerProvider } from "../config/layers";
@@ -280,7 +281,7 @@ import SkyHud from "./SkyHud.vue";
 
 type MenuKey = "cat" | "sat" | "gs" | "map" | "view" | "ios" | "dbg";
 
-const cc = globalThis.cc;
+const cc = useController();
 
 const menu = reactive<Record<MenuKey, boolean>>({
   cat: false,
@@ -365,10 +366,10 @@ function toggleOverlay(name: string, enabled: boolean): void {
 const satStore = useSatStore();
 const { enabledComponents, overpassMode } = storeToRefs(satStore);
 
-const { pending: locating, locate } = useGeolocation();
+const { pending: locating, locate } = useGeolocation(cc);
 
 const compassOffered = compassAvailable();
-const { active: compassActive, pending: compassPending, toggle: toggleCompass } = useSkyCompass();
+const { active: compassActive, pending: compassPending, toggle: toggleCompass } = useSkyCompass(cc);
 const inSkyView = computed(() => sceneMode.value === SKY_MODE);
 
 // Handing the aim to a sensor is an action with an outcome, and the outcome may be

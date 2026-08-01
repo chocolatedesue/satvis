@@ -5,7 +5,8 @@
 // changes the selection itself except in `deselect()`, which mirrors the native
 // InfoBox close button (`viewer.selectedEntity = undefined`).
 //
-// State lives at module scope as a lazy singleton wired up on first use.
+// State lives at module scope as a lazy singleton, wired up on first use against
+// the controller its first caller hands it.
 // While something is selected, a 1 s periodic clock callback refreshes the
 // time-dependent data (position, pass countdowns) and re-resolves the selection
 // so a satellite disposed mid-selection (e.g. its tag toggled off) hides the
@@ -21,6 +22,7 @@ import { JulianDate } from "@cesium/engine";
 import { storeToRefs } from "pinia";
 import { markRaw, ref, shallowRef, watch, type Ref, type ShallowRef } from "vue";
 
+import type { CesiumController } from "../modules/CesiumController";
 import type { GroundStationEntity } from "../modules/GroundStationEntity";
 import { filterPasses, toPassRows, type PassRow } from "../modules/PassPredictor";
 import type { SatelliteComponentCollection } from "../modules/SatelliteComponentCollection";
@@ -53,8 +55,17 @@ const elements: ShallowRef<ElementsInfo | null> = shallowRef(null);
 // carries). Resolved once per selection, not per tick — none of it is time-dependent.
 const satelliteInfo: ShallowRef<[string, string][]> = shallowRef([]);
 
-let initialized = false;
+// Given on first use rather than found on `globalThis`, so the dependency is in
+// the signature and app.ts decides which instance this singleton speaks for.
+let controller: CesiumController | undefined;
 let removeTickCallback: (() => void) | undefined;
+
+function cc(): CesiumController {
+  if (!controller) {
+    throw new Error("useSelectedEntity used before it was given a CesiumController");
+  }
+  return controller;
+}
 
 function selectionTarget(sel: Selection | null): SatelliteComponentCollection | GroundStationEntity | null {
   if (!sel) {
@@ -64,7 +75,7 @@ function selectionTarget(sel: Selection | null): SatelliteComponentCollection | 
 }
 
 function resolveSelection(): Selection | null {
-  const { viewer, sats } = globalThis.cc;
+  const { viewer, sats } = cc();
   if (!viewer.selectedEntity) {
     return null;
   }
@@ -84,7 +95,7 @@ function syncTracked(): void {
 }
 
 function refreshData(sel: Selection, time: JulianDate): void {
-  const { sats } = globalThis.cc;
+  const { sats } = cc();
   const mode = sats.overpassMode;
   groundStationAvailable.value = sats.groundStationAvailable;
 
@@ -121,7 +132,7 @@ function refreshData(sel: Selection, time: JulianDate): void {
 }
 
 function update(time?: JulianDate): void {
-  const { viewer } = globalThis.cc;
+  const { viewer } = cc();
   const now = time ?? viewer.clock.currentTime;
   const next = resolveSelection();
   const previousTarget = selectionTarget(selection.value);
@@ -145,7 +156,7 @@ function update(time?: JulianDate): void {
 }
 
 function init(): void {
-  const { viewer } = globalThis.cc;
+  const { viewer } = cc();
   viewer.selectedEntityChanged.addEventListener(() => update());
   viewer.trackedEntityChanged.addEventListener(() => syncTracked());
   // Flip the passes table columns immediately on mode change instead of
@@ -161,14 +172,14 @@ function init(): void {
   update();
 }
 
-export function useSelectedEntity() {
-  if (!initialized) {
-    initialized = true;
+export function useSelectedEntity(instance: CesiumController) {
+  if (!controller) {
+    controller = instance;
     init();
   }
 
   function deselect(): void {
-    globalThis.cc.viewer.selectedEntity = undefined;
+    cc().viewer.selectedEntity = undefined;
   }
 
   function toggleTrack(): void {
@@ -177,7 +188,7 @@ export function useSelectedEntity() {
       return;
     }
     if (target.isTracked) {
-      globalThis.cc.viewer.trackedEntity = undefined;
+      cc().viewer.trackedEntity = undefined;
     } else {
       target.track();
     }

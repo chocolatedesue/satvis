@@ -73,6 +73,7 @@
 import { storeToRefs } from "pinia";
 import { computed, onUnmounted, watch } from "vue";
 
+import { useController } from "../composables/useController";
 import { useSkyCompass } from "../composables/useSkyCompass";
 import { useSkyHud, type TapeTick } from "../composables/useSkyHud";
 import { SKY_MODE } from "../config/viewModes";
@@ -94,8 +95,9 @@ const COMPASS_Y = 62;
 const ELEVATION_RULE_X = 46;
 const TAPE_LENGTH = 12;
 
-const { compass, elevation, locked, trace, calibrated, settled, start, stop } = useSkyHud();
-const { active: compassActive, stopped: compassStopped } = useSkyCompass();
+const cc = useController();
+const { compass, elevation, locked, trace, calibrated, settled, start, stop } = useSkyHud(cc);
+const { active: compassActive, stopped: compassStopped } = useSkyCompass(cc);
 
 const { sceneMode } = storeToRefs(useCesiumStore());
 const visible = computed(() => sceneMode.value === SKY_MODE);
@@ -125,14 +127,14 @@ watch(
     stop();
     // Leaving the view stops the interaction, which drops the sensor subscription
     // with it, so the control must not go on claiming the compass is aiming.
-    globalThis.cc.skyInteraction.disableDeviceOrientation();
+    cc.skyInteraction.disableDeviceOrientation();
     compassStopped();
   },
   { immediate: true },
 );
 onUnmounted(() => {
   stop();
-  globalThis.cc.skyInteraction.disableDeviceOrientation();
+  cc.skyInteraction.disableDeviceOrientation();
   compassStopped();
 });
 </script>

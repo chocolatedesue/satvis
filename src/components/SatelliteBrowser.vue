@@ -58,9 +58,13 @@
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import { computed, ref } from "vue";
 
+import { useController } from "../composables/useController";
 import { type BrowserRow, useSatelliteBrowser } from "../composables/useSatelliteBrowser";
 
 const ROW_HEIGHT = 28;
+
+// The catalog, not the controller: it is all this panel needs from the globe.
+const { catalog } = useController().sats;
 
 const {
   searchQuery,
@@ -78,7 +82,7 @@ const {
   toggleSat,
   toggleExpand,
   clearAll,
-} = useSatelliteBrowser();
+} = useSatelliteBrowser(catalog);
 
 // Quick-select items: label "<tag> (<count>)", value the tag string.
 const groupItems = computed(() => availableGroups.value.toSorted((a, b) => a.tag.localeCompare(b.tag)).map((g) => ({ label: `${g.tag} (${g.count})`, value: g.tag })));

@@ -111,16 +111,17 @@ import dayjs from "dayjs";
 import { storeToRefs } from "pinia";
 import { computed } from "vue";
 
+import { useController } from "../composables/useController";
 import { useSelectedEntity } from "../composables/useSelectedEntity";
 import { SKY_MODE } from "../config/viewModes";
 import type { Pass } from "../modules/PassPredictor";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 
-const cc = globalThis.cc;
+const cc = useController();
 const toast = useToast();
 
-const { selection, isTracked, name, position, passRows, hasAnyPasses, showPastPasses, elements, satelliteInfo, deselect, toggleTrack } = useSelectedEntity();
+const { selection, isTracked, name, position, passRows, hasAnyPasses, showPastPasses, elements, satelliteInfo, deselect, toggleTrack } = useSelectedEntity(cc);
 
 const { overpassMode } = storeToRefs(useSatStore());
 

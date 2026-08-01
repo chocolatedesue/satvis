@@ -15,6 +15,15 @@ export class DeviceDetect {
     return !window.matchMedia("(hover: none)").matches;
   }
 
+  /**
+   * Whether to build the app with the reduced chrome. One definition, because
+   * two consumers act on it — createViewer decides which widgets exist, and
+   * CesiumController decides what the UI toggle is allowed to hide.
+   */
+  static minimalUI(): boolean {
+    return this.inIframe() || this.isIos();
+  }
+
   static isIos(): boolean {
     const userAgent = window.navigator.userAgent.toLowerCase();
     return /iphone|ipad|ipod/.test(userAgent);
