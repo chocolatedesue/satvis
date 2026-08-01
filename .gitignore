@@ -13,9 +13,8 @@ report/
 
 # Environment variables
 .env
-.env.local
-.env.development
-.env.production
+.env.*
+!.env.example
 
 # Claude Code: track only the launch.json blueprint (worktrees/ stays ignored)
 .claude/*
