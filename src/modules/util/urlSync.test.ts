@@ -70,6 +70,20 @@ describe("owned parameters", () => {
     expect("terrain" in router.currentRoute.value.query).toBe(false);
   });
 
+  // The one selection that can be armed for a view mode the url is not also
+  // asking for, so it has to survive being currently inapplicable.
+  test("a surface model that cannot apply here is still carried", async () => {
+    const { router } = await mount("/?surface=GooglePhotorealistic");
+    expect(useCesiumStore().surfaceModel).toBe("GooglePhotorealistic");
+    expect(router.currentRoute.value.query.surface).toBe("GooglePhotorealistic");
+  });
+
+  test("an invalid surface model is dropped and the state keeps its default", async () => {
+    const { router } = await mount("/?surface=Bogus");
+    expect(useCesiumStore().surfaceModel).toBe("None");
+    expect("surface" in router.currentRoute.value.query).toBe(false);
+  });
+
   test("state that is not synced never reaches the url", async () => {
     const { router } = await mount("/");
     const before = router.currentRoute.value.fullPath;

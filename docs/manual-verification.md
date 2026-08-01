@@ -92,16 +92,247 @@ its marks pointing at the zenith. Before the change, 15° of azimuth spanned 147
 eye level and 1691 px at 85° of pitch, and the visible window collapsed from ±15° to
 nothing.
 
+## Worker: missing files 404, and none of it is billed
+
+**Why it matters.** `not_found_handling: "single-page-application"` answered every
+unmatched path with `index.html` and a 200, which is what made `response.ok` meaningless
+for the imagery probe and let the service worker cache the app shell under tile urls. The
+constraint on any fix is that it must not turn asset traffic into billed Worker
+invocations.
+
+**Procedure.** `pnpm build`, `pnpm dev:worker`, then request each path and read the status.
+For the billing half, put `console.log("BILLED", new URL(request.url).pathname)` at the top
+of the Worker's `fetch` and watch which requests appear.
+
+**Result, 2026-07-30, wrangler dev on the built dist.**
+
+| path                                                 | status                                                                   |
+| ---------------------------------------------------- | ------------------------------------------------------------------------ |
+| `/`, `/ot`                                           | 200 text/html                                                            |
+| `/embedded.html`, `/test.html`                       | 307 to `/embedded`, `/test` (asset router `html_handling`, pre-existing) |
+| `/typo-route`                                        | 404 text/html (the 404 page)                                             |
+| `/api/groups.json`                                   | 200 application/json                                                     |
+| `/cesium/…/tilemapresource.xml` (exists)             | 200 application/xml                                                      |
+| `/data/cesium-assets/…/tilemapresource.xml` (absent) | **404**                                                                  |
+| `/data/gp/weather.json` (absent)                     | **404**                                                                  |
+
+Of those six requests, **only `/api/groups.json` logged `BILLED`** — routes, unknown paths
+and missing files are all answered by the asset router. Two combinations that are _not_
+free, both measured: `404-page` with no `404.html` falls through to the Worker, and
+`not_found_handling: "none"` invokes it for every unmatched path.
+
+`/ot` returning 200 depends on the `_redirects` rewrite `/ot / 200`. Two details it is
+easy to get wrong, both found by testing: the target must be `/` and not `/index.html`,
+because the asset router strips the extension and answers with a 307 to `/`, which would
+send the route to the default preset; and wrangler warns that a static rule placed after a
+dynamic one cannot be matched as cheaply, so it goes above the splat rule.
+
+**A trap when checking this in a browser.** The app writes its state into the query, so
+re-visiting the bare path in the same tab can land on the previously written url — `/ot`
+became `/ot?layers=Offline` from an earlier visit, which looked exactly like the OT preset
+failing to apply. Navigate with a distinct query (`/ot?v=clean`) to be sure of a fresh
+state. Verified that way: `/ot` selects VersaTiles and adds no `layers=` to the url, while
+`/` falls back to `Offline` as it should.
+
+For comparison, production before this change answered a missing data asset with
+`200 text/html`.
+
+**One inconsistency worth knowing:** with the service worker installed, a navigation to an
+unknown route is answered from precache by `navigateFallback`, so it shows the app rather
+than the 404 page. The server and the service worker disagree there, deliberately — offline
+that is the behaviour you want.
+
 ## Layers: the offline imagery fallback
 
-**Procedure.** Move `data/cesium-assets/imagery/NaturalEarthII/tilemapresource.xml`
-aside to simulate an unpopulated submodule, reload, then put it back.
+**Procedure.** Open a checkout whose `data/cesium-assets` submodule is genuinely
+unpopulated — a fresh `git worktree add` is one — and load the default route. Read the
+basemap selection, the url, and the console. Do **not** simulate it by deleting the file
+from a running dev server: see below.
 
-**Result, 2026-07-28, Chrome.** The base layer became
-`/cesium/Assets/Textures/NaturalEarthII/...` (the bundled set), the url was rewritten
-to `?layers=Offline`, and the console carried the warning naming
-`git submodule update --init`. With the file present the high-resolution provider is
-used and the globe tiles normally.
+**Result, 2026-07-30, Chrome, in a worktree.** Basemap `Offline`, url rewritten to
+`?layers=Offline`, the console warning naming `git submodule update --init`, and the globe
+tiling normally from `/cesium/Assets/Textures/NaturalEarthII/...`. The fallback target was
+checked directly and is sound: its manifest answers `text/xml` beginning `<?xml`, and its
+tiles answer `image/jpeg`.
+
+**The earlier result recorded here for 2026-07-28 was wrong**, and worth keeping as a
+warning about the method. It reported the fallback firing, but the probe tested only
+`response.ok`, and in a real unpopulated checkout the request for the missing manifest is
+answered by the SPA fallback with **200 and `index.html`** — measured, `content-type:
+text/html`, 1065 bytes of markup. So the probe concluded the imagery was present and the
+globe stayed blank, which is what was being reported from worktrees all along. The probe
+now reads the body and requires `<TileMap`.
+
+Deleting the file from a running dev server most likely produced a 404 instead — the
+static-copy middleware owns that path and fails outright, where a file that never existed
+falls through to the SPA fallback. That is inference, not measurement, but it is reason
+enough that this check must be run on a genuinely unpopulated checkout rather than a
+simulated one.
+
+## PWA: a data url in the address bar must not serve the app shell
+
+**Why it is here.** The two halves are checkable separately but the whole needs a
+deployed Worker plus an installed service worker, which no local setup reproduces: served
+by `pnpm preview` there is no `/api` backend, so a denied navigation and a served shell
+look identical.
+
+**What was checked, 2026-07-30.** `https://satvis.space/api/groups.json` answers
+`content-type: application/json` with the real index, with or without an HTML `Accept`
+header — so the server was never the problem; the app shell came from the service worker.
+`workbox-routing/NavigationRoute._match` rejects any request whose `mode !== "navigate"`
+before consulting the denylist, and then tests `pathname + search`, which is why `.json`
+missing from the extension list was enough to hand `/api/groups.json` to
+`createHandlerBoundToURL("/index.html")`. The built `dist/sw.js` now carries
+`denylist:[/\.(css|js|...)$/,/^\/api\//,/^\/data\//,/^\/cesium\//]`.
+
+**Not checked:** a live navigation against a deployed Worker with the new service worker
+installed. Worth doing after the next deploy — open the url in a tab and confirm JSON.
+
+## Map menu: the Basemap/Overlays split, and Re:Earth terrain
+
+**Procedure.** Open `?layers=ArcGis_0.5,Nextrad&terrain=ReEarth`, read the two imagery
+groups, switch basemap, toggle an overlay, and fly somewhere with relief.
+
+**Result, 2026-07-30, Chrome.** Basemap radios listed `Offline`, `OfflineHighres`,
+`ArcGis`, `OSM`, `BlackMarble` with **ArcGis checked** — bound by provider, so the `_0.5`
+token still reads as the layer it is, which the old flat checkbox list did not. Overlays
+listed `Tiles`, `GOES-IR`, `Nextrad` with Nextrad checked. Switching to OSM rewrote
+`?layers=OSM,Nextrad`, keeping the overlay and dropping the old basemap's opacity, which
+belonged to a layer no longer in the stack. Toggling `Tiles` gave `OSM,Nextrad,Tiles` and
+three imagery layers, and untoggling gave back two.
+
+Re:Earth terrain resolved `https://terrain.reearth.land/cesium-mesh/ellipsoid/` and
+rendered the Bernese Alps with correct relief. Its required credit — "Re:Earth Terrain ·
+Mapterhorn (CC BY 4.0)" — appears in the "Data attribution" display, alongside the
+service's own layer.json credits (Mapterhorn, EGM2008, Protomaps, OpenStreetMap).
+
+VersaTiles rendered the whole globe the right way up (no `{reverseY}` needed, since its
+TileJSON declares no `scheme`) and resolved to sharp orthophoto over central Munich, with
+tile requests observed from level 7 to 14 and no errors. "VersaTiles sources" is in the
+attribution display. **Note for whoever runs this next:** an unfocused browser tab
+throttles `requestAnimationFrame` to a standstill, so Cesium stops refining and the globe
+sits on whatever coarse level it had — which looks exactly like broken imagery. Front the
+tab, or drive `cc.viewer.scene.render()` in a loop, before concluding a provider is at
+fault.
+
+Worth re-running if the terrain looks flat: this is a free, keyless service on
+best-effort uptime with no SLA, so it is the one terrain that can simply stop answering.
+
+## Sky view: enabling a surface model must not lurch or flip
+
+**Why it cannot be a unit test.** The symptom is a sequence of camera positions across
+frames while terrain streams, which needs a live globe and a real network.
+
+**Procedure.** Enter the sky view with `?scene=Sky&gs=48.1372,11.5756,Munich` and no
+surface model, then enable OsmBuildings while recording `camera.position` and `camera.up`
+on every `preRender`.
+
+**Result, 2026-07-30, Chrome.** Two distinct eye heights, 2 m then 572.8 m — one
+transition, in the same frame the terrain provider becomes World Terrain — and `up.z`
+constant at 0.979 throughout, i.e. no orientation change. 572.8 m is CWT's Munich ground of
+570.8 m plus the 2 m eye height.
+
+Before the fix the same trace showed the eye stuck at 2 m while the provider had already
+become World Terrain, leaving the camera ~570 m under the new ground (the reported flip:
+inside terrain you see its underside), followed by a step per terrain refinement as
+`getHeight` improved its answer — including one reading of -76639, which the plausibility
+guard rejected.
+
+## Sky view: moving the observer must not drop the eye underground
+
+**Why it cannot be a unit test.** The symptom is a camera position across frames while an
+asynchronous height measurement is in flight.
+
+**Procedure.** Settle the sky view over Munich with OsmBuildings, then move the observer —
+`cc.skyView.enter({ lat, lon })`, which is exactly what a station drag or an arriving
+geolocation fix does — recording `camera.position` every `preRender`.
+
+**Result, 2026-07-30, Chrome.** One height throughout, 572.8 m, `up.z` constant at 0.979.
+Before the fix the move reset the ground height to sea level, putting the eye at 2 m while
+Munich's ground is 570 m — 568 m underground for as long as the measurement took.
+
+Worth knowing what that looks like, because it does not look like a wrong height: from
+under a surface you see its underside wearing the same imagery, so the frame fills with
+what reads as a plan view of the city, a horizon-like edge where the mesh ends, and black
+below. It was reported as the world flipping. Reproduce it deliberately with
+`cc.skyView.setGroundHeight(0)` over any city.
+
+## Surface models: the matrix, the eye height, and what drapes on a mesh
+
+The pure part is unit-tested (`src/config/surfaceModels.test.ts`); what needs a browser
+is whether the scene agrees with it. Needs an unrestricted `VITE_CESIUM_ION_TOKEN`.
+
+**Procedure.** With `?layers=ArcGis&gs=48.1372,11.5756,Munich`, walk `surface=` and
+`scene=` through the combinations, reading `cc.surface.active`,
+`scene.globe.show`, `scene.terrainProvider.constructor.name`, the camera's cartographic
+height, and the dimmed groups in the Map panel.
+
+**Result, 2026-07-29, Chrome.**
+
+- `surface=OsmBuildings&scene=3D`: buildings drawn on the globe over Munich, terrain
+  `CesiumTerrainProvider` while the store still holds `None`, Terrain group dimmed and
+  Layers not. The Terrain radio reads `CesiumWorldTerrain` — the terrain in force, not the
+  stored choice — its rows are disabled, and the note names what returns
+  ("OsmBuildings needs CesiumWorldTerrain, None returns"). Re-checked 2026-07-30 after
+  the radio was rebound; before that it read `None` and said nothing, which is what the
+  rebinding fixed.
+- `surface=GooglePhotorealistic&scene=Sky`: globe hidden, mesh drawn, both Layers and
+  Terrain dimmed. The camera settled at **563.3 m** ellipsoid height at the observer —
+  the mesh surface plus the 2 m eye height, where without the clamp it would have been
+  2 m, i.e. some 560 m underground.
+- Switching that to `scene=3D`: tileset removed, globe back, nothing dimmed, terrain
+  back to `EllipsoidTerrainProvider`, `?surface=GooglePhotorealistic` still in the url,
+  and the panel reads "Applies in the sky view only".
+- `surface=OsmBuildings&scene=2D`: no tileset, terrain not overridden, panel reads
+  "Applies in the 3D and sky views only".
+- **Ground-clamped overlays under a hidden globe**: a probe corridor with
+  `heightReference: CLAMP_TO_GROUND` through the observer rendered and draped onto the
+  photorealistic mesh, following the street and correctly occluded by the buildings
+  either side. So the Ground track component needs no suppression there.
+- **Failure path**: with `VITE_CESIUM_ION_TOKEN=not-a-real-token`, selecting
+  `GooglePhotorealistic` toasted "GooglePhotorealistic unavailable … Cesium ion needs a
+  token valid for this origin", put the radio back to `None`, and dropped `surface`
+  from the url. `SurfaceModel.apply` was called exactly twice — the attempt and the
+  revert — so the failure is reported once.
+- **Ground station pin**: at the Eiger with `terrain=CesiumWorldTerrain` the pin sits on
+  the ridge, where at its stored height of 0 it had been ~4 km below the surface.
+
+**Loading cost, 2026-07-30, Chrome.** Measured because "load the buildings later" turned
+out to have nothing to defer: at globe altitude OSM Buildings loads _nothing_ — 0 tiles
+visited, 0 ready, 0 MB — so Cesium already withholds it until the camera is near the
+ground. In the sky view at Marienplatz, settled, the neighbourhood costs 34.38 MB across 34
+tiles with the sky-view roll-off, against 39.73 MB across 40 tiles at Cesium's defaults:
+a 13% saving from capping the radius at ~800 m. The eye sat at 573 m, i.e. ground + 2 m.
+
+The globe's 2 km ceiling, same city, three altitudes: at 9,261 km and at 2,500 m the
+tileset was hidden with 0 tiles visited and 0 MB; dropping to 1,400 m showed it and
+streamed 35 tiles for 44 MB. Entering the sky view from there kept it shown with the
+ground-level roll-off (density 8.0e-4, factor 48) and the eye at 573 m. Note the ceiling
+is re-evaluated on `preRender`, so a camera moved from the console in a stalled render loop
+will read as stuck hidden — force a frame before believing it.
+
+**The mesh waits for the descent, 2026-07-30, Chrome.** Entering the sky view with
+`surface=GooglePhotorealistic` from the default globe view: mid-flight the tileset was
+present but `show: false` with **0 MB** of geometry and the globe still visible, so the
+descent costs nothing and is not black. On landing, `settled: true` flipped it to
+`show: true`, hid the globe, and started requests. The tileset carried
+`maximumScreenSpaceError: 24`, `skipLevelOfDetail: true` and
+`immediatelyLoadDesiredLevelOfDetail: true`.
+
+The skip-LOD saving itself is **not measured** — a clean before-and-after needs an uncached
+city and burns Google quota — so it is reasoned from Cesium's documented behaviour only.
+
+The service-worker rule was checked in the build output rather than at runtime: `dist/sw.js`
+contains `ion-asset-cache` and the pattern `ion\.cesium\.com`, and `googleapis` appears
+zero times in it, which is the property that matters — Google's tiles must not be cached.
+
+The 1 km OSM ceiling's above-ground behaviour is **unverified here**: this environment
+never refines terrain past level 0, so `globe.getHeight` returns either nothing or
+implausible values (-76594 was observed) and the sticky-last-believable fallback keeps the
+gate on ellipsoid height. Worth re-checking in a real browser over a high city.
+
+Not exercised: iOS, where the photorealistic mesh's tuned-down `cacheBytes` and
+`maximumScreenSpaceError` apply, and where a phone's memory is the thing being protected.
 
 ## Sky view: what a device is still needed for
 

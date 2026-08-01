@@ -44,7 +44,9 @@ body {
   display: flex;
   flex-direction: column;
   margin: 2px 3px;
-  background-color: #30333680;
+  /* Carries the group titles, which have no surface of their own — the rows do,
+     so the panel is what has to hold them legible against a bright globe. */
+  background-color: #303336d9;
   border-radius: 8px;
 }
 
@@ -65,15 +67,48 @@ body {
   margin: 5px;
 }
 
+/* A control whose selection a surface model has taken over, so it is no longer
+   describing what is on screen. Dimming says only that; whether the row is still
+   the user's to change is a separate question the markup answers per group (a
+   hidden globe leaves the choice theirs, an imposed terrain does not).
+   Opacity only, deliberately. A `grayscale` filter here read as a broken panel
+   rather than an inert one: the red/green dot is the only state a row carries,
+   and draining its colour left a column of switches saying nothing at all. */
+.toolbarSwitch--inert {
+  opacity: 0.3;
+}
+
+.toolbarTitle--inert {
+  opacity: 0.5;
+}
+
+/* Why nothing happened, for a surface model that cannot apply in this view mode.
+   Zero width with a full-width minimum so the sentence wraps inside the panel
+   instead of widening it: these panels are sized by their content, and the
+   longest row is what should set that width. */
+.toolbarNote {
+  width: 0;
+  min-width: 100%;
+  box-sizing: border-box;
+  padding: 2px 8px 3px 8px;
+  font-size: 11px;
+  line-height: 14px;
+  opacity: 0.6;
+}
+
 .toolbarSwitch {
-  background-color: #303336;
+  /* Lighter than the panel it sits on, not the same colour. These were both
+     #303336, which was invisible while the panel was translucent enough to show
+     the globe through the gaps — and once the panel was made opaque, the rows and
+     their surface merged into one flat slab with no edges at all. */
+  background-color: #464b50;
   border-radius: 8px;
   cursor: pointer;
   display: inline-block;
   height: 24px;
   line-height: 24px;
   margin: 1px 0px 1px 0px;
-  opacity: 0.5;
+  opacity: 0.85;
   padding-left: 50px;
   position: relative;
 }

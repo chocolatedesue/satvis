@@ -112,7 +112,16 @@ const config: ViteConfigWithTest = {
         globIgnores: ["cesium/ThirdParty/**/*", "cesium/Widgets/**/*", "cesium/Workers/**/*", "cesium/Assets/Textures/maki/*", "**/*.map"],
         sourcemap: true,
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/\.(css|js|png|svg|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|txt|glb)$/],
+        // Matched against `pathname + search`, and only for requests whose mode is
+        // `navigate` — Workbox's NavigationRoute rejects everything else before it
+        // consults this list, so it has no bearing on what `fetch()` receives.
+        //
+        // The extension list alone let `/api/groups.json` be answered with the app
+        // shell, because `.json` is not in it: opening an API url in the address bar
+        // is a navigation, and the service worker was happily serving index.html for
+        // it. The three prefixes are the paths that hold data rather than routes, so
+        // navigating to one should reach the network and get the real thing.
+        navigateFallbackDenylist: [/\.(css|js|png|svg|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|txt|glb)$/, /^\/api\//, /^\/data\//, /^\/cesium\//],
         runtimeCaching: [
           {
             urlPattern: /cesium\/(Assets|Widgets|Workers)\/.*\.(css|js|json|jpg)$/,
@@ -147,6 +156,30 @@ const config: ViteConfigWithTest = {
               expiration: {
                 maxAgeSeconds: 48 * 60 * 60, // 2 days
                 maxEntries: 50,
+              },
+            },
+          },
+          {
+            // Cesium ion assets: OSM Buildings tiles and World Terrain. ion already
+            // serves them `public, max-age=86400`, so the browser covers a day on its
+            // own; this survives eviction and works offline, which is what makes a
+            // second sky-view session over the same city cost nothing.
+            //
+            // Scoped to this host on purpose. Google's photorealistic tiles come from
+            // tile.googleapis.com, and their Map Tiles policies restrict caching — so
+            // the one rule that must never widen into a path or a file extension is
+            // this one.
+            urlPattern: /^https:\/\/assets\.ion\.cesium\.com\/.*/i,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "ion-asset-cache",
+              expiration: {
+                maxEntries: 4000,
+                maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+                purgeOnQuotaError: true,
+              },
+              cacheableResponse: {
+                statuses: [0, 200],
               },
             },
           },

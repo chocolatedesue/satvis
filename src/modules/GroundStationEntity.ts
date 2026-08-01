@@ -1,4 +1,4 @@
-import { BillboardGraphics, type Cartesian3, HorizontalOrigin, JulianDate, NearFarScalar, VerticalOrigin } from "@cesium/engine";
+import { BillboardGraphics, type Cartesian3, HeightReference, HorizontalOrigin, JulianDate, NearFarScalar, VerticalOrigin } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 
 import icon from "../images/icons/pin.svg";
@@ -40,6 +40,12 @@ export class GroundStationEntity extends CesiumComponentCollection {
       // The tip of the pin is what marks the spot, and it is the bottom of the
       // artwork.
       verticalOrigin: VerticalOrigin.BOTTOM,
+      // The station's own height is 0, so on any real surface the pin was buried
+      // by the local elevation — a few hundred metres of it under a photorealistic
+      // mesh, where the pin marks the very spot the sky view stands on. Clamped
+      // rather than offset, because there is no one height to offset by: the
+      // surface may be the ellipsoid, terrain, or a tileset.
+      heightReference: HeightReference.CLAMP_TO_GROUND,
       // Scales are a fraction of the source image, so they belong with it: the
       // pin is 96 px square, giving roughly 38 px up close and 21 px from orbit.
       scaleByDistance: new NearFarScalar(1e2, 0.4, 4e7, 0.22),

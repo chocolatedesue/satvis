@@ -9,9 +9,11 @@ import {
   Matrix4,
   PerspectiveFrustum,
   type Scene,
+  sampleTerrainMostDetailed,
   SceneMode,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
+  type TerrainProvider,
   TimeInterval,
   Transforms,
   defined,
@@ -38,7 +40,8 @@ import {
 } from "./CesiumLayerProviders";
 import { SatelliteManager } from "./SatelliteManager";
 import { SkyInteraction } from "./SkyInteraction";
-import { SkyView } from "./SkyView";
+import { type Observer, SkyView } from "./SkyView";
+import { SurfaceModel } from "./SurfaceModel";
 import { CesiumPerformanceStats } from "./util/CesiumPerformanceStats";
 import { DeviceDetect } from "./util/DeviceDetect";
 import { PushManager } from "./util/PushManager";
@@ -81,6 +84,8 @@ export class CesiumController {
 
   skyInteraction!: SkyInteraction;
 
+  surface!: SurfaceModel;
+
   pm!: PushManager;
 
   sceneModes: string[] = [];
@@ -101,6 +106,18 @@ export class CesiumController {
   #cameraModeSuppressed = false;
 
   #removeCameraTrackEci: (() => void) | undefined;
+
+  // The same split for terrain, which a surface model can insist on: what the
+  // user picked, what is overriding it, and what is actually in the viewer.
+  #terrainProvider: string = "None";
+
+  #terrainOverride: string | undefined;
+
+  #terrainGeneration = 0;
+
+  // The last surface model the store asked for, so the selection is reported once
+  // rather than every time the view mode makes it re-apply.
+  #selectedSurfaceModel: string | undefined;
 
   constructor() {
     this.preloadReferenceFrameData();
@@ -164,6 +181,29 @@ export class CesiumController {
         this.viewer.selectedEntity = target.sat.defaultEntity;
       },
     });
+
+    this.surface = new SurfaceModel({
+      scene: this.viewer.scene,
+      setTerrainOverride: (name) => (name === undefined ? this.releaseTerrain() : this.suppressTerrain(name)),
+      skyLanded: () => this.skyView.settled,
+      onFailure: (name, error) => {
+        // The selection goes back to None so the radio, the url and the scene
+        // cannot disagree — the same correction the imagery fallback makes — and
+        // it is said out loud, because the commonest cause is a token this
+        // origin is not allowed to use and nothing else would explain that.
+        useCesiumStore().surfaceModel = "None";
+        useToastProxy().add({
+          title: `${name} unavailable`,
+          description: `${error instanceof Error ? error.message : "The tileset could not be loaded"}. Cesium ion needs a token valid for this origin.`,
+          color: "warning",
+        });
+      },
+    });
+
+    // Permanent, and asked again whenever what the observer stands on changes. The
+    // sky view then has a measured height for every case — terrain, surface model,
+    // bare ellipsoid — instead of following whichever tile has loaded so far.
+    this.skyView.setGroundHeightSource((observer) => this.#observerGroundHeight(observer));
 
     this.pm = new PushManager();
 
@@ -281,17 +321,157 @@ export class CesiumController {
   }
 
   set terrainProvider(terrainProviderName: string) {
-    this.updateTerrainProvider(terrainProviderName);
-  }
-
-  async updateTerrainProvider(terrainProviderName: string): Promise<void> {
     if (!this.terrainProviderNames.includes(terrainProviderName)) {
       console.error("Unknown terrain provider");
       return;
     }
+    this.#terrainProvider = terrainProviderName;
+    // Recorded but not applied while a surface model is imposing a terrain: this
+    // is the choice that comes back on release, and building it now would only
+    // fetch a provider nothing is going to show.
+    if (this.#terrainOverride === undefined) {
+      void this.#applyTerrain();
+    }
+  }
 
-    const provider = await (terrainProviders[terrainProviderName] as TerrainProviderEntry).create();
-    this.viewer.terrainProvider = provider;
+  /**
+   * Impose a terrain over the user's choice. Suppression rather than a write, the
+   * way the camera mode is suppressed: OSM Buildings needs the terrain it was
+   * authored against, and the user's own terrain has to come back untouched the
+   * moment it is deselected.
+   *
+   * Validated against every registered provider, not just the selectable ones, so
+   * an override may name a terrain a url is not allowed to.
+   */
+  suppressTerrain(terrainProviderName: string): void {
+    if (!(terrainProviderName in terrainProviders)) {
+      console.error("Unknown terrain provider override");
+      return;
+    }
+    this.#setTerrainOverride(terrainProviderName);
+  }
+
+  /** Honour the user's own terrain again. */
+  releaseTerrain(): void {
+    this.#setTerrainOverride(undefined);
+  }
+
+  #setTerrainOverride(terrainProviderName: string | undefined): void {
+    if (terrainProviderName === this.#terrainOverride) {
+      return;
+    }
+    this.#terrainOverride = terrainProviderName;
+    void this.#applyTerrain();
+  }
+
+  /**
+   * Build the terrain that is actually in force and hand it to the viewer.
+   *
+   * The generation guard is not ceremony: creating a provider is a fetch, and two
+   * changes in quick succession — which is exactly what selecting a surface model
+   * does, since it overrides the terrain in the same tick — can resolve out of
+   * order and leave the loser applied.
+   *
+   * Deliberately no "already applied" short-circuit. There was one, remembering the
+   * name before awaiting the provider, and it turned a provider that never resolved
+   * — a terrain host that hangs rather than refusing — into a terrain that could
+   * never be selected again: the marker said applied, the viewer showed something
+   * else, and every later request for it returned early. The callers already avoid
+   * redundant work, so the only thing the marker bought was a way to lie.
+   */
+  async #applyTerrain(): Promise<void> {
+    const name = this.#terrainOverride ?? this.#terrainProvider;
+    const generation = ++this.#terrainGeneration;
+    try {
+      const provider = await (terrainProviders[name] as TerrainProviderEntry).create();
+      if (generation !== this.#terrainGeneration) {
+        return;
+      }
+      // Measured before the swap, not after: the sky view stands on this terrain, and
+      // a height that arrives a beat later leaves the eye under the new ground for
+      // that beat. Nothing is standing on it if the sky view is not up, so the
+      // round trip is only spent when it buys something.
+      const observer = this.skyView.active ? this.skyView.observer : undefined;
+      const groundHeight = observer ? await this.#terrainHeightAt(provider, observer) : undefined;
+      if (generation !== this.#terrainGeneration) {
+        return;
+      }
+      this.viewer.terrainProvider = provider;
+      if (groundHeight !== undefined) {
+        this.skyView.setGroundHeight(groundHeight);
+      }
+    } catch (error) {
+      // Terrain can fail for a reason the network is not responsible for now that
+      // one of them is ion-backed. The previous terrain stays, and the next
+      // selection is free to try again.
+      console.error(`Terrain provider ${name} failed to load`, error);
+    }
+  }
+
+  /**
+   * Put a surface model selection into effect, and tell the sky view what it is
+   * now standing on.
+   *
+   * The two halves live together because the second is a consequence of the
+   * first and neither module should have to know about the other: the surface
+   * model can measure a height and the sky view needs one, and wiring them is
+   * exactly what this class is for.
+   */
+  /**
+   * What the observer is standing on, measured rather than guessed: the surface model
+   * when one is drawing, otherwise the terrain in force.
+   *
+   * The sky view's own per-frame `globe.getHeight` is a fallback of last resort. It
+   * answers from whatever tile happens to be loaded, so while terrain streams it
+   * reports a coarse approximation, then a better one, then a better one — and the eye
+   * follows each, which is a stagger of jumps rather than a move.
+   */
+  async #observerGroundHeight(observer: Observer): Promise<number | undefined> {
+    if (this.surface.active) {
+      return this.surface.surfaceHeight(observer);
+    }
+    return this.#terrainHeightAt(this.viewer.terrainProvider, observer);
+  }
+
+  /**
+   * The height a given terrain provider puts under a point, at its most detailed.
+   *
+   * `sampleTerrainMostDetailed` needs the provider's availability metadata, which the
+   * ellipsoid provider has none of because it does not need any: its surface is height
+   * zero everywhere, and that is the answer rather than a missing one.
+   */
+  async #terrainHeightAt(provider: TerrainProvider, observer: Observer): Promise<number | undefined> {
+    if (!provider.availability) {
+      return 0;
+    }
+    try {
+      const [sample] = await sampleTerrainMostDetailed(provider, [Cartographic.fromDegrees(observer.lon, observer.lat)]);
+      return sample?.height;
+    } catch (error) {
+      console.warn("Could not sample the terrain under the observer", error);
+      return undefined;
+    }
+  }
+
+  async applySurfaceModel(surfaceModel: string, viewMode: string): Promise<void> {
+    // On selection, not on load: what the quota is exposed to is people choosing
+    // this, and a choice that fails or that lands in a view mode it cannot apply
+    // in is exactly the kind of thing worth seeing. The view mode goes along so
+    // the two are still distinguishable.
+    if (surfaceModel !== this.#selectedSurfaceModel) {
+      this.#selectedSurfaceModel = surfaceModel;
+      if (surfaceModel !== "None") {
+        usePostHog().posthog.capture("surface_model_selected", { surface_model: surfaceModel, view_mode: viewMode });
+      }
+    }
+
+    const before = this.surface.active;
+    await this.surface.apply(surfaceModel, viewMode);
+    // Only on a change: what the observer stands on is the same as it was otherwise,
+    // and re-measuring it is a needless round trip.
+    if (this.surface.active !== before) {
+      this.skyView.remeasureGround();
+    }
   }
 
   /**

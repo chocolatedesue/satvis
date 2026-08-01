@@ -92,18 +92,54 @@
         </label>
       </div>
       <div v-show="menu.map" class="toolbarSwitches">
-        <div class="toolbarTitle">Layers</div>
-        <label v-for="name in cc.imageryProviderNames" :key="name" class="toolbarSwitch">
-          <input v-model="layerSelection" type="checkbox" :value="name" />
+        <!-- The imagery is two groups rather than one list, each with the control
+             its invariant deserves: at most one basemap, so radios, and any number
+             of overlays, so checkboxes. Both bind by *provider* rather than by
+             token, so a layer carrying an opacity (`ArcGis_0.5`, which only a url
+             can set) still shows as the layer it is.
+
+             Either group goes inert when a surface model has taken over what it
+             describes. Dimmed, and still live: the selection is still the user's,
+             it simply is not being drawn while the globe is hidden. The Terrain
+             group below is the one exception, and says why. -->
+        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('layers') }">Basemap</div>
+        <label v-for="name in cc.baseLayers" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('layers') }">
+          <input type="radio" name="basemap" :value="name" :checked="baseLayer === name" @change="setBaseLayer(name)" />
           <span class="slider"></span>
           {{ name }}
         </label>
-        <div class="toolbarTitle">Terrain</div>
-        <label v-for="name in cc.terrainProviderNames" :key="name" class="toolbarSwitch">
-          <input v-model="terrainProvider" type="radio" :value="name" />
+        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('layers') }">Overlays</div>
+        <label v-for="name in cc.overlayLayers" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('layers') }">
+          <input type="checkbox" :checked="hasOverlay(name)" @change="toggleOverlay(name, ($event.target as HTMLInputElement).checked)" />
           <span class="slider"></span>
           {{ name }}
         </label>
+        <div v-if="inertReason('layers')" class="toolbarNote">{{ inertReason("layers") }}</div>
+        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('terrain') }">Terrain</div>
+        <!-- `:checked` against what the globe is using rather than `v-model` against
+             the store: while a surface model imposes a terrain, the stored choice is
+             not the terrain being drawn, and a radio's dot is the app saying what
+             is. Disabled only when imposed — the choice is genuinely not the user's
+             then, and a control that accepts a click and shows nothing is worse than
+             one that declines it. The store still remembers, and still comes back. -->
+        <label v-for="name in cc.terrainProviderNames" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('terrain') }">
+          <input type="radio" name="terrain" :value="name" :checked="activeTerrain === name" :disabled="terrainImposed" @change="terrainProvider = name" />
+          <span class="slider"></span>
+          {{ name }}
+        </label>
+        <!-- Dimming says a group is not describing the picture; this says what is.
+             Without it the Terrain group is the confusing case: the selected row is
+             not what is in force, and nothing on screen names what is. -->
+        <div v-if="inertReason('terrain')" class="toolbarNote">{{ inertReason("terrain") }}</div>
+        <div class="toolbarTitle">Surface</div>
+        <label v-for="name in SURFACE_MODELS" :key="name" class="toolbarSwitch">
+          <input v-model="surfaceModel" type="radio" :value="name" />
+          <span class="slider"></span>
+          {{ name }}
+        </label>
+        <!-- Only for the model actually selected: the note explains why nothing
+             happened, and is noise against a model nobody asked for. -->
+        <div v-if="surfaceUnavailable" class="toolbarNote">{{ surfaceUnavailable }}</div>
       </div>
       <!-- Where you look from and with what, as against the Map panel's what you
            are looking at. -->
@@ -232,6 +268,8 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { useGeolocation } from "../composables/useGeolocation";
 import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
+import { layerProvider } from "../config/layers";
+import { type MapGroup, SURFACE_MODELS, type SurfaceModelName, surfaceEffects, viewModeNote } from "../config/surfaceModels";
 import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
@@ -256,15 +294,73 @@ const menu = reactive<Record<MenuKey, boolean>>({
 const showUI = ref(true);
 
 const cesiumStore = useCesiumStore();
-const { layers, terrainProvider, sceneMode, cameraMode, qualityPreset, showFps, pickMode } = storeToRefs(cesiumStore);
+const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, qualityPreset, showFps, pickMode } = storeToRefs(cesiumStore);
 
-// The checkbox list writes the whole array back. layers is read-only because
-// "at most one base layer" is an invariant of the list, so the write is routed
-// through the action that enforces it.
-const layerSelection = computed({
-  get: () => layers.value,
-  set: (next: string[]) => cesiumStore.setLayers(next),
+// What the selection means here and now, from the one function the globe reads
+// too — so a dimmed group and an unlit tileset cannot disagree.
+const effects = computed(() => surfaceEffects(surfaceModel.value, sceneMode.value));
+const inert = computed(() => effects.value.inert);
+
+// The terrain the globe is actually using, and whether the user still owns the
+// choice. A surface model that imposes one takes it over completely; a hidden
+// globe does not — that choice is still theirs, it just is not being drawn yet.
+const activeTerrain = computed(() => effects.value.terrain ?? terrainProvider.value);
+const terrainImposed = computed(() => effects.value.terrain !== undefined);
+
+// Why a group stopped describing the picture. Two different answers, and the
+// distinction matters: an overridden terrain is still being drawn, just not the
+// one the radio says, while a hidden globe is drawing neither.
+//
+// The imposed case also names the terrain that comes back, because the radio is
+// showing what is in force rather than what the user picked — so without this
+// their own choice would be stated nowhere at all.
+function inertReason(group: MapGroup): string {
+  if (!inert.value.includes(group)) {
+    return "";
+  }
+  const forced = effects.value.terrain;
+  if (group === "terrain" && forced) {
+    return forced === terrainProvider.value ? `${surfaceModel.value} needs ${forced}` : `${surfaceModel.value} needs ${forced}, ${terrainProvider.value} returns`;
+  }
+  return `Hidden by ${surfaceModel.value}`;
+}
+
+// Named rather than merely flagged: "nothing happened" is the question this
+// answers, and which view modes would have worked is the answer — derived from
+// the rules themselves, never written out here, so widening one cannot leave this
+// sentence asserting a restriction that is gone.
+const surfaceUnavailable = computed(() => {
+  if (surfaceModel.value === "None" || !effects.value.unavailable.includes(surfaceModel.value as SurfaceModelName)) {
+    return "";
+  }
+  return viewModeNote(surfaceModel.value);
 });
+
+// The imagery stack, read and written a group at a time. `layers` is read-only
+// because "at most one base layer" is an invariant of the list rather than of any
+// one entry, so every write goes through the action that enforces it — and list
+// order is z-order, which is why a basemap goes under and an overlay goes on top.
+const isBaseToken = (token: string): boolean => {
+  const provider = layerProvider(token);
+  return provider !== undefined && cc.baseLayers.includes(provider);
+};
+
+/** The basemap in the stack, by provider name, or "" when a url left none. */
+const baseLayer = computed(() => {
+  const token = layers.value.find(isBaseToken);
+  return token === undefined ? "" : (layerProvider(token) ?? "");
+});
+
+const hasOverlay = (name: string): boolean => layers.value.some((token) => layerProvider(token) === name);
+
+function setBaseLayer(name: string): void {
+  cesiumStore.setLayers([name, ...layers.value.filter((token) => !isBaseToken(token))]);
+}
+
+function toggleOverlay(name: string, enabled: boolean): void {
+  const without = layers.value.filter((token) => layerProvider(token) !== name);
+  cesiumStore.setLayers(enabled ? [...without, name] : without);
+}
 
 const satStore = useSatStore();
 const { enabledComponents, overpassMode } = storeToRefs(satStore);

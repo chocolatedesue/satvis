@@ -48,17 +48,36 @@ const MIN_GROUND_HEIGHT = -500;
 const MAX_GROUND_HEIGHT = 9000;
 
 /**
- * Whether a surface height from `globe.getHeight` can be believed.
+ * Whether a surface height can be believed, wherever it came from.
  *
- * It has to be asked, because the honest answer for "no tile loaded here" is not
- * `undefined`: with the default `EllipsoidTerrainProvider`, where the surface is
- * the ellipsoid and the answer is exactly 0, it has been observed returning
- * -36990. Taking that at face value puts the camera 37 km underground, which
- * stops the tiles under the observer from rendering at all, which keeps the
- * answer garbage — the view never recovers on its own.
+ * It has to be asked of `globe.getHeight`, because the honest answer for "no tile
+ * loaded here" is not `undefined`: with the default `EllipsoidTerrainProvider`,
+ * where the surface is the ellipsoid and the answer is exactly 0, it has been
+ * observed returning -36990. Taking that at face value puts the camera 37 km
+ * underground, which stops the tiles under the observer from rendering at all,
+ * which keeps the answer garbage — the view never recovers on its own.
+ *
+ * It is worth asking of a surface model's clamp too, for a different reason: that
+ * clamps to whatever scene geometry is above the point, and a satellite's own 3D
+ * model passing overhead is scene geometry.
  */
 export const isPlausibleGroundHeight = (height: number | undefined): height is number =>
   height !== undefined && Number.isFinite(height) && height >= MIN_GROUND_HEIGHT && height <= MAX_GROUND_HEIGHT;
+
+/**
+ * Where the ground under the observer comes from when the globe cannot say.
+ *
+ * The globe is the default and needs no source: `getHeight` answers from tiles
+ * that are already loaded, every frame, for free. A surface model is neither —
+ * measuring it is a request, and with the photorealistic mesh the globe is not
+ * even being drawn, so `getHeight` has nothing to answer from and the eye would
+ * sit at ellipsoid height, hundreds of metres inside the mesh.
+ *
+ * Async, and asked once per observer rather than per frame: the answer needs the
+ * tiles at that spot loaded, which is a network round trip, and standing still is
+ * what the sky view does.
+ */
+export type GroundHeightSource = (observer: Observer) => Promise<number | undefined>;
 
 /**
  * Defaults chosen so the first frame is legible rather than empty sky. The
@@ -216,6 +235,16 @@ export class SkyView {
   // default terrain provider and a safe one for every other.
   #groundHeight = 0;
 
+  // A surface model's answer, once it has one, and the flag that stops the globe
+  // being consulted as well. Both matter: with OSM Buildings the globe is still
+  // there and still has an opinion, and the two would fight every frame.
+  #groundSource: GroundHeightSource | undefined;
+
+  #groundMeasured = false;
+
+  /** Which observer the outstanding measurement is about. */
+  #groundGeneration = 0;
+
   #aim: Aim = { azimuth: 0, pitch: DEFAULT_PITCH, roll: 0 };
 
   #fovy: number = DEFAULT_FOVY;
@@ -271,6 +300,53 @@ export class SkyView {
   look(aim: Partial<Aim>): void {
     this.#aim = { ...this.#aim, ...aim };
     this.#apply();
+  }
+
+  /**
+   * Take the ground under the observer from somewhere other than the globe, or
+   * pass `undefined` to go back to the globe.
+   *
+   * Re-measures immediately, because this is called when the thing being stood on
+   * has changed — a surface model appearing or going away — and the height already
+   * in hand was about the old one.
+   */
+  setGroundHeightSource(source: GroundHeightSource | undefined): void {
+    this.#groundSource = source;
+    this.#measureGround();
+  }
+
+  /**
+   * Ask again what the observer is standing on, because it changed under them — a
+   * terrain swapped, a surface model arriving or going away.
+   */
+  remeasureGround(): void {
+    this.#measureGround();
+  }
+
+  /**
+   * Stand on a height somebody else measured, now.
+   *
+   * For the one case an asynchronous source cannot cover: the terrain under the
+   * observer is being *replaced*, and the height has to change in the same breath as
+   * the ground does. Left to arrive on its own it lands a beat late, and for that
+   * beat the eye is under the new surface — 570 m under it in Munich, switching from
+   * the ellipsoid to World Terrain — which does not read as a lag. It reads as the
+   * world flipping inside out.
+   */
+  setGroundHeight(height: number): void {
+    if (!isPlausibleGroundHeight(height)) {
+      return;
+    }
+    // Counted as a measurement so the per-frame globe reads stay out of it: those
+    // are what turn one honest move into a stagger of them as tiles refine.
+    this.#groundGeneration += 1;
+    this.#groundMeasured = true;
+    if (height !== this.#groundHeight) {
+      this.#groundHeight = height;
+      this.#frame = undefined;
+    }
+    this.#apply();
+    this.#scene.requestRender();
   }
 
   /**
@@ -370,9 +446,49 @@ export class SkyView {
   #setObserver(observer: Observer): void {
     this.#observer = observer;
     Cartographic.fromDegrees(observer.lon, observer.lat, 0, this.#observerCartographic);
-    // A different place has a different ground under it, and a different frame.
-    this.#groundHeight = 0;
+    // A different place has a different ground under it, and a different frame — but
+    // the height it had is kept until the new one is measured, rather than reset to
+    // sea level. Resetting looks harmless and is not: the observer moves while the
+    // view is up (dragging a station, or a geolocation fix arriving), and anywhere
+    // above sea level the eye would spend the measurement underneath the ground.
+    // From under a surface you see its underside, textured with the same imagery,
+    // which does not read as a wrong height. It reads as the world inverted.
     this.#frame = undefined;
+    this.#measureGround();
+  }
+
+  /**
+   * Ask the ground height source about the observer, if there is one.
+   *
+   * The generation is what makes a late answer harmless: the observer can move —
+   * dragging a ground station does exactly that — while a measurement is in
+   * flight, and that answer is about a place the view has left.
+   */
+  #measureGround(): void {
+    const generation = ++this.#groundGeneration;
+    // `#groundMeasured` deliberately survives this. A height measured a moment ago,
+    // even somewhere slightly else, beats what the globe can offer while tiles are
+    // still arriving — which is a coarse approximation, then a better one, then a
+    // better one, each of which would move the camera.
+    const source = this.#groundSource;
+    const observer = this.#observer;
+    if (!source || !observer) {
+      return;
+    }
+    void source(observer).then((height) => {
+      if (generation !== this.#groundGeneration || !isPlausibleGroundHeight(height)) {
+        return;
+      }
+      this.#groundMeasured = true;
+      if (height !== this.#groundHeight) {
+        this.#groundHeight = height;
+        this.#frame = undefined;
+      }
+      // The camera may already be standing at the old height, and nothing else
+      // will come along to move it: a settled sky view renders on demand.
+      this.#apply();
+      this.#scene.requestRender();
+    });
   }
 
   /** Fly the one path, forwards to enter and backwards to leave. */
@@ -486,10 +602,16 @@ export class SkyView {
     // metres out in the mountains. The last believable answer is kept, so an
     // implausible one — which is how a missing tile reports itself — leaves the
     // camera where it was instead of dropping it through the surface.
-    const measured = this.#scene.globe.getHeight(this.#observerCartographic);
-    if (isPlausibleGroundHeight(measured) && measured !== this.#groundHeight) {
-      this.#groundHeight = measured;
-      this.#frame = undefined;
+    //
+    // Skipped once a surface model has answered: that model is what is being
+    // stood on, and the globe underneath it — still loaded and still opinionated
+    // under OSM Buildings — would pull the eye back down to the street every frame.
+    if (!this.#groundMeasured) {
+      const measured = this.#scene.globe.getHeight(this.#observerCartographic);
+      if (isPlausibleGroundHeight(measured) && measured !== this.#groundHeight) {
+        this.#groundHeight = measured;
+        this.#frame = undefined;
+      }
     }
     Cartesian3.fromDegrees(observer.lon, observer.lat, this.#groundHeight + EYE_HEIGHT, undefined, pose.position);
     // Built from where the observer stands, never from `camera.position`, which

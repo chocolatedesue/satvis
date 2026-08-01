@@ -18,7 +18,7 @@ import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import type { CesiumController } from "./CesiumController";
-import { offlineFallback } from "./CesiumLayerProviders";
+import { highresImageryMissing, withoutHighresImagery } from "./CesiumLayerProviders";
 import type { DesiredScene } from "./SatelliteManager";
 import type { Observer } from "./SkyView";
 import { toMinuteIso } from "./util/urlCodec";
@@ -49,11 +49,16 @@ export function startSceneSync(cc: CesiumController): void {
   );
 
   async function correctMissingImagery(): Promise<void> {
-    const swapped = await offlineFallback(cesiumStore.layers);
-    // Reading the store again rather than trusting the stack this was called for:
-    // the user may have picked something else while the probe was in flight, and
-    // that answer is simply about a stack that no longer exists.
+    if (!(await highresImageryMissing())) {
+      return;
+    }
+    // Read *after* waiting, not before. This watcher is immediate, so it first runs
+    // on the store's own default — and by the time a probe answers, the route's
+    // preset has hydrated and the user may have picked something else. Swapping a
+    // stack captured before the await wrote `Offline` over the OT preset's basemap.
+    const swapped = withoutHighresImagery(cesiumStore.layers);
     if (swapped) {
+      console.warn("High-resolution offline imagery is missing, falling back to Offline. Run `git submodule update --init` to fetch data/cesium-assets.");
       cesiumStore.setLayers(swapped);
     }
   }
@@ -62,6 +67,17 @@ export function startSceneSync(cc: CesiumController): void {
     (name) => {
       cc.terrainProvider = name;
     },
+  );
+  // Both arguments, one watcher: what a surface model does depends on the view
+  // mode as much as on the selection, and there is nothing to gain from
+  // discovering which of the two moved. Immediate, because `?surface=` arrives
+  // before anything else would trigger it.
+  watch(
+    () => [cesiumStore.surfaceModel, cesiumStore.sceneMode] as const,
+    ([surfaceModel, viewMode]) => {
+      void cc.applySurfaceModel(surfaceModel, viewMode);
+    },
+    { immediate: true },
   );
   // The view mode is the one setting that cannot be a plain assignment. Three
   // of the four are a Cesium projection, but "Sky" needs an observer, which may

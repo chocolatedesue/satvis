@@ -21,6 +21,9 @@ export interface PresetConfig {
     // open straight into the sky view without the type having to change first,
     // which is the point of a preset supplying defaults.
     sceneMode?: string;
+    // One of SURFACE_MODELS, and unset for the same reason: a route that opens on
+    // the sky view is the one that would want buildings with it.
+    surfaceModel?: string;
   };
 }
 
@@ -66,7 +69,7 @@ export const presets: Record<string, Preset> = {
         overpassMode: "swath",
       },
       cesium: {
-        layers: ["ArcGis"],
+        layers: ["VersaTiles"],
       },
     },
     elements: [
