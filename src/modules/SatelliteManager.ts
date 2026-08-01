@@ -10,6 +10,7 @@ import { SatelliteComponentCollection } from "./SatelliteComponentCollection";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
 import { sameValue } from "./util/equality";
 import type { GpRecord } from "./util/gp";
+import { OrbitBatch } from "./util/OrbitBatch";
 
 /**
  * Everything the globe should be showing. The manager holds no opinion of its
@@ -51,6 +52,13 @@ export class SatelliteManager {
 
   readonly catalog = new SatelliteCatalog();
 
+  /**
+   * The shared primitive every untracked orbit is drawn into. Owned here because
+   * this is what owns the collections that feed it; it used to be four statics on
+   * their base class.
+   */
+  readonly orbits: OrbitBatch;
+
   // Live collections keyed by catalog entry key. Satellites are instantiated
   // lazily: only entries in the current activation target (see #reconcileActive)
   // have a collection here; everything else stays a plain catalog entry.
@@ -62,6 +70,7 @@ export class SatelliteManager {
 
   constructor(viewer: Viewer) {
     this.viewer = viewer;
+    this.orbits = new OrbitBatch(viewer);
 
     // Tracking is the one genuinely two-way value: the user can also start it
     // by clicking a satellite on the globe. Report it rather than reaching for
@@ -270,7 +279,7 @@ export class SatelliteManager {
       if (this.#active.has(key)) {
         continue;
       }
-      const sat = new SatelliteComponentCollection(this.viewer, entry);
+      const sat = new SatelliteComponentCollection(this.viewer, entry, this.orbits);
       if (this.groundStationAvailable) {
         sat.groundStations = this.#stations;
       }
@@ -395,9 +404,5 @@ export class SatelliteManager {
 
   get overpassMode(): string {
     return this.#desired.overpassMode;
-  }
-
-  get pendingUpdate(): boolean {
-    return SatelliteComponentCollection.primitivePendingUpdate;
   }
 }

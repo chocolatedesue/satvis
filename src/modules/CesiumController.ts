@@ -476,15 +476,12 @@ export class CesiumController {
       };
       this.viewer.scene.morphComplete.addEventListener(enableOrbits);
 
-      // wait until orbit elements are removed
-      const checkPending = (): void => {
-        if (!this.sats.pendingUpdate) {
-          morph();
-        } else {
-          requestAnimationFrame(checkPending);
-        }
-      };
-      checkPending();
+      // Suppressing Orbit drops every geometry from the shared batch, and the
+      // batch rebuilds asynchronously — morphing before it has caught up would
+      // rebuild it into the projection being left behind. One await, where this
+      // used to poll a static flag re-exported from the collections' base class
+      // through a requestAnimationFrame loop.
+      void this.sats.orbits.settled().then(morph);
     } else {
       morph();
     }

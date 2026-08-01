@@ -1,6 +1,5 @@
 import {
   ArcType,
-  BoxGraphics,
   CallbackProperty,
   Cartesian2,
   Cartesian3,
@@ -10,7 +9,9 @@ import {
   CorridorGraphics,
   DistanceDisplayCondition,
   Entity,
+  EntityView,
   GeometryInstance,
+  HeadingPitchRange,
   HeadingPitchRoll,
   HeightReference,
   HorizontalOrigin,
@@ -18,7 +19,6 @@ import {
   LabelGraphics,
   LabelStyle,
   Math as CesiumMath,
-  Matrix4,
   ModelGraphics,
   NearFarScalar,
   PathGraphics,
@@ -27,40 +27,164 @@ import {
   PolylineGeometry,
   PolylineGlowMaterialProperty,
   PolylineGraphics,
-  Primitive,
   SceneMode,
   Transforms,
   VelocityOrientationProperty,
-  defined,
 } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 import CesiumSensorVolumes from "cesium-sensor-volumes";
 
+import { SATELLITE_COMPONENTS } from "../config/components";
 import type { GroundStation } from "./PassPredictor";
 import type { CatalogEntry } from "./SatelliteCatalog";
 import { coneDescription, groundTrackDescription, modelUri, orbitPathTimes, orbitTrackTimes, orbitUsesPathGraphic } from "./satelliteGraphics";
 import { SatelliteProperties } from "./SatelliteProperties";
-import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
-import { CesiumComponentCollection } from "./util/CesiumComponentCollection";
 import { CesiumTimelineHelper } from "./util/CesiumTimelineHelper";
+import type { OrbitBatch } from "./util/OrbitBatch";
 
 type SatelliteComponentName = string;
 
-export class SatelliteComponentCollection extends CesiumComponentCollection {
-  props: SatelliteProperties;
+/**
+ * The link drawn to a ground station during a pass. Not in SATELLITE_COMPONENTS
+ * and not switchable: the ground-station setter makes it when there is a station
+ * to draw to, so it is a component this class creates for itself.
+ */
+const GROUND_STATION_LINK = "Ground station link";
+
+/**
+ * How each component is made. Keyed against the config list rather than written
+ * out as a switch, so adding a component there without a creator here is a
+ * compile error instead of a "Unknown component" at runtime.
+ */
+const CREATORS: Record<(typeof SATELLITE_COMPONENTS)[number] | typeof GROUND_STATION_LINK, (sat: SatelliteComponentCollection) => void> = {
+  Point: (sat) => sat.createPoint(),
+  Label: (sat) => sat.createLabel(),
+  Orbit: (sat) => sat.createOrbit(),
+  "Orbit track": (sat) => sat.createOrbitTrack(),
+  "Ground track": (sat) => sat.createGroundTrack(),
+  "Sensor cone": (sat) => sat.createCone(),
+  "3D model": (sat) => sat.createModel(),
+  [GROUND_STATION_LINK]: (sat) => sat.createGroundStationLink(),
+};
+
+/**
+ * An Entity when the component is drawn on its own, a GeometryInstance when it is
+ * merged into the shared orbit batch. Never a Primitive: the one creator that made
+ * one was dead code, and the branch checking for it could never be true.
+ */
+type Component = Entity | GeometryInstance;
+
+/** One satellite's Cesium objects, created on demand and dropped on disable. */
+export class SatelliteComponentCollection {
+  readonly viewer: Viewer;
+
+  readonly props: SatelliteProperties;
+
+  /**
+   * The batch every untracked orbit is drawn into. Passed in rather than reached
+   * for: it is shared by every satellite, and one owner beats a static.
+   */
+  readonly #orbits: OrbitBatch;
+
+  #components: Record<string, Component> = {};
+
+  /** What a click or a track acts on — the first Entity to be created. */
+  defaultEntity: Entity | undefined;
 
   eventListeners: Record<string, () => void> = {};
 
-  orbitPrimitiveUpdater: (() => void) | undefined;
-
-  static geometryPrimitiveUpdater: (() => void) | undefined;
-
-  constructor(viewer: Viewer, entry: CatalogEntry) {
-    super(viewer);
+  constructor(viewer: Viewer, entry: CatalogEntry, orbits: OrbitBatch) {
+    this.viewer = viewer;
     this.props = new SatelliteProperties(entry);
+    this.#orbits = orbits;
   }
 
-  override enableComponent(name: SatelliteComponentName): void {
+  get components(): Record<string, Component> {
+    return this.#components;
+  }
+
+  get componentNames(): string[] {
+    return Object.keys(this.#components);
+  }
+
+  get created(): boolean {
+    return this.componentNames.length > 0;
+  }
+
+  get isSelected(): boolean {
+    return Object.values(this.#components).some((component) => this.viewer.selectedEntity === component);
+  }
+
+  get isTracked(): boolean {
+    return Object.values(this.#components).some((component) => this.viewer.trackedEntity === component);
+  }
+
+  show(componentNames: string[] = this.componentNames): void {
+    componentNames.forEach((name) => this.enableComponent(name));
+  }
+
+  hide(componentNames: string[] = this.componentNames): void {
+    componentNames.forEach((name) => this.disableComponent(name));
+  }
+
+  track(animate = false): void {
+    if (!this.defaultEntity) {
+      return;
+    }
+    if (!animate) {
+      this.viewer.trackedEntity = this.defaultEntity;
+      return;
+    }
+
+    this.viewer.trackedEntity = undefined;
+    const clockRunning = this.viewer.clock.shouldAnimate;
+    this.viewer.clock.shouldAnimate = false;
+    void this.viewer.flyTo(this.defaultEntity, { offset: new HeadingPitchRange(0, -CesiumMath.PI_OVER_FOUR, 1580000) }).then((result: boolean) => {
+      if (result) {
+        this.viewer.trackedEntity = this.defaultEntity;
+        this.viewer.clock.shouldAnimate = clockRunning;
+      }
+    });
+  }
+
+  /**
+   * Drive the camera from the entity's own position while it is tracked, and put
+   * it back to a sensible angle when tracking stops.
+   */
+  artificiallyTrack(): void {
+    const entity = this.defaultEntity;
+    if (!entity) {
+      return;
+    }
+    const cameraTracker = new EntityView(entity, this.viewer.scene, this.viewer.scene.globe.ellipsoid);
+    const removeTick = this.viewer.clock.onTick.addEventListener((clock) => {
+      cameraTracker.update(clock.currentTime);
+    });
+    const removeTracked = this.viewer.trackedEntityChanged.addEventListener(() => {
+      removeTick();
+      removeTracked();
+      if (typeof this.viewer.trackedEntity === "undefined") {
+        void this.viewer.flyTo(entity, { offset: new HeadingPitchRange(0, CesiumMath.toRadians(-90.0), 2000000) });
+      }
+    });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  createCesiumEntity(componentName: string, entityKey: string, entityValue: any, name: string, position: any, moving: boolean): void {
+    const entity = new Entity({
+      name,
+      position,
+      viewFrom: new Cartesian3(0, -3600000, 4200000),
+    });
+    if (moving) {
+      entity.orientation = new VelocityOrientationProperty(position);
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (entity as any)[entityKey] = entityValue;
+    this.#components[componentName] = entity;
+  }
+
+  enableComponent(name: SatelliteComponentName): void {
     if (!this.created) {
       this.init();
     }
@@ -68,81 +192,58 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       console.error(`No valid position data available for ${this.props.name}`);
       return;
     }
-    if (!(name in this.components)) {
+    if (!(name in this.#components)) {
       this.createComponent(name);
       this.updatedSampledPositionForComponents();
     }
 
-    super.enableComponent(name);
+    const component = this.#components[name];
+    if (component instanceof Entity) {
+      if (!this.viewer.entities.contains(component)) {
+        this.viewer.entities.add(component);
+      }
+      this.defaultEntity ??= component;
+    } else if (component instanceof GeometryInstance) {
+      this.#orbits.add(component);
+    }
 
     if (name === "3D model") {
       // Adjust label offset to avoid overlap with model
-      const labelEntity = this.components.Label as Entity | undefined;
-      if (labelEntity?.label) {
-        labelEntity.label.pixelOffset = new Cartesian2(20, 0) as unknown as typeof labelEntity.label.pixelOffset;
-      }
-    } else if (name === "Orbit" && this.components[name] instanceof Primitive) {
-      // Update the model matrix periodically to keep the orbit in the inertial frame
-      if (!this.orbitPrimitiveUpdater) {
-        this.orbitPrimitiveUpdater = CesiumCallbackHelper.createPeriodicTimeCallback(this.viewer, 0.5, (time) => {
-          if (!this.components.Orbit) {
-            // Remove callback if orbit is disabled
-            this.orbitPrimitiveUpdater?.();
-            return;
-          }
-          const orbit = this.components.Orbit as Primitive;
-          if (this.viewer.scene.mode !== SceneMode.SCENE3D) {
-            // modelMatrix (inertial frame) is only supported in 3D; reset to identity so the
-            // primitive renders in 2D/Columbus instead of throwing inside Cesium's render loop.
-            orbit.modelMatrix = Matrix4.IDENTITY;
-            return;
-          }
-          const icrfToFixed = Transforms.computeIcrfToFixedMatrix(time);
-          if (defined(icrfToFixed)) {
-            orbit.modelMatrix = Matrix4.fromRotationTranslation(icrfToFixed);
-          }
-        });
-      }
-    } else if (name === "Orbit" && this.components[name] instanceof GeometryInstance) {
-      // Update the model matrix of the primitive containing all orbit geometries periodically to keep the orbit in the inertial frame
-      const ctor = this.constructor as typeof SatelliteComponentCollection;
-      if (!ctor.geometryPrimitiveUpdater) {
-        if (!this.components.Orbit) {
-          // Note: original code referenced an undefined geometryPrimitiveUpdater() here; preserve as no-op
-          return;
-        }
-        ctor.geometryPrimitiveUpdater = CesiumCallbackHelper.createPeriodicTimeCallback(this.viewer, 0.5, (time) => {
-          if (!ctor.primitive) {
-            return;
-          }
-          if (this.viewer.scene.mode !== SceneMode.SCENE3D) {
-            // modelMatrix (inertial frame) is only supported in 3D; reset to identity so the
-            // primitive renders in 2D/Columbus instead of throwing inside Cesium's render loop.
-            ctor.primitive.modelMatrix = Matrix4.IDENTITY;
-            return;
-          }
-          const icrfToFixed = Transforms.computeIcrfToFixedMatrix(time);
-          if (defined(icrfToFixed)) {
-            ctor.primitive.modelMatrix = Matrix4.fromRotationTranslation(icrfToFixed);
-          }
-        });
-      }
+      this.#setLabelOffset(20);
     }
   }
 
-  override disableComponent(name: SatelliteComponentName): void {
+  disableComponent(name: SatelliteComponentName): void {
     if (name === "3D model") {
       // Restore old label offset
-      const labelEntity = this.components.Label as Entity | undefined;
-      if (labelEntity?.label) {
-        labelEntity.label.pixelOffset = new Cartesian2(10, 0) as unknown as typeof labelEntity.label.pixelOffset;
-      }
+      this.#setLabelOffset(10);
     }
-    super.disableComponent(name);
+
+    const component = this.#components[name];
+    if (component instanceof Entity) {
+      this.viewer.entities.remove(component);
+    } else if (component instanceof GeometryInstance) {
+      this.#orbits.remove(component);
+    }
+    delete this.#components[name];
+
+    if (this.defaultEntity === component) {
+      // Hand the role to whatever is still drawn. It used to be kept pointing at
+      // the removed entity, so a click target and the camera's tracked entity
+      // could both outlive what they referred to.
+      this.defaultEntity = Object.values(this.#components).find((remaining) => remaining instanceof Entity);
+    }
 
     if (this.componentNames.length === 0) {
       // Remove event listeners when no components are enabled
       this.deinit();
+    }
+  }
+
+  #setLabelOffset(x: number): void {
+    const labelEntity = this.#components.Label as Entity | undefined;
+    if (labelEntity?.label) {
+      labelEntity.label.pixelOffset = new Cartesian2(x, 0) as unknown as typeof labelEntity.label.pixelOffset;
     }
   }
 
@@ -205,8 +306,8 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       if (type === "Orbit") {
         if (component instanceof Entity) {
           component.position = inertial;
-        } else if (update && (component instanceof Primitive || component instanceof GeometryInstance)) {
-          // Primitives need to be recreated to update the geometry
+        } else if (update && component instanceof GeometryInstance) {
+          // A geometry cannot be edited in place; it has to be rebuilt
           this.disableComponent("Orbit");
           this.enableComponent("Orbit");
         }
@@ -234,34 +335,15 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
   }
 
   createComponent(name: SatelliteComponentName): void {
-    switch (name) {
-      case "Point":
-        this.createPoint();
-        break;
-      case "Label":
-        this.createLabel();
-        break;
-      case "Orbit":
-        this.createOrbit();
-        break;
-      case "Orbit track":
-        this.createOrbitTrack();
-        break;
-      case "Ground track":
-        this.createGroundTrack();
-        break;
-      case "Sensor cone":
-        this.createCone();
-        break;
-      case "3D model":
-        this.createModel();
-        break;
-      case "Ground station link":
-        this.createGroundStationLink();
-        break;
-      default:
-        console.error("Unknown component");
+    // A plain string, because that is what the store and the url carry. The
+    // table's own type is the const union, so a component added to the config
+    // without a creator here is still a compile error.
+    const create = (CREATORS as Record<string, ((sat: SatelliteComponentCollection) => void) | undefined>)[name];
+    if (!create) {
+      console.error(`Unknown component ${name}`);
+      return;
     }
+    create(this);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -277,15 +359,6 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
       outlineWidth: 1,
     });
     this.createCesiumSatelliteEntity("Point", "point", point);
-  }
-
-  createBox(): void {
-    const size = 1000;
-    const box = new BoxGraphics({
-      dimensions: new Cartesian3(size, size, size),
-      material: Color.WHITE,
-    });
-    this.createCesiumSatelliteEntity("Box", "box", box);
   }
 
   createModel(): void {
@@ -320,8 +393,17 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
     }
   }
 
+  /**
+   * Whether the Orbit component matches how it should currently be drawn.
+   *
+   * The non-path branch used to be checked against `Primitive`, which is what
+   * the never-called `createOrbitPolylinePrimitive` would have stored —
+   * `createOrbitPolylineGeometry` stores a GeometryInstance, so the check was
+   * permanently false and every track change tore down and rebuilt the orbit of
+   * every untracked satellite in 3D, each rebuild costing a full batch rebuild.
+   */
   isCorrectOrbitComponent(): boolean {
-    return this.usePathGraphicForOrbit ? this.components.Orbit instanceof Entity : this.components.Orbit instanceof Primitive;
+    return this.usePathGraphicForOrbit ? this.components.Orbit instanceof Entity : this.components.Orbit instanceof GeometryInstance;
   }
 
   get usePathGraphicForOrbit(): boolean {
@@ -338,37 +420,8 @@ export class SatelliteComponentCollection extends CesiumComponentCollection {
     this.createCesiumEntity("Orbit", "path", path, this.props.name, this.props.trajectory.inertial, true);
   }
 
-  createOrbitPolylinePrimitive(): void {
-    const primitive = new Primitive({
-      geometryInstances: new GeometryInstance({
-        geometry: new PolylineGeometry({
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          positions: this.props.trajectory.positionsForNextOrbit(this.viewer.clock.currentTime) as any,
-          width: 2,
-          arcType: ArcType.NONE,
-          vertexFormat: PolylineColorAppearance.VERTEX_FORMAT,
-        }),
-        attributes: {
-          color: ColorGeometryInstanceAttribute.fromColor(new Color(1.0, 1.0, 1.0, 0.15)),
-        },
-        id: this.props.name,
-      }),
-      appearance: new PolylineColorAppearance(),
-      asynchronous: false,
-    });
-    if (this.viewer.scene.mode === SceneMode.SCENE3D) {
-      // modelMatrix (inertial frame) is only supported in 3D; leave the default identity
-      // matrix in 2D/Columbus. The periodic updater applies the rotation once back in 3D.
-      const icrfToFixed = Transforms.computeIcrfToFixedMatrix(this.viewer.clock.currentTime);
-      if (defined(icrfToFixed)) {
-        primitive.modelMatrix = Matrix4.fromRotationTranslation(icrfToFixed);
-      }
-    }
-    this.components.Orbit = primitive;
-  }
-
+  /** The orbit as a geometry for the shared batch — how every untracked orbit is drawn in 3D. */
   createOrbitPolylineGeometry(): void {
-    // Currently unused
     const geometryInstance = new GeometryInstance({
       geometry: new PolylineGeometry({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

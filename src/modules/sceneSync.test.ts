@@ -101,9 +101,13 @@ function fakeTarget() {
   return { target, calls };
 }
 
-/** Two ticks: the watcher runs on one, the awaited view-mode work on the next. */
+/**
+ * Drain the microtask queue. Sequential on purpose: the view-mode path is a
+ * chain of awaits, and each tick can only release the next one.
+ */
 async function settle(): Promise<void> {
   for (let i = 0; i < 6; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
     await nextTick();
   }
 }
