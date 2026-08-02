@@ -141,11 +141,16 @@
              happened, and is noise against a model nobody asked for. -->
         <div v-if="surfaceUnavailable" class="toolbarNote">{{ surfaceUnavailable }}</div>
         <!-- Last, because it is the only group here that is about what is *behind*
-             the globe rather than on it. Both options draw the same star field at
-             different resolutions — see src/config/starMaps.ts for what the
-             higher one costs. -->
+             the globe rather than on it. See src/config/starMaps.ts for what each
+             one is and what it costs.
+
+             Narrowed to the maps actually on the server, the same way the pixel
+             ratio ladder is narrowed to the rungs below this display: two of the
+             three are optional assets, and a radio that selects a sky nobody can
+             load is worse than one that is absent. The url vocabulary is not
+             narrowed with it — `?stars=` still accepts all three. -->
         <div class="toolbarTitle">Star map</div>
-        <label v-for="name in STAR_MAPS" :key="name" class="toolbarSwitch">
+        <label v-for="name in starMapOptions" :key="name" class="toolbarSwitch">
           <input v-model="starMap" type="radio" :value="name" />
           <span class="slider"></span>
           {{ name }}
@@ -303,7 +308,7 @@ import { useGeolocation } from "../composables/useGeolocation";
 import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
 import { layerProvider } from "../config/layers";
 import { MSAA_RATES, pixelRatiosFor } from "../config/rendering";
-import { STAR_MAPS } from "../config/starMaps";
+import { availableStarMaps, type StarMapName } from "../config/starMaps";
 import { type MapGroup, SURFACE_MODELS, type SurfaceModelName, surfaceEffects, viewModeNote } from "../config/surfaceModels";
 import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
@@ -335,6 +340,15 @@ const showUI = ref(true);
 
 const cesiumStore = useCesiumStore();
 const { layers, terrainProvider, surfaceModel, starMap, sceneMode, cameraMode, pixelRatio, msaa, showFps, showBenchmark, requestRenderMode, pickMode } = storeToRefs(cesiumStore);
+
+// Which star maps the Map menu offers. Starts at the one that cannot be missing
+// so the group is never empty, and widens once the probes answer — a couple of
+// HEAD requests, resolved once per page rather than per menu open, so the list
+// is settled long before anyone opens the panel.
+const starMapOptions = ref<StarMapName[]>(["Tycho1K"]);
+void availableStarMaps().then((names) => {
+  starMapOptions.value = names;
+});
 
 // This display's own ratio: it names the `native` option and decides which of
 // the fixed rungs are below it and so worth offering at all.
