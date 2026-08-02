@@ -74,15 +74,40 @@ export function currentDevicePixelRatio(): number {
  * trade sharpness for fill rate.
  *
  * This replaced a `low`/`high` switch that could only choose between 1 and the
- * display's ratio. Two reasons for the ladder: the cost is quadratic in this
- * number — on a DPR-2 display an empty globe is 29.6 ms at native and 9.8 ms at
- * 1, so the interesting settings are all in between — and the endpoints answer
- * the wrong question on a phone, where `native` is 3 and the fallback is a
- * quarter-resolution blur.
+ * display's ratio, and the middle is where the useful settings turned out to be:
+ * on a ratio-2 display an empty globe costs 29.6 ms at native and 9.8 ms at 1,
+ * linear in megapixels at 3.10 ms/Mpx between them.
+ *
+ * The top rung is `native` rather than a literal `2` on purpose. An absolute cap
+ * would mean a ratio-3 phone could never draw at its own resolution, and label
+ * text — the thing that actually degrades when this is lowered — is the fidelity
+ * floor here. So the ladder reads 1x / 1.5x / 2x on a ratio-2 display and
+ * 1x / 1.5x / 3x on a ratio-3 one, and `1` stays reachable everywhere, which
+ * matters most on exactly the weak high-density devices that need it. The cost
+ * is a wide 1.5→3 gap on such a device; a `2` rung would close it, and belongs
+ * here once there is a ratio-3 device to measure rather than guess on.
  */
-export const PIXEL_RATIOS = ["1", "1.25", "1.5", "1.75", "native"] as const;
+export const PIXEL_RATIOS = ["1", "1.5", "native"] as const;
 
 export type PixelRatio = (typeof PIXEL_RATIOS)[number];
+
+/**
+ * The rungs worth showing on a display of this density: the fixed ones strictly
+ * below it, then `native`.
+ *
+ * Without the filter the ladder stops being a ladder at low densities. On a
+ * ratio-1 display `1` and `native` are the same setting listed twice — both read
+ * "1.0x" — and `1.5` sits *above* native while appearing below it, because
+ * asking for more pixels than the display has is supersampling rather than a
+ * saving. This menu exists to spend less, so a rung that spends more does not
+ * belong on it, and a ratio-1 display correctly ends up with nothing to choose.
+ *
+ * The vocabulary is not narrowed with it: `?pixelratio=1.5` still supersamples
+ * on a ratio-1 display for anyone who asks in so many words.
+ */
+export function pixelRatiosFor(devicePixelRatio: number): readonly PixelRatio[] {
+  return PIXEL_RATIOS.filter((ratio) => ratio === "native" || Number(ratio) < devicePixelRatio);
+}
 
 /**
  * What to set `viewer.resolutionScale` to for a chosen ratio.

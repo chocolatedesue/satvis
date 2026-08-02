@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { MSAA_RATES, PIXEL_RATIOS, currentDevicePixelRatio, defaultMsaaRate, msaaSamplesFor, resolutionScaleFor } from "./rendering";
+import { MSAA_RATES, PIXEL_RATIOS, currentDevicePixelRatio, defaultMsaaRate, msaaSamplesFor, pixelRatiosFor, resolutionScaleFor } from "./rendering";
 
 describe("msaaSamplesFor", () => {
   test("off is one sample, which is how Cesium spells it", () => {
@@ -48,6 +48,50 @@ describe("resolutionScaleFor", () => {
       const scale = resolutionScaleFor(ratio, 2);
       expect(Number.isFinite(scale)).toBe(true);
       expect(scale).toBeGreaterThan(0);
+    }
+  });
+
+  // The reason the top rung is `native` and not a literal 2: on a phone the
+  // ladder has to keep reaching both ends, the display's own resolution and the
+  // cheapest one.
+  test("the ladder spans 1x to the display's own at every density", () => {
+    for (const dpr of [1, 2, 3]) {
+      const absolute = PIXEL_RATIOS.map((ratio) => resolutionScaleFor(ratio, dpr) * dpr);
+      expect(absolute.at(0)).toBe(1);
+      expect(absolute.at(-1)).toBe(dpr);
+    }
+  });
+});
+
+describe("pixelRatiosFor", () => {
+  test("a ratio-2 display gets the three rungs the menu was designed around", () => {
+    expect(pixelRatiosFor(2)).toEqual(["1", "1.5", "native"]);
+  });
+
+  test("a ratio-3 display gets the same three, with native meaning 3x", () => {
+    expect(pixelRatiosFor(3)).toEqual(["1", "1.5", "native"]);
+    expect(resolutionScaleFor("native", 3) * 3).toBe(3);
+  });
+
+  test("a ratio-1 display has nothing to trade, so only native is offered", () => {
+    expect(pixelRatiosFor(1)).toEqual(["native"]);
+  });
+
+  test("a fractional display keeps only the rungs below it", () => {
+    expect(pixelRatiosFor(1.5)).toEqual(["1", "native"]);
+  });
+
+  test("native is always offered and always last", () => {
+    for (const dpr of [1, 1.5, 2, 2.625, 3]) {
+      expect(pixelRatiosFor(dpr).at(-1)).toBe("native");
+    }
+  });
+
+  test("no rung ever asks for more pixels than the display has", () => {
+    for (const dpr of [1, 1.5, 2, 3]) {
+      for (const ratio of pixelRatiosFor(dpr)) {
+        expect(resolutionScaleFor(ratio, dpr) * dpr).toBeLessThanOrEqual(dpr);
+      }
     }
   });
 });

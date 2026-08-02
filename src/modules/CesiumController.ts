@@ -482,27 +482,6 @@ export class CesiumController {
     }
   }
 
-  jumpTo(location: string): void {
-    switch (location) {
-      case "Everest": {
-        const target = new Cartesian3(300770.50872389384, 5634912.131394585, 2978152.2865545116);
-        const offset = new Cartesian3(6344.974098678562, -793.3419798081741, 2499.9508860763162);
-        this.viewer.camera.lookAt(target, offset);
-        this.viewer.camera.lookAtTransform(Matrix4.IDENTITY);
-        break;
-      }
-      case "HalfDome": {
-        const target = new Cartesian3(-2489625.0836225147, -4393941.44443024, 3882535.9454173897);
-        const offset = new Cartesian3(-6857.40902037546, 412.3284835694358, 2147.5545426812023);
-        this.viewer.camera.lookAt(target, offset);
-        this.viewer.camera.lookAtTransform(Matrix4.IDENTITY);
-        break;
-      }
-      default:
-        console.error("Unknown location");
-    }
-  }
-
   set cameraMode(cameraMode: string) {
     if (cameraMode !== "Inertial" && cameraMode !== "Fixed") {
       console.error("Unknown camera mode");
@@ -669,8 +648,10 @@ export class CesiumController {
    * it. Leaving the flag alone and driving one number keeps the two from
    * disagreeing — the same picture used to be reachable two ways.
    *
-   * Resizing the canvas draws by itself, so unlike `msaa` this needs no explicit
-   * render.
+   * No explicit render, unlike `msaa`. Both setters only raise Cesium's
+   * `_forceResize` flag, but `CesiumWidget.resize` runs on every animation frame
+   * ahead of `render` whatever render-on-demand is doing, and asks for a frame
+   * itself once it has reconfigured the canvas.
    */
   set pixelRatio(ratio: string) {
     if (!(PIXEL_RATIOS as readonly string[]).includes(ratio)) {

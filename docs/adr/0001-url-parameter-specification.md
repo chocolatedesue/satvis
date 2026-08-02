@@ -44,7 +44,7 @@ Every parameter is optional. An absent parameter means "use the default" (see
 | `surface`    | `cesium.surfaceModel`    | enum                | `None` \| `OsmBuildings` \| `GooglePhotorealistic`                                                                | `None`           |
 | `scene`      | `cesium.sceneMode`       | enum                | `3D` \| `2D` \| `Columbus` \| `Sky`                                                                               | `3D`             |
 | `camera`     | `cesium.cameraMode`      | enum                | `Fixed` \| `Inertial`                                                                                             | `Fixed`          |
-| `pixelratio` | `cesium.pixelRatio`      | enum                | `1` \| `1.25` \| `1.5` \| `1.75` \| `native`                                                                      | `native`         |
+| `pixelratio` | `cesium.pixelRatio`      | enum                | `1` \| `1.5` \| `native`                                                                                          | `native`         |
 | `msaa`       | `cesium.msaa`            | enum                | `off` \| `2` \| `4`                                                                                               | per display[^1]  |
 | `fps`        | `cesium.showFps`         | boolean             | `true` \| `false`                                                                                                 | `false`          |
 | `bench`      | `cesium.showBenchmark`   | boolean             | `true` \| `false`                                                                                                 | `false`          |
