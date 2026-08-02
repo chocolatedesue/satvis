@@ -4,17 +4,18 @@ import { CesiumCleanupHelper, collectLabelCollections } from "./CesiumCleanupHel
 
 // A stand-in for Cesium's BillboardCollection: remove() takes a billboard out and
 // destroys it, which is why the pool must be emptied alongside.
+//
+// A Set rather than an array, because the real `remove` is indexed off the
+// billboard (`_index`) rather than a scan — and because a linear one made this
+// file quadratic at the 68,000 billboards the regression actually produced.
 const billboardCollection = (count: number) => {
-  const billboards = Array.from({ length: count }, (_, index) => ({ id: index }));
+  const held = new Set(Array.from({ length: count }, (_, index) => ({ id: index })));
   return {
-    billboards,
+    get billboards(): { id: number }[] {
+      return [...held];
+    },
     remove(billboard: unknown): boolean {
-      const index = billboards.indexOf(billboard as { id: number });
-      if (index === -1) {
-        return false;
-      }
-      billboards.splice(index, 1);
-      return true;
+      return held.delete(billboard as { id: number });
     },
   };
 };
