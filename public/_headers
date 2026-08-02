@@ -1,4 +1,7 @@
-/index.html
+/
+  Cache-Control: no-cache
+
+/ot
   Cache-Control: no-cache
 
 /sw.js
@@ -9,3 +12,9 @@
 
 /data/models/*
   Access-Control-Allow-Origin: *
+
+/test
+  X-Robots-Tag: noindex
+
+/embedded
+  X-Robots-Tag: noindex

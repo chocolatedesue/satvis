@@ -36,7 +36,7 @@ export interface Preset {
 
 export const presets: Record<string, Preset> = {
   default: {
-    title: "Satellite Orbit Visualization",
+    title: "Satvis - 3D Satellite Tracker & Sky View",
     config: {
       sat: {
         enabledTags: ["Weather"],
@@ -61,7 +61,7 @@ export const presets: Record<string, Preset> = {
     ],
   },
   ot: {
-    title: "OT Satellite Orbit Visualization",
+    title: "OT Satvis - 3D Satellite Tracker & Sky View",
     config: {
       sat: {
         enabledTags: ["OT"],
