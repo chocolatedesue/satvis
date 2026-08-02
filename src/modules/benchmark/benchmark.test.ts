@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { buildPlan, CUMULATIVE_COMPONENT_SETS, formatSeries, ISOLATED_COMPONENT_SETS, type BenchmarkStep } from "./benchmarkPlan";
 import type { BenchmarkResult, BenchmarkRun, SceneApplied } from "./benchmarkRunner";
 import { FrameSampler, JANK_MS, seriesStats } from "./frameSampler";
-import { marginalCosts, propagationCosts, repeatChecks, scalingFits, thinRows, toCsv } from "./report";
+import { gpuTimerTrustworthy, marginalCosts, propagationCosts, repeatChecks, reportRows, scalingFits, thinRows, toCsv } from "./report";
 
 // A result carrying only what the report reads. `cpuMs` is the figure every
 // derived table differences, so it is the one the fixtures set deliberately.
@@ -12,6 +12,8 @@ function result(options: {
   components: string[];
   clock?: number;
   cpuMs: number;
+  gpuMs?: number;
+  wallMs?: number;
   repeat?: boolean;
   buildMs?: number;
   visible?: number;
@@ -48,8 +50,9 @@ function result(options: {
       frames,
       elapsedMs: frames * 10,
       fps: 100,
-      wall: seriesStats([10]),
+      wall: seriesStats([options.wallMs ?? 10]),
       cpu: seriesStats([options.cpuMs]),
+      gpu: options.gpuMs === undefined ? undefined : seriesStats([options.gpuMs]),
       jankFrames: 0,
       jankRatio: 0,
     },
@@ -297,6 +300,69 @@ describe("repeatChecks", () => {
 
   test("a run without a repeat step reports nothing", () => {
     expect(repeatChecks(run([result({ sats: 100, components: ["Point"], cpuMs: 10 })]))).toEqual([]);
+  });
+});
+
+describe("gpu timing", () => {
+  test("a plausible GPU time is reported", () => {
+    const rows = reportRows(run([result({ sats: 0, components: ["Point"], cpuMs: 1, gpuMs: 9, wallMs: 14 })]));
+    expect(rows[0]?.gpuMs).toBe(9);
+  });
+
+  test("a GPU-bound scene, where gpu approaches the frame interval, is still believed", () => {
+    const rows = reportRows(run([result({ sats: 0, components: ["Point"], cpuMs: 1, gpuMs: 13.5, wallMs: 14 })]));
+    expect(rows[0]?.gpuMs).toBe(13.5);
+  });
+
+  test("a timer claiming more GPU than the frame it presented in is withheld", () => {
+    // The ANGLE/Metal case: 49 ms of "GPU" against frames arriving every 14 ms.
+    // A frame that presented cannot have cost that, so the column goes blank
+    // rather than print it.
+    const bad = run([result({ sats: 0, components: ["Point"], cpuMs: 1, gpuMs: 49, wallMs: 14 })]);
+    expect(gpuTimerTrustworthy(bad)).toBe(false);
+    expect(reportRows(bad)[0]?.gpuMs).toBe("");
+  });
+
+  test("one odd step does not discredit a run, a majority does", () => {
+    const mostlyFine = run([
+      result({ sats: 0, components: ["Point"], cpuMs: 1, gpuMs: 9, wallMs: 14 }),
+      result({ sats: 1, components: ["Point"], cpuMs: 1, gpuMs: 9, wallMs: 14 }),
+      result({ sats: 2, components: ["Point"], cpuMs: 1, gpuMs: 60, wallMs: 14 }),
+    ]);
+    expect(gpuTimerTrustworthy(mostlyFine)).toBe(true);
+
+    const mostlyBad = run([
+      result({ sats: 0, components: ["Point"], cpuMs: 1, gpuMs: 60, wallMs: 14 }),
+      result({ sats: 1, components: ["Point"], cpuMs: 1, gpuMs: 60, wallMs: 14 }),
+      result({ sats: 2, components: ["Point"], cpuMs: 1, gpuMs: 9, wallMs: 14 }),
+    ]);
+    expect(gpuTimerTrustworthy(mostlyBad)).toBe(false);
+  });
+
+  test("no GPU samples at all is blank, not zero", () => {
+    const none = run([result({ sats: 0, components: ["Point"], cpuMs: 1 })]);
+    expect(gpuTimerTrustworthy(none)).toBe(false);
+    expect(reportRows(none)[0]?.gpuMs).toBe("");
+  });
+
+  test("the sampler keeps GPU timings as their own population", () => {
+    const sampler = new FrameSampler();
+    sampler.push(0);
+    sampler.push(10, 1);
+    sampler.push(20, 1);
+    // Two frames, one GPU result — they arrive out of step and are not paired.
+    sampler.pushGpu(8);
+    const snap = sampler.snapshot();
+    expect(snap.frames).toBe(2);
+    expect(snap.gpu?.count).toBe(1);
+    expect(snap.gpu?.mean).toBe(8);
+  });
+
+  test("reset clears GPU timings with everything else", () => {
+    const sampler = new FrameSampler();
+    sampler.pushGpu(8);
+    sampler.reset();
+    expect(sampler.snapshot().gpu).toBeUndefined();
   });
 });
 

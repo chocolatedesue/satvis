@@ -45,6 +45,12 @@
         <span
           >cpu <b>{{ live.cpuMs.toFixed(2) }}</b> ms</span
         >
+        <template v-if="live.gpuMs !== undefined">
+          <span class="bench__sep">·</span>
+          <span
+            >gpu <b>{{ live.gpuMs.toFixed(2) }}</b> ms</span
+          >
+        </template>
       </div>
       <div class="bench__row bench__dim">
         p95 {{ live.p95Ms.toFixed(2) }} · worst {{ live.worstMs.toFixed(2) }} · jank {{ live.jankPct.toFixed(0) }}% · heap
@@ -131,6 +137,7 @@
               <th class="bench__num">frame</th>
               <th class="bench__num">p95</th>
               <th class="bench__num">cpu</th>
+              <th v-if="gpuColumn" class="bench__num">gpu</th>
               <th class="bench__num">build</th>
               <th class="bench__num">heap</th>
               <th>components</th>
@@ -148,6 +155,7 @@
               <td class="bench__num">{{ row.frameMs.toFixed(2) }}</td>
               <td class="bench__num">{{ row.p95Ms.toFixed(2) }}</td>
               <td class="bench__num">{{ row.cpuMs.toFixed(2) }}</td>
+              <td v-if="gpuColumn" class="bench__num">{{ row.gpuMs === "" ? "—" : row.gpuMs.toFixed(2) }}</td>
               <td class="bench__num">{{ row.buildMs.toFixed(0) }}</td>
               <td class="bench__num">{{ row.heapMb === "" ? "—" : row.heapMb }}</td>
               <td>
@@ -276,6 +284,7 @@ import {
   toCsv,
   toJson,
   formatTable,
+  GPU_TIMER_TRUST_FACTOR,
   MAX_TRUSTWORTHY_DRIFT_PCT,
   MIN_TRUSTWORTHY_FRAMES,
   type BenchmarkRun,
@@ -415,6 +424,13 @@ const clockSwept = computed(() => new Set(rows.value.map((row) => row.clock)).si
 /** Any row too thin to mean anything taints the derived tables built on top of it. */
 const thin = computed(() => rows.value.filter((row) => row.frames < MIN_TRUSTWORTHY_FRAMES).length);
 
+/**
+ * Only give the column its width when some row actually carries a figure — the
+ * report blanks every one of them together when the driver's clock cannot be
+ * believed, and a column of dashes says nothing a missing column does not.
+ */
+const gpuColumn = computed(() => rows.value.some((row) => row.gpuMs !== ""));
+
 // --- live readout ----------------------------------------------------------
 interface Live {
   fps: number;
@@ -422,6 +438,8 @@ interface Live {
   p95Ms: number;
   worstMs: number;
   cpuMs: number;
+  /** Undefined where there is no GPU clock, or one that contradicts the frame rate. */
+  gpuMs: number | undefined;
   jankPct: number;
   heapMb: number | undefined;
   satellites: number;
@@ -436,6 +454,7 @@ const EMPTY_LIVE: Live = {
   p95Ms: 0,
   worstMs: 0,
   cpuMs: 0,
+  gpuMs: undefined,
   jankPct: 0,
   heapMb: undefined,
   satellites: 0,
@@ -447,6 +466,9 @@ const EMPTY_LIVE: Live = {
 const live = ref<Live>(EMPTY_LIVE);
 
 const fpsClass = computed(() => (live.value.fps < 30 ? "bench__bad" : live.value.fps < 55 ? "bench__warn" : "bench__good"));
+
+const gpuOrUndefined = (gpuMs: number | undefined, wallP50: number | undefined): number | undefined =>
+  gpuMs !== undefined && wallP50 !== undefined && wallP50 > 0 && gpuMs <= wallP50 * GPU_TIMER_TRUST_FACTOR ? gpuMs : undefined;
 
 /** The warning's own way out, so the fix is where the complaint is. */
 function disableRenderOnDemand(): void {
@@ -481,6 +503,10 @@ function refresh(): void {
     p95Ms: snapshot.frames.wall?.p95 ?? 0,
     worstMs: snapshot.frames.wall?.max ?? 0,
     cpuMs: snapshot.frames.cpu?.mean ?? 0,
+    // The same invariant the report applies per run, applied here per snapshot:
+    // a frame that presented every N ms cannot have cost the GPU much more than
+    // N, so a timer claiming otherwise is measuring something else.
+    gpuMs: gpuOrUndefined(snapshot.frames.gpu?.mean, snapshot.frames.wall?.p50),
     jankPct: snapshot.frames.jankRatio * 100,
     heapMb: snapshot.heapMb,
     satellites: snapshot.satellitesVisible,

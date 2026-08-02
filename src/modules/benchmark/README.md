@@ -64,7 +64,8 @@ nothing when the question is only about drawing.
 | Column           | Meaning                                                                             |
 | ---------------- | ----------------------------------------------------------------------------------- |
 | `fps`, `frameMs` | Between presented frames. What the user feels; flattens against vsync at 60/120 fps |
-| `cpuMs`          | `preUpdate` → `postRender`. The work done, which keeps moving after fps has capped  |
+| `cpuMs`          | `preUpdate` → `postRender`. Main-thread work only — see the GPU caveat below        |
+| `gpuMs`          | GPU time per frame, where the driver's clock can be believed. Blank otherwise       |
 | `p95`, `worst`   | Percentiles, not just a max — one 400 ms frame should not define a row              |
 | `frames`         | The sample size. A handful means the row is noise; read this one first              |
 | `jankPct`        | Share of frames slower than 33 ms                                                   |
@@ -141,6 +142,28 @@ per-satellite propagation and nothing else.
 - **`cpuMs` excludes the clock tick.** Cesium runs `clock.onTick` — where sampled
   positions update — before `scene.preUpdate`, so per-satellite position work lands
   in `frameMs` but not in `cpuMs`. The gap between the two is the interesting part.
+- **The derived tables fit against `cpuMs`, which is main-thread time only, and
+  this app is usually GPU-bound.** Measured on an M4 Pro at 2560×1440 with zero
+  satellites: `frameMs` 14.3, `cpuMs` 0.74 — the CPU is 5% of the frame, and the
+  remaining ~13.5 ms is fragment work that `scalingFits` and `marginalCosts`
+  cannot see. Ablation put nearly all of it in two settings, both full-screen
+  per-pixel costs: **4× MSAA** (Cesium's default) and **`highDynamicRange`** (set
+  in `createViewer.ts`), with `quality: high` rendering at full device pixels and
+  so quadrupling both on a Retina display. Everything scene-shaped — atmosphere,
+  fog, globe lighting, sun/moon/starfield — came to under 1.5 ms together.
+  So a component that is cheap on the CPU but adds fragments will look free in
+  the marginal-cost table and still cost frames. Read `gpuMs` beside `cpuMs`, and
+  where `gpuMs` is blank read `frameMs`: if it sits well above the display's
+  fastest observed interval, the scene is GPU-bound whatever `cpuMs` says.
+- **`gpuMs` is withheld rather than guessed when the driver lies.** A frame that
+  presented every 14 ms cannot have cost the GPU 49 ms, but that is exactly what
+  `EXT_disjoint_timer_query_webgl2` reported on ANGLE/Metal. Every row's figure is
+  checked against its own frame interval (`GPU_TIMER_TRUST_FACTOR`, 1.5×) and the
+  whole column blanks when most rows fail, with `logRun` saying which of the two
+  reasons applies — no extension, or one that cannot be believed. Two other
+  approaches were tried and do not work: `gl.finish()` never synchronises in
+  Chrome (WebGL is proxied to a separate GPU process), and timing a tight
+  `scene.render()` loop measures queueing rather than execution.
 - **`buildMs` is not comparable across component sets.** The first pass over a
   population pays for whatever it warms up; a measured run had `Point` at 500
   satellites cost 3,245 ms to build and `Point + Orbit` at the same 500 cost

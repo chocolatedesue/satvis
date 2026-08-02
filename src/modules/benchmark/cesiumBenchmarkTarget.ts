@@ -19,6 +19,10 @@ declare global {
 /** About two seconds at 60 fps — enough for the live readout to be steady. */
 const LIVE_WINDOW_FRAMES = 120;
 
+/** A GPU query result is usually a frame or two away; give up rather than leak. */
+const GPU_QUERY_POLL_MS = 4;
+const GPU_QUERY_MAX_POLLS = 250;
+
 export interface LiveSnapshot {
   frames: FrameSample;
   satellitesVisible: number;
@@ -113,6 +117,18 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
 
   #preUpdateAt = 0;
 
+  /** `EXT_disjoint_timer_query_webgl2`, or undefined where the browser has no such thing. */
+  #timerExt: { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | undefined;
+
+  #gl: WebGL2RenderingContext | undefined;
+
+  /**
+   * At most one query in flight. Beginning one per frame would queue hundreds of
+   * query objects and force a flush on each; one at a time samples a subset of
+   * frames, which is all a median needs.
+   */
+  #queryInFlight: WebGLQuery | undefined;
+
   options: TargetOptions = {};
 
   /**
@@ -129,15 +145,106 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     // postRender alone, and the work inside one frame needs both. Cesium runs
     // most position updates in clock onTick, before preUpdate, so measuring
     // from preUpdate deliberately excludes them — see README.
+    this.#initGpuTimer(scene);
     scene.preUpdate.addEventListener(() => {
       this.#preUpdateAt = performance.now();
+      this.#beginGpuQuery();
     });
     scene.postRender.addEventListener(() => {
       const now = performance.now();
       const cpuMs = now - this.#preUpdateAt;
       this.#live.push(now, cpuMs);
       this.#sweep?.push(now, cpuMs);
+      this.#endGpuQuery();
     });
+  }
+
+  /**
+   * The GPU-side clock. Optional in every sense: the extension is absent on some
+   * browsers, blocked on others, and — as measured on ANGLE/Metal — can return
+   * times several multiples of the frame interval, which is why nothing here
+   * trusts the number on sight. The report gates it; this only collects it.
+   */
+  #initGpuTimer(scene: object): void {
+    try {
+      // `context` is Cesium-internal and untyped; reaching for it is the only way
+      // to time the GPU on the context the app is actually drawing with.
+      const gl = (scene as { context?: { _gl?: WebGL2RenderingContext } }).context?._gl;
+      const ext = gl?.getExtension("EXT_disjoint_timer_query_webgl2") as { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null;
+      if (gl && ext) {
+        this.#gl = gl;
+        this.#timerExt = ext;
+      }
+    } catch {
+      // A missing or blocked extension is not worth a broken benchmark.
+    }
+  }
+
+  #beginGpuQuery(): void {
+    const gl = this.#gl;
+    const ext = this.#timerExt;
+    if (!gl || !ext || this.#queryInFlight) {
+      return;
+    }
+    try {
+      const query = gl.createQuery();
+      if (!query) {
+        return;
+      }
+      gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
+      this.#queryInFlight = query;
+    } catch {
+      this.#timerExt = undefined;
+    }
+  }
+
+  #endGpuQuery(): void {
+    const gl = this.#gl;
+    const ext = this.#timerExt;
+    const query = this.#queryInFlight;
+    if (!gl || !ext || !query) {
+      return;
+    }
+    this.#queryInFlight = undefined;
+    try {
+      gl.endQuery(ext.TIME_ELAPSED_EXT);
+    } catch {
+      gl.deleteQuery(query);
+      this.#timerExt = undefined;
+      return;
+    }
+    // The result lands some frames later, so poll rather than block. A frame
+    // whose timing arrives after its sample window closed simply joins the next
+    // one — the population is a median, not a per-frame pairing.
+    let attempts = 0;
+    const poll = (): void => {
+      attempts += 1;
+      try {
+        if (gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) {
+          // A disjoint means the GPU was interrupted and the timing is garbage.
+          if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) {
+            const ns = gl.getQueryParameter(query, gl.QUERY_RESULT) as number;
+            this.#live.pushGpu(ns / 1e6);
+            this.#sweep?.pushGpu(ns / 1e6);
+          }
+          gl.deleteQuery(query);
+          return;
+        }
+        if (attempts > GPU_QUERY_MAX_POLLS) {
+          gl.deleteQuery(query);
+          return;
+        }
+        setTimeout(poll, GPU_QUERY_POLL_MS);
+      } catch {
+        this.#timerExt = undefined;
+      }
+    };
+    setTimeout(poll, GPU_QUERY_POLL_MS);
+  }
+
+  /** True when this browser offered a GPU clock at all. */
+  get gpuTimingAvailable(): boolean {
+    return this.#timerExt !== undefined;
   }
 
   /** The in-browser readout, sampled continuously whether a sweep is running or not. */

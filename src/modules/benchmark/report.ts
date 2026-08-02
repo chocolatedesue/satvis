@@ -23,6 +23,37 @@ const seriesOf = (result: BenchmarkResult): string => formatSeries(result.applie
  */
 const measured = (run: BenchmarkRun): BenchmarkResult[] => run.results.filter((result) => !result.step.repeat);
 
+/**
+ * How far past the frame interval a GPU timing may sit before it is disbelieved.
+ *
+ * The invariant: frames present one after another, and GPU work for a frame does
+ * not overlap GPU work for the next, so a frame that presents every 14 ms cannot
+ * have taken 49 ms on the GPU. 1.5× leaves room for measurement noise and for a
+ * genuinely GPU-bound scene (where the two converge on each other) while still
+ * catching a driver that is reporting something other than execution time.
+ */
+export const GPU_TIMER_TRUST_FACTOR = 1.5;
+
+/**
+ * Whether this run's GPU timings can be printed.
+ *
+ * `EXT_disjoint_timer_query_webgl2` is present but wrong on some stacks —
+ * measured on ANGLE/Metal (Apple silicon) it reported ~49 ms per frame while the
+ * app was demonstrably presenting at 70 fps. Rather than print a number that is
+ * three times the whole frame, the column goes blank and `logRun` says why.
+ */
+export function gpuTimerTrustworthy(run: BenchmarkRun): boolean {
+  const pairs = run.results
+    .map((result) => ({ gpu: result.frames.gpu?.p50, wall: result.frames.wall?.p50 }))
+    .filter((pair): pair is { gpu: number; wall: number } => pair.gpu !== undefined && pair.wall !== undefined && pair.wall > 0);
+  if (pairs.length === 0) {
+    return false;
+  }
+  const overruns = pairs.filter((pair) => pair.gpu > pair.wall * GPU_TIMER_TRUST_FACTOR).length;
+  // A single odd step is noise; a majority overrunning is the driver, not the app.
+  return overruns * 2 <= pairs.length;
+}
+
 export interface ReportRow {
   sats: number;
   components: string;
@@ -45,6 +76,11 @@ export interface ReportRow {
   worstMs: number;
   cpuMs: number;
   cpuP95Ms: number;
+  /**
+   * GPU time for one frame. Blank where the browser has no timer extension, and
+   * blank where it has one that cannot be believed — see `gpuTimerTrustworthy`.
+   */
+  gpuMs: number | "";
   jankPct: number;
   buildMs: number;
   clearMs: number;
@@ -54,9 +90,14 @@ export interface ReportRow {
 }
 
 export function reportRows(run: BenchmarkRun): ReportRow[] {
+  // Decided once per run, not per row: whether the driver's clock can be
+  // believed is a property of the machine, and a column that appeared on some
+  // rows and not others would read as "the GPU did nothing here".
+  const trustGpu = gpuTimerTrustworthy(run);
   return run.results.map((result) => {
     const requested = formatComponents(result.applied.componentsRequested);
     const drawn = formatComponents(result.applied.componentsDrawn);
+    const gpu = trustGpu ? result.frames.gpu?.mean : undefined;
     return {
       sats: result.applied.satellitesRequested,
       components: requested,
@@ -71,6 +112,7 @@ export function reportRows(run: BenchmarkRun): ReportRow[] {
       worstMs: round(result.frames.wall?.max ?? 0),
       cpuMs: round(cpuMs(result)),
       cpuP95Ms: round(result.frames.cpu?.p95 ?? 0),
+      gpuMs: gpu === undefined ? "" : round(gpu),
       jankPct: round(result.frames.jankRatio * 100, 1),
       buildMs: round(result.applied.buildMs),
       clearMs: round(result.applied.clearMs),
@@ -331,8 +373,8 @@ const pad = (value: string | number, width: number): string => String(value).pad
 /** A fixed-width table, for pasting into an issue. */
 export function formatTable(run: BenchmarkRun): string {
   const rows = reportRows(run);
-  const header = ["sats", "visible", "clock", "frames", "fps", "frameMs", "p95", "worst", "cpuMs", "cpuP95", "jank%", "build", "heapMb", "components"];
-  const widths = [6, 8, 7, 7, 7, 8, 7, 8, 7, 7, 6, 8, 8];
+  const header = ["sats", "visible", "clock", "frames", "fps", "frameMs", "p95", "worst", "cpuMs", "cpuP95", "gpuMs", "jank%", "build", "heapMb", "components"];
+  const widths = [6, 8, 7, 7, 7, 8, 7, 8, 7, 7, 7, 6, 8, 8];
   const lines = [header.map((name, index) => (index < widths.length ? pad(name, widths[index] as number) : ` ${name}`)).join("")];
   for (const row of rows) {
     const values = [
@@ -346,6 +388,7 @@ export function formatTable(run: BenchmarkRun): string {
       row.worstMs,
       row.cpuMs,
       row.cpuP95Ms,
+      row.gpuMs === "" ? "—" : row.gpuMs,
       row.jankPct,
       row.buildMs,
       row.heapMb,
@@ -412,6 +455,19 @@ export function logRun(run: BenchmarkRun): void {
     console.warn(
       `${thin.length}/${run.results.length} steps sampled fewer than ${MIN_TRUSTWORTHY_FRAMES} frames — treat their timings as noise.`,
       run.environment.visibility === "hidden" ? "The tab was hidden; a hidden tab suspends the render loop entirely." : "",
+    );
+  }
+  // Said once, before the table, so a blank gpu column is a known absence rather
+  // than a mystery. The distinction matters: "no extension" is a browser fact,
+  // "not believable" is a finding about this machine's driver.
+  const anyGpu = run.results.some((result) => result.frames.gpu !== undefined);
+  if (!anyGpu) {
+    console.log("gpuMs: unavailable — this browser offers no EXT_disjoint_timer_query_webgl2.");
+  } else if (!gpuTimerTrustworthy(run)) {
+    console.warn(
+      `gpuMs: withheld — the driver's timer reported more than ${GPU_TIMER_TRUST_FACTOR}× the frame interval on most steps, ` +
+        "which a frame that presented cannot have cost. Known to happen on ANGLE/Metal. Read frameMs against cpuMs instead: " +
+        "the gap between them is the GPU, and if frameMs is well above the display's fastest interval the scene is GPU-bound.",
     );
   }
   console.log("%cper step", "font-weight:bold");

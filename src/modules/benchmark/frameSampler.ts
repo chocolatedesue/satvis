@@ -50,6 +50,17 @@ export interface FrameSample {
    * flattened against vsync.
    */
   cpu: SeriesStats | undefined;
+  /**
+   * Time the GPU spent on one frame, from `EXT_disjoint_timer_query_webgl2`.
+   *
+   * A separate population from `wall` and `cpu` rather than a third value on
+   * each frame: a query's result arrives several frames after the frame it
+   * timed, and only some frames are sampled at all, so its count is its own.
+   * Undefined where the extension is missing — and note the driver can still
+   * lie even where it is present, which is why the report gates it against the
+   * frame interval rather than printing whatever comes back.
+   */
+  gpu: SeriesStats | undefined;
   jankFrames: number;
   jankRatio: number;
 }
@@ -69,10 +80,25 @@ export class FrameSampler {
 
   #cpu: number[] = [];
 
+  #gpu: number[] = [];
+
   #last: number | undefined;
 
   constructor(limit = 0) {
     this.#limit = limit;
+  }
+
+  /**
+   * A GPU timing, whenever its query finally resolves. Kept apart from `push`
+   * because the two are not in step: a result lands frames after the frame it
+   * belongs to, so pairing them would mean holding frames open for a number
+   * that may never arrive.
+   */
+  pushGpu(ms: number): void {
+    this.#gpu.push(ms);
+    if (this.#limit > 0 && this.#gpu.length > this.#limit) {
+      this.#gpu.shift();
+    }
   }
 
   /** `now` is a monotonic timestamp; `cpuMs` the render duration for that frame. */
@@ -101,6 +127,7 @@ export class FrameSampler {
   reset(): void {
     this.#wall = [];
     this.#cpu = [];
+    this.#gpu = [];
   }
 
   get frames(): number {
@@ -117,6 +144,7 @@ export class FrameSampler {
       fps: elapsedMs > 0 ? (this.#wall.length / elapsedMs) * 1000 : 0,
       wall,
       cpu: seriesStats(this.#cpu),
+      gpu: seriesStats(this.#gpu),
       jankFrames,
       jankRatio: this.#wall.length > 0 ? jankFrames / this.#wall.length : 0,
     };
