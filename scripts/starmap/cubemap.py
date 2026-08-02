@@ -20,6 +20,15 @@ what the Tycho asset forces — cannot do this.
 correlates each face against the Tycho asset over all eight dihedral transforms;
 anything but identity means the projection is wrong. Rotating one face to make
 it match is a trap, because the set then stops agreeing at the shared edges.
+
+**A correct projection still leaves a step at the edges**, and `--match-edges`
+is what removes it. Six square grids cannot tile a sphere evenly: adjacent border
+texels are mirror images about their shared edge and integrate differently skewed
+patches of sky, which differs systematically along the whole edge. Measured on
+the 32K source at 2048px, that is a coherent 0.90 levels on average and 5.67 at
+worst, against ~1.0 levels of coherent grain — a faint but real line. It shrinks
+with supersampling (2.19 -> 1.30 coherent at 512px going from 1 to 4 samples per
+axis) and does not go away, because it is sampling, not a bug.
 """
 
 from __future__ import annotations
@@ -267,6 +276,186 @@ def default_supersample(size: int, width: int) -> int:
     return int(min(4, max(2, np.ceil(ratio))))
 
 
+def face_basis(face: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(normal, du, dv) as signed unit axes, read out of `FACES` itself.
+
+    Every entry there is a signed axis permutation, so evaluating it at three
+    points recovers the frame exactly — no second copy of the convention to keep
+    in step with the first.
+    """
+    zero, one = np.zeros(1), np.ones(1)
+    sample = lambda u, v: np.array([float(np.asarray(c).item()) for c in FACES[face](u, v)])  # noqa: E731
+    normal = sample(zero, zero)
+    return normal, sample(one, zero) - normal, sample(zero, one) - normal
+
+
+def edge_pairs(size: int) -> list[tuple[tuple[str, np.ndarray, np.ndarray], tuple[str, np.ndarray, np.ndarray]]]:
+    """For each of the 12 shared edges, the two rows of border texels that meet on it.
+
+    Derived rather than tabulated. Each side of a face is walked at its exact
+    boundary (the coordinate pinned to +-1, the tangential one at texel centres);
+    that direction names the neighbour by major axis, and re-expressing it in the
+    neighbour's frame says which of its border texels lies opposite. Rounding is
+    exact to well under a texel — asserted below — because the two faces' border
+    texels are mirror images about the edge, both one half-texel inside it.
+    """
+    idx = np.arange(size)
+    centres = (idx + 0.5) * 2.0 / size - 1.0
+    ones = np.ones(size)
+    inner = 1.0 - 1.0 / size  # where a border texel's own centre sits
+
+    # (u, v) along the boundary, and the pixels those belong to. v runs bottom to
+    # top while rows run top to bottom, hence -centres for the vertical sides.
+    sides = {
+        "top": (centres, ones, (np.zeros(size, int), idx)),
+        "bottom": (centres, -ones, (np.full(size, size - 1), idx)),
+        "left": (-ones, -centres, (idx, np.zeros(size, int))),
+        "right": (ones, -centres, (idx, np.full(size, size - 1))),
+    }
+
+    seen: set[frozenset] = set()
+    pairs = []
+    for face, (u, v, (rows, cols)) in ((f, s) for f in FACE_ORDER for s in sides.values()):
+        normal, du, dv = face_basis(face)
+        edge = normal[:, None] + du[:, None] * u + dv[:, None] * v
+
+        # The neighbour is whichever face this boundary direction points into.
+        others = [f for f in FACE_ORDER if f != face]
+        bases = [face_basis(f) for f in others]
+        depth = np.array([n @ edge for n, _, _ in bases])
+        far = others[int(np.argmax(depth[:, 0]))]
+        nb_normal, nb_du, nb_dv = face_basis(far)
+
+        nu = (nb_du @ edge) / (nb_normal @ edge)
+        nv = (nb_dv @ edge) / (nb_normal @ edge)
+        # One of the two is pinned to +-1 on the shared edge; step it half a texel
+        # in to reach the neighbour's own border texel and leave the other alone.
+        pinned = np.abs(np.abs(nu) - 1.0) < np.abs(np.abs(nv) - 1.0)
+        nu = np.where(pinned, np.sign(nu) * inner, nu)
+        nv = np.where(pinned, nv, np.sign(nv) * inner)
+
+        nx = (nu + 1.0) * size / 2.0 - 0.5
+        ny = (1.0 - nv) * size / 2.0 - 0.5
+        drift = max(np.abs(nx - np.round(nx)).max(), np.abs(ny - np.round(ny)).max())
+        if drift > 1e-6:
+            raise AssertionError(f"{face} border does not land on {far} texels (off by {drift:.3g})")
+
+        key = frozenset((face, far))
+        here = (face, rows, cols)
+        there = (far, np.round(ny).astype(int), np.round(nx).astype(int))
+        if key not in seen:
+            seen.add(key)
+            pairs.append((here, there))
+
+    if len(pairs) != 12:
+        raise AssertionError(f"expected 12 shared edges, derived {len(pairs)}")
+    return pairs
+
+
+SIDES = ("top", "bottom", "left", "right")
+
+
+def sides_of(y: int, x: int, size: int) -> list[tuple[str, int]]:
+    """Which side a border texel sits on, and where along it — two entries at a corner."""
+    on = []
+    if y == 0:
+        on.append(("top", x))
+    if y == size - 1:
+        on.append(("bottom", x))
+    if x == 0:
+        on.append(("left", y))
+    if x == size - 1:
+        on.append(("right", y))
+    return on
+
+
+def edge_step(faces: dict[str, np.ndarray], pairs, exposure: float) -> tuple[float, float]:
+    """Mean and p99 brightness difference across the shared edges, in 8-bit levels.
+
+    Measured after `encode`, because the tone curve is steep where this map is
+    dark: a difference the eye can see in the sky is far below one 8-bit level in
+    linear radiance, and a linear metric reports it as nothing.
+    """
+    diffs = []
+    for (fa, ya, xa), (fb, yb, xb) in pairs:
+        a = encode(faces[fa][ya, xa], exposure).astype(np.float32)
+        b = encode(faces[fb][yb, xb], exposure).astype(np.float32)
+        diffs.append(np.abs(a - b).max(axis=1))
+    joined = np.concatenate(diffs)
+    return float(joined.mean()), float(np.percentile(joined, 99))
+
+
+def match_edges(faces: dict[str, np.ndarray], pairs, feather: int) -> None:
+    """Reconcile the faces across their shared edges, in place and in linear light.
+
+    Two texels meet along an edge and three at each corner; every such group is
+    set to its own mean. That is the standard cube map seam fixup, and on its own
+    it is a one-texel-wide change that trades a step for a thinner step.
+
+    The feather is what makes it a fix rather than a smear: the correction each
+    border texel needs is carried `feather` texels inward on a linear ramp, so the
+    two faces converge over a band instead of jumping at the last row. Near a
+    corner two ramps overlap and are averaged, which keeps the corner texel's own
+    correction intact.
+
+    Linear light, before the tone curve, for the same reason supersampling is:
+    averaging radiance is meaningful, averaging sRGB is not.
+
+    Four texels is the measured optimum at 2048px, by sweeping 2 to 64 and scoring
+    the correction the fixup itself introduces. Below it the ramp is steep enough
+    to read as a second, softer line; above it the correction grows — the same
+    linear delta carried further inward lands on more of the tone curve, so by 64
+    it is a 12 level smear where at 4 it is 4. The residual step at 4 is 0.17
+    levels at worst, against the 5.67 it started from.
+    """
+    # Group the border texels that must agree — pairs along edges, triples at the
+    # corners, found by union rather than special-cased.
+    parent: dict[tuple[str, int, int], tuple[str, int, int]] = {}
+
+    def find(k):
+        parent.setdefault(k, k)
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    for (fa, ya, xa), (fb, yb, xb) in pairs:
+        for i in range(len(ya)):
+            ka, kb = find((fa, int(ya[i]), int(xa[i]))), find((fb, int(yb[i]), int(xb[i])))
+            if ka != kb:
+                parent[ka] = kb
+
+    groups: dict[tuple[str, int, int], list] = {}
+    for key in list(parent):
+        groups.setdefault(find(key), []).append(key)
+
+    # Corrections are held per side rather than as six full-size images: they are
+    # four texels wide out of 2048 and the zeros would cost 300 MB.
+    size = next(iter(faces.values())).shape[0]
+    deltas = {face: {side: np.zeros((size, 3), np.float32) for side in SIDES} for face in faces}
+    for members in groups.values():
+        mean = np.mean([faces[f][y, x] for f, y, x in members], axis=0)
+        for f, y, x in members:
+            for side, along in sides_of(y, x, size):
+                deltas[f][side][along] = mean - faces[f][y, x]
+
+    ramp = np.clip(1.0 - np.arange(size, dtype=np.float32) / feather, 0.0, 1.0)
+    for face, delta in deltas.items():
+        weight = np.zeros((size, size), np.float32)
+        spread = np.zeros((size, size, 3), np.float32)
+        for w, band in (
+            (ramp[:, None], delta["top"][None, :, :]),
+            (ramp[::-1, None], delta["bottom"][None, :, :]),
+            (ramp[None, :], delta["left"][:, None, :]),
+            (ramp[None, ::-1], delta["right"][:, None, :]),
+        ):
+            weight += w
+            spread += w[..., None] * band
+        # Only corners see more than one ramp; normalising there averages them
+        # instead of applying both.
+        faces[face] += spread / np.maximum(1.0, weight)[..., None]
+
+
 def open_layers(mode: str, res: str, star_gain: float, cache_dir: str) -> list[tuple[np.ndarray, float]]:
     """The source maps to sum, each with its weight.
 
@@ -371,6 +560,8 @@ def main() -> int:
     ap.add_argument("--star-gain", type=float, default=1.0, help="scale the bright star layer, --layers composite only")
     ap.add_argument("--size", type=int, default=2048, help="cube face edge in pixels")
     ap.add_argument("--supersample", default="auto", help="samples per output texel per axis, or auto from the source resolution")
+    ap.add_argument("--match-edges", type=int, default=4, metavar="N",
+                    help="reconcile adjacent faces over their outermost N texels; 0 leaves them alone")
     ap.add_argument("--quality", type=int, default=80, help="JPEG quality")
     ap.add_argument("--exposure", default="auto", help="float, or auto")
     ap.add_argument("--exposure-percentile", type=float, default=99.99)
@@ -403,10 +594,22 @@ def main() -> int:
         exposure = float(args.exposure)
         print(f"exposure {exposure:.6g}", flush=True)
 
+    # All six are held at once so the edges can be reconciled before encoding;
+    # 2048px faces are 50 MB each in linear float, which is affordable where the
+    # source is not.
+    faces = {face: render_face(layers, face, args.size, ss) for face in FACE_ORDER}
+
+    pairs = edge_pairs(args.size)
+    mean, p99 = edge_step(faces, pairs, exposure)
+    print(f"edge step before: mean {mean:.2f}, p99 {p99:.2f} levels", flush=True)
+    if args.match_edges:
+        match_edges(faces, pairs, args.match_edges)
+        mean, p99 = edge_step(faces, pairs, exposure)
+        print(f"edge step after:  mean {mean:.2f}, p99 {p99:.2f} levels ({args.match_edges}-texel feather)", flush=True)
+
     total = 0
     for face in FACE_ORDER:
-        linear = render_face(layers, face, args.size, ss)
-        pixels = encode(linear, exposure)
+        pixels = encode(faces[face], exposure)
         path = os.path.join(args.out, f"{prefix}_{face}.jpg")
         cv2.imwrite(path, np.ascontiguousarray(pixels), [cv2.IMWRITE_JPEG_QUALITY, args.quality])
         total += os.path.getsize(path)
