@@ -13,6 +13,14 @@ const round = (value: number, digits = 2): number => Number(value.toFixed(digits
 /** The frame time a row is judged by: the work done, not the vsync wait. */
 const cpuMs = (result: BenchmarkResult): number => result.frames.cpu?.mean ?? 0;
 
+/**
+ * The heap figure every memory table is built from: the window's low-water mark.
+ *
+ * Undefined outside Chrome. Not a footprint on its own — see `FrameSample.heap`
+ * and `memoryFits` — which is why nothing here prints it as one.
+ */
+const heapFloorMb = (result: BenchmarkResult): number | undefined => result.frames.heap?.min;
+
 /** What varies within a series: the component set and the clock rate together. */
 const seriesOf = (result: BenchmarkResult): string => formatSeries(result.applied.componentsRequested, result.applied.clockMultiplier);
 
@@ -86,7 +94,18 @@ export interface ReportRow {
   clearMs: number;
   entities: number;
   primitives: number;
+  /**
+   * The heap's low-water mark over the sample window.
+   *
+   * Deliberately **not** in the printed tables — it is an input to `memoryFits`,
+   * not a figure. On its own it carries whatever garbage was standing when the
+   * window opened, which is how the same scene read 59, 436 and 270 MB on three
+   * passes. It stays in the csv and json so a fit can be recomputed or argued
+   * with. See `FrameSample.heap`.
+   */
   heapMb: number | "";
+  /** The high-water mark. `heapPeakMb - heapMb` is the window's allocation rate. */
+  heapPeakMb: number | "";
 }
 
 export function reportRows(run: BenchmarkRun): ReportRow[] {
@@ -118,7 +137,8 @@ export function reportRows(run: BenchmarkRun): ReportRow[] {
       clearMs: round(result.applied.clearMs),
       entities: result.applied.entities,
       primitives: result.applied.primitives,
-      heapMb: result.heapMb === undefined ? "" : round(result.heapMb, 1),
+      heapMb: result.frames.heap === undefined ? "" : round(result.frames.heap.min, 1),
+      heapPeakMb: result.frames.heap === undefined ? "" : round(result.frames.heap.max, 1),
     };
   });
 }
@@ -185,6 +205,77 @@ export function scalingFits(run: BenchmarkRun): ScalingFit[] {
       baseCpuMs: round(fit.intercept),
       r2: round(fit.r2, 3),
       satsAt60fps: fit.slope > 0 && headroom > 0 ? Math.round(headroom / fit.slope) : "",
+    });
+  }
+  return fits;
+}
+
+export interface MemoryFit {
+  /** The component set and, where it is not real time, the clock rate. */
+  series: string;
+  points: number;
+  /** Least-squares slope of the heap floor against satellites drawn, per 1,000. */
+  mbPer1000Sats: number;
+  /** The same slope per satellite, which is the figure worth quoting. */
+  kbPerSatellite: number;
+  /**
+   * The intercept. **Not** a footprint: it is the app's baseline plus whatever
+   * garbage happened to be standing, and it is the term the differencing exists
+   * to throw away. Printed only so a wild one warns that the fit is junk.
+   */
+  baseMb: number;
+  /** 1.0 means memory grows linearly with the count. Read it before the slope. */
+  r2: number;
+}
+
+/**
+ * How much memory a satellite costs, by fitting the heap floor against the count
+ * *within one series* — which is the only form of this measurement that survives
+ * a second run.
+ *
+ * The absolute heap cannot be measured from a page: `usedJSHeapSize` includes
+ * garbage, and script cannot force a collection. But that garbage is a roughly
+ * common offset across the rows of one series measured in one pass, so it lands
+ * in the intercept and leaves the slope alone. Measured over two consecutive
+ * passes, a 5,000-satellite scene came out +269.9 and +269.4 MB above its own
+ * zero row — agreeing to 0.2% where the raw figures disagreed by 7×.
+ *
+ * Accuracy, checked against a live set obtained properly (forced collections via
+ * `HeapProfiler.collectGarbage` over CDP, scene held up): the fit reported 53.7 KB
+ * per satellite where the forced collection said 52.5 — about 2% out, with
+ * r² 0.999.
+ *
+ * **But only when no collection lands mid-series.** If one does, the offset stops
+ * being common and the fit is meaningless: measured on a pass where a major GC
+ * fell between the zero row (floor 419 MB) and the next (101 MB), this reported
+ * −2.8 MB per 1,000 satellites — memory apparently freed by drawing. That is what
+ * `r2` is for, and it caught it at 0.002. Read r² first; below
+ * `MIN_TRUSTWORTHY_MEMORY_R2` the slope is noise and `logRun` says so.
+ */
+export function memoryFits(run: BenchmarkRun): MemoryFit[] {
+  const bySeries = new Map<string, BenchmarkResult[]>();
+  for (const result of measured(run)) {
+    // A browser with no heap reading gets no rows rather than a fit through
+    // zeroes, which would report every satellite as free.
+    if (heapFloorMb(result) === undefined) {
+      continue;
+    }
+    const key = seriesOf(result);
+    bySeries.set(key, [...(bySeries.get(key) ?? []), result]);
+  }
+  const fits: MemoryFit[] = [];
+  for (const [series, results] of bySeries) {
+    const fit = leastSquares(results.map((result) => ({ x: result.applied.satellitesVisible, y: heapFloorMb(result) as number })));
+    if (!fit) {
+      continue;
+    }
+    fits.push({
+      series,
+      points: results.length,
+      mbPer1000Sats: round(fit.slope * 1000, 1),
+      kbPerSatellite: round(fit.slope * 1024, 1),
+      baseMb: round(fit.intercept, 1),
+      r2: round(fit.r2, 3),
     });
   }
   return fits;
@@ -321,10 +412,45 @@ export interface RepeatCheck {
   repeatBuildMs: number;
   /** Usually strongly negative: the first build pays for warming the app up. */
   buildDriftPct: number;
+  // No heap drift here, though it is the obvious thing to want: a leak would show
+  // as the same scene retaining more when re-run at the end. It was built and
+  // measured, and it cannot discriminate — on three runs with nothing wrong the
+  // floor moved -14.6%, -10.2% and +638%, because a single window's floor tracks
+  // whenever V8 last collected rather than what is retained. A column that reads
+  // +638% on a healthy app is the same failure as the old heapMb figure, so it is
+  // deliberately absent. To check for a leak, repeat one scene and force a
+  // collection between the passes (DevTools, or HeapProfiler.collectGarbage over
+  // CDP) — that is what found the glyph-billboard leak this framework exposed.
 }
 
 /** Above this the run measured a moving target, not a scene. */
 export const MAX_TRUSTWORTHY_DRIFT_PCT = 10;
+
+/**
+ * Below this a memory fit is noise rather than a slope.
+ *
+ * The fit assumes a garbage offset common to the series; a collection landing
+ * mid-series breaks that assumption and shows up as scatter, not as a wrong-but-
+ * plausible number. 0.9 is where a genuinely linear series (measured: 0.999) is
+ * comfortably clear of a broken one (measured: 0.002).
+ */
+export const MIN_TRUSTWORTHY_MEMORY_R2 = 0.9;
+
+/**
+ * Fewer points than this and r² cannot police the fit: two points always lie on
+ * their own line, so a series of two reports r² 1.0 however badly a collection
+ * mangled it. Three is the least that can disagree with itself.
+ */
+export const MIN_MEMORY_FIT_POINTS = 3;
+
+/**
+ * Whether a memory slope can be read at all.
+ *
+ * Both conditions are the same condition twice: the fit assumes a garbage offset
+ * common to the series, and this is the only evidence available that the
+ * assumption held. Scatter says it broke; too few points say nobody looked.
+ */
+export const memoryFitTrustworthy = (fit: MemoryFit): boolean => fit.points >= MIN_MEMORY_FIT_POINTS && fit.r2 >= MIN_TRUSTWORTHY_MEMORY_R2;
 
 const driftPct = (first: number, repeat: number): number => (first === 0 ? 0 : round(((repeat - first) / first) * 100, 1));
 
@@ -373,8 +499,11 @@ const pad = (value: string | number, width: number): string => String(value).pad
 /** A fixed-width table, for pasting into an issue. */
 export function formatTable(run: BenchmarkRun): string {
   const rows = reportRows(run);
-  const header = ["sats", "visible", "clock", "frames", "fps", "frameMs", "p95", "worst", "cpuMs", "cpuP95", "gpuMs", "jank%", "build", "heapMb", "components"];
-  const widths = [6, 8, 7, 7, 7, 8, 7, 8, 7, 7, 7, 6, 8, 8];
+  // No heap column. The floor is an input to `memoryFits`, and printed beside
+  // frame times it reads as a footprint — which is exactly the misreading that
+  // cost someone a leak hunt. `toCsv`/`toJson` still carry it.
+  const header = ["sats", "visible", "clock", "frames", "fps", "frameMs", "p95", "worst", "cpuMs", "cpuP95", "gpuMs", "jank%", "build", "components"];
+  const widths = [6, 8, 7, 7, 7, 8, 7, 8, 7, 7, 7, 6, 8];
   const lines = [header.map((name, index) => (index < widths.length ? pad(name, widths[index] as number) : ` ${name}`)).join("")];
   for (const row of rows) {
     const values = [
@@ -391,7 +520,6 @@ export function formatTable(run: BenchmarkRun): string {
       row.gpuMs === "" ? "—" : row.gpuMs,
       row.jankPct,
       row.buildMs,
-      row.heapMb,
     ];
     const suffix = `${row.repeat ? " (repeat)" : ""}${row.drawn ? ` (drew ${row.drawn})` : ""}`;
     lines.push(`${values.map((value, index) => pad(value, widths[index] as number)).join("")} ${row.components}${suffix}`);
@@ -421,6 +549,7 @@ export function toJson(run: BenchmarkRun): string {
       cancelled: run.cancelled,
       rows: reportRows(run),
       scaling: scalingFits(run),
+      memory: memoryFits(run),
       marginal: marginalCosts(run),
       propagation: propagationCosts(run),
       repeat: repeatChecks(run),
@@ -474,6 +603,30 @@ export function logRun(run: BenchmarkRun): void {
   console.table(reportRows(run));
   console.log("%cscaling with satellite count (cpu frame time)", "font-weight:bold");
   console.table(scalingFits(run));
+  // Absent rather than zeroed where the browser has no reading, and said out
+  // loud, so an empty memory table is a known absence like the gpu column.
+  const memory = memoryFits(run);
+  if (memory.length > 0) {
+    console.log("%cmemory growth with satellite count (heap floor, relative)", "font-weight:bold");
+    console.table(memory);
+    const untrustworthy = memory.filter((fit) => !memoryFitTrustworthy(fit));
+    if (untrustworthy.length > 0) {
+      // Louder than a low r² in a column, because the symptom is a slope that
+      // looks like an answer — a negative one means drawing satellites freed
+      // memory, which is a collection landing mid-series, not a finding.
+      console.warn(
+        `memory: ${untrustworthy.map((fit) => `${fit.series} (r² ${fit.r2}, ${fit.points} points)`).join(", ")} cannot be read — ` +
+          `a fit needs at least ${MIN_MEMORY_FIT_POINTS} counts (two points always fit their own line) and r² ${MIN_TRUSTWORTHY_MEMORY_R2}, ` +
+          "or else a garbage collection landed inside the series and its offset is not common to the rows. Sweep more counts, or re-run.",
+      );
+    }
+    console.log(
+      "Slopes only, and only within a series: the heap floor includes uncollected garbage, so the intercept is not a footprint. " +
+        "Checked against forced collections the slope came within 2% (53.7 vs 52.5 KB per satellite). For an absolute figure use DevTools or HeapProfiler.collectGarbage.",
+    );
+  } else {
+    console.log("memory: unavailable — performance.memory is Chrome-only, so there is no heap reading to fit.");
+  }
   console.log("%cmarginal cost per component", "font-weight:bold");
   console.table(marginalCosts(run));
   // Only when the clock was actually swept — an empty table would read as

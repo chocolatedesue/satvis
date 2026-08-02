@@ -74,7 +74,8 @@ nothing when the question is only about drawing.
 | `clearMs`        | Tearing the previous scene down                                                     |
 | `visible`        | Satellites actually drawn, which is **not** always the count requested              |
 | `drawn`          | Components actually drawn, when they differ from the ones requested                 |
-| `heapMb`         | Chrome only, bucketed to 5 MB. A trend, not a figure                                |
+| `heapMb`         | Heap low-water mark. **Not printed** — an input to the memory fit. csv/json only    |
+| `heapPeak`       | High-water mark. `heapPeak - heapMb` is the window's allocation rate                |
 
 And derived, across steps:
 
@@ -82,6 +83,10 @@ And derived, across steps:
   _series_ (component set **and** clock rate, so a fit is never averaged across
   clocks): ms per 1,000 satellites, the fixed cost at zero, r² (well under 1.0
   means the cost is _not_ linear in the count), and where 60 fps runs out.
+- **memory** — a least-squares fit of the heap floor against the satellites drawn,
+  per series: MB per 1,000 satellites, KB per satellite, and r². Chrome only, and
+  a slope rather than a footprint — **read r² first**, because the whole method
+  rests on an assumption that can break. See the memory caveat below.
 - **marginal cost** — each set differenced against the largest set measured under
   the same conditions that is a strict subset of it. In a cumulative sweep that is
   the cost of the component just added; in an isolated sweep it is that component's
@@ -180,6 +185,82 @@ per-satellite propagation and nothing else.
   are drawn per orbit class, a 3D model needs a model url. `visible` and
   `componentInstances` are recorded for exactly this reason; check them before
   believing a flat line.
+- **Memory is reported as a slope, and the slope has one failure mode.**
+  `performance.memory.usedJSHeapSize` counts garbage that has not been collected
+  yet, and script cannot force a collection. So a heap reading is not a footprint,
+  and the single one this framework used to print per step read 86 MB and 462 MB
+  on consecutive passes over the _same_ scene — it sent someone hunting a leak
+  that did not exist. The heap is now sampled every frame, the per-step floor is
+  kept out of the printed tables (csv and json still carry it), and what is
+  reported is `memoryFits`: the floor fitted against the satellites drawn, within
+  one series.
+
+  Why a fit works: the standing garbage is roughly a **common offset** across the
+  rows of one series measured in one pass, so it lands in the intercept and leaves
+  the slope alone. Checked against forced collections over CDP with each scene held
+  up, the fit reported **53.7 KB per satellite against a true 52.5** — about 2%
+  out, r² 0.999.
+
+  When it does not work: if a major collection lands _between_ two rows of a
+  series, the offset stops being common and the slope is meaningless rather than
+  merely noisy. Measured on such a pass — zero-satellite floor 419 MB, the next row
+  101 MB — the fit reported **−2.8 MB per 1,000 satellites**, memory apparently
+  freed by drawing. That is what r² is for and it caught it at **0.002**, against
+  0.999 for the good pass. `memoryFitTrustworthy` gates on it, the panel marks the
+  row, and `logRun` warns — if you see it, re-run the sweep.
+
+  It also refuses a **two-count sweep** (`MIN_MEMORY_FIT_POINTS`, 3), however
+  beautifully it fits: two points always lie on their own line, so r² comes back
+  1.000 exactly where the offset assumption has been tested least. Three counts is
+  the fewest that can disagree with itself.
+
+  `heapDriftPct` on the drift table is the same scene's floor minutes apart. Treat
+  it as a **prompt, not a verdict**: it moves with whenever V8 last collected, and
+  measured on two clean runs it read −14.6% and −10.2% with nothing wrong. A large
+  figure means go and check with a real collection, not that there is a leak.
+
+  For an absolute number there is no substitute for a collection script cannot ask
+  for: DevTools, or `HeapProfiler.collectGarbage` over CDP. Measured that way, the
+  live set after five passes at 5,000 satellites was flat at 40–41 MB (nothing
+  leaks), and a live 5,000-satellite scene is 287 MB against 30 MB empty. There is
+  one accurate in-page alternative, tried rather than assumed:
+  `performance.measureUserAgentSpecificMemory()`. It needs cross-origin isolation,
+  and `Cross-Origin-Opener-Policy: same-origin` with
+  `Cross-Origin-Embedder-Policy: credentialless` isolates this app without breaking
+  anything — verified `crossOriginIsolated` true, catalog loaded, 74 satellites
+  drawn, no console errors, and still working when framed from a foreign origin
+  (COOP does not apply to iframes, so a framed instance runs unisolated as before).
+  `credentialless` is required rather than `require-corp`, which would need ion and
+  Google tiles to send CORP headers they do not send. Its figure agreed with a
+  forced collection to 0.2%: 52.6 KB per satellite against 52.7.
+
+  Every cross-origin consumer was checked against a control differing only in the
+  headers, and all of them behaved identically: the five imagery hosts (ArcGIS,
+  OSM, VersaTiles, NASA GIBS, Iowa Mesonet), ReEarth terrain, `api.cesium.com`,
+  36 tile loads from `assets.ion.cesium.com` under ion World Terrain, 178 more
+  under OSM Buildings, and 114 from `tile.googleapis.com` under Google
+  photorealistic in the sky view — every status 200, no failures, no
+  `blockedReason` on either side. That last one also settles the worry that the
+  PWA's `statuses: [0, 200]` rule implied opaque ion responses: they come back
+  200, so they are CORS and `credentialless` leaves them alone. Two providers
+  fail identically with and without the headers and so are unrelated:
+  `api.maptiler.com` answers 403 (its key looks domain-restricted the way the ion
+  token is) and ArcGIS terrain makes no requests at all. PostHog is the one
+  consumer still unverified.
+
+  What makes it a separate tool rather than a column is its cost. The call resolves
+  only after a natural major collection: measured over six calls, **14–19 s each,
+  mean 17 s**. It does not perturb what it measures (frame median 8.33 ms both
+  during a call and quiet), but at one call per step a 36-step sweep would grow by
+  ten minutes. Where it fits is once before and once after a run — about 34 s for
+  two real live sets of the same scene, which is the leak check `heapDriftPct`
+  could not be — or a short dedicated sweep of three counts for absolute
+  footprints.
+
+  Chrome only. Granularity is not the limitation: measured, eight consecutive
+  reads give eight distinct non-round values with and without
+  `--enable-precise-memory-info`.
+
 - **The whole catalog is loaded before the first step** (`catalog.ensureAll()`), so
   a run measures drawing rather than downloading. Counts are sliced from the sorted
   catalog, so "the first 500" is the same 500 every time — but which 500 depends on
@@ -197,8 +278,8 @@ browser in the loop:
 
 - `frameSampler.ts` — timestamps in, percentiles out. No Cesium, no DOM.
 - `benchmarkPlan.ts` — the three-axis sweep matrix, pure.
-- `report.ts` — rows, the linear fits, the marginal-cost, propagation and drift
-  differencing, csv/json.
+- `report.ts` — rows, the linear fits (frame time and memory), the marginal-cost,
+  propagation and drift differencing, csv/json.
 - `benchmarkRunner.ts` — the loop, over a `BenchmarkTarget` interface.
 - `cesiumBenchmarkTarget.ts` — the only file that knows what a viewer is.
 - `index.ts` — the console handle, `window.bench`.

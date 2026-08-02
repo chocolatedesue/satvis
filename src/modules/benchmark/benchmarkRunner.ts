@@ -48,8 +48,11 @@ export interface BenchmarkTarget {
   /** How many satellites are available to draw at all. */
   catalogSize(): number;
   apply(request: SceneRequest): Promise<SceneApplied>;
+  /**
+   * Sample the window. The heap is part of the returned frame sample rather than
+   * a separate reading taken afterwards — see `FrameSample.heap`.
+   */
   measure(options: MeasureOptions): Promise<FrameSample>;
-  memoryBytes(): number | undefined;
   /** Put the app back the way it was found. */
   restore(): Promise<void>;
 }
@@ -72,7 +75,6 @@ export interface BenchmarkResult {
   step: BenchmarkStep;
   applied: SceneApplied;
   frames: FrameSample;
-  heapMb: number | undefined;
 }
 
 export interface BenchmarkRun {
@@ -90,8 +92,6 @@ export interface RunnerHooks {
   /** Called as each row lands, so a live table does not wait for the sweep. */
   onResult?(result: BenchmarkResult, run: BenchmarkRun): void;
 }
-
-const BYTES_PER_MB = 1024 * 1024;
 
 export class BenchmarkRunner {
   readonly #target: BenchmarkTarget;
@@ -158,8 +158,7 @@ export class BenchmarkRunner {
           run.cancelled = true;
           break;
         }
-        const bytes = this.#target.memoryBytes();
-        const result: BenchmarkResult = { step, applied, frames, heapMb: bytes === undefined ? undefined : bytes / BYTES_PER_MB };
+        const result: BenchmarkResult = { step, applied, frames };
         run.results.push(result);
         hooks.onResult?.(result, run);
       }

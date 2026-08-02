@@ -61,6 +61,37 @@ export interface FrameSample {
    * frame interval rather than printing whatever comes back.
    */
   gpu: SeriesStats | undefined;
+  /**
+   * Heap size in MB, sampled once per frame across the window.
+   *
+   * A population rather than one reading, because one reading is not a
+   * measurement of anything: `usedJSHeapSize` counts garbage that has not been
+   * collected yet, and a page cannot force a collection. The single post-sample
+   * reading this replaces read 86 MB and 462 MB on consecutive passes over the
+   * same scene, purely by which side of a major GC it landed on.
+   *
+   * What the window buys is `min` and `max` — and be clear about what each is
+   * worth, because it is less than it looks:
+   *
+   * - **`min` is not the live set.** A major collection rarely lands inside a
+   *   4 s window, so the low-water mark is mostly the heap as the window opened,
+   *   accumulated garbage included. Measured over three identical sweeps, the
+   *   zero-satellite step read 59, 436 and 270 MB against a true live set of
+   *   39.5 MB. Read it as a *relative* figure: the difference down a column
+   *   within one sweep cancels the offset, and did so to about 1% (a 5,000
+   *   satellite scene came out +269.9 and +269.4 MB over its own zero row on two
+   *   consecutive passes).
+   * - **`max - min` is the allocation rate** over the window, and repeats well:
+   *   13 MB at zero satellites, 24 MB at 1,000, 31 MB at 5,000.
+   *
+   * For an absolute number there is no substitute for a collection nobody can
+   * ask for from script — DevTools, or `HeapProfiler.collectGarbage` over CDP.
+   *
+   * Undefined outside Chrome. Granularity is not the problem — measured, eight
+   * consecutive reads give eight distinct non-round values, with or without
+   * `--enable-precise-memory-info` — uncollected garbage is.
+   */
+  heap: SeriesStats | undefined;
   jankFrames: number;
   jankRatio: number;
 }
@@ -82,6 +113,8 @@ export class FrameSampler {
 
   #gpu: number[] = [];
 
+  #heap: number[] = [];
+
   #last: number | undefined;
 
   constructor(limit = 0) {
@@ -98,6 +131,18 @@ export class FrameSampler {
     this.#gpu.push(ms);
     if (this.#limit > 0 && this.#gpu.length > this.#limit) {
       this.#gpu.shift();
+    }
+  }
+
+  /**
+   * The heap for this frame, in MB. Its own population like `pushGpu`, since it
+   * is absent entirely on browsers that do not offer the reading and a frame
+   * without one is still a frame.
+   */
+  pushHeap(mb: number): void {
+    this.#heap.push(mb);
+    if (this.#limit > 0 && this.#heap.length > this.#limit) {
+      this.#heap.shift();
     }
   }
 
@@ -128,6 +173,7 @@ export class FrameSampler {
     this.#wall = [];
     this.#cpu = [];
     this.#gpu = [];
+    this.#heap = [];
   }
 
   get frames(): number {
@@ -145,6 +191,7 @@ export class FrameSampler {
       wall,
       cpu: seriesStats(this.#cpu),
       gpu: seriesStats(this.#gpu),
+      heap: seriesStats(this.#heap),
       jankFrames,
       jankRatio: this.#wall.length > 0 ? jankFrames / this.#wall.length : 0,
     };

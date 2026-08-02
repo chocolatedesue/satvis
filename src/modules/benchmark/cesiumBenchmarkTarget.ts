@@ -10,14 +10,19 @@ import { FrameSampler, type FrameSample } from "./frameSampler";
 
 declare global {
   interface Performance {
-    // Chrome only, and coarse (bucketed to 5 MB unless the browser was started
-    // with --enable-precise-memory-info). Useful as a trend, not as a figure.
+    // Chrome only. The comment here used to claim 5 MB buckets unless started
+    // with --enable-precise-memory-info; measured on Chrome in 2026 that is not
+    // so — eight consecutive reads gave eight distinct non-round values with and
+    // without the flag. What makes a single read useless is not granularity but
+    // uncollected garbage. See FrameSample.heap.
     memory?: { usedJSHeapSize: number; totalJSHeapSize: number; jsHeapSizeLimit: number };
   }
 }
 
 /** About two seconds at 60 fps — enough for the live readout to be steady. */
 const LIVE_WINDOW_FRAMES = 120;
+
+const BYTES_PER_MB = 1024 * 1024;
 
 /** A GPU query result is usually a frame or two away; give up rather than leak. */
 const GPU_QUERY_POLL_MS = 4;
@@ -30,7 +35,6 @@ export interface LiveSnapshot {
   clockMultiplier: number;
   entities: number;
   primitives: number;
-  heapMb: number | undefined;
 }
 
 export interface TargetOptions {
@@ -155,6 +159,15 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       const cpuMs = now - this.#preUpdateAt;
       this.#live.push(now, cpuMs);
       this.#sweep?.push(now, cpuMs);
+      // After the timing marks, so the read is never inside what it would
+      // otherwise inflate. Per frame rather than once per step because a single
+      // reading measures when the last GC happened, not what the scene costs.
+      const bytes = performance.memory?.usedJSHeapSize;
+      if (bytes !== undefined) {
+        const mb = bytes / BYTES_PER_MB;
+        this.#live.pushHeap(mb);
+        this.#sweep?.pushHeap(mb);
+      }
       this.#endGpuQuery();
     });
   }
@@ -249,7 +262,6 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
 
   /** The in-browser readout, sampled continuously whether a sweep is running or not. */
   live(): LiveSnapshot {
-    const bytes = this.memoryBytes();
     return {
       frames: this.#live.snapshot(),
       satellitesVisible: this.#cc.sats.visibleSatellites.length,
@@ -257,7 +269,6 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       clockMultiplier: this.#cc.viewer.clock.multiplier,
       entities: this.#cc.viewer.entities.values.length,
       primitives: this.#cc.viewer.scene.primitives.length,
-      heapMb: bytes === undefined ? undefined : bytes / 1024 / 1024,
     };
   }
 
@@ -360,10 +371,6 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     } finally {
       this.#sweep = undefined;
     }
-  }
-
-  memoryBytes(): number | undefined {
-    return performance.memory?.usedJSHeapSize;
   }
 
   async restore(): Promise<void> {

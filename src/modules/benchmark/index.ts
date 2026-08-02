@@ -119,10 +119,13 @@ export function installBenchmark(cc: CesiumController): BenchmarkHandle {
     watch(intervalMs = 2000) {
       const timer = setInterval(() => {
         const live = target.live();
-        const { wall, cpu } = live.frames;
+        const { wall, cpu, heap } = live.frames;
+        // Low-water mark and peak, not one figure: the gap between them is
+        // uncollected garbage rather than footprint. See FrameSample.heap.
+        const heapText = heap === undefined ? "n/a" : `${heap.min.toFixed(0)}–${heap.max.toFixed(0)} MB`;
         console.log(
           `[bench] ${live.frames.fps.toFixed(1).padStart(5)} fps · frame ${(wall?.mean ?? 0).toFixed(2).padStart(6)} ms (p95 ${(wall?.p95 ?? 0).toFixed(2)}) · cpu ${(cpu?.mean ?? 0).toFixed(2).padStart(6)} ms ·`,
-          `${String(live.satellitesVisible).padStart(5)} sats · ${formatComponents(live.componentsDrawn)} @ ×${live.clockMultiplier} · ${live.entities} entities · heap ${live.heapMb === undefined ? "n/a" : `${live.heapMb.toFixed(0)} MB`}`,
+          `${String(live.satellitesVisible).padStart(5)} sats · ${formatComponents(live.componentsDrawn)} @ ×${live.clockMultiplier} · ${live.entities} entities · heap ${heapText}`,
         );
       }, intervalMs);
       return () => clearInterval(timer);

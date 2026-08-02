@@ -54,7 +54,10 @@
       </div>
       <div class="bench__row bench__dim">
         p95 {{ live.p95Ms.toFixed(2) }} · worst {{ live.worstMs.toFixed(2) }} · jank {{ live.jankPct.toFixed(0) }}% · heap
-        {{ live.heapMb === undefined ? "n/a" : `${live.heapMb.toFixed(0)} MB` }}
+        <!-- Low-water mark first: it is the one that means something. The peak
+             beside it is the same window's garbage, so the two read as footprint
+             and churn rather than as one number that wanders. -->
+        {{ live.heapMb === undefined ? "n/a" : `${live.heapMb.toFixed(0)}–${(live.heapPeakMb ?? live.heapMb).toFixed(0)} MB` }}
       </div>
       <div class="bench__row bench__dim">
         {{ live.satellites }} sats · {{ live.components || "no components" }} · ×{{ live.clock }} · {{ live.entities }} entities · {{ live.primitives }} primitives
@@ -139,7 +142,6 @@
               <th class="bench__num">cpu</th>
               <th v-if="gpuColumn" class="bench__num">gpu</th>
               <th class="bench__num">build</th>
-              <th class="bench__num">heap</th>
               <th>components</th>
             </tr>
           </thead>
@@ -157,7 +159,6 @@
               <td class="bench__num">{{ row.cpuMs.toFixed(2) }}</td>
               <td v-if="gpuColumn" class="bench__num">{{ row.gpuMs === "" ? "—" : row.gpuMs.toFixed(2) }}</td>
               <td class="bench__num">{{ row.buildMs.toFixed(0) }}</td>
-              <td class="bench__num">{{ row.heapMb === "" ? "—" : row.heapMb }}</td>
               <td>
                 {{ row.components }}<span v-if="row.drawn" class="bench__warn"> → drew {{ row.drawn }}</span>
               </td>
@@ -188,6 +189,40 @@
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Slopes only, and captioned as relative on purpose. The heap floor these
+         are fitted through includes uncollected garbage, so the intercept is not a
+         footprint and an absolute figure printed here would invite exactly the
+         misreading that sent someone after a leak that did not exist. -->
+      <div v-if="memory.length > 0" class="bench__block bench__block--table">
+        <div class="bench__caption">memory (heap growth per 1,000 satellites — relative; within 2% of a forced GC when r² holds)</div>
+        <table class="bench__table">
+          <thead>
+            <tr>
+              <th>series</th>
+              <th class="bench__num">MB/1k</th>
+              <th class="bench__num">KB/sat</th>
+              <th class="bench__num">r²</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="fit in memory" :key="fit.series">
+              <td>{{ fit.series }}</td>
+              <td class="bench__num">{{ fit.mbPer1000Sats.toFixed(1) }}</td>
+              <td class="bench__num">{{ fit.kbPerSatellite.toFixed(1) }}</td>
+              <td :class="['bench__num', memoryFitTrustworthy(fit) ? 'bench__good' : 'bench__bad']">{{ fit.r2.toFixed(3) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <!-- Not a footnote: a collection landing mid-series makes the slope
+             meaningless rather than merely noisy, and a negative one reads as an
+             answer. Measured, a broken series fitted r² 0.002 against 0.999 for a
+             good one, so the row says so in place of its own numbers. -->
+        <div v-if="memory.some((fit) => !memoryFitTrustworthy(fit))" class="bench__row bench__bad">
+          that slope cannot be read — it needs {{ MIN_MEMORY_FIT_POINTS }}+ counts and r² {{ MIN_TRUSTWORTHY_MEMORY_R2 }}, or a garbage collection landed inside the series and its
+          offset is not common to the rows. Sweep more counts, or re-run.
+        </div>
       </div>
 
       <!-- Only when the clock was swept: an empty table here would read as
@@ -277,6 +312,7 @@ import {
   installBenchmark,
   logRun,
   marginalCosts,
+  memoryFits,
   propagationCosts,
   reportRows,
   scalingFits,
@@ -286,8 +322,12 @@ import {
   formatTable,
   GPU_TIMER_TRUST_FACTOR,
   MAX_TRUSTWORTHY_DRIFT_PCT,
+  MIN_MEMORY_FIT_POINTS,
   MIN_TRUSTWORTHY_FRAMES,
+  MIN_TRUSTWORTHY_MEMORY_R2,
+  memoryFitTrustworthy,
   type BenchmarkRun,
+  type MemoryFit,
   type PropagationCost,
   type RepeatCheck,
   type ReportRow,
@@ -401,6 +441,11 @@ const fits = computed<ScalingFit[]>(() => {
   const current = run();
   return current && current.results.length > 1 ? scalingFits(current) : [];
 });
+const memory = computed<MemoryFit[]>(() => {
+  void revision.value;
+  const current = run();
+  return current && current.results.length > 1 ? memoryFits(current) : [];
+});
 const propagation = computed<PropagationCost[]>(() => {
   void revision.value;
   const current = run();
@@ -441,7 +486,10 @@ interface Live {
   /** Undefined where there is no GPU clock, or one that contradicts the frame rate. */
   gpuMs: number | undefined;
   jankPct: number;
+  /** The window's low-water mark — the live-set estimate. Undefined outside Chrome. */
   heapMb: number | undefined;
+  /** The same window's high-water mark, so the gap reads as garbage. */
+  heapPeakMb: number | undefined;
   satellites: number;
   components: string;
   clock: number;
@@ -457,6 +505,7 @@ const EMPTY_LIVE: Live = {
   gpuMs: undefined,
   jankPct: 0,
   heapMb: undefined,
+  heapPeakMb: undefined,
   satellites: 0,
   components: "",
   clock: 1,
@@ -508,7 +557,8 @@ function refresh(): void {
     // N, so a timer claiming otherwise is measuring something else.
     gpuMs: gpuOrUndefined(snapshot.frames.gpu?.mean, snapshot.frames.wall?.p50),
     jankPct: snapshot.frames.jankRatio * 100,
-    heapMb: snapshot.heapMb,
+    heapMb: snapshot.frames.heap?.min,
+    heapPeakMb: snapshot.frames.heap?.max,
     satellites: snapshot.satellitesVisible,
     components: formatComponents(snapshot.componentsDrawn),
     clock: snapshot.clockMultiplier,
