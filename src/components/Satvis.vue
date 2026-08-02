@@ -262,6 +262,7 @@
       </div>
     </div>
     <div id="toolbarRight">
+      <about-dialog v-if="showUI" />
       <UTooltip v-if="showUI" text="Github">
         <a class="cesium-button cesium-toolbar-button" href="https://github.com/Flowm/satvis/" target="_blank" rel="noopener">
           <UIcon name="fa6-brands:github" />
@@ -297,6 +298,7 @@ import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
+import AboutDialog from "./AboutDialog.vue";
 import EntityInfoPanel from "./EntityInfoPanel.vue";
 import SatelliteBrowser from "./SatelliteBrowser.vue";
 import SkyHud from "./SkyHud.vue";

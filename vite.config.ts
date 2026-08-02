@@ -56,6 +56,7 @@ export default defineConfig({
     rolldownOptions: {
       input: {
         index: fileURLToPath(new URL("index.html", import.meta.url)),
+        about: fileURLToPath(new URL("about.html", import.meta.url)),
         embedded: fileURLToPath(new URL("embedded.html", import.meta.url)),
         test: fileURLToPath(new URL("test.html", import.meta.url)),
       },
