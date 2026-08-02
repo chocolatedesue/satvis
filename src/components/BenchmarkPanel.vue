@@ -531,7 +531,7 @@ onMounted(() => {
   // between.
   //
   // Through the store, not `scene.requestRenderMode`. Writing the scene left the
-  // debug menu's own RequestRender switch showing the old value — a plain scene
+  // Render menu's own RequestRender switch showing the old value — a plain scene
   // property is not reactive — so the first time the panel was opened it looked
   // as though nothing had happened.
   savedRequestRenderMode = cesiumStore.requestRenderMode;

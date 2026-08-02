@@ -286,7 +286,7 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     // scene costs. The clock has to run for the same reason: a stopped clock
     // means no position updates, and position updates are most of the cost.
     //
-    // Through the store so the debug menu's switch follows: a sweep started from
+    // Through the store so the Render menu's switch follows: a sweep started from
     // the console with the panel closed still changes this, and a control showing
     // the opposite of what is in force is worse than no control.
     cesiumStore.requestRenderMode = false;

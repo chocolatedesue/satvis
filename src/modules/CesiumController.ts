@@ -680,7 +680,7 @@ export class CesiumController {
 
   /**
    * Render-on-demand. Owned by the store rather than poked on the scene, because
-   * more than one thing turns it off — the debug toggle and the benchmark panel —
+   * more than one thing turns it off — the Render menu's switch and the benchmark panel —
    * and a plain scene property is not reactive, so a control bound straight to it
    * goes on showing the old value after anything else has written it.
    */
