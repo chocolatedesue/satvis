@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { layerProvider } from "../config/layers";
-import { MSAA_RATES, PIXEL_RATIOS } from "../config/rendering";
+import { MSAA_RATES, PIXEL_RATIOS, currentDevicePixelRatio, defaultMsaaRate } from "../config/rendering";
 import { SURFACE_MODELS } from "../config/surfaceModels";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { baseLayerNames, imageryProviderNames, terrainProviderNames } from "../modules/CesiumLayerProviders";
@@ -21,13 +21,17 @@ export const useCesiumStore = defineStore(
     const cameraMode = ref("Fixed");
     // Drawing-buffer pixels per CSS pixel; `native` is the display's own ratio.
     const pixelRatio = ref<string>("native");
-    // Multisample antialiasing, at Cesium's default rate. A second quality axis
-    // rather than part of `pixelRatio`, because the two buy smoothness in
-    // different currencies — the ratio trades away resolution, this trades away
-    // edge quality at the same resolution — and on a 4k canvas MSAA is the single
-    // most expensive thing in an empty frame, so what it costs and what it is
-    // worth are worth being able to see separately.
-    const msaa = ref<string>("4");
+    // Multisample antialiasing. A second quality axis rather than part of
+    // `pixelRatio`, because the two buy smoothness in different currencies —
+    // the ratio trades away resolution, this trades away edge quality at the
+    // same resolution — and on a 4k canvas MSAA is the single most expensive
+    // thing in an empty frame.
+    //
+    // The default is the display's, not a constant: see `defaultMsaaRate`.
+    // Read once, so a window dragged to a second monitor keeps the rate it
+    // started with — re-deriving it would overwrite a choice the user may have
+    // made in between, and the menu is right there.
+    const msaa = ref<string>(defaultMsaaRate(currentDevicePixelRatio()));
     const background = ref(true);
     const showFps = ref(false);
     const pickMode = ref(false);

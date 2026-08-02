@@ -45,11 +45,20 @@ Every parameter is optional. An absent parameter means "use the default" (see
 | `scene`      | `cesium.sceneMode`       | enum                | `3D` \| `2D` \| `Columbus` \| `Sky`                                                                               | `3D`             |
 | `camera`     | `cesium.cameraMode`      | enum                | `Fixed` \| `Inertial`                                                                                             | `Fixed`          |
 | `pixelratio` | `cesium.pixelRatio`      | enum                | `1` \| `1.25` \| `1.5` \| `1.75` \| `native`                                                                      | `native`         |
-| `msaa`       | `cesium.msaa`            | enum                | `off` \| `2` \| `4`                                                                                               | `4`              |
+| `msaa`       | `cesium.msaa`            | enum                | `off` \| `2` \| `4`                                                                                               | per display[^1]  |
 | `fps`        | `cesium.showFps`         | boolean             | `true` \| `false`                                                                                                 | `false`          |
 | `bench`      | `cesium.showBenchmark`   | boolean             | `true` \| `false`                                                                                                 | `false`          |
 | `bg`         | `cesium.background`      | boolean             | `true` \| `false`                                                                                                 | `true`           |
 | `time`       | clock time               | timestamp           | emitted as ISO-8601 at minute precision (`2026-07-26T20:46Z`); any `dayjs`-parseable value accepted               | absent (live)    |
+
+[^1]:
+    `msaa` is the one parameter whose default depends on the machine rather than on
+    the route: `off` at a device pixel ratio of 2 or more, `2` below it
+    (`defaultMsaaRate`). It is the same rule as every other default — the baseline is
+    whatever the store holds after hydration — but it is worth naming, because it means
+    a link with no `msaa` can render differently on a laptop and a desktop. That is the
+    intent: the parameter is absent because nobody chose, and what nobody chose should
+    suit the display. A link that must pin the rate says so explicitly.
 
 `scene=Sky` is the odd one out: the other three name a Cesium `SceneMode` and it does
 not — it is the ground-level sky view, which renders in 3D. It shares the parameter
