@@ -26,6 +26,7 @@ import { currentPosition } from "../composables/useGeolocation";
 import { usePostHog } from "../composables/usePostHog";
 import { useToastProxy } from "../composables/useToastProxy";
 import { parseLayer } from "../config/layers";
+import { MSAA_RATES, PIXEL_RATIOS, msaaSamplesFor, resolutionScaleFor } from "../config/rendering";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
@@ -658,19 +659,42 @@ export class CesiumController {
     }
   }
 
-  set qualityPreset(quality: string) {
-    switch (quality) {
-      case "low":
-        // Ignore browser's device pixel ratio and use CSS pixels instead of device pixels for render resolution
-        this.viewer.useBrowserRecommendedResolution = true;
-        break;
-      case "high":
-        // Use browser's device pixel ratio for render resolution
-        this.viewer.useBrowserRecommendedResolution = false;
-        break;
-      default:
-        console.error("Unknown quality preset");
+  /**
+   * Drawing-buffer pixels per CSS pixel — `1`, `1.25`, `1.5`, `1.75` or
+   * `native` (`PIXEL_RATIOS`).
+   *
+   * `useBrowserRecommendedResolution` is held false throughout, which is what
+   * makes Cesium multiply by the display's own ratio rather than by a flat 1.0;
+   * the chosen ratio is then expressed as the `resolutionScale` that lands on
+   * it. Leaving the flag alone and driving one number keeps the two from
+   * disagreeing — the same picture used to be reachable two ways.
+   *
+   * Resizing the canvas draws by itself, so unlike `msaa` this needs no explicit
+   * render.
+   */
+  set pixelRatio(ratio: string) {
+    if (!(PIXEL_RATIOS as readonly string[]).includes(ratio)) {
+      console.error("Unknown pixel ratio");
+      return;
     }
+    this.viewer.useBrowserRecommendedResolution = false;
+    this.viewer.resolutionScale = resolutionScaleFor(ratio, window.devicePixelRatio);
+  }
+
+  /**
+   * Multisample antialiasing — `off`, `2` or `4` (`MSAA_RATES`).
+   *
+   * Setting the sample count does not itself ask for a frame, so under
+   * render-on-demand the control would appear to do nothing until something
+   * else happened to request one — hence the explicit render.
+   */
+  set msaa(rate: string) {
+    if (!(MSAA_RATES as readonly string[]).includes(rate)) {
+      console.error("Unknown MSAA rate");
+      return;
+    }
+    this.viewer.scene.msaaSamples = msaaSamplesFor(rate);
+    this.viewer.scene.requestRender();
   }
 
   /**

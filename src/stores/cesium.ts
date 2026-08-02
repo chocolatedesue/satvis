@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { layerProvider } from "../config/layers";
+import { MSAA_RATES, PIXEL_RATIOS } from "../config/rendering";
 import { SURFACE_MODELS } from "../config/surfaceModels";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { baseLayerNames, imageryProviderNames, terrainProviderNames } from "../modules/CesiumLayerProviders";
@@ -18,7 +19,15 @@ export const useCesiumStore = defineStore(
     const surfaceModel = ref("None");
     const sceneMode = ref("3D");
     const cameraMode = ref("Fixed");
-    const qualityPreset = ref("high");
+    // Drawing-buffer pixels per CSS pixel; `native` is the display's own ratio.
+    const pixelRatio = ref<string>("native");
+    // Multisample antialiasing, at Cesium's default rate. A second quality axis
+    // rather than part of `pixelRatio`, because the two buy smoothness in
+    // different currencies — the ratio trades away resolution, this trades away
+    // edge quality at the same resolution — and on a 4k canvas MSAA is the single
+    // most expensive thing in an empty frame, so what it costs and what it is
+    // worth are worth being able to see separately.
+    const msaa = ref<string>("4");
     const background = ref(true);
     const showFps = ref(false);
     const pickMode = ref(false);
@@ -84,7 +93,8 @@ export const useCesiumStore = defineStore(
       surfaceModel,
       sceneMode,
       cameraMode,
-      qualityPreset,
+      pixelRatio,
+      msaa,
       background,
       showFps,
       pickMode,
@@ -102,7 +112,8 @@ export const useCesiumStore = defineStore(
         { name: "surfaceModel", url: "surface", kind: enumString(SURFACE_MODELS) },
         { name: "sceneMode", url: "scene", kind: enumString(SCENE_MODES) },
         { name: "cameraMode", url: "camera", kind: enumString(CAMERA_MODES) },
-        { name: "qualityPreset", url: "quality", kind: enumString(["low", "high"]) },
+        { name: "pixelRatio", url: "pixelratio", kind: enumString([...PIXEL_RATIOS]) },
+        { name: "msaa", url: "msaa", kind: enumString([...MSAA_RATES]) },
         { name: "showFps", url: "fps", kind: boolean() },
         { name: "showBenchmark", url: "bench", kind: boolean() },
         { name: "background", url: "bg", kind: boolean() },
