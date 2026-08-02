@@ -50,6 +50,7 @@ function fakeTarget() {
     cameraMode: "Fixed",
     qualityPreset: "",
     showFps: false,
+    requestRenderMode: true,
     background: false,
     skyView: {
       active: false,

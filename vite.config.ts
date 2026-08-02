@@ -97,7 +97,19 @@ export default defineConfig({
       workbox: {
         maximumFileSizeToCacheInBytes: 5000000,
         globPatterns: ["**/*.{js,css,html,svg,png,ico}", "cesium/Assets/**/*.{jpg,png,xml,json}"],
-        globIgnores: ["cesium/ThirdParty/**/*", "cesium/Widgets/**/*", "cesium/Workers/**/*", "cesium/Assets/Textures/maki/*", "**/*.map"],
+        globIgnores: [
+          "cesium/ThirdParty/**/*",
+          "cesium/Widgets/**/*",
+          "cesium/Workers/**/*",
+          "cesium/Assets/Textures/maki/*",
+          "**/*.map",
+          // The benchmarking framework (src/modules/benchmark), which
+          // rolls up into the panel's chunk because the panel is its only
+          // importer. The chunk is lazy, but the precache glob above would pull
+          // it down for every visitor anyway — and only the Benchmark switch
+          // ever loads it.
+          "**/BenchmarkPanel-*.{js,css}",
+        ],
         sourcemap: true,
         navigateFallback: "/index.html",
         // Matched against `pathname + search`, and only for requests whose mode is
@@ -230,6 +242,14 @@ export default defineConfig({
   preview: {
     port,
     strictPort: port !== undefined,
+    // Same proxy as the dev server. `pnpm bench` measures a production build,
+    // and a build with no satellite data to draw would measure nothing.
+    proxy: {
+      "/api": {
+        target: process.env.SATVIS_API_PROXY ?? "https://satvis.space",
+        changeOrigin: true,
+      },
+    },
   },
   worker: {
     format: "es",

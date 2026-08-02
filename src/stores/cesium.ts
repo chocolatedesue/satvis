@@ -22,6 +22,17 @@ export const useCesiumStore = defineStore(
     const background = ref(true);
     const showFps = ref(false);
     const pickMode = ref(false);
+    // Matches what createViewer sets. Held here rather than read off the scene so
+    // the debug toggle and the benchmark panel cannot disagree about it: a scene
+    // property is not reactive, so a checkbox bound straight to it keeps showing
+    // the old value after anything else has written it. Not URL-synced — it is a
+    // property of a debugging session, not of a view worth sharing.
+    const requestRenderMode = ref(true);
+    // The benchmarking framework (src/modules/benchmark). URL-synced
+    // like every other debug toggle, so a benchmarking session is a shareable
+    // link and the switch in the menu and the `?bench` parameter are one thing
+    // rather than two ways in.
+    const showBenchmark = ref(false);
 
     // Read-only: "at most one base layer" is an invariant of the list as a
     // whole, so it cannot be enforced from a per-checkbox write.
@@ -77,6 +88,8 @@ export const useCesiumStore = defineStore(
       background,
       showFps,
       pickMode,
+      showBenchmark,
+      requestRenderMode,
     };
   },
   {
@@ -91,6 +104,7 @@ export const useCesiumStore = defineStore(
         { name: "cameraMode", url: "camera", kind: enumString(CAMERA_MODES) },
         { name: "qualityPreset", url: "quality", kind: enumString(["low", "high"]) },
         { name: "showFps", url: "fps", kind: boolean() },
+        { name: "showBenchmark", url: "bench", kind: boolean() },
         { name: "background", url: "bg", kind: boolean() },
         { name: "time", url: "time", kind: timestamp() },
       ],

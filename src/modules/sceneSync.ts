@@ -46,6 +46,7 @@ export interface SceneTarget {
   cameraMode: string;
   qualityPreset: string;
   showFps: boolean;
+  requestRenderMode: boolean;
   background: boolean;
   readonly skyView: {
     readonly active: boolean;
@@ -267,6 +268,15 @@ export function startSceneSync(cc: SceneTarget): void {
     (show) => {
       cc.showFps = show;
     },
+  );
+  // Immediate, so the store's value is the one in force from the first frame
+  // rather than whatever the viewer was constructed with.
+  watch(
+    () => cesiumStore.requestRenderMode,
+    (on) => {
+      cc.requestRenderMode = on;
+    },
+    { immediate: true },
   );
   watch(
     () => cesiumStore.background,

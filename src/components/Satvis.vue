@@ -203,8 +203,16 @@
           <span class="slider"></span>
           FPS
         </label>
+        <!-- The benchmarking framework (src/modules/benchmark). Beneath FPS because it is the same
+             question asked in more depth, and url-synced like the rest of this
+             menu, so a benchmarking session is a link. -->
         <label class="toolbarSwitch">
-          <input v-model="cc.viewer.scene.requestRenderMode" type="checkbox" />
+          <input v-model="showBenchmark" type="checkbox" />
+          <span class="slider"></span>
+          Benchmark
+        </label>
+        <label class="toolbarSwitch">
+          <input v-model="requestRenderMode" type="checkbox" />
           <span class="slider"></span>
           RequestRender
         </label>
@@ -259,12 +267,15 @@
          Cesium InfoBox, which was visible with hidden UI and in minimalUI. -->
     <entity-info-panel />
     <sky-hud />
+    <!-- Async, so nothing about it is in the
+         bundle a normal visitor downloads. -->
+    <benchmark-panel v-if="showBenchmark" @close="showBenchmark = false" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, defineAsyncComponent, onMounted, reactive, ref } from "vue";
 
 import { useController } from "../composables/useController";
 import { useGeolocation } from "../composables/useGeolocation";
@@ -281,6 +292,10 @@ import SkyHud from "./SkyHud.vue";
 
 type MenuKey = "cat" | "sat" | "gs" | "map" | "view" | "ios" | "dbg";
 
+// The benchmarking framework. Async, so nothing about it — the sweep, the
+// report tables, the panel — is in the bundle a normal visitor downloads.
+const BenchmarkPanel = defineAsyncComponent(() => import("./BenchmarkPanel.vue"));
+
 const cc = useController();
 
 const menu = reactive<Record<MenuKey, boolean>>({
@@ -295,7 +310,7 @@ const menu = reactive<Record<MenuKey, boolean>>({
 const showUI = ref(true);
 
 const cesiumStore = useCesiumStore();
-const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, qualityPreset, showFps, pickMode } = storeToRefs(cesiumStore);
+const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, qualityPreset, showFps, showBenchmark, requestRenderMode, pickMode } = storeToRefs(cesiumStore);
 
 // What the selection means here and now, from the one function the globe reads
 // too — so a dimmed group and an unlit tileset cannot disagree.
