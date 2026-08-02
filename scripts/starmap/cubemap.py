@@ -9,23 +9,17 @@ light, half-float EXR, of 1.7 billion stars from Hipparcos-2, Tycho-2 and Gaia
 DR2 — public domain, credit requested. https://svs.gsfc.nasa.gov/4851
 Output is six 8-bit JPEG cube faces named the way `SkyBox` wants them.
 
-Two things here are worth knowing before changing anything.
+Two things are worth knowing before changing anything.
 
 **Linear light is the whole point of the EXR.** Averaging supersamples is only
-physically meaningful before the tone curve, so everything below stays linear
-until `encode()` at the very end. A star that lands on one source texel keeps
-its flux when it is spread across a coarser output texel; the tone curve then
-decides how bright that reads. Downsampling an already tone-mapped JPEG — which
-is what the Tycho asset forces — cannot do this.
+physically meaningful before the tone curve, so everything stays linear until
+`encode()` at the very end. Downsampling an already tone-mapped JPEG — which is
+what the Tycho asset forces — cannot do this.
 
-**Orientation is checked against a known-good map, and only ever as a whole.**
-`--verify` correlates each generated face with the corresponding face of the
-Tycho asset in the tree, over all eight dihedral transforms; anything but
-identity is a failure to fix in the projection, never by rotating the output.
-Rotating individual faces is what a previous version did, and it is a trap: each
-face can be made to match on its own while the set stops agreeing at the shared
-edges, which is invisible against Tycho's near-black sky and obvious as a seam
-against a bright one.
+**Orientation is checked as a whole, never patched per face.** `--verify`
+correlates each face against the Tycho asset over all eight dihedral transforms;
+anything but identity means the projection is wrong. Rotating one face to make
+it match is a trap, because the set then stops agreeing at the shared edges.
 """
 
 from __future__ import annotations
@@ -56,12 +50,6 @@ FACES: dict[str, callable] = {
 FACE_ORDER = ["px", "mx", "py", "my", "pz", "mz"]
 
 
-def remote_size(url: str) -> int:
-    req = Request(url, method="HEAD")
-    with urlopen(req) as r:  # noqa: S310 — fixed https host, see BASE_URL
-        return int(r.headers.get("Content-Length") or 0)
-
-
 def fetch(name: str, cache_dir: str) -> str:
     """Download into the cache, resuming a partial file and skipping a whole one.
 
@@ -70,7 +58,8 @@ def fetch(name: str, cache_dir: str) -> str:
     """
     dest = os.path.join(cache_dir, name)
     url = f"{BASE_URL}/{name}"
-    want = remote_size(url)
+    with urlopen(Request(url, method="HEAD")) as head:  # noqa: S310 — fixed host, see BASE_URL
+        want = int(head.headers.get("Content-Length") or 0)
     have = os.path.getsize(dest) if os.path.exists(dest) else 0
 
     if want and have == want:
@@ -108,14 +97,6 @@ def fetch(name: str, cache_dir: str) -> str:
     return dest
 
 
-def exr_dims(path: str) -> tuple[int, int]:
-    """(height, width) from the header, without decoding a pixel."""
-    import OpenEXR
-
-    window = OpenEXR.InputFile(path).header()["dataWindow"]
-    return window.max.y - window.min.y + 1, window.max.x - window.min.x + 1
-
-
 def open_source(exr_path: str) -> np.ndarray:
     """The map as a memory-mapped float16 BGR array.
 
@@ -126,37 +107,39 @@ def open_source(exr_path: str) -> np.ndarray:
     in what the current block touches and evicts the rest.
 
     float16 is not a precision compromise: the source is half-float already, so
-    the sidecar is bit-exact and half the size of the float32 it would otherwise
-    take. It is kept rather than rebuilt, at the cost of disk in the cache.
+    the sidecar is bit-exact and half the size of float32. It is kept rather than
+    rebuilt, at the cost of disk in the cache.
     """
     import Imath
     import OpenEXR
 
-    height, width = exr_dims(exr_path)
+    src = OpenEXR.InputFile(exr_path)
+    window = src.header()["dataWindow"]
+    height = window.max.y - window.min.y + 1
+    width = window.max.x - window.min.x + 1
     raw_path = f"{exr_path.removesuffix('.exr')}.{width}x{height}.bgr16"
+    shape = (height, width, 3)
     want = height * width * 3 * 2
 
     if os.path.exists(raw_path) and os.path.getsize(raw_path) == want:
         print(f"cached   {os.path.basename(raw_path)}", flush=True)
-        return np.memmap(raw_path, dtype=np.float16, mode="r", shape=(height, width, 3))
+        return np.memmap(raw_path, dtype=np.float16, mode="r", shape=shape)
 
     print(f"decoding {os.path.basename(exr_path)} to {width}x{height} ({want / 2**30:.2f} GiB sidecar)", flush=True)
-    src = OpenEXR.InputFile(exr_path)
     half = Imath.PixelType(Imath.PixelType.HALF)
     available = set(src.header()["channels"].keys())
-    out = np.memmap(raw_path, dtype=np.float16, mode="w+", shape=(height, width, 3))
-    band = 512
+    out = np.memmap(raw_path, dtype=np.float16, mode="w+", shape=shape)
     # BGR on the way in, so cv2.imwrite at the other end needs no swap.
     for index, name in enumerate(("B", "G", "R")):
         channel = name if name in available else next(iter(available))
-        for y0 in range(0, height, band):
-            y1 = min(y0 + band, height) - 1
+        for y0 in range(0, height, 512):
+            y1 = min(y0 + 512, height) - 1
             buf = src.channel(channel, half, y0, y1)
             out[y0 : y1 + 1, :, index] = np.frombuffer(buf, dtype=np.float16).reshape(y1 - y0 + 1, width)
         print(f"  {name} done", flush=True)
     out.flush()
     del out
-    return np.memmap(raw_path, dtype=np.float16, mode="r", shape=(height, width, 3))
+    return np.memmap(raw_path, dtype=np.float16, mode="r", shape=shape)
 
 
 def sample_bilinear(src: np.ndarray, sx: np.ndarray, sy: np.ndarray) -> np.ndarray:
@@ -185,25 +168,16 @@ def render_face(layers: list[tuple[np.ndarray, float]], face: str, size: int, ss
     a flux estimate rather than whichever source texel a nearest-neighbour lookup
     happened to hit.
 
-    **The kernel widens toward the corners, and that is the point.** A cube face
-    is not uniform: a texel at the centre spans 2/N radians and one at a corner
-    3^1.5 times less, so a corner texel resolves 2.3x finer detail than a middle
-    one. Resample a uniform-resolution sky faithfully into that and the corners
-    come out crisp while the middles come out smooth — on every face, identically,
-    which tiles into a quilt with the transitions along the face boundaries. It
-    reads as stitching, and a sharper source makes it worse rather than better.
-
-    Scaling each texel's sample spread by r^1.5 — the ratio of a centre texel's
-    angular size to this one's — makes every texel integrate the same solid angle,
-    so the whole map is band-limited to the coarsest part of a face and the grain
-    is uniform. Near an edge the widened kernel reaches into directions belonging
-    to the neighbouring face, which is exactly what makes the two agree there.
+    **The kernel widens toward the corners**, by r^1.5 — the ratio of a centre
+    texel's angular size to this one's — so every texel integrates the same solid
+    angle. Without it the corners resolve 2.3x finer than the middles and the
+    resulting grain difference tiles across all six faces as a quilt; see
+    `default_supersample`. Near an edge the widened kernel reaches into directions
+    belonging to the neighbouring face, which is what makes the two agree there.
 
     Layers are summed here rather than up front so `--layers composite` never
-    materialises a combined map. At 32K that array would be larger than the VM.
-
-    Row blocks bound peak memory, and with a memmapped source they also bound the
-    working set: one block touches a band of source rows, not the whole file.
+    materialises a combined map; at 32K that array would exceed the VM. Row blocks
+    bound peak memory and, with a memmapped source, the working set too.
     """
     h, w = layers[0][0].shape[:2]
     out = np.empty((size, size, 3), np.float32)
@@ -221,34 +195,20 @@ def render_face(layers: list[tuple[np.ndarray, float]], face: str, size: int, ss
         norm = np.sqrt(dx * dx + dy * dy + dz * dz)
         dx, dy, dz = dx / norm, dy / norm, dz / norm
 
-        # The source's left edge is RA 180 and its right ascension increases
-        # leftward, so the direction is reflected through x=0 before being turned
-        # into a pixel: ra -> pi - ra. Equivalently, the map is drawn as the sky
-        # looks from outside the celestial sphere and centred on RA 0, while a sky
-        # box is viewed from inside.
-        #
-        # Measured, and worth stating how, because an earlier version of this got
-        # it wrong in a way that survived review: cross-correlating each generated
-        # face against every face of the Tycho asset gives a clean diagonal except
-        # that +X and -X trade places, and every face wants a horizontal mirror.
-        # Swap one axis and mirror the rest is precisely a reflection through that
-        # axis — one global convention error, not the six-entry patch table that
-        # used to sit here fitting a reflection with rotations. That table left
-        # adjacent faces disagreeing, which showed up as a bright seam along a
-        # face boundary once the sky behind it was no longer almost black.
+        # ra -> pi - ra reflects the direction through x=0, because the source's
+        # left edge is RA 180 with right ascension increasing leftward: it is drawn
+        # as the sky looks from outside the celestial sphere, and a sky box is
+        # viewed from inside. Established by cross-correlating every generated face
+        # against every reference face — a clean diagonal except that +X and -X
+        # trade places, with every face wanting a horizontal mirror, which is
+        # exactly a reflection through that axis.
         ra = np.arctan2(dy, dx)
         dec = np.arcsin(np.clip(dz, -1.0, 1.0))
         sx = ((np.pi - ra) % (2.0 * np.pi)) / (2.0 * np.pi) * w - 0.5
         sy = (0.5 - dec / np.pi) * h - 0.5
 
-        block_px = None
-        for array, gain in layers:
-            contribution = sample_bilinear(array, sx, sy)
-            if gain != 1.0:
-                contribution *= gain
-            block_px = contribution if block_px is None else block_px + contribution
-        # (rows, ss, size, ss, 3) from the broadcast above; average the two
-        # sub-texel axes away.
+        # (rows, ss, size, ss, 3) from the broadcast above; average the sub-texel axes.
+        block_px = sum(sample_bilinear(array, sx, sy) * gain for array, gain in layers)
         out[y0:y1] = block_px.mean(axis=(1, 3))
 
     return out
@@ -279,25 +239,10 @@ def auto_exposure(layers: list[tuple[np.ndarray, float]], percentile: float) -> 
     h = layers[0][0].shape[0]
     samples = []
     for y0 in range(0, h, 1024):
-        y1 = min(y0 + 1024, h)
-        band = None
-        for array, gain in layers:
-            part = array[y0:y1:8, ::8].astype(np.float32)
-            if gain != 1.0:
-                part *= gain
-            band = part if band is None else band + part
+        band = sum(array[y0 : y0 + 1024 : 8, ::8].astype(np.float32) * gain for array, gain in layers)
         samples.append(band.max(axis=2).ravel())
     ref = float(np.percentile(np.concatenate(samples), percentile))
     return 1.0 if ref <= 0.0 else 1.0 / ref
-
-
-def face_centre_px_per_deg(size: int) -> float:
-    """Angular resolution at the middle of a face, the coarsest point on it.
-
-    A texel there spans 2/N radians; at a corner it is 3^1.5 times finer. For a
-    2048px face that is 17.9 px/deg against 40.8.
-    """
-    return size * np.pi / 360.0
 
 
 def default_supersample(size: int, width: int) -> int:
@@ -311,13 +256,34 @@ def default_supersample(size: int, width: int) -> int:
     quilted look with the transitions along the face boundaries.
 
     Matching the sample count to the centre's minification makes the integration
-    real where it is needed, which is what the 32K source is for.
+    real where it is needed, which is what the 32K source is for. A face-centre
+    texel spans 2/N radians, i.e. size*pi/360 px/deg — 17.9 at 2048, against 40.8
+    at a corner.
     """
-    ratio = (width / 360.0) / face_centre_px_per_deg(size)
+    ratio = (width / 360.0) / (size * np.pi / 360.0)
     # Capped at 4: cost is quadratic in this, and 16 samples already turns the
     # corners from "no filtering at all" into a real average, which is the part
     # that was showing as seams. Override with --supersample for more.
     return int(min(4, max(2, np.ceil(ratio))))
+
+
+def open_layers(mode: str, res: str, star_gain: float, cache_dir: str) -> list[tuple[np.ndarray, float]]:
+    """The source maps to sum, each with its weight.
+
+    Linear light, so layers simply add — but they are kept apart rather than
+    summed here so the composite path never materialises a combined map. At 32K
+    that array alone would exceed the VM.
+    """
+    if mode == "full":
+        return [(open_source(fetch(f"starmap_2020_{res}.exr", cache_dir)), 1.0)]
+
+    layers = [
+        (open_source(fetch(f"milkyway_2020_{res}.exr", cache_dir)), 1.0),
+        (open_source(fetch(f"hiptyc_2020_{res}.exr", cache_dir)), star_gain),
+    ]
+    if layers[0][0].shape != layers[1][0].shape:
+        raise SystemExit(f"layer size mismatch: {layers[0][0].shape} vs {layers[1][0].shape}")
+    return layers
 
 
 def dihedral(img: np.ndarray, k: int) -> np.ndarray:
@@ -425,18 +391,7 @@ def main() -> int:
     if free < 2 * 2**30:
         print(f"warning: {free / 2**30:.1f} GiB free in the cache mount", flush=True)
 
-    if args.layers == "full":
-        # Linear light, so layers simply add — kept separate rather than summed
-        # here so the composite path never materialises a combined map.
-        layers = [(open_source(fetch(f"starmap_2020_{args.res}.exr", args.cache)), 1.0)]
-    else:
-        layers = [
-            (open_source(fetch(f"milkyway_2020_{args.res}.exr", args.cache)), 1.0),
-            (open_source(fetch(f"hiptyc_2020_{args.res}.exr", args.cache)), args.star_gain),
-        ]
-        if layers[0][0].shape != layers[1][0].shape:
-            raise SystemExit(f"layer size mismatch: {layers[0][0].shape} vs {layers[1][0].shape}")
-
+    layers = open_layers(args.layers, args.res, args.star_gain, args.cache)
     h, w = layers[0][0].shape[:2]
     ss = default_supersample(args.size, w) if args.supersample == "auto" else int(args.supersample)
     print(f"source {w}x{h} float16, {ss}x{ss} samples per texel", flush=True)
