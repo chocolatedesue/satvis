@@ -137,9 +137,16 @@ export function buildPlan(spec: PlanSpec): BenchmarkStep[] {
   return steps;
 }
 
-/** What to tell the user before they start something that takes minutes. */
-export function estimateDurationMs(steps: readonly BenchmarkStep[], perStepMs: number): number {
+/**
+ * What to tell the user before they start something that takes minutes.
+ *
+ * `footprintMs` is not a rounding term: a footprint capture waits about 17 s for a
+ * collection, so on the default sweep it is the difference between four minutes
+ * and fourteen. Showing that before the run is what lets someone choose three
+ * counts instead of five rather than discovering the cost half way through.
+ */
+export function estimateDurationMs(steps: readonly BenchmarkStep[], perStepMs: number, footprintMs = 0): number {
   // A step costs its warmup and sample period plus the build, which is the part
   // that grows with the count and is not worth modelling here beyond a nudge.
-  return steps.length * (perStepMs + 400);
+  return steps.length * (perStepMs + 400 + footprintMs);
 }

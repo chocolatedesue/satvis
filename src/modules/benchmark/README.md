@@ -39,6 +39,7 @@ bench.clock(); // 5 counts × 4 clock rates: the propagation axis
 bench.run({ satelliteCounts: [0, 500, 5000], componentSets: [["Point", "Orbit"]] });
 bench.run({ clockMultipliers: [1, 100] }); // any sweep can take the clock axis
 bench.run({ groundStation: { lat: 48.18, lon: 11.75 } }); // switches pass prediction on
+bench.run({ captureFootprint: true }); // absolute memory per step, ~17 s each
 bench.run({ repeatFirstStep: false }); // skip the closing drift check
 bench.watch(); // log a live line every 2 s; returns a stop function
 bench.cancel();
@@ -61,21 +62,23 @@ A step is one point in a three-axis sweep: **satellite count × component set ×
 clock rate**. The clock axis is one value (×1) unless asked for, so it costs
 nothing when the question is only about drawing.
 
-| Column           | Meaning                                                                             |
-| ---------------- | ----------------------------------------------------------------------------------- |
-| `fps`, `frameMs` | Between presented frames. What the user feels; flattens against vsync at 60/120 fps |
-| `cpuMs`          | `preUpdate` → `postRender`. Main-thread work only — see the GPU caveat below        |
-| `gpuMs`          | GPU time per frame, where the driver's clock can be believed. Blank otherwise       |
-| `p95`, `worst`   | Percentiles, not just a max — one 400 ms frame should not define a row              |
-| `frames`         | The sample size. A handful means the row is noise; read this one first              |
-| `jankPct`        | Share of frames slower than 33 ms                                                   |
-| `clock`          | The clock rate the step ran at, as a multiple of real time                          |
-| `buildMs`        | The synchronous cost of building the scene: instantiation plus component creation   |
-| `clearMs`        | Tearing the previous scene down                                                     |
-| `visible`        | Satellites actually drawn, which is **not** always the count requested              |
-| `drawn`          | Components actually drawn, when they differ from the ones requested                 |
-| `heapMb`         | Heap low-water mark. **Not printed** — an input to the memory fit. csv/json only    |
-| `heapPeak`       | High-water mark. `heapPeak - heapMb` is the window's allocation rate                |
+| Column             | Meaning                                                                             |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| `fps`, `frameMs`   | Between presented frames. What the user feels; flattens against vsync at 60/120 fps |
+| `cpuMs`            | `preUpdate` → `postRender`. Main-thread work only — see the GPU caveat below        |
+| `gpuMs`            | GPU time per frame, where the driver's clock can be believed. Blank otherwise       |
+| `p95`, `worst`     | Percentiles, not just a max — one 400 ms frame should not define a row              |
+| `frames`           | The sample size. A handful means the row is noise; read this one first              |
+| `jankPct`          | Share of frames slower than 33 ms                                                   |
+| `clock`            | The clock rate the step ran at, as a multiple of real time                          |
+| `buildMs`          | The synchronous cost of building the scene: instantiation plus component creation   |
+| `clearMs`          | Tearing the previous scene down                                                     |
+| `visible`          | Satellites actually drawn, which is **not** always the count requested              |
+| `drawn`            | Components actually drawn, when they differ from the ones requested                 |
+| `heapMb`           | Heap low-water mark. **Not printed** — an input to the memory fit. csv/json only    |
+| `heapPeakMb`       | High-water mark. `heapPeakMb - heapMb` is the window's allocation rate. csv/json    |
+| `footprintMb`      | Absolute JS footprint, garbage excluded. Only with the footprint switch on          |
+| `footprintTotalMb` | The whole agent — JS plus DOM and workers. Broader, and csv/json only               |
 
 And derived, across steps:
 
@@ -87,6 +90,33 @@ And derived, across steps:
   per series: MB per 1,000 satellites, KB per satellite, and r². Chrome only, and
   a slope rather than a footprint — **read r² first**, because the whole method
   rests on an assumption that can break. See the memory caveat below.
+
+  With **accurate memory footprint** switched on (Render menu → Benchmark →
+  settings → extras, or `captureFootprint: true`) each step also gets an absolute
+  figure with garbage excluded, from
+  `performance.measureUserAgentSpecificMemory()`. That adds a `mem MB` column and
+  an `absolute` KB-per-satellite beside the derived one — two independent
+  derivations of the same quantity, so agreement is evidence and a gap is a
+  question. Measured on one run: 54.4 derived against 54.0 absolute.
+
+  The `absolute` column carries **its own r² and point count**, because a capture
+  can be refused for a single step: that leaves it fitted over two points while the
+  floor fit beside it still has three, and it would otherwise be printed under the
+  floor fit's green r².
+
+  It is off by default because it is the most expensive thing here: the call
+  resolves only when a collection happens, about 17 s a step, which the duration
+  estimate includes (the default sweep reads `≈ 0m 38s` off and `≈ 2m 20s` on).
+  It needs a cross-origin isolated page, which `pnpm dev` and `pnpm preview` serve
+  and a deployed satvis.space does not — see
+  [Cross-origin isolation](#cross-origin-isolation).
+  Where the page is not isolated the switch is disabled and says why.
+
+  **This is also the only leak check that works.** Two absolute figures for one
+  scene, minutes apart, are comparable in a way the heap floor is not: on a clean
+  run the first step and its repeat measured 36.2 and 38.7 MB, where the floors for
+  those same two rows read 35.0 and 103.3 — a 195% swing against a real 7%.
+
 - **marginal cost** — each set differenced against the largest set measured under
   the same conditions that is a strict subset of it. In a cumulative sweep that is
   the cost of the component just added; in an isolated sweep it is that component's
@@ -117,6 +147,51 @@ the difference between two clock rates attributable to propagation.
 
 A `usPerSatellite` that holds steady across counts at one rate says the cost is
 per-satellite propagation and nothing else.
+
+### Cross-origin isolation
+
+`performance.measureUserAgentSpecificMemory()` — the **accurate memory footprint**
+switch — is only exposed to a cross-origin isolated page, so it needs
+`Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: credentialless`, which `pnpm dev` and `pnpm preview`
+both send.
+
+One interaction is unresolved rather than settled: **isolation and this app's service
+worker.** An isolated document refuses to start a
+dedicated worker from a cached response carrying no
+`Cross-Origin-Embedder-Policy`, and `createVerticesFromHeightmap.js` is exactly
+such a worker — when it is blocked no terrain geometry is built, the globe is black,
+and the satellites go on drawing over nothing. That was observed once directly, with
+the blocked request in the network log and a precache entry whose
+`cross-origin-embedder-policy` was null, and it was reported again as recurring on
+every reload rather than once.
+
+It has not been reproduced deliberately. Four configurations were tried in system
+Chrome — a fresh origin over three loads with the precache settled at 116 entries;
+the same build isolated and then de-isolated on one origin; a second worktree's
+build served on an origin the isolated build had populated; and repeated reloads in
+the automated browser pane. All of them rendered the globe with the worker
+constructing fine. Two things did come out of the attempt and both matter:
+
+- **A service worker replays the stored `COOP`/`COEP` headers**, so an origin can
+  stay isolated after the server stops sending them. Isolation is sticky per origin,
+  not per response.
+- **The preview port is shared between git worktrees.** A service worker is scoped
+  to the origin, so one worktree's build populates caches that another worktree's
+  build is then served against — different assets, and now possibly different
+  isolation state, behind one registration.
+
+The mechanism is not understood. If the globe goes black while the satellites draw,
+clear that origin's service worker and caches — and check whether
+`createVerticesFromHeightmap.js` shows `ERR_BLOCKED_BY_RESPONSE`, which is what
+separates this from the shared-origin cache mess above.
+
+**Shipping this to production needs more than a `cacheId` bump.** Precache entries
+are keyed by content revision and Cesium's workers are copied verbatim between
+builds, so a deploy would not re-fetch them — and `cesium-cache` runtime-caches
+those same workers `CacheFirst` for 30 days under a name Workbox does not namespace
+with `cacheId`. Both would have to change in one release. PostHog under
+`credentialless` is also still unverified.
 
 ## Things that will bite you
 

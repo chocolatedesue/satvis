@@ -1,11 +1,13 @@
 import { describe, expect, test } from "vitest";
 
-import { buildPlan, CUMULATIVE_COMPONENT_SETS, formatSeries, ISOLATED_COMPONENT_SETS, type BenchmarkStep } from "./benchmarkPlan";
+import { buildPlan, CUMULATIVE_COMPONENT_SETS, estimateDurationMs, formatSeries, ISOLATED_COMPONENT_SETS, type BenchmarkStep } from "./benchmarkPlan";
 import type { BenchmarkResult, BenchmarkRun, SceneApplied } from "./benchmarkRunner";
 import { FrameSampler, JANK_MS, seriesStats } from "./frameSampler";
 import {
+  absoluteFitTrustworthy,
   formatTable,
   gpuTimerTrustworthy,
+  hasFootprints,
   marginalCosts,
   memoryFits,
   memoryFitTrustworthy,
@@ -31,6 +33,7 @@ function result(options: {
   visible?: number;
   frames?: number;
   heapMb?: readonly number[];
+  footprintMb?: number;
 }): BenchmarkResult {
   const clock = options.clock ?? 1;
   const components = options.components;
@@ -70,11 +73,13 @@ function result(options: {
       jankFrames: 0,
       jankRatio: 0,
     },
+    footprint: options.footprintMb === undefined ? undefined : { totalMb: options.footprintMb * 1.4, jsMb: options.footprintMb, elapsedMs: 17_000 },
   };
 }
 
 const run = (results: BenchmarkResult[]): BenchmarkRun => ({
   startedAtIso: "2026-01-01T00:00:00.000Z",
+  spec: { satelliteCounts: [], componentSets: [] },
   environment: {},
   options: { warmupMs: 0, sampleMs: 0 },
   catalogSize: 0,
@@ -522,6 +527,90 @@ describe("memoryFits", () => {
     );
     expect(fits[0]?.points).toBe(2);
     expect(fits[0]?.mbPer1000Sats).toBe(50);
+  });
+});
+
+describe("the footprint capture", () => {
+  const withFootprints = (points: readonly { visible: number; jsMb: number; floorMb: number }[]) =>
+    run(points.map((point) => result({ sats: point.visible, visible: point.visible, components: ["Point"], cpuMs: 1, heapMb: [point.floorMb], footprintMb: point.jsMb })));
+
+  // The two slopes are independent derivations of one quantity: one differenced
+  // out of garbage-contaminated floors, one measured after a collection. That is
+  // the whole reason both are reported.
+  test("the measured slope sits beside the derived one", () => {
+    const fits = memoryFits(
+      withFootprints([
+        { visible: 0, jsMb: 30.2, floorMb: 50.7 },
+        { visible: 1001, jsMb: 82.8, floorMb: 95.4 },
+        { visible: 5001, jsMb: 287.7, floorMb: 310.5 },
+      ]),
+    );
+    // Both land near the 52.5 KB per satellite a forced collection reported.
+    expect(fits[0]?.kbPerSatellite).toBeCloseTo(53.7, 0);
+    expect(fits[0]?.absoluteKbPerSatellite).toBeCloseTo(52.7, 0);
+    // Three captures for three counts, so the absolute slope stands on its own.
+    expect(absoluteFitTrustworthy(fits[0]!)).toBe(true);
+  });
+
+  test("blank where the run never captured one, rather than zero", () => {
+    const fits = memoryFits(
+      run([result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [10] }), result({ sats: 1000, components: ["Point"], cpuMs: 1, visible: 1000, heapMb: [60] })]),
+    );
+    expect(fits[0]?.absoluteKbPerSatellite).toBeUndefined();
+    expect(reportRows(run([result({ sats: 0, components: ["Point"], cpuMs: 1 })]))[0]?.footprintMb).toBe("");
+  });
+
+  // The review finding: `measureFootprint` can be refused for one step, which
+  // leaves the absolute fit two points wide while the floor fit beside it still has
+  // three. Borrowing the floor fit's r² would print that under a green guard.
+  test("a refused capture is judged on its own points, not the floor fit's", () => {
+    const fits = memoryFits(
+      run([
+        result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [50.7], footprintMb: 30.2 }),
+        // This step's capture was refused: heap floor present, footprint absent.
+        result({ sats: 1000, components: ["Point"], cpuMs: 1, visible: 1001, heapMb: [95.4] }),
+        result({ sats: 5000, components: ["Point"], cpuMs: 1, visible: 5001, heapMb: [310.5], footprintMb: 287.7 }),
+      ]),
+    );
+    // The floor fit is fine — three points, tight.
+    expect(memoryFitTrustworthy(fits[0]!)).toBe(true);
+    // The absolute one is not, and says so rather than borrowing that verdict.
+    expect(fits[0]?.absolutePoints).toBe(2);
+    expect(fits[0]?.absoluteKbPerSatellite).not.toBeUndefined();
+    expect(absoluteFitTrustworthy(fits[0]!)).toBe(false);
+  });
+
+  test("hasFootprints is the one predicate both readers use", () => {
+    expect(hasFootprints(run([result({ sats: 0, components: ["Point"], cpuMs: 1, heapMb: [40] })]))).toBe(false);
+    expect(hasFootprints(run([result({ sats: 0, components: ["Point"], cpuMs: 1, heapMb: [40], footprintMb: 30 })]))).toBe(true);
+  });
+
+  test("the absolute figures reach the rows, total and js apart", () => {
+    const rows = reportRows(withFootprints([{ visible: 5001, jsMb: 297.4, floorMb: 310.5 }]));
+    expect(rows[0]?.footprintMb).toBe(297.4);
+    // The total counts DOM and worker memory too, so it is the larger number.
+    expect(Number(rows[0]?.footprintTotalMb)).toBeGreaterThan(297.4);
+  });
+
+  // Same rule the gpu column follows: a column of dashes says nothing an absent
+  // column does not.
+  test("the pasted table grows a memory column only when one was captured", () => {
+    expect(formatTable(withFootprints([{ visible: 0, jsMb: 30, floorMb: 50 }])).split("\n")[0]).toContain("footprint");
+    expect(formatTable(run([result({ sats: 0, components: ["Point"], cpuMs: 1 })])).split("\n")[0]).not.toContain("footprint");
+  });
+});
+
+describe("estimateDurationMs with a footprint capture", () => {
+  test("the capture is added per step, not amortised", () => {
+    const steps = buildPlan({ satelliteCounts: [0, 100, 500], componentSets: [["Point"]], repeatFirstStep: false });
+    const plain = estimateDurationMs(steps, 6000);
+    const withCapture = estimateDurationMs(steps, 6000, 17_000);
+    expect(withCapture - plain).toBe(steps.length * 17_000);
+  });
+
+  test("no capture leaves the estimate exactly as it was", () => {
+    const steps = buildPlan({ satelliteCounts: [0, 100], componentSets: [["Point"]], repeatFirstStep: false });
+    expect(estimateDurationMs(steps, 6000, 0)).toBe(estimateDurationMs(steps, 6000));
   });
 });
 

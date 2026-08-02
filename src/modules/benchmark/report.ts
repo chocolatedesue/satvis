@@ -10,6 +10,9 @@ import type { BenchmarkResult, BenchmarkRun } from "./benchmarkRunner";
 
 const round = (value: number, digits = 2): number => Number(value.toFixed(digits));
 
+/** A report column that is empty rather than zero when there is nothing to report. */
+const blankOr = (value: number | undefined, digits = 2): number | "" => (value === undefined ? "" : round(value, digits));
+
 /** The frame time a row is judged by: the work done, not the vsync wait. */
 const cpuMs = (result: BenchmarkResult): number => result.frames.cpu?.mean ?? 0;
 
@@ -20,6 +23,12 @@ const cpuMs = (result: BenchmarkResult): number => result.frames.cpu?.mean ?? 0;
  * and `memoryFits` — which is why nothing here prints it as one.
  */
 const heapFloorMb = (result: BenchmarkResult): number | undefined => result.frames.heap?.min;
+
+/** The window's high-water mark. `heapPeakMb - heapFloorMb` is its allocation rate. */
+const heapPeakMb = (result: BenchmarkResult): number | undefined => result.frames.heap?.max;
+
+/** The absolute footprint, present only where a run paid for the capture. */
+const footprintJsMb = (result: BenchmarkResult): number | undefined => result.footprint?.jsMb;
 
 /** What varies within a series: the component set and the clock rate together. */
 const seriesOf = (result: BenchmarkResult): string => formatSeries(result.applied.componentsRequested, result.applied.clockMultiplier);
@@ -106,6 +115,13 @@ export interface ReportRow {
   heapMb: number | "";
   /** The high-water mark. `heapPeakMb - heapMb` is the window's allocation rate. */
   heapPeakMb: number | "";
+  /**
+   * The scene's absolute JavaScript footprint, garbage excluded — blank unless the
+   * run asked for it. Unlike `heapMb` this *is* a total and can be read as one.
+   */
+  footprintMb: number | "";
+  /** The whole agent including DOM and worker memory, which is a broader figure. */
+  footprintTotalMb: number | "";
 }
 
 export function reportRows(run: BenchmarkRun): ReportRow[] {
@@ -137,8 +153,10 @@ export function reportRows(run: BenchmarkRun): ReportRow[] {
       clearMs: round(result.applied.clearMs),
       entities: result.applied.entities,
       primitives: result.applied.primitives,
-      heapMb: result.frames.heap === undefined ? "" : round(result.frames.heap.min, 1),
-      heapPeakMb: result.frames.heap === undefined ? "" : round(result.frames.heap.max, 1),
+      heapMb: blankOr(heapFloorMb(result), 1),
+      heapPeakMb: blankOr(heapPeakMb(result), 1),
+      footprintMb: blankOr(footprintJsMb(result), 1),
+      footprintTotalMb: blankOr(result.footprint?.totalMb, 1),
     };
   });
 }
@@ -183,14 +201,26 @@ const FRAME_BUDGET_60FPS_MS = 1000 / 60;
  * component set *and* clock rate, so a sweep over both does not average a fit
  * across clocks and report a slope belonging to neither.
  */
-export function scalingFits(run: BenchmarkRun): ScalingFit[] {
-  const bySeries = new Map<string, BenchmarkResult[]>();
+/**
+ * The measured steps grouped by series, which is the shape every per-series fit
+ * needs. `keep` drops results a particular fit cannot use — a browser with no heap
+ * reading gets no memory rows rather than a fit through zeroes.
+ */
+function bySeries(run: BenchmarkRun, keep: (result: BenchmarkResult) => boolean = () => true): Map<string, BenchmarkResult[]> {
+  const groups = new Map<string, BenchmarkResult[]>();
   for (const result of measured(run)) {
+    if (!keep(result)) {
+      continue;
+    }
     const key = seriesOf(result);
-    bySeries.set(key, [...(bySeries.get(key) ?? []), result]);
+    groups.set(key, [...(groups.get(key) ?? []), result]);
   }
+  return groups;
+}
+
+export function scalingFits(run: BenchmarkRun): ScalingFit[] {
   const fits: ScalingFit[] = [];
-  for (const [series, results] of bySeries) {
+  for (const [series, results] of bySeries(run)) {
     // Against the satellites actually drawn, not the ones asked for — the two
     // part company as soon as a component does not apply to every satellite.
     const fit = leastSquares(results.map((result) => ({ x: result.applied.satellitesVisible, y: cpuMs(result) })));
@@ -213,19 +243,43 @@ export function scalingFits(run: BenchmarkRun): ScalingFit[] {
 export interface MemoryFit {
   /** The component set and, where it is not real time, the clock rate. */
   series: string;
+  /**
+   * Points behind the *floor* fit. Zero, with the four figures below undefined,
+   * where there was no heap reading to fit — outside Chrome, or on a series with a
+   * single satellite count. A row still appears in that case if the run captured
+   * footprints, because those do not depend on the floor at all.
+   */
   points: number;
   /** Least-squares slope of the heap floor against satellites drawn, per 1,000. */
-  mbPer1000Sats: number;
+  mbPer1000Sats: number | undefined;
   /** The same slope per satellite, which is the figure worth quoting. */
-  kbPerSatellite: number;
+  kbPerSatellite: number | undefined;
   /**
    * The intercept. **Not** a footprint: it is the app's baseline plus whatever
    * garbage happened to be standing, and it is the term the differencing exists
    * to throw away. Printed only so a wild one warns that the fit is junk.
    */
-  baseMb: number;
+  baseMb: number | undefined;
   /** 1.0 means memory grows linearly with the count. Read it before the slope. */
-  r2: number;
+  r2: number | undefined;
+  /**
+   * The same slope from absolute footprints instead of sampled floors, where the
+   * run captured them — undefined otherwise.
+   *
+   * Kept beside `kbPerSatellite` rather than replacing it because the pair is a
+   * check on both: independent measurements of one quantity, so agreement is
+   * evidence and a gap is a question. Measured, they came out 52.6 and 52.7 KB
+   * per satellite.
+   *
+   * It carries its own `absolutePoints` and `absoluteR2` because it is fitted over
+   * a *subset* of the series: `captureFootprint` can be refused per step, so one
+   * rejected call leaves this a two-point line while the floor fit beside it still
+   * has three. Gating it on the floor fit's r² would print that under a green
+   * guard — see `absoluteFitTrustworthy`.
+   */
+  absoluteKbPerSatellite: number | undefined;
+  absolutePoints: number;
+  absoluteR2: number | undefined;
 }
 
 /**
@@ -252,30 +306,42 @@ export interface MemoryFit {
  * `r2` is for, and it caught it at 0.002. Read r² first; below
  * `MIN_TRUSTWORTHY_MEMORY_R2` the slope is noise and `logRun` says so.
  */
+/** Points for a fit, dropping the results that have no value for `pick`. */
+const pointsOf = (results: readonly BenchmarkResult[], pick: (result: BenchmarkResult) => number | undefined): { x: number; y: number }[] =>
+  results.flatMap((result) => {
+    const y = pick(result);
+    return y === undefined ? [] : [{ x: result.applied.satellitesVisible, y }];
+  });
+
+const withFootprints = (results: readonly BenchmarkResult[]): { x: number; y: number }[] => pointsOf(results, footprintJsMb);
+
 export function memoryFits(run: BenchmarkRun): MemoryFit[] {
-  const bySeries = new Map<string, BenchmarkResult[]>();
-  for (const result of measured(run)) {
-    // A browser with no heap reading gets no rows rather than a fit through
-    // zeroes, which would report every satellite as free.
-    if (heapFloorMb(result) === undefined) {
-      continue;
-    }
-    const key = seriesOf(result);
-    bySeries.set(key, [...(bySeries.get(key) ?? []), result]);
-  }
   const fits: MemoryFit[] = [];
-  for (const [series, results] of bySeries) {
-    const fit = leastSquares(results.map((result) => ({ x: result.applied.satellitesVisible, y: heapFloorMb(result) as number })));
-    if (!fit) {
+  // Every series, not just the ones with heap readings: the absolute fit comes from
+  // captured footprints and owes the floor nothing, so gating the row on the floor
+  // fit would throw away the accurate figure whenever the estimated one failed —
+  // outside Chrome, or on a series with one satellite count.
+  for (const [series, results] of bySeries(run)) {
+    const floorPoints = pointsOf(results, heapFloorMb);
+    const floorFit = leastSquares(floorPoints);
+    // No garbage in the footprints, so no offset to cancel — the slope is the
+    // slope. Its own point count, because a refused capture shrinks this series
+    // and not the other.
+    const absolutePoints = withFootprints(results);
+    const absoluteFit = leastSquares(absolutePoints);
+    if (floorFit === undefined && absoluteFit === undefined) {
       continue;
     }
     fits.push({
       series,
-      points: results.length,
-      mbPer1000Sats: round(fit.slope * 1000, 1),
-      kbPerSatellite: round(fit.slope * 1024, 1),
-      baseMb: round(fit.intercept, 1),
-      r2: round(fit.r2, 3),
+      points: floorFit === undefined ? 0 : floorPoints.length,
+      mbPer1000Sats: floorFit === undefined ? undefined : round(floorFit.slope * 1000, 1),
+      kbPerSatellite: floorFit === undefined ? undefined : round(floorFit.slope * 1024, 1),
+      baseMb: floorFit === undefined ? undefined : round(floorFit.intercept, 1),
+      r2: floorFit === undefined ? undefined : round(floorFit.r2, 3),
+      absoluteKbPerSatellite: absoluteFit === undefined ? undefined : round(absoluteFit.slope * 1024, 1),
+      absolutePoints: absolutePoints.length,
+      absoluteR2: absoluteFit === undefined ? undefined : round(absoluteFit.r2, 3),
     });
   }
   return fits;
@@ -450,7 +516,19 @@ export const MIN_MEMORY_FIT_POINTS = 3;
  * common to the series, and this is the only evidence available that the
  * assumption held. Scatter says it broke; too few points say nobody looked.
  */
-export const memoryFitTrustworthy = (fit: MemoryFit): boolean => fit.points >= MIN_MEMORY_FIT_POINTS && fit.r2 >= MIN_TRUSTWORTHY_MEMORY_R2;
+export const memoryFitTrustworthy = (fit: MemoryFit): boolean => fit.r2 !== undefined && fit.points >= MIN_MEMORY_FIT_POINTS && fit.r2 >= MIN_TRUSTWORTHY_MEMORY_R2;
+
+/**
+ * Whether the absolute slope can be read. Its own check, against its own point
+ * count and r²: `captureFootprint` can be refused for a single step, so this fit
+ * can be two points wide while the floor fit beside it is three, and borrowing the
+ * floor fit's verdict would print that as trustworthy.
+ */
+export const absoluteFitTrustworthy = (fit: MemoryFit): boolean =>
+  fit.absoluteKbPerSatellite !== undefined && fit.absolutePoints >= MIN_MEMORY_FIT_POINTS && (fit.absoluteR2 ?? 0) >= MIN_TRUSTWORTHY_MEMORY_R2;
+
+/** Whether any step in the run captured an absolute footprint. One predicate, so the panel and logRun cannot disagree. */
+export const hasFootprints = (run: BenchmarkRun): boolean => run.results.some((result) => result.footprint !== undefined);
 
 const driftPct = (first: number, repeat: number): number => (first === 0 ? 0 : round(((repeat - first) / first) * 100, 1));
 
@@ -502,8 +580,26 @@ export function formatTable(run: BenchmarkRun): string {
   // No heap column. The floor is an input to `memoryFits`, and printed beside
   // frame times it reads as a footprint — which is exactly the misreading that
   // cost someone a leak hunt. `toCsv`/`toJson` still carry it.
-  const header = ["sats", "visible", "clock", "frames", "fps", "frameMs", "p95", "worst", "cpuMs", "cpuP95", "gpuMs", "jank%", "build", "components"];
-  const widths = [6, 8, 7, 7, 7, 8, 7, 8, 7, 7, 7, 6, 8];
+  const showFootprint = rows.some((row) => row.footprintMb !== "");
+  const header = [
+    "sats",
+    "visible",
+    "clock",
+    "frames",
+    "fps",
+    "frameMs",
+    "p95",
+    "worst",
+    "cpuMs",
+    "cpuP95",
+    "gpuMs",
+    "jank%",
+    "build",
+    ...(showFootprint ? ["footprint"] : []),
+    "components",
+  ];
+  // 10 for footprint: the name is 9 characters, and a width of 8 ran it into `build`.
+  const widths = [6, 8, 7, 7, 7, 8, 7, 8, 7, 7, 7, 6, 8, ...(showFootprint ? [10] : [])];
   const lines = [header.map((name, index) => (index < widths.length ? pad(name, widths[index] as number) : ` ${name}`)).join("")];
   for (const row of rows) {
     const values = [
@@ -520,6 +616,7 @@ export function formatTable(run: BenchmarkRun): string {
       row.gpuMs === "" ? "—" : row.gpuMs,
       row.jankPct,
       row.buildMs,
+      ...(showFootprint ? [row.footprintMb] : []),
     ];
     const suffix = `${row.repeat ? " (repeat)" : ""}${row.drawn ? ` (drew ${row.drawn})` : ""}`;
     lines.push(`${values.map((value, index) => pad(value, widths[index] as number)).join("")} ${row.components}${suffix}`);
@@ -543,6 +640,7 @@ export function toJson(run: BenchmarkRun): string {
   return JSON.stringify(
     {
       startedAtIso: run.startedAtIso,
+      spec: run.spec,
       environment: run.environment,
       options: run.options,
       catalogSize: run.catalogSize,
@@ -608,8 +706,21 @@ export function logRun(run: BenchmarkRun): void {
   const memory = memoryFits(run);
   if (memory.length > 0) {
     console.log("%cmemory growth with satellite count (heap floor, relative)", "font-weight:bold");
-    console.table(memory);
-    const untrustworthy = memory.filter((fit) => !memoryFitTrustworthy(fit));
+    // baseMb is deliberately not printed: it is the garbage-contaminated intercept
+    // the differencing exists to throw away, and a bare MB figure in a table reads
+    // as a total. It stays on MemoryFit for json and for judging a wild fit.
+    console.table(
+      memory.map((fit) => ({
+        series: fit.series,
+        points: fit.points,
+        mbPer1000Sats: fit.mbPer1000Sats,
+        kbPerSatellite: fit.kbPerSatellite,
+        r2: fit.r2,
+        absoluteKbPerSatellite: fit.absoluteKbPerSatellite,
+        absoluteR2: fit.absoluteR2,
+      })),
+    );
+    const untrustworthy = memory.filter((fit) => fit.r2 !== undefined && !memoryFitTrustworthy(fit));
     if (untrustworthy.length > 0) {
       // Louder than a low r² in a column, because the symptom is a slope that
       // looks like an answer — a negative one means drawing satellites freed
@@ -620,12 +731,54 @@ export function logRun(run: BenchmarkRun): void {
           "or else a garbage collection landed inside the series and its offset is not common to the rows. Sweep more counts, or re-run.",
       );
     }
-    console.log(
-      "Slopes only, and only within a series: the heap floor includes uncollected garbage, so the intercept is not a footprint. " +
-        "Checked against forced collections the slope came within 2% (53.7 vs 52.5 KB per satellite). For an absolute figure use DevTools or HeapProfiler.collectGarbage.",
-    );
+    if (hasFootprints(run)) {
+      // Two independent derivations of one quantity. Saying so is the point: a gap
+      // between them is the only cheap signal that either is wrong.
+      console.log(
+        "absoluteKbPerSatellite comes from absolute footprints (measureUserAgentSpecificMemory) rather than sampled floors. " +
+          "Where the two agree, both are trustworthy; a wide gap means the growth fit straddled a collection.",
+      );
+      const weakAbsolute = memory.filter((fit) => fit.absoluteKbPerSatellite !== undefined && !absoluteFitTrustworthy(fit));
+      if (weakAbsolute.length > 0) {
+        // Its own warning, because a refused capture shrinks this fit and not the
+        // one beside it — the floor fit's r² says nothing about this column.
+        console.warn(
+          `absoluteKbPerSatellite: ${weakAbsolute.map((fit) => `${fit.series} (r² ${fit.absoluteR2}, ${fit.absolutePoints} points)`).join(", ")} cannot be read — ` +
+            "fewer captures than counts, so a step's capture was refused. Re-run.",
+        );
+      }
+    } else {
+      console.log(
+        "Slopes only, and only within a series: the heap floor includes uncollected garbage, so the intercept is not a total. " +
+          "Checked against forced collections the slope came within 2% (53.7 vs 52.5 KB per satellite). For absolute figures re-run with captureFootprint.",
+      );
+    }
+  } else if (!run.results.some((result) => result.frames.heap !== undefined) && !hasFootprints(run)) {
+    console.log("memory: unavailable — performance.memory is Chrome-only and no footprint was captured, so there is nothing to fit.");
   } else {
-    console.log("memory: unavailable — performance.memory is Chrome-only, so there is no heap reading to fit.");
+    // There were readings, so the browser is not the reason: a fit needs two
+    // different satellite counts in one series, and this run had one.
+    console.log(`memory: not fitted — a slope needs at least two satellite counts per series (${MIN_MEMORY_FIT_POINTS} to be readable). Sweep more counts.`);
+  }
+  const captured = run.results.filter((result) => result.footprint !== undefined);
+  if (captured.length > 0) {
+    const waitedMs = captured.reduce((total, result) => total + (result.footprint?.elapsedMs ?? 0), 0);
+    console.log("%cabsolute memory footprint (garbage excluded)", "font-weight:bold");
+    console.table(
+      captured.map((result) => ({
+        sats: result.applied.satellitesVisible,
+        components: formatComponents(result.applied.componentsRequested),
+        jsMb: round(result.footprint?.jsMb ?? 0, 1),
+        totalMb: round(result.footprint?.totalMb ?? 0, 1),
+      })),
+    );
+    console.log(`${captured.length} captures cost ${Math.round(waitedMs / 1000)} s of waiting — the call resolves only when a collection happens.`);
+  } else if (run.environment.crossOriginIsolated !== "true") {
+    // Said once, so an absent footprint reads as "not served that way" rather
+    // than "not supported" — the difference is a deployment decision.
+    console.log(
+      "footprint: unavailable — the page is not cross-origin isolated, so measureUserAgentSpecificMemory is not exposed. Needs COOP: same-origin and COEP: credentialless.",
+    );
   }
   console.log("%cmarginal cost per component", "font-weight:bold");
   console.table(marginalCosts(run));

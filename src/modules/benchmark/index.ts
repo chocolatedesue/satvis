@@ -12,8 +12,8 @@ import {
   formatComponents,
   type PlanSpec,
 } from "./benchmarkPlan";
-import { BenchmarkRunner, DEFAULT_OPTIONS, type BenchmarkOptions, type BenchmarkRun, type RunnerHooks } from "./benchmarkRunner";
-import { CesiumBenchmarkTarget, type TargetOptions } from "./cesiumBenchmarkTarget";
+import { BenchmarkRunner, DEFAULT_OPTIONS, FOOTPRINT_CAPTURE_MS, type BenchmarkOptions, type BenchmarkRun, type RunnerHooks } from "./benchmarkRunner";
+import { CesiumBenchmarkTarget, canMeasureFootprint, type TargetOptions } from "./cesiumBenchmarkTarget";
 import { logRun, toCsv, toJson, formatTable } from "./report";
 
 export * from "./benchmarkPlan";
@@ -83,7 +83,7 @@ export function installBenchmark(cc: CesiumController): BenchmarkHandle {
   };
 
   async function start(defaults: PlanSpec, overrides: RunOverrides = {}): Promise<BenchmarkRun> {
-    const { satelliteCounts, componentSets, clockMultipliers, repeatFirstStep, warmupMs, sampleMs, ...targetOptions } = overrides;
+    const { satelliteCounts, componentSets, clockMultipliers, repeatFirstStep, warmupMs, sampleMs, captureFootprint, ...targetOptions } = overrides;
     target.options = targetOptions;
     const spec: PlanSpec = {
       satelliteCounts: satelliteCounts ?? defaults.satelliteCounts,
@@ -91,9 +91,18 @@ export function installBenchmark(cc: CesiumController): BenchmarkHandle {
       clockMultipliers: clockMultipliers ?? defaults.clockMultipliers,
       repeatFirstStep: repeatFirstStep ?? defaults.repeatFirstStep,
     };
-    const options: BenchmarkOptions = { warmupMs: warmupMs ?? DEFAULT_OPTIONS.warmupMs, sampleMs: sampleMs ?? DEFAULT_OPTIONS.sampleMs };
+    const options: BenchmarkOptions = { warmupMs: warmupMs ?? DEFAULT_OPTIONS.warmupMs, sampleMs: sampleMs ?? DEFAULT_OPTIONS.sampleMs, captureFootprint };
+    if (captureFootprint && !canMeasureFootprint()) {
+      // Refused up front rather than silently producing a run with no footprints
+      // in it: the fix is a header on the response, which no amount of retrying
+      // from here will supply.
+      console.warn(
+        "[bench] captureFootprint was asked for but performance.measureUserAgentSpecificMemory is not available — the page is not cross-origin isolated. " +
+          "Serve it with COOP: same-origin and COEP: credentialless. Carrying on without footprints.",
+      );
+    }
     const steps = buildPlan(spec);
-    const seconds = Math.round(estimateDurationMs(steps, options.warmupMs + options.sampleMs) / 1000);
+    const seconds = Math.round(estimateDurationMs(steps, options.warmupMs + options.sampleMs, options.captureFootprint ? FOOTPRINT_CAPTURE_MS : 0) / 1000);
     console.log(`[bench] ${steps.length} steps, roughly ${Math.floor(seconds / 60)}m${seconds % 60}s. Leave the tab in the foreground — a background tab is throttled.`);
     const run = await runner.start(spec, options, hooks);
     logRun(run);

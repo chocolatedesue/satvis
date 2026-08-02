@@ -53,11 +53,10 @@
         </template>
       </div>
       <div class="bench__row bench__dim">
+        <!-- The window's low-water mark, and raw: a live instrument, not a report
+             row. The fit is what turns heap into something comparable. -->
         p95 {{ live.p95Ms.toFixed(2) }} · worst {{ live.worstMs.toFixed(2) }} · jank {{ live.jankPct.toFixed(0) }}% · heap
-        <!-- Low-water mark first: it is the one that means something. The peak
-             beside it is the same window's garbage, so the two read as footprint
-             and churn rather than as one number that wanders. -->
-        {{ live.heapMb === undefined ? "n/a" : `${live.heapMb.toFixed(0)}–${(live.heapPeakMb ?? live.heapMb).toFixed(0)} MB` }}
+        {{ live.heapMb === undefined ? "n/a" : `${live.heapMb.toFixed(0)} MB` }}
       </div>
       <div class="bench__row bench__dim">
         {{ live.satellites }} sats · {{ live.components || "no components" }} · ×{{ live.clock }} · {{ live.entities }} entities · {{ live.primitives }} primitives
@@ -111,6 +110,13 @@
             <span>extras</span>
             <div class="bench__inline">
               <label><input v-model="withGroundStation" type="checkbox" :disabled="running" /> ground station (pass prediction)</label>
+              <!-- The expensive one. Disabled rather than hidden when it cannot
+                   work, because "not cross-origin isolated" is a fact about how the
+                   page was served that nothing else in the app ever surfaces. -->
+              <label :title="footprintHint">
+                <input v-model="withFootprint" type="checkbox" :disabled="running || !footprintAvailable" />
+                accurate memory footprint (measureUAM, ~17 s/step)
+              </label>
             </div>
           </div>
         </template>
@@ -142,6 +148,7 @@
               <th class="bench__num">cpu</th>
               <th v-if="gpuColumn" class="bench__num">gpu</th>
               <th class="bench__num">build</th>
+              <th v-if="footprintColumn" class="bench__num">footprint</th>
               <th>components</th>
             </tr>
           </thead>
@@ -153,12 +160,15 @@
               <td class="bench__num">{{ row.sats }}</td>
               <td class="bench__num">{{ row.visible }}</td>
               <td v-if="clockSwept" class="bench__num">×{{ row.clock }}</td>
-              <td :class="['bench__num', row.fps < 30 ? 'bench__bad' : row.fps < 55 ? 'bench__warn' : '']" :title="`${row.frames} frames sampled`">{{ row.fps.toFixed(1) }}</td>
+              <td :class="['bench__num', row.fps < FPS_BAD ? 'bench__bad' : row.fps < FPS_WARN ? 'bench__warn' : '']" :title="`${row.frames} frames sampled`">
+                {{ row.fps.toFixed(1) }}
+              </td>
               <td class="bench__num">{{ row.frameMs.toFixed(2) }}</td>
               <td class="bench__num">{{ row.p95Ms.toFixed(2) }}</td>
               <td class="bench__num">{{ row.cpuMs.toFixed(2) }}</td>
               <td v-if="gpuColumn" class="bench__num">{{ row.gpuMs === "" ? "—" : row.gpuMs.toFixed(2) }}</td>
               <td class="bench__num">{{ row.buildMs.toFixed(0) }}</td>
+              <td v-if="footprintColumn" class="bench__num">{{ row.footprintMb === "" ? "—" : row.footprintMb }}</td>
               <td>
                 {{ row.components }}<span v-if="row.drawn" class="bench__warn"> → drew {{ row.drawn }}</span>
               </td>
@@ -203,23 +213,34 @@
               <th>series</th>
               <th class="bench__num">MB/1k</th>
               <th class="bench__num">KB/sat</th>
+              <th v-if="footprintColumn" class="bench__num" title="The same slope from absolute footprints, with its own r². Agreement with KB/sat means both can be trusted.">
+                absolute
+              </th>
               <th class="bench__num">r²</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="fit in memory" :key="fit.series">
               <td>{{ fit.series }}</td>
-              <td class="bench__num">{{ fit.mbPer1000Sats.toFixed(1) }}</td>
-              <td class="bench__num">{{ fit.kbPerSatellite.toFixed(1) }}</td>
-              <td :class="['bench__num', memoryFitTrustworthy(fit) ? 'bench__good' : 'bench__bad']">{{ fit.r2.toFixed(3) }}</td>
+              <!-- Em dash rather than 0: a series with one count, or a browser with no
+                   heap reading, has no derived slope — but may still have an absolute
+                   one beside it. -->
+              <td class="bench__num">{{ fit.mbPer1000Sats?.toFixed(1) ?? "—" }}</td>
+              <td class="bench__num">{{ fit.kbPerSatellite?.toFixed(1) ?? "—" }}</td>
+              <td v-if="footprintColumn" :class="['bench__num', fit.absoluteKbPerSatellite === undefined ? '' : absoluteFitTrustworthy(fit) ? 'bench__good' : 'bench__bad']">
+                {{ fit.absoluteKbPerSatellite === undefined ? "—" : fit.absoluteKbPerSatellite.toFixed(1) }}
+              </td>
+              <td :class="['bench__num', fit.r2 === undefined ? '' : memoryFitTrustworthy(fit) ? 'bench__good' : 'bench__bad']">{{ fit.r2?.toFixed(3) ?? "—" }}</td>
             </tr>
           </tbody>
         </table>
         <!-- Not a footnote: a collection landing mid-series makes the slope
              meaningless rather than merely noisy, and a negative one reads as an
              answer. Measured, a broken series fitted r² 0.002 against 0.999 for a
-             good one, so the row says so in place of its own numbers. -->
-        <div v-if="memory.some((fit) => !memoryFitTrustworthy(fit))" class="bench__row bench__bad">
+             good one. The numbers still render — striking them out would hide the
+             negative slope that is the tell — so the r² cell turns red and this
+             line says what it means. -->
+        <div v-if="memory.some((fit) => fit.r2 !== undefined && !memoryFitTrustworthy(fit))" class="bench__row bench__bad">
           that slope cannot be read — it needs {{ MIN_MEMORY_FIT_POINTS }}+ counts and r² {{ MIN_TRUSTWORTHY_MEMORY_R2 }}, or a garbage collection landed inside the series and its
           offset is not common to the rows. Sweep more counts, or re-run.
         </div>
@@ -307,7 +328,9 @@ import {
   DEFAULT_SATELLITE_COUNTS,
   ISOLATED_COMPONENT_SETS,
   buildPlan,
+  canMeasureFootprint,
   estimateDurationMs,
+  FOOTPRINT_CAPTURE_MS,
   formatComponents,
   installBenchmark,
   logRun,
@@ -325,6 +348,8 @@ import {
   MIN_MEMORY_FIT_POINTS,
   MIN_TRUSTWORTHY_FRAMES,
   MIN_TRUSTWORTHY_MEMORY_R2,
+  absoluteFitTrustworthy,
+  hasFootprints,
   memoryFitTrustworthy,
   type BenchmarkRun,
   type MemoryFit,
@@ -367,7 +392,21 @@ const clocksText = ref("1");
 const mode = ref<Mode>("current");
 const warmupMs = ref(DEFAULT_OPTIONS.warmupMs);
 const sampleMs = ref(DEFAULT_OPTIONS.sampleMs);
+/** Below this a row is red; below FPS_WARN it is yellow. 60 is the budget the scaling table extrapolates to. */
+const FPS_BAD = 30;
+const FPS_WARN = 60;
+
 const withGroundStation = ref(false);
+/**
+ * Off by default, and the estimate is what keeps that honest: a capture waits
+ * about 17 s for a collection, so on the default sweep this is four minutes
+ * against fourteen.
+ */
+const withFootprint = ref(false);
+const footprintAvailable = canMeasureFootprint();
+const footprintHint = footprintAvailable
+  ? "performance.measureUserAgentSpecificMemory(): an absolute footprint with garbage excluded, against the relative slope the default reports. It resolves only when a collection happens, which is the ~17 s."
+  : "Unavailable: this page is not cross-origin isolated, so the API is not exposed. pnpm dev and pnpm preview send the headers that enable it; a deployed satvis.space does not.";
 const running = ref(false);
 const status = ref("idle");
 const copied = ref("");
@@ -408,11 +447,36 @@ const spec = computed(() => ({ satelliteCounts: counts.value, componentSets: com
 const plan = computed(() => buildPlan(spec.value));
 
 const estimateText = computed(() => {
-  const seconds = Math.round(estimateDurationMs(plan.value, warmupMs.value + sampleMs.value) / 1000);
+  const seconds = Math.round(estimateDurationMs(plan.value, warmupMs.value + sampleMs.value, withFootprint.value ? FOOTPRINT_CAPTURE_MS : 0) / 1000);
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 });
 
 /** What the folded settings say, so collapsing them is not the same as losing them. */
+/**
+ * Point the controls at what a run is actually doing.
+ *
+ * `mode` is reverse-mapped rather than stored: the spec carries component sets, and
+ * whether they came from a preset is only recoverable by comparing against the
+ * presets. Anything unrecognised is "current", which is what a hand-passed
+ * `componentSets` most resembles.
+ */
+function adoptRunSettings(): void {
+  const current = run();
+  if (!current) {
+    return;
+  }
+  const sameSets = (a: readonly (readonly string[])[], b: readonly (readonly string[])[]): boolean =>
+    a.length === b.length && a.every((set, index) => set.join("|") === (b[index] ?? []).join("|"));
+  const sets = current.spec.componentSets;
+  mode.value = sameSets(sets, ISOLATED_COMPONENT_SETS) ? "isolated" : sameSets(sets, CUMULATIVE_COMPONENT_SETS) ? "cumulative" : "current";
+  countsText.value = [...current.spec.satelliteCounts].join(", ");
+  clocksText.value = (current.spec.clockMultipliers ?? [1]).join(", ");
+  warmupMs.value = current.options.warmupMs;
+  sampleMs.value = current.options.sampleMs;
+  withFootprint.value = current.options.captureFootprint === true;
+  withGroundStation.value = bench.target.options.groundStation !== undefined;
+}
+
 const settingsSummary = computed(() => {
   const parts = [`${counts.value.length} counts`, mode.value];
   if (clocks.value.length > 1 || (clocks.value[0] ?? 1) !== 1) {
@@ -420,6 +484,11 @@ const settingsSummary = computed(() => {
   }
   if (withGroundStation.value) {
     parts.push("ground station");
+  }
+  if (withFootprint.value) {
+    // Named in the collapsed summary because it is the setting that turns a
+    // four-minute sweep into a fourteen-minute one.
+    parts.push("footprint");
   }
   return `· ${parts.join(" · ")}`;
 });
@@ -476,6 +545,17 @@ const thin = computed(() => rows.value.filter((row) => row.frames < MIN_TRUSTWOR
  */
 const gpuColumn = computed(() => rows.value.some((row) => row.gpuMs !== ""));
 
+/**
+ * Same rule as gpuColumn: shown only where a run actually captured footprints. Via
+ * the shared predicate, so this and `logRun` cannot disagree about whether a run
+ * has any.
+ */
+const footprintColumn = computed(() => {
+  void revision.value;
+  const current = run();
+  return current !== undefined && hasFootprints(current);
+});
+
 // --- live readout ----------------------------------------------------------
 interface Live {
   fps: number;
@@ -488,8 +568,6 @@ interface Live {
   jankPct: number;
   /** The window's low-water mark — the live-set estimate. Undefined outside Chrome. */
   heapMb: number | undefined;
-  /** The same window's high-water mark, so the gap reads as garbage. */
-  heapPeakMb: number | undefined;
   satellites: number;
   components: string;
   clock: number;
@@ -505,7 +583,6 @@ const EMPTY_LIVE: Live = {
   gpuMs: undefined,
   jankPct: 0,
   heapMb: undefined,
-  heapPeakMb: undefined,
   satellites: 0,
   components: "",
   clock: 1,
@@ -514,7 +591,7 @@ const EMPTY_LIVE: Live = {
 };
 const live = ref<Live>(EMPTY_LIVE);
 
-const fpsClass = computed(() => (live.value.fps < 30 ? "bench__bad" : live.value.fps < 55 ? "bench__warn" : "bench__good"));
+const fpsClass = computed(() => (live.value.fps < FPS_BAD ? "bench__bad" : live.value.fps < FPS_WARN ? "bench__warn" : "bench__good"));
 
 const gpuOrUndefined = (gpuMs: number | undefined, wallP50: number | undefined): number | undefined =>
   gpuMs !== undefined && wallP50 !== undefined && wallP50 > 0 && gpuMs <= wallP50 * GPU_TIMER_TRUST_FACTOR ? gpuMs : undefined;
@@ -539,6 +616,10 @@ function refresh(): void {
     // "running" over a finished run's results.
     if (running.value) {
       status.value = "running — started from the console";
+      // A console run bypasses these controls, so they would otherwise go on
+      // describing whatever was last typed while a different sweep ran. Adopting
+      // the run's own spec keeps the panel an honest account of what is happening.
+      adoptRunSettings();
     } else if (wasRunning) {
       const finishedRun = bench.runner.run;
       status.value = finishedRun ? `done — ${finishedRun.results.length} steps (console)` : "idle";
@@ -558,7 +639,6 @@ function refresh(): void {
     gpuMs: gpuOrUndefined(snapshot.frames.gpu?.mean, snapshot.frames.wall?.p50),
     jankPct: snapshot.frames.jankRatio * 100,
     heapMb: snapshot.frames.heap?.min,
-    heapPeakMb: snapshot.frames.heap?.max,
     satellites: snapshot.satellitesVisible,
     components: formatComponents(snapshot.componentsDrawn),
     clock: snapshot.clockMultiplier,
@@ -613,7 +693,7 @@ async function start(): Promise<void> {
   try {
     const result = await bench.runner.start(
       spec.value,
-      { warmupMs: warmupMs.value, sampleMs: sampleMs.value },
+      { warmupMs: warmupMs.value, sampleMs: sampleMs.value, captureFootprint: withFootprint.value },
       {
         onProgress: ({ done, total, step }) => {
           status.value = `${done + 1}/${total} — ${step.label}`;
@@ -673,7 +753,10 @@ async function copy(format: "csv" | "json" | "text"): Promise<void> {
 watch(
   withGroundStation,
   (enabled) => {
-    bench.target.options = enabled ? { groundStation: { lat: 48.1772, lon: 11.7476 } } : {};
+    // Merged, not replaced: a console run may have set `tag` to pin the population,
+    // and replacing the object would silently drop it — including when the panel
+    // adopts a console run's settings and this watcher fires as a side effect.
+    bench.target.options = { ...bench.target.options, groundStation: enabled ? { lat: 48.1772, lon: 11.7476 } : undefined };
   },
   { immediate: true },
 );
@@ -909,6 +992,12 @@ watch(
   text-decoration: line-through;
 }
 
+/* Beats `.bench__table th`, which sets text-align: left and outranks a bare
+   `.bench__num` on specificity — that is what left a numeric header sitting over a
+   right-aligned column. */
+.bench__table th.bench__num {
+  text-align: right;
+}
 .bench__num {
   text-align: right;
   font-variant-numeric: tabular-nums;
