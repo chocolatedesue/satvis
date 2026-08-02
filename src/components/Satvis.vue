@@ -140,6 +140,16 @@
         <!-- Only for the model actually selected: the note explains why nothing
              happened, and is noise against a model nobody asked for. -->
         <div v-if="surfaceUnavailable" class="toolbarNote">{{ surfaceUnavailable }}</div>
+        <!-- Last, because it is the only group here that is about what is *behind*
+             the globe rather than on it. Both options draw the same star field at
+             different resolutions — see src/config/starMaps.ts for what the
+             higher one costs. -->
+        <div class="toolbarTitle">Star map</div>
+        <label v-for="name in STAR_MAPS" :key="name" class="toolbarSwitch">
+          <input v-model="starMap" type="radio" :value="name" />
+          <span class="slider"></span>
+          {{ name }}
+        </label>
       </div>
       <!-- Where you look from and with what, as against the Map panel's what you
            are looking at. -->
@@ -293,6 +303,7 @@ import { useGeolocation } from "../composables/useGeolocation";
 import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
 import { layerProvider } from "../config/layers";
 import { MSAA_RATES, pixelRatiosFor } from "../config/rendering";
+import { STAR_MAPS } from "../config/starMaps";
 import { type MapGroup, SURFACE_MODELS, type SurfaceModelName, surfaceEffects, viewModeNote } from "../config/surfaceModels";
 import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
@@ -323,7 +334,7 @@ const menu = reactive<Record<MenuKey, boolean>>({
 const showUI = ref(true);
 
 const cesiumStore = useCesiumStore();
-const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, pixelRatio, msaa, showFps, showBenchmark, requestRenderMode, pickMode } = storeToRefs(cesiumStore);
+const { layers, terrainProvider, surfaceModel, starMap, sceneMode, cameraMode, pixelRatio, msaa, showFps, showBenchmark, requestRenderMode, pickMode } = storeToRefs(cesiumStore);
 
 // This display's own ratio: it names the `native` option and decides which of
 // the fixed rungs are below it and so worth offering at all.

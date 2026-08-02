@@ -8,11 +8,13 @@ import {
   Math as CesiumMath,
   Matrix4,
   PerspectiveFrustum,
+  Resource,
   type Scene,
   sampleTerrainMostDetailed,
   SceneMode,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
+  SkyBox,
   type TerrainProvider,
   TimeInterval,
   Transforms,
@@ -27,6 +29,7 @@ import { usePostHog } from "../composables/usePostHog";
 import { useToastProxy } from "../composables/useToastProxy";
 import { parseLayer } from "../config/layers";
 import { MSAA_RATES, PIXEL_RATIOS, msaaSamplesFor, resolutionScaleFor } from "../config/rendering";
+import { STAR_MAPS, type StarMapSources, starMapSources } from "../config/starMaps";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
@@ -110,6 +113,11 @@ export class CesiumController {
   // The last surface model the store asked for, so the selection is reported once
   // rather than every time the view mode makes it re-apply.
   #selectedSurfaceModel: string | undefined;
+
+  // Which `applyStarMap` call owns the sky box. Two switches in quick succession
+  // race over a fetch, and the one that started last should win rather than the
+  // one whose faces happen to arrive last.
+  private starMapGeneration = 0;
 
   /**
    * Takes the viewer rather than making one (see src/modules/createViewer.ts).
@@ -694,6 +702,76 @@ export class CesiumController {
 
   set showFps(value: boolean) {
     this.viewer.scene.debugShowFramesPerSecond = value;
+  }
+
+  /**
+   * Put a star map behind the globe — `Tycho1K` or `Tycho2K` (`STAR_MAPS`).
+   * Resolves once it is drawing, and rejects if its faces could not be fetched.
+   *
+   * An action rather than a setter, unlike the rest of the scene settings,
+   * because `Tycho2K` has to be in hand before the sky box is built. Cesium is
+   * willing to take urls and fetch them itself, but it does that *inside* the
+   * render loop: a face that 404s then throws out of `Scene.render` rather than
+   * out of here, and with `rethrowRenderErrors` on that takes the app down
+   * instead of falling back to `Tycho1K`. Which is not hypothetical — the
+   * 2048x2048 faces live in the `data/cesium-assets` submodule, and a checkout
+   * without `git submodule update --init` does not have them.
+   *
+   * The viewer is constructed with exactly the `Tycho1K` sky box (CesiumWidget
+   * calls `SkyBox.createEarthSkyBox()` when it is passed none), so this only ever
+   * runs to move off that or back to it — hence the watcher in sceneSync is not
+   * immediate, and a link that says `stars=Tycho1K` re-fetches nothing.
+   */
+  async applyStarMap(name: string): Promise<void> {
+    if (!(STAR_MAPS as readonly string[]).includes(name)) {
+      console.error("Unknown star map");
+      return;
+    }
+    // A star map is part of the background, and `background: false` is what took
+    // the sky box away. Installing one would put the stars back behind a scene
+    // that asked to be transparent.
+    if (!useCesiumStore().background) {
+      return;
+    }
+
+    const generation = ++this.starMapGeneration;
+    const sources = starMapSources(name);
+    const faces = sources === undefined ? undefined : await this.loadStarMapFaces(sources);
+    // Overtaken while the faces were in flight. Nothing to undo — the swap below
+    // is the only thing that touches the scene.
+    if (generation !== this.starMapGeneration) {
+      return;
+    }
+
+    const previous = this.viewer.scene.skyBox;
+    this.viewer.scene.skyBox = faces === undefined ? SkyBox.createEarthSkyBox() : new SkyBox({ sources: faces });
+    // Scene destroys its sky box only when the scene itself goes, so a swap
+    // without this leaks the outgoing cube map — 100 MB of it leaving `Tycho2K`,
+    // which Cesium keeps unmipmapped. Safe here because the scene no longer holds
+    // the reference: the next frame builds its command from the new one.
+    previous?.destroy();
+    // Nothing in Cesium asks for a frame when a cube map lands, so under
+    // render-on-demand with a paused clock the swap would sit invisible.
+    this.viewer.scene.requestRender();
+  }
+
+  /**
+   * The six faces as images, fetched exactly the way Cesium's own `loadCubeMap`
+   * would. The options are not incidental: `flipY` is what orients a cube map
+   * face, and dropping it mirrors the sky.
+   */
+  private async loadStarMapFaces(sources: StarMapSources): Promise<Record<keyof StarMapSources, ImageBitmap | HTMLImageElement>> {
+    const entries = Object.entries(sources) as [keyof StarMapSources, string][];
+    const images = await Promise.all(
+      entries.map(async ([, url]) => {
+        const image = await Resource.fetchImage({ url, flipY: true, preferImageBitmap: true });
+        if (!image) {
+          throw new Error(`Star map face ${url} did not load`);
+        }
+        return image;
+      }),
+    );
+    return Object.fromEntries(entries.map(([face], index) => [face, images[index]])) as Record<keyof StarMapSources, ImageBitmap | HTMLImageElement>;
   }
 
   set background(active: boolean) {

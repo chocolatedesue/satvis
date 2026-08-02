@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 
 import { layerProvider } from "../config/layers";
 import { MSAA_RATES, PIXEL_RATIOS, currentDevicePixelRatio, defaultMsaaRate } from "../config/rendering";
+import { STAR_MAPS } from "../config/starMaps";
 import { SURFACE_MODELS } from "../config/surfaceModels";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { baseLayerNames, imageryProviderNames, terrainProviderNames } from "../modules/CesiumLayerProviders";
@@ -17,6 +18,11 @@ export const useCesiumStore = defineStore(
     // than an invariant of a list, so there is nothing to enforce on write. What
     // a selection *implies* is not state — it is derived, in surfaceEffects.
     const surfaceModel = ref("None");
+    // The star field behind the globe. In the Map menu with the imagery rather
+    // than in Render with the quality ladders, because it is a choice about what
+    // is drawn rather than about how finely: both options cost the same frame,
+    // and only memory and download size separate them (`src/config/starMaps.ts`).
+    const starMap = ref("Tycho1K");
     const sceneMode = ref("3D");
     const cameraMode = ref("Fixed");
     // Drawing-buffer pixels per CSS pixel; `native` is the display's own ratio.
@@ -95,6 +101,7 @@ export const useCesiumStore = defineStore(
       setTime,
       terrainProvider,
       surfaceModel,
+      starMap,
       sceneMode,
       cameraMode,
       pixelRatio,
@@ -114,6 +121,7 @@ export const useCesiumStore = defineStore(
         { name: "layers", url: "layers", kind: layerList(imageryProviderNames) },
         { name: "terrainProvider", url: "terrain", kind: enumString(terrainProviderNames()) },
         { name: "surfaceModel", url: "surface", kind: enumString(SURFACE_MODELS) },
+        { name: "starMap", url: "stars", kind: enumString([...STAR_MAPS]) },
         { name: "sceneMode", url: "scene", kind: enumString(SCENE_MODES) },
         { name: "cameraMode", url: "camera", kind: enumString(CAMERA_MODES) },
         { name: "pixelRatio", url: "pixelratio", kind: enumString([...PIXEL_RATIOS]) },

@@ -42,6 +42,7 @@ Every parameter is optional. An absent parameter means "use the default" (see
 | `layers`     | `cesium.layers`          | layer list          | comma-joined; each item `Name` or `Name_<alpha>`; list order is z-order                                           | `OfflineHighres` |
 | `terrain`    | `cesium.terrainProvider` | enum                | `None` \| `CesiumWorldTerrain` \| `ReEarth` \| `Maptiler`                                                         | `None`           |
 | `surface`    | `cesium.surfaceModel`    | enum                | `None` \| `OsmBuildings` \| `GooglePhotorealistic`                                                                | `None`           |
+| `stars`      | `cesium.starMap`         | enum                | `Tycho1K` \| `Tycho2K`                                                                                            | `Tycho1K`        |
 | `scene`      | `cesium.sceneMode`       | enum                | `3D` \| `2D` \| `Columbus` \| `Sky`                                                                               | `3D`             |
 | `camera`     | `cesium.cameraMode`      | enum                | `Fixed` \| `Inertial`                                                                                             | `Fixed`          |
 | `pixelratio` | `cesium.pixelRatio`      | enum                | `1` \| `1.5` \| `native`                                                                                          | `native`         |

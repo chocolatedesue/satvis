@@ -75,6 +75,7 @@ export interface SceneTarget {
     readonly timeline?: unknown;
   };
   applySurfaceModel(surfaceModel: string, viewMode: string): Promise<void>;
+  applyStarMap(starMap: string): Promise<void>;
   suppressCameraMode(): void;
   releaseCameraMode(): void;
   morphTo(mode: string): void;
@@ -123,6 +124,36 @@ export function startSceneSync(cc: SceneTarget): void {
       cc.terrainProvider = name;
     },
   );
+  // Not immediate, unlike the render settings: the viewer is constructed with
+  // exactly the `Tycho1K` sky box, so there is nothing to bring into line until
+  // the value moves, and a link that says `stars=Tycho1K` fetches nothing.
+  //
+  // The fallback below is the imagery one in reverse. There the stack is applied
+  // first and a probe corrects it afterwards, because a missing tile set only
+  // leaves the globe blank. Here the faces have to be in hand before the sky box
+  // exists at all, so the failure *is* the probe and it arrives as a rejection.
+  watch(
+    () => cesiumStore.starMap,
+    (name) => {
+      void applyStarMap(name);
+    },
+  );
+
+  async function applyStarMap(name: string): Promise<void> {
+    try {
+      await cc.applyStarMap(name);
+    } catch (error) {
+      console.warn(`Star map ${name} could not be loaded, falling back to Tycho1K. Run \`git submodule update --init\` to fetch data/cesium-assets.`, error);
+      // Read back rather than assuming: a second switch while the faces were in
+      // flight has already asked for something else, and the one that failed is
+      // no longer what anybody wants. Writing Tycho1K re-enters this watcher,
+      // which is what puts it on the globe — and writing it over itself is not a
+      // change, so a Tycho1K that somehow fails cannot loop here.
+      if (cesiumStore.starMap === name) {
+        cesiumStore.starMap = "Tycho1K";
+      }
+    }
+  }
   // Both arguments, one watcher: what a surface model does depends on the view
   // mode as much as on the selection, and there is nothing to gain from
   // discovering which of the two moved. Immediate, because `?surface=` arrives

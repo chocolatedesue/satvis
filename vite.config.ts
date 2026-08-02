@@ -174,6 +174,23 @@ export default defineConfig({
             },
           },
           {
+            // The high-resolution star map (src/config/starMaps.ts). Not precached:
+            // the glob above covers `cesium/Assets`, which is where the *default*
+            // sky box lives, so a first offline load has stars either way — these
+            // 3.6 MB are only fetched by someone who asked for them, and then they
+            // should survive going offline.
+            urlPattern: /data\/cesium-assets\/stars\/.*\.jpg$/,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "cesium-starmap-cache",
+              expiration: {
+                maxEntries: 6,
+                maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+                purgeOnQuotaError: true,
+              },
+            },
+          },
+          {
             // GP element sets: worker mode (/api/gp/<group>.json, groups, metadata),
             // static-snapshot mode (data/gp/<group>.json), and the worker probe —
             // so offline keeps working in every deployment mode.
