@@ -42,38 +42,36 @@
     <main id="about-content" class="about">
       <h1>Satvis: 3D satellite tracker and pass predictor</h1>
       <p class="about-lede">
-        Satvis is a free, open-source satellite tracker that runs in the browser. It draws more than 12,000 satellites on a 3D globe in real time, propagating each orbit from
-        CelesTrak element sets: Starlink, GPS and the other GNSS constellations, weather and Earth-observation craft, the ISS and other crewed stations. Set a ground station by
-        geolocation or by picking a point on the map, and Satvis works out when each one passes over you. It can say so before the pass starts. The sky view trades the globe for a
-        ground-level camera aimed by your phone's compass, so you look for the satellite in the sky rather than on a map of it.
+        Satvis is a free, open-source satellite tracker that runs in the browser. It draws more than 12,000 satellites on a 3D globe in real time, across fourteen catalogue groups:
+        Starlink, GPS and the other GNSS constellations, weather and Earth-observation craft, the ISS and other crewed stations. Tell it where you are and it works out when each
+        one passes overhead. The sky view then trades the globe for a ground-level camera aimed by your phone's compass and gyroscope. You look for the satellite in the sky rather
+        than on a map of it.
       </p>
 
       <h2>What it does</h2>
       <ul>
-        <li>Calculates positions and orbits for 12,000+ objects across fourteen catalogue groups</li>
-        <li>Predicts passes for a ground station you set by geolocation or pick on the map</li>
-        <li>Sends a local browser notification before a pass starts</li>
-        <li>Aims a ground-level sky view with the phone's compass and gyroscope</li>
+        <li>Sets a ground station from geolocation or a point you pick on the map</li>
+        <li>Lists upcoming passes and sends a local browser notification before one starts</li>
         <li>Draws orbit tracks, ground tracks, sensor cones and 3D models per satellite</li>
-        <li>Installs as a Progressive Web App and keeps working offline</li>
+        <li>Switches catalogue groups on and off, or searches out a single satellite</li>
+        <li>Installs as a Progressive Web App, on a phone or a desktop</li>
       </ul>
 
       <h2>Where the data comes from</h2>
       <p>
-        Element sets come from <a href="https://celestrak.org" rel="noopener">CelesTrak</a> as OMM JSON, the format replacing TLE for new objects. A Cloudflare Worker refreshes
-        every group into Workers KV on a six-hourly cron, and a source that fails to fetch keeps its last known good copy instead of emptying the group. Positions are propagated
-        with SGP4 through <a href="https://github.com/shashwatak/satellite-js" rel="noopener">satellite.js</a>. How close a prediction lands depends on how recently the element set
-        was issued, so a satellite that has just manoeuvred will be the least accurate thing on the globe.
+        Element sets come from <a href="https://celestrak.org" rel="noopener">CelesTrak</a> as OMM JSON, the format replacing TLE for new objects, and a
+        <a href="https://workers.cloudflare.com" rel="noopener">Cloudflare Worker</a> refreshes them every six hours. Positions are propagated from them in the browser with SGP4,
+        through <a href="https://github.com/shashwatak/satellite-js" rel="noopener">satellite.js</a>. A snapshot of the same element sets ships inside the app, so everything still
+        works offline.
       </p>
 
       <h2>Built with</h2>
       <p>
         <a href="https://cesiumjs.org" rel="noopener">CesiumJS</a> draws the globe, <a href="https://vuejs.org" rel="noopener">Vue</a> and
-        <a href="https://ui.nuxt.com" rel="noopener">Nuxt UI</a> the interface, and <a href="https://developers.google.com/web/tools/workbox" rel="noopener">Workbox</a> the offline
-        caching. The element-set API is a <a href="https://workers.cloudflare.com" rel="noopener">Cloudflare Worker</a>, so there is no server to run. Created by Florian Mauracher
-        and maintained as an open-source project on <a href="https://github.com/Flowm/satvis/" rel="noopener">github.com/Flowm/satvis</a> under the MIT licence. An
-        <a href="https://apps.apple.com/us/app/satvis/id1441084766" rel="noopener">iOS app</a> wraps the same site and schedules UserNotifications, because a browser on iOS has no
-        local notifications of its own.
+        <a href="https://ui.nuxt.com" rel="noopener">Nuxt UI</a> the interface, and <a href="https://developers.google.com/web/tools/workbox" rel="noopener">Workbox</a> the service
+        worker. Everything but the data API is static files on a CDN, so there is no server to run. Created by Florian Mauracher and maintained on
+        <a href="https://github.com/Flowm/satvis/" rel="noopener">github.com/Flowm/satvis</a> under the MIT licence. An
+        <a href="https://apps.apple.com/us/app/satvis/id1441084766" rel="noopener">iOS app</a> wraps the same site and schedules pass notifications with UserNotifications.
       </p>
     </main>
   </body>
