@@ -254,6 +254,7 @@ export class SatelliteManager {
     const target = this.#activeTargetEntries();
 
     // Dispose collections no longer in the target.
+    let disposed = false;
     for (const [key, sat] of this.#active) {
       if (target.has(key)) {
         continue;
@@ -265,6 +266,7 @@ export class SatelliteManager {
       }
       sat.dispose();
       this.#active.delete(key);
+      disposed = true;
     }
 
     // Instantiate collections newly in the target.
@@ -291,7 +293,12 @@ export class SatelliteManager {
       }
     }
 
-    if (this.visibleSatellites.length === 0) {
+    // Any shrink, not only a shrink to nothing: the glyph billboards Cesium
+    // leaves behind are proportional to the labels that went away, and going
+    // from 5,000 satellites to 74 never reaches zero. The helper is gated on the
+    // size of the pool it finds rather than on the size of the drop, so calling
+    // it on every disposal costs a walk of the primitive tree and nothing else.
+    if (disposed) {
       CesiumCleanupHelper.cleanup(this.viewer);
     }
   }
