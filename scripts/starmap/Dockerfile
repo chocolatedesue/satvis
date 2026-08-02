@@ -12,7 +12,13 @@ ENV OMP_NUM_THREADS=4
 
 # numpy is deliberately unpinned: opencv pins a compatible range itself, and
 # pinning both just produces an unsolvable resolution.
-RUN pip install --no-cache-dir "opencv-python-headless==4.12.*"
+#
+# OpenEXR is here for one thing opencv cannot do: read a scanline range instead
+# of the whole image. The 32K map is 6.4 GiB as float32 and Docker's VM is a
+# fraction of that, so it has to be streamed rather than loaded.
+RUN pip install --no-cache-dir \
+      "opencv-python-headless==4.12.*" \
+      "OpenEXR==3.4.*"
 
 WORKDIR /work
 COPY cubemap.py /work/cubemap.py

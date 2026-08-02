@@ -124,18 +124,64 @@ def fetch(name: str, cache_dir: str) -> str:
     return dest
 
 
-def read_exr(path: str) -> np.ndarray:
-    """The map as float32 BGR. OpenCV reads and writes BGR, so it round-trips."""
-    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-    if img is None:
-        raise SystemExit(f"could not read {path} — is OPENCV_IO_ENABLE_OPENEXR set?")
-    if img.ndim == 2:
-        img = np.repeat(img[:, :, None], 3, axis=2)
-    return np.ascontiguousarray(img[:, :, :3].astype(np.float32))
+def exr_dims(path: str) -> tuple[int, int]:
+    """(height, width) from the header, without decoding a pixel."""
+    import OpenEXR
+
+    window = OpenEXR.InputFile(path).header()["dataWindow"]
+    return window.max.y - window.min.y + 1, window.max.x - window.min.x + 1
+
+
+def open_source(exr_path: str) -> np.ndarray:
+    """The map as a memory-mapped float16 BGR array.
+
+    Not `cv2.imread`, because that decodes the whole image at once: the 32K map
+    is 6.4 GiB as float32 and Docker's VM has a fraction of that. So the EXR is
+    streamed a band of scanlines at a time into a raw sidecar beside it in the
+    cache, and everything downstream reads that through a memmap — the OS pages
+    in what the current block touches and evicts the rest.
+
+    float16 is not a precision compromise: the source is half-float already, so
+    the sidecar is bit-exact and half the size of the float32 it would otherwise
+    take. It is kept rather than rebuilt, at the cost of disk in the cache.
+    """
+    import Imath
+    import OpenEXR
+
+    height, width = exr_dims(exr_path)
+    raw_path = f"{exr_path.removesuffix('.exr')}.{width}x{height}.bgr16"
+    want = height * width * 3 * 2
+
+    if os.path.exists(raw_path) and os.path.getsize(raw_path) == want:
+        print(f"cached   {os.path.basename(raw_path)}", flush=True)
+        return np.memmap(raw_path, dtype=np.float16, mode="r", shape=(height, width, 3))
+
+    print(f"decoding {os.path.basename(exr_path)} to {width}x{height} ({want / 2**30:.2f} GiB sidecar)", flush=True)
+    src = OpenEXR.InputFile(exr_path)
+    half = Imath.PixelType(Imath.PixelType.HALF)
+    available = set(src.header()["channels"].keys())
+    out = np.memmap(raw_path, dtype=np.float16, mode="w+", shape=(height, width, 3))
+    band = 512
+    # BGR on the way in, so cv2.imwrite at the other end needs no swap.
+    for index, name in enumerate(("B", "G", "R")):
+        channel = name if name in available else next(iter(available))
+        for y0 in range(0, height, band):
+            y1 = min(y0 + band, height) - 1
+            buf = src.channel(channel, half, y0, y1)
+            out[y0 : y1 + 1, :, index] = np.frombuffer(buf, dtype=np.float16).reshape(y1 - y0 + 1, width)
+        print(f"  {name} done", flush=True)
+    out.flush()
+    del out
+    return np.memmap(raw_path, dtype=np.float16, mode="r", shape=(height, width, 3))
 
 
 def sample_bilinear(src: np.ndarray, sx: np.ndarray, sy: np.ndarray) -> np.ndarray:
-    """Bilinear lookup that wraps in right ascension and clamps at the poles."""
+    """Bilinear lookup that wraps in right ascension and clamps at the poles.
+
+    Gathers are promoted to float32 immediately: the source is float16, and
+    accumulating supersamples at that precision would quantise the faint diffuse
+    background the whole exercise is about.
+    """
     h, w = src.shape[:2]
     x0 = np.floor(sx).astype(np.int64)
     y0 = np.floor(sy).astype(np.int64)
@@ -143,29 +189,49 @@ def sample_bilinear(src: np.ndarray, sx: np.ndarray, sy: np.ndarray) -> np.ndarr
     fy = (sy - y0).astype(np.float32)[..., None]
     x0w, x1w = x0 % w, (x0 + 1) % w
     y0c, y1c = np.clip(y0, 0, h - 1), np.clip(y0 + 1, 0, h - 1)
-    top = src[y0c, x0w] * (1.0 - fx) + src[y0c, x1w] * fx
-    bot = src[y1c, x0w] * (1.0 - fx) + src[y1c, x1w] * fx
+    top = src[y0c, x0w].astype(np.float32) * (1.0 - fx) + src[y0c, x1w].astype(np.float32) * fx
+    bot = src[y1c, x0w].astype(np.float32) * (1.0 - fx) + src[y1c, x1w].astype(np.float32) * fx
     return top * (1.0 - fy) + bot * fy
 
 
-def render_face(src: np.ndarray, face: str, size: int, ss: int, block: int = 256) -> np.ndarray:
-    """One face, supersampled `ss`x per axis and area-averaged back down.
+def render_face(layers: list[tuple[np.ndarray, float]], face: str, size: int, ss: int, block: int = 64) -> np.ndarray:
+    """One face, supersampled `ss`x per axis and averaged back down.
 
-    Averaging is what makes this worth doing from a 16K source: each output texel
-    integrates ss^2 samples of linear radiance, so the result is a flux estimate
-    rather than whichever source texel a nearest-neighbour lookup happened to hit.
-    Done in row blocks purely to bound peak memory — the gathers below allocate
-    proportional to the block, not the face.
+    Each output texel integrates ss^2 samples of linear radiance, so the result is
+    a flux estimate rather than whichever source texel a nearest-neighbour lookup
+    happened to hit.
+
+    **The kernel widens toward the corners, and that is the point.** A cube face
+    is not uniform: a texel at the centre spans 2/N radians and one at a corner
+    3^1.5 times less, so a corner texel resolves 2.3x finer detail than a middle
+    one. Resample a uniform-resolution sky faithfully into that and the corners
+    come out crisp while the middles come out smooth — on every face, identically,
+    which tiles into a quilt with the transitions along the face boundaries. It
+    reads as stitching, and a sharper source makes it worse rather than better.
+
+    Scaling each texel's sample spread by r^1.5 — the ratio of a centre texel's
+    angular size to this one's — makes every texel integrate the same solid angle,
+    so the whole map is band-limited to the coarsest part of a face and the grain
+    is uniform. Near an edge the widened kernel reaches into directions belonging
+    to the neighbouring face, which is exactly what makes the two agree there.
+
+    Layers are summed here rather than up front so `--layers composite` never
+    materialises a combined map. At 32K that array would be larger than the VM.
+
+    Row blocks bound peak memory, and with a memmapped source they also bound the
+    working set: one block touches a band of source rows, not the whole file.
     """
-    h, w = src.shape[:2]
+    h, w = layers[0][0].shape[:2]
     out = np.empty((size, size, 3), np.float32)
-    # Sample centres of the supersample grid, in face coordinates.
-    axis = (np.arange(size * ss, dtype=np.float32) + 0.5) / (size * ss) * 2.0 - 1.0
+    centres = (np.arange(size, dtype=np.float32) + 0.5) / size * 2.0 - 1.0
+    offsets = ((np.arange(ss, dtype=np.float32) + 0.5) / ss - 0.5) * (2.0 / size)
 
     for y0 in range(0, size, block):
         y1 = min(y0 + block, size)
-        rows = axis[y0 * ss : y1 * ss]
-        uu, vv = np.meshgrid(axis, rows)
+        uc, vc = centres, centres[y0:y1]
+        spread = (np.sqrt(1.0 + uc[None, :] ** 2 + vc[:, None] ** 2) ** 1.5)[:, None, :, None]
+        uu = uc[None, None, :, None] + offsets[None, None, None, :] * spread
+        vv = vc[:, None, None, None] + offsets[None, :, None, None] * spread
         # `v` runs bottom to top, image rows run top to bottom.
         dx, dy, dz = FACES[face](uu, -vv)
         norm = np.sqrt(dx * dx + dy * dy + dz * dz)
@@ -180,9 +246,15 @@ def render_face(src: np.ndarray, face: str, size: int, ss: int, block: int = 256
         sx = ra / (2.0 * np.pi) * w - 0.5
         sy = (0.5 - dec / np.pi) * h - 0.5
 
-        block_px = sample_bilinear(src, sx, sy)
-        rows_out = y1 - y0
-        out[y0:y1] = block_px.reshape(rows_out, ss, size, ss, 3).mean(axis=(1, 3))
+        block_px = None
+        for array, gain in layers:
+            contribution = sample_bilinear(array, sx, sy)
+            if gain != 1.0:
+                contribution *= gain
+            block_px = contribution if block_px is None else block_px + contribution
+        # (rows, ss, size, ss, 3) from the broadcast above; average the two
+        # sub-texel axes away.
+        out[y0:y1] = block_px.mean(axis=(1, 3))
 
     return out
 
@@ -201,17 +273,56 @@ def encode(linear: np.ndarray, exposure: float) -> np.ndarray:
     return np.clip(srgb * 255.0 + 0.5, 0, 255).astype(np.uint8)
 
 
-def auto_exposure(src: np.ndarray, percentile: float) -> float:
+def auto_exposure(layers: list[tuple[np.ndarray, float]], percentile: float) -> float:
     """Scale so `percentile` of the sky's luminance lands at the tone curve's knee.
 
-    Sampled rather than exact: a 16K map is 134 million pixels and the percentile
-    of a strided quarter of them is identical to three decimals for this purpose.
+    Read on a stride and band by band. Taking `src[::8, ::8]` of a memmap in one
+    go would fault in the entire file, which at 32K is larger than the machine
+    this runs on; the percentile of every 64th pixel is identical to three
+    decimals for this purpose anyway.
     """
-    lum = src[::2, ::2].max(axis=2)
-    ref = float(np.percentile(lum, percentile))
-    if ref <= 0.0:
-        return 1.0
-    return 1.0 / ref
+    h = layers[0][0].shape[0]
+    samples = []
+    for y0 in range(0, h, 1024):
+        y1 = min(y0 + 1024, h)
+        band = None
+        for array, gain in layers:
+            part = array[y0:y1:8, ::8].astype(np.float32)
+            if gain != 1.0:
+                part *= gain
+            band = part if band is None else band + part
+        samples.append(band.max(axis=2).ravel())
+    ref = float(np.percentile(np.concatenate(samples), percentile))
+    return 1.0 if ref <= 0.0 else 1.0 / ref
+
+
+def face_centre_px_per_deg(size: int) -> float:
+    """Angular resolution at the middle of a face, the coarsest point on it.
+
+    A texel there spans 2/N radians; at a corner it is 3^1.5 times finer. For a
+    2048px face that is 17.9 px/deg against 40.8.
+    """
+    return size * np.pi / 360.0
+
+
+def default_supersample(size: int, width: int) -> int:
+    """Enough samples per texel that the coarsest part of a face still filters.
+
+    The centre of a face is where the source is minified hardest, and a fixed 2x2
+    grid there is four point samples spread over several source texels — while at
+    the corners, where the face is 2.3x finer, those same four samples sit inside
+    one source texel and no filtering happens at all. That difference in grain is
+    uniform across every face, so it tiles: soft middles, crisp edges, and a
+    quilted look with the transitions along the face boundaries.
+
+    Matching the sample count to the centre's minification makes the integration
+    real where it is needed, which is what the 32K source is for.
+    """
+    ratio = (width / 360.0) / face_centre_px_per_deg(size)
+    # Capped at 4: cost is quadratic in this, and 16 samples already turns the
+    # corners from "no filtering at all" into a real average, which is the part
+    # that was showing as seams. Override with --supersample for more.
+    return int(min(4, max(2, np.ceil(ratio))))
 
 
 def dihedral(img: np.ndarray, k: int) -> np.ndarray:
@@ -287,7 +398,7 @@ def main() -> int:
                     help="'full' is one baked map; 'composite' adds the diffuse and bright star layers separately")
     ap.add_argument("--star-gain", type=float, default=1.0, help="scale the bright star layer, --layers composite only")
     ap.add_argument("--size", type=int, default=2048, help="cube face edge in pixels")
-    ap.add_argument("--supersample", type=int, default=2, help="samples per output texel, per axis")
+    ap.add_argument("--supersample", default="auto", help="samples per output texel per axis, or auto from the source resolution")
     ap.add_argument("--quality", type=int, default=80, help="JPEG quality")
     ap.add_argument("--exposure", default="auto", help="float, or auto")
     ap.add_argument("--exposure-percentile", type=float, default=99.99)
@@ -300,14 +411,6 @@ def main() -> int:
     ap.add_argument("--verify-prefix", default="TychoSkymapII.t3_08192x04096_80")
     args = ap.parse_args()
 
-    if args.res == "32k":
-        # cv2 has no partial EXR read, so a 32K map is 6.4 GiB resident before any
-        # work starts, and the reprojection needs headroom on top. Supporting it
-        # means tiled reads through OpenImageIO, which is a different program.
-        # 16K already oversamples a 2048px face at every point.
-        raise SystemExit("32k is unsupported: 32768x16384 float32 is 6.4 GiB resident and cv2\n"
-                         "cannot read EXR in tiles. 16k already oversamples a 2048px face.")
-
     prefix = args.prefix or f"deepstar_2020_{args.size}"
     os.makedirs(args.out, exist_ok=True)
     os.makedirs(args.cache, exist_ok=True)
@@ -317,23 +420,23 @@ def main() -> int:
         print(f"warning: {free / 2**30:.1f} GiB free in the cache mount", flush=True)
 
     if args.layers == "full":
-        src = read_exr(fetch(f"starmap_2020_{args.res}.exr", args.cache))
+        # Linear light, so layers simply add — kept separate rather than summed
+        # here so the composite path never materialises a combined map.
+        layers = [(open_source(fetch(f"starmap_2020_{args.res}.exr", args.cache)), 1.0)]
     else:
-        src = read_exr(fetch(f"milkyway_2020_{args.res}.exr", args.cache))
-        stars = read_exr(fetch(f"hiptyc_2020_{args.res}.exr", args.cache))
-        if stars.shape != src.shape:
-            raise SystemExit(f"layer size mismatch: {src.shape} vs {stars.shape}")
-        # Linear light, so the layers simply add. This is the composite the SVS
-        # split exists for: the diffuse layer survives downsampling on its own
-        # terms while the star layer can be weighted independently of it.
-        src += stars * args.star_gain
-        del stars
+        layers = [
+            (open_source(fetch(f"milkyway_2020_{args.res}.exr", args.cache)), 1.0),
+            (open_source(fetch(f"hiptyc_2020_{args.res}.exr", args.cache)), args.star_gain),
+        ]
+        if layers[0][0].shape != layers[1][0].shape:
+            raise SystemExit(f"layer size mismatch: {layers[0][0].shape} vs {layers[1][0].shape}")
 
-    h, w = src.shape[:2]
-    print(f"source {w}x{h}, {src.dtype}, {src.nbytes / 2**30:.2f} GiB resident", flush=True)
+    h, w = layers[0][0].shape[:2]
+    ss = default_supersample(args.size, w) if args.supersample == "auto" else int(args.supersample)
+    print(f"source {w}x{h} float16, {ss}x{ss} samples per texel", flush=True)
 
     if args.exposure == "auto":
-        exposure = auto_exposure(src, args.exposure_percentile)
+        exposure = auto_exposure(layers, args.exposure_percentile)
         print(f"auto exposure {exposure:.6g} (p{args.exposure_percentile} of luminance at the knee)", flush=True)
     else:
         exposure = float(args.exposure)
@@ -341,7 +444,7 @@ def main() -> int:
 
     total = 0
     for face in FACE_ORDER:
-        linear = render_face(src, face, args.size, args.supersample)
+        linear = render_face(layers, face, args.size, ss)
         pixels = dihedral(encode(linear, exposure), FACE_FIX[face])
         path = os.path.join(args.out, f"{prefix}_{face}.jpg")
         cv2.imwrite(path, np.ascontiguousarray(pixels), [cv2.IMWRITE_JPEG_QUALITY, args.quality])
