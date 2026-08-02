@@ -9,10 +9,90 @@
       name="description"
       content="Track 12,000+ satellites live on a 3D globe, or point your phone at the sky to spot them. Starlink, GPS, the ISS and more. Pass prediction, alerts, offline PWA."
     />
+    <!-- Inline, because main.css arrives with the bundle and this has to style
+         something the bundle has not run yet to replace. -->
+    <style>
+      #shell {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0b222d;
+        color: #edffff;
+        font-family: sans-serif;
+        text-align: center;
+        /* Faded out by src/app.ts rather than cut, so the globe arriving reads as
+           the screen resolving instead of the text being snatched away mid-word. */
+        transition: opacity 0.25s ease-out;
+      }
+      #shell.is-done {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #shell div {
+        padding: 1.25rem;
+      }
+      /* Deliberately not headline-sized. This is a splash, and anything big enough
+         to start reading is big enough to resent losing. */
+      #shell h1 {
+        font-size: 1.05rem;
+        font-weight: 400;
+        line-height: 1.4;
+        margin: 0;
+        color: #edffffcc;
+      }
+      #shell p {
+        margin: 0.6rem 0 0;
+        font-size: 0.85rem;
+        color: #7fd2ea99;
+      }
+      #shell a {
+        color: #7fd2eacc;
+      }
+      #shell .shell-pulse {
+        animation: shell-pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes shell-pulse {
+        50% {
+          opacity: 0.35;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #shell,
+        #shell .shell-pulse {
+          transition: none;
+          animation: none;
+        }
+      }
+    </style>
   </head>
   <body>
-    <noscript><h1>JavaScript is not enabled, please check your browser settings.</h1></noscript>
     <div id="cesiumContainer"></div>
+    <!-- A loading screen, kept to one line of it. An earlier version put a summary
+         paragraph here and it read as an article that got snatched away a second
+         after you started it — worse than the dark screen it replaced. What is left
+         names the app and says it is loading, which is all a splash owes anyone.
+         The description that used to be here lives on /about, linked below.
+
+         Outside #app rather than in it, because [v-cloak] hides that until Vue
+         mounts and a loading state nobody sees is not one — and because Vue would
+         discard this markup on mount anyway. src/app.ts fades and removes it once
+         the globe is up. Whoever never runs the bundle keeps it. -->
+    <div id="shell">
+      <div>
+        <h1>Satvis: 3D satellite tracker and pass predictor</h1>
+        <p class="shell-pulse">Loading the globe…</p>
+        <!-- Outside the noscript on purpose: this is the only link to /about in the
+             raw html, and a crawler that does not run the bundle is exactly the
+             reader that needs to find it. One word, so it costs the splash nothing. -->
+        <p><a href="/about">About</a></p>
+        <noscript>
+          <p>The globe needs JavaScript.</p>
+        </noscript>
+      </div>
+    </div>
     <!-- `dark` forces Nuxt UI onto its dark palette (Vue mode has no color-mode
          switch and defaults to light); this app is a dark globe UI throughout. -->
     <div id="app" class="dark isolate" v-cloak></div>

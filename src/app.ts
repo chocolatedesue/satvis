@@ -64,3 +64,18 @@ app.use(ui);
 
 // Mount the app
 app.mount("#app");
+
+// The loading screen in index.html has served its purpose once the globe is up.
+// Faded rather than cut, so the handover reads as the screen resolving; removed
+// rather than left hidden, because it is a full-screen overlay and leaving it in
+// the tree would leave a second <h1> in the rendered document. Anything that
+// never runs this file keeps it.
+const shell = document.getElementById("shell");
+if (shell) {
+  shell.classList.add("is-done");
+  // On the transition rather than a bare timer, so the node goes exactly when the
+  // fade ends — with a timer behind it because transitionend never fires when the
+  // transition is off (prefers-reduced-motion) or the tab is in the background.
+  shell.addEventListener("transitionend", () => shell.remove(), { once: true });
+  setTimeout(() => shell.remove(), 1000);
+}
