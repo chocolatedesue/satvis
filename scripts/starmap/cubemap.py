@@ -18,13 +18,14 @@ its flux when it is spread across a coarser output texel; the tone curve then
 decides how bright that reads. Downsampling an already tone-mapped JPEG — which
 is what the Tycho asset forces — cannot do this.
 
-**Orientation is empirical, not derived.** Between the cube map face convention,
-the direction of increasing right ascension, and the `flipY` that Cesium's
-`loadCubeMap` applies at upload, there are more sign conventions here than are
-worth reasoning about in the dark. `--verify` scores each generated face against
-the corresponding face of the Tycho asset already in the tree, over all eight
-dihedral transforms, and says which one lines up. Identity everywhere means the
-constants below are right.
+**Orientation is checked against a known-good map, and only ever as a whole.**
+`--verify` correlates each generated face with the corresponding face of the
+Tycho asset in the tree, over all eight dihedral transforms; anything but
+identity is a failure to fix in the projection, never by rotating the output.
+Rotating individual faces is what a previous version did, and it is a trap: each
+face can be made to match on its own while the set stops agreeing at the shared
+edges, which is invisible against Tycho's near-black sky and obvious as a seam
+against a bright one.
 """
 
 from __future__ import annotations
@@ -53,23 +54,6 @@ FACES: dict[str, callable] = {
 }
 
 FACE_ORDER = ["px", "mx", "py", "my", "pz", "mz"]
-
-# Per-face square symmetry applied on the way out, as an index into `dihedral`.
-#
-# Determined by measurement, not derivation. Between the GL face table above, the
-# handedness of the celestial frame and the `flipY` Cesium applies at upload,
-# there are enough conventions in play that reasoning it out is slower and less
-# trustworthy than asking: `--verify` correlates each generated face against the
-# Tycho asset over all eight symmetries and reports which one lands. Run it with
-# this table set to identity and it prints the table to paste back here.
-#
-# Note the mixed parity: px/mx want a rotation, the other four want a reflection.
-# A single wrong global convention would flip every face the same way, so this is
-# compensating for something genuinely inconsistent between the face table and
-# what Cesium uploads, not one tidy sign error. It is verified rather than
-# understood — re-run `--verify` after any Cesium upgrade that touches
-# `loadCubeMap` or `CubeMapPanorama`.
-FACE_FIX = {"px": 2, "mx": 2, "py": 4, "my": 4, "pz": 4, "mz": 4}
 
 
 def remote_size(url: str) -> int:
@@ -237,13 +221,24 @@ def render_face(layers: list[tuple[np.ndarray, float]], face: str, size: int, ss
         norm = np.sqrt(dx * dx + dy * dy + dz * dz)
         dx, dy, dz = dx / norm, dy / norm, dz / norm
 
-        ra = np.arctan2(dy, dx) % (2.0 * np.pi)
+        # The source's left edge is RA 180 and its right ascension increases
+        # leftward, so the direction is reflected through x=0 before being turned
+        # into a pixel: ra -> pi - ra. Equivalently, the map is drawn as the sky
+        # looks from outside the celestial sphere and centred on RA 0, while a sky
+        # box is viewed from inside.
+        #
+        # Measured, and worth stating how, because an earlier version of this got
+        # it wrong in a way that survived review: cross-correlating each generated
+        # face against every face of the Tycho asset gives a clean diagonal except
+        # that +X and -X trade places, and every face wants a horizontal mirror.
+        # Swap one axis and mirror the rest is precisely a reflection through that
+        # axis — one global convention error, not the six-entry patch table that
+        # used to sit here fitting a reflection with rotations. That table left
+        # adjacent faces disagreeing, which showed up as a bright seam along a
+        # face boundary once the sky behind it was no longer almost black.
+        ra = np.arctan2(dy, dx)
         dec = np.arcsin(np.clip(dz, -1.0, 1.0))
-        # Plate carree, RA increasing to the right, +90 declination on the top
-        # row. Kept in the textbook orientation on purpose: every deviation from
-        # it lives in FACE_FIX instead, where it is one table rather than sign
-        # flips smeared across the projection.
-        sx = ra / (2.0 * np.pi) * w - 0.5
+        sx = ((np.pi - ra) % (2.0 * np.pi)) / (2.0 * np.pi) * w - 0.5
         sy = (0.5 - dec / np.pi) * h - 0.5
 
         block_px = None
@@ -331,60 +326,71 @@ def dihedral(img: np.ndarray, k: int) -> np.ndarray:
     return np.fliplr(out) if k >= 4 else out
 
 
-def verify(out_dir: str, ref_dir: str, prefix: str, ref_prefix: str) -> int:
-    """Score each generated face against the Tycho asset already in the tree.
+def star_field(path: str) -> np.ndarray:
+    """A face reduced to where its stars are, for comparing against another map.
 
-    Different catalogs, so the pixels never match; the *structure* does, and that
-    is enough to settle orientation. Both sides are blurred hard and reduced to a
-    small grid first, which throws away the star-by-star differences and leaves
-    the large-scale shape of the Milky Way — then a plain correlation coefficient
-    picks the transform that lines up.
+    High-passed rather than blurred. An earlier version of this check smoothed
+    both sides down to 96x96 and correlated the large-scale shape of the Milky
+    Way, which is nearly symmetric under several of the eight transforms — it
+    picked a wrong one for a face by a margin of 0.09 and the mistake only
+    surfaced later as a visible seam between two faces.
+
+    Stars are the opposite kind of feature: point-like, in the same places in
+    both catalogues, and shared between them for everything bright. Subtracting a
+    blur leaves those and throws away the diffuse difference between Tycho and
+    Gaia, so the correct transform wins by an order of magnitude instead of a
+    hair.
+    """
+    img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise SystemExit(f"could not read {path}")
+    small = cv2.resize(img, (1024, 1024), interpolation=cv2.INTER_AREA).astype(np.float32)
+    high = small - cv2.GaussianBlur(small, (0, 0), 3.0)
+    return (high - high.mean()) / (high.std() + 1e-6)
+
+
+def verify(out_dir: str, ref_dir: str, prefix: str, ref_prefix: str) -> int:
+    """Check every generated face against the Tycho asset already in the tree.
+
+    Tycho is the reference because it is known to render correctly in Cesium, and
+    both it and this map reach the GPU by the same path — `Resource.fetchImage`
+    with `flipY`, then `CubeMap` with its own `flipY` — so a face that matches
+    Tycho's orientation is by construction right for Cesium's lookup. That makes
+    the reference worth more than reasoning about the convention.
     """
     worst = 1.0
     bad = 0
-    suggested: dict[str, int] = {}
-    print(f"{'face':6} {'applied':>8} {'best':>8} {'margin':>8}  verdict")
+    print(f"{'face':6} {'best':>8} {'2nd':>8} {'margin':>8}  verdict")
     for face in FACE_ORDER:
         gen_path = os.path.join(out_dir, f"{prefix}_{face}.jpg")
         ref_path = os.path.join(ref_dir, f"{ref_prefix}_{face}.jpg")
         if not (os.path.exists(gen_path) and os.path.exists(ref_path)):
             print(f"{face:6} {'-':>8} {'-':>8} {'-':>8}  missing, skipped")
             continue
-        gen = cv2.imread(gen_path, cv2.IMREAD_GRAYSCALE)
-        ref = cv2.imread(ref_path, cv2.IMREAD_GRAYSCALE)
-        small = 96
-        prep = lambda im: cv2.resize(  # noqa: E731
-            cv2.GaussianBlur(im.astype(np.float32), (0, 0), im.shape[0] / 64.0),
-            (small, small),
-            interpolation=cv2.INTER_AREA,
-        )
-        g, r = prep(gen), prep(ref)
-        r = (r - r.mean()) / (r.std() + 1e-6)
+        gen, ref = star_field(gen_path), star_field(ref_path)
         scores = []
         for k in range(8):
-            t = dihedral(g, k)
-            t = (t - t.mean()) / (t.std() + 1e-6)
-            scores.append(float((t * r).mean()))
+            t = dihedral(gen, k)
+            scores.append(float((t * ref).mean()))
         order = np.argsort(scores)[::-1]
         best, runner = int(order[0]), int(order[1])
         margin = scores[best] - scores[runner]
-        # The correction that would have to be *composed* with what is already
-        # applied, so the number below can be pasted straight into FACE_FIX.
-        suggested[face] = (FACE_FIX[face] + best) % 4 if best < 4 and FACE_FIX[face] < 4 else best
         note = "ok" if best == 0 else f"needs dihedral {best}"
-        if margin < 0.15:
-            note += f" (weak: runner-up {runner} at {scores[runner]:.3f})"
+        # With star positions rather than blurred structure the right answer is
+        # unambiguous; anything close is a signal not to trust the result.
+        if margin < 0.05:
+            note += f" — AMBIGUOUS, runner-up {runner} at {scores[runner]:.3f}"
         if best != 0:
             bad += 1
         worst = min(worst, scores[0])
-        print(f"{face:6} {FACE_FIX[face]:>8} {scores[best]:8.3f} {margin:8.3f}  {note}")
+        print(f"{face:6} {scores[best]:8.3f} {scores[runner]:8.3f} {margin:8.3f}  {note}")
     print()
     if bad:
-        print(f"{bad}/6 faces need a transform. Compose it into FACE_FIX in this")
-        print("file and re-run. Suggested (only valid when the current entry is 0):")
-        print("  FACE_FIX = {" + ", ".join(f'"{f}": {suggested[f]}' for f in FACE_ORDER) + "}")
+        print(f"{bad}/6 faces do not match the reference. A face wanting a rotation or")
+        print("mirror means the projection is wrong — fix that rather than rotating the")
+        print("output, or adjacent faces stop agreeing at their shared edges.")
         return 1
-    print(f"all six faces match as generated, weakest correlation {worst:.3f}")
+    print(f"all six faces match the reference as generated, weakest correlation {worst:.3f}")
     return 0
 
 
@@ -445,7 +451,7 @@ def main() -> int:
     total = 0
     for face in FACE_ORDER:
         linear = render_face(layers, face, args.size, ss)
-        pixels = dihedral(encode(linear, exposure), FACE_FIX[face])
+        pixels = encode(linear, exposure)
         path = os.path.join(args.out, f"{prefix}_{face}.jpg")
         cv2.imwrite(path, np.ascontiguousarray(pixels), [cv2.IMWRITE_JPEG_QUALITY, args.quality])
         total += os.path.getsize(path)
