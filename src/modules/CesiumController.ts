@@ -26,6 +26,7 @@ import { currentPosition } from "../composables/useGeolocation";
 import { usePostHog } from "../composables/usePostHog";
 import { useToastProxy } from "../composables/useToastProxy";
 import { parseLayer } from "../config/layers";
+import { MSAA_RATES, PIXEL_RATIOS, msaaSamplesFor, resolutionScaleFor } from "../config/rendering";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
@@ -481,27 +482,6 @@ export class CesiumController {
     }
   }
 
-  jumpTo(location: string): void {
-    switch (location) {
-      case "Everest": {
-        const target = new Cartesian3(300770.50872389384, 5634912.131394585, 2978152.2865545116);
-        const offset = new Cartesian3(6344.974098678562, -793.3419798081741, 2499.9508860763162);
-        this.viewer.camera.lookAt(target, offset);
-        this.viewer.camera.lookAtTransform(Matrix4.IDENTITY);
-        break;
-      }
-      case "HalfDome": {
-        const target = new Cartesian3(-2489625.0836225147, -4393941.44443024, 3882535.9454173897);
-        const offset = new Cartesian3(-6857.40902037546, 412.3284835694358, 2147.5545426812023);
-        this.viewer.camera.lookAt(target, offset);
-        this.viewer.camera.lookAtTransform(Matrix4.IDENTITY);
-        break;
-      }
-      default:
-        console.error("Unknown location");
-    }
-  }
-
   set cameraMode(cameraMode: string) {
     if (cameraMode !== "Inertial" && cameraMode !== "Fixed") {
       console.error("Unknown camera mode");
@@ -658,24 +638,49 @@ export class CesiumController {
     }
   }
 
-  set qualityPreset(quality: string) {
-    switch (quality) {
-      case "low":
-        // Ignore browser's device pixel ratio and use CSS pixels instead of device pixels for render resolution
-        this.viewer.useBrowserRecommendedResolution = true;
-        break;
-      case "high":
-        // Use browser's device pixel ratio for render resolution
-        this.viewer.useBrowserRecommendedResolution = false;
-        break;
-      default:
-        console.error("Unknown quality preset");
+  /**
+   * Drawing-buffer pixels per CSS pixel — `1`, `1.25`, `1.5`, `1.75` or
+   * `native` (`PIXEL_RATIOS`).
+   *
+   * `useBrowserRecommendedResolution` is held false throughout, which is what
+   * makes Cesium multiply by the display's own ratio rather than by a flat 1.0;
+   * the chosen ratio is then expressed as the `resolutionScale` that lands on
+   * it. Leaving the flag alone and driving one number keeps the two from
+   * disagreeing — the same picture used to be reachable two ways.
+   *
+   * No explicit render, unlike `msaa`. Both setters only raise Cesium's
+   * `_forceResize` flag, but `CesiumWidget.resize` runs on every animation frame
+   * ahead of `render` whatever render-on-demand is doing, and asks for a frame
+   * itself once it has reconfigured the canvas.
+   */
+  set pixelRatio(ratio: string) {
+    if (!(PIXEL_RATIOS as readonly string[]).includes(ratio)) {
+      console.error("Unknown pixel ratio");
+      return;
     }
+    this.viewer.useBrowserRecommendedResolution = false;
+    this.viewer.resolutionScale = resolutionScaleFor(ratio, window.devicePixelRatio);
+  }
+
+  /**
+   * Multisample antialiasing — `off`, `2` or `4` (`MSAA_RATES`).
+   *
+   * Setting the sample count does not itself ask for a frame, so under
+   * render-on-demand the control would appear to do nothing until something
+   * else happened to request one — hence the explicit render.
+   */
+  set msaa(rate: string) {
+    if (!(MSAA_RATES as readonly string[]).includes(rate)) {
+      console.error("Unknown MSAA rate");
+      return;
+    }
+    this.viewer.scene.msaaSamples = msaaSamplesFor(rate);
+    this.viewer.scene.requestRender();
   }
 
   /**
    * Render-on-demand. Owned by the store rather than poked on the scene, because
-   * more than one thing turns it off — the debug toggle and the benchmark panel —
+   * more than one thing turns it off — the Render menu's switch and the benchmark panel —
    * and a plain scene property is not reactive, so a control bound straight to it
    * goes on showing the old value after anything else has written it.
    */

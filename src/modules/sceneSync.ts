@@ -44,7 +44,8 @@ export interface SceneTarget {
   imageryLayers: string[];
   terrainProvider: string;
   cameraMode: string;
-  qualityPreset: string;
+  pixelRatio: string;
+  msaa: string;
   showFps: boolean;
   requestRenderMode: boolean;
   background: boolean;
@@ -257,9 +258,19 @@ export function startSceneSync(cc: SceneTarget): void {
     },
   );
   watch(
-    () => cesiumStore.qualityPreset,
-    (preset) => {
-      cc.qualityPreset = preset;
+    () => cesiumStore.pixelRatio,
+    (ratio) => {
+      cc.pixelRatio = ratio;
+    },
+    { immediate: true },
+  );
+  // Immediate, for the same reason as render-on-demand below: a url that asks
+  // for `msaa=off` should be in force from the first frame rather than after
+  // the first time the control is touched.
+  watch(
+    () => cesiumStore.msaa,
+    (rate) => {
+      cc.msaa = rate;
     },
     { immediate: true },
   );

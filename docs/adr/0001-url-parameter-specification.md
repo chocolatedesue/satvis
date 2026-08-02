@@ -30,25 +30,35 @@ undoable, which is better than a history made of clock ticks.
 Every parameter is optional. An absent parameter means "use the default" (see
 [Defaults](#defaults)).
 
-| Parameter  | State                    | Kind                | Wire form / accepted values                                                                                       | Global default   |
-| ---------- | ------------------------ | ------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------- |
-| `elements` | `sat.enabledComponents`  | string list         | comma-joined component names: `Point`, `Label`, `Orbit`, `Orbit track`, `Ground track`, `Sensor cone`, `3D model` | `Point,Label`    |
-| `tags`     | `sat.enabledTags`        | string list         | comma-joined tag names                                                                                            | empty            |
-| `sats`     | `sat.enabledSatellites`  | string list         | comma-joined satellite names                                                                                      | empty            |
-| `xsats`    | `sat.disabledSatellites` | string list         | comma-joined satellite names opted out of tag activation                                                          | empty            |
-| `gs`       | `sat.groundStations`     | ground-station list | `_`-joined; each station `lat,lon` or `lat,lon,name`; lat/lon emitted at 4 decimal places                         | empty            |
-| `track`    | `sat.trackedSatellite`   | string              | one satellite name; empty means nothing tracked                                                                   | empty            |
-| `overpass` | `sat.overpassMode`       | enum                | `elevation` \| `swath`                                                                                            | `elevation`      |
-| `layers`   | `cesium.layers`          | layer list          | comma-joined; each item `Name` or `Name_<alpha>`; list order is z-order                                           | `OfflineHighres` |
-| `terrain`  | `cesium.terrainProvider` | enum                | `None` \| `CesiumWorldTerrain` \| `ReEarth` \| `Maptiler`                                                         | `None`           |
-| `surface`  | `cesium.surfaceModel`    | enum                | `None` \| `OsmBuildings` \| `GooglePhotorealistic`                                                                | `None`           |
-| `scene`    | `cesium.sceneMode`       | enum                | `3D` \| `2D` \| `Columbus` \| `Sky`                                                                               | `3D`             |
-| `camera`   | `cesium.cameraMode`      | enum                | `Fixed` \| `Inertial`                                                                                             | `Fixed`          |
-| `quality`  | `cesium.qualityPreset`   | enum                | `low` \| `high`                                                                                                   | `high`           |
-| `fps`      | `cesium.showFps`         | boolean             | `true` \| `false`                                                                                                 | `false`          |
-| `bench`    | `cesium.showBenchmark`   | boolean             | `true` \| `false`                                                                                                 | `false`          |
-| `bg`       | `cesium.background`      | boolean             | `true` \| `false`                                                                                                 | `true`           |
-| `time`     | clock time               | timestamp           | emitted as ISO-8601 at minute precision (`2026-07-26T20:46Z`); any `dayjs`-parseable value accepted               | absent (live)    |
+| Parameter    | State                    | Kind                | Wire form / accepted values                                                                                       | Global default   |
+| ------------ | ------------------------ | ------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `elements`   | `sat.enabledComponents`  | string list         | comma-joined component names: `Point`, `Label`, `Orbit`, `Orbit track`, `Ground track`, `Sensor cone`, `3D model` | `Point,Label`    |
+| `tags`       | `sat.enabledTags`        | string list         | comma-joined tag names                                                                                            | empty            |
+| `sats`       | `sat.enabledSatellites`  | string list         | comma-joined satellite names                                                                                      | empty            |
+| `xsats`      | `sat.disabledSatellites` | string list         | comma-joined satellite names opted out of tag activation                                                          | empty            |
+| `gs`         | `sat.groundStations`     | ground-station list | `_`-joined; each station `lat,lon` or `lat,lon,name`; lat/lon emitted at 4 decimal places                         | empty            |
+| `track`      | `sat.trackedSatellite`   | string              | one satellite name; empty means nothing tracked                                                                   | empty            |
+| `overpass`   | `sat.overpassMode`       | enum                | `elevation` \| `swath`                                                                                            | `elevation`      |
+| `layers`     | `cesium.layers`          | layer list          | comma-joined; each item `Name` or `Name_<alpha>`; list order is z-order                                           | `OfflineHighres` |
+| `terrain`    | `cesium.terrainProvider` | enum                | `None` \| `CesiumWorldTerrain` \| `ReEarth` \| `Maptiler`                                                         | `None`           |
+| `surface`    | `cesium.surfaceModel`    | enum                | `None` \| `OsmBuildings` \| `GooglePhotorealistic`                                                                | `None`           |
+| `scene`      | `cesium.sceneMode`       | enum                | `3D` \| `2D` \| `Columbus` \| `Sky`                                                                               | `3D`             |
+| `camera`     | `cesium.cameraMode`      | enum                | `Fixed` \| `Inertial`                                                                                             | `Fixed`          |
+| `pixelratio` | `cesium.pixelRatio`      | enum                | `1` \| `1.5` \| `native`                                                                                          | `native`         |
+| `msaa`       | `cesium.msaa`            | enum                | `off` \| `2` \| `4`                                                                                               | per display[^1]  |
+| `fps`        | `cesium.showFps`         | boolean             | `true` \| `false`                                                                                                 | `false`          |
+| `bench`      | `cesium.showBenchmark`   | boolean             | `true` \| `false`                                                                                                 | `false`          |
+| `bg`         | `cesium.background`      | boolean             | `true` \| `false`                                                                                                 | `true`           |
+| `time`       | clock time               | timestamp           | emitted as ISO-8601 at minute precision (`2026-07-26T20:46Z`); any `dayjs`-parseable value accepted               | absent (live)    |
+
+[^1]:
+    `msaa` is the one parameter whose default depends on the machine rather than on
+    the route: `off` at a device pixel ratio of 2 or more, `2` below it
+    (`defaultMsaaRate`). It is the same rule as every other default — the baseline is
+    whatever the store holds after hydration — but it is worth naming, because it means
+    a link with no `msaa` can render differently on a laptop and a desktop. That is the
+    intent: the parameter is absent because nobody chose, and what nobody chose should
+    suit the display. A link that must pin the rate says so explicitly.
 
 `scene=Sky` is the odd one out: the other three name a Cesium `SceneMode` and it does
 not — it is the ground-level sky view, which renders in 3D. It shares the parameter

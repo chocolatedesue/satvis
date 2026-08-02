@@ -32,9 +32,9 @@
             <UIcon name="lucide:smartphone" />
           </button>
         </UTooltip>
-        <UTooltip text="Debug">
-          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('dbg')">
-            <UIcon name="lucide:hammer" />
+        <UTooltip text="Render">
+          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('render')">
+            <UIcon name="lucide:gauge" />
           </button>
         </UTooltip>
       </div>
@@ -196,8 +196,12 @@
           Reload
         </label>
       </div>
-      <div v-show="menu.dbg" class="toolbarSwitches">
-        <div class="toolbarTitle">Debug</div>
+      <!-- Everything about how the globe is drawn, and what that costs. Four
+           sections: what reports the cost, then the three kinds of thing that
+           decide it — what is in the scene, how many pixels it is drawn into,
+           and what each edge pixel costs. -->
+      <div v-show="menu.render" class="toolbarSwitches">
+        <div class="toolbarTitle">Measurement</div>
         <label class="toolbarSwitch">
           <input v-model="showFps" type="checkbox" />
           <span class="slider"></span>
@@ -211,16 +215,15 @@
           <span class="slider"></span>
           Benchmark
         </label>
+        <!-- Not a measurement itself, but the setting that decides whether there
+             is one to be had: with render-on-demand on, the gap between frames
+             measures how idle the loop is rather than what a scene costs. -->
         <label class="toolbarSwitch">
           <input v-model="requestRenderMode" type="checkbox" />
           <span class="slider"></span>
           RequestRender
         </label>
-        <label class="toolbarSwitch">
-          <input v-model="qualityPreset" true-value="high" false-value="low" type="checkbox" />
-          <span class="slider"></span>
-          High Quality
-        </label>
+        <div class="toolbarTitle">Scene effects</div>
         <label class="toolbarSwitch">
           <input v-model="cc.viewer.scene.fog.enabled" type="checkbox" />
           <span class="slider"></span>
@@ -241,13 +244,20 @@
           <span class="slider"></span>
           Atmosphere
         </label>
-        <label class="toolbarSwitch">
-          <input type="button" @click="cc.jumpTo('Everest')" />
-          Jump to Everest
+        <!-- The two halves of the same trade, in the order they multiply. Both
+             are ladders rather than switches because both costs are smooth —
+             see src/config/rendering.ts. -->
+        <div class="toolbarTitle">Pixel ratio</div>
+        <label v-for="ratio in pixelRatioOptions" :key="ratio" class="toolbarSwitch">
+          <input v-model="pixelRatio" type="radio" :value="ratio" />
+          <span class="slider"></span>
+          {{ ratio === "native" ? `${devicePixelRatio.toFixed(1)}x (Native)` : `${Number(ratio).toFixed(1)}x` }}
         </label>
-        <label class="toolbarSwitch">
-          <input type="button" @click="cc.jumpTo('HalfDome')" />
-          Jump to HalfDome
+        <div class="toolbarTitle">Antialiasing (MSAA)</div>
+        <label v-for="rate in MSAA_RATES" :key="rate" class="toolbarSwitch">
+          <input v-model="msaa" type="radio" :value="rate" />
+          <span class="slider"></span>
+          {{ rate === "off" ? "Off" : `${rate}x` }}
         </label>
       </div>
     </div>
@@ -281,6 +291,7 @@ import { useController } from "../composables/useController";
 import { useGeolocation } from "../composables/useGeolocation";
 import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
 import { layerProvider } from "../config/layers";
+import { MSAA_RATES, pixelRatiosFor } from "../config/rendering";
 import { type MapGroup, SURFACE_MODELS, type SurfaceModelName, surfaceEffects, viewModeNote } from "../config/surfaceModels";
 import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
@@ -290,7 +301,7 @@ import EntityInfoPanel from "./EntityInfoPanel.vue";
 import SatelliteBrowser from "./SatelliteBrowser.vue";
 import SkyHud from "./SkyHud.vue";
 
-type MenuKey = "cat" | "sat" | "gs" | "map" | "view" | "ios" | "dbg";
+type MenuKey = "cat" | "sat" | "gs" | "map" | "view" | "ios" | "render";
 
 // The benchmarking framework. Async, so nothing about it — the sweep, the
 // report tables, the panel — is in the bundle a normal visitor downloads.
@@ -305,12 +316,17 @@ const menu = reactive<Record<MenuKey, boolean>>({
   map: false,
   view: false,
   ios: false,
-  dbg: false,
+  render: false,
 });
 const showUI = ref(true);
 
 const cesiumStore = useCesiumStore();
-const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, qualityPreset, showFps, showBenchmark, requestRenderMode, pickMode } = storeToRefs(cesiumStore);
+const { layers, terrainProvider, surfaceModel, sceneMode, cameraMode, pixelRatio, msaa, showFps, showBenchmark, requestRenderMode, pickMode } = storeToRefs(cesiumStore);
+
+// This display's own ratio: it names the `native` option and decides which of
+// the fixed rungs are below it and so worth offering at all.
+const devicePixelRatio = window.devicePixelRatio;
+const pixelRatioOptions = pixelRatiosFor(devicePixelRatio);
 
 // What the selection means here and now, from the one function the globe reads
 // too — so a dimmed group and an unlit tileset cannot disagree.

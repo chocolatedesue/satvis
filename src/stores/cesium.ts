@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { layerProvider } from "../config/layers";
+import { MSAA_RATES, PIXEL_RATIOS, currentDevicePixelRatio, defaultMsaaRate } from "../config/rendering";
 import { SURFACE_MODELS } from "../config/surfaceModels";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { baseLayerNames, imageryProviderNames, terrainProviderNames } from "../modules/CesiumLayerProviders";
@@ -18,18 +19,30 @@ export const useCesiumStore = defineStore(
     const surfaceModel = ref("None");
     const sceneMode = ref("3D");
     const cameraMode = ref("Fixed");
-    const qualityPreset = ref("high");
+    // Drawing-buffer pixels per CSS pixel; `native` is the display's own ratio.
+    const pixelRatio = ref<string>("native");
+    // Multisample antialiasing. A second quality axis rather than part of
+    // `pixelRatio`, because the two buy smoothness in different currencies —
+    // the ratio trades away resolution, this trades away edge quality at the
+    // same resolution — and on a 4k canvas MSAA is the single most expensive
+    // thing in an empty frame.
+    //
+    // The default is the display's, not a constant: see `defaultMsaaRate`.
+    // Read once, so a window dragged to a second monitor keeps the rate it
+    // started with — re-deriving it would overwrite a choice the user may have
+    // made in between, and the menu is right there.
+    const msaa = ref<string>(defaultMsaaRate(currentDevicePixelRatio()));
     const background = ref(true);
     const showFps = ref(false);
     const pickMode = ref(false);
     // Matches what createViewer sets. Held here rather than read off the scene so
-    // the debug toggle and the benchmark panel cannot disagree about it: a scene
+    // the menu's switch and the benchmark panel cannot disagree about it: a scene
     // property is not reactive, so a checkbox bound straight to it keeps showing
     // the old value after anything else has written it. Not URL-synced — it is a
     // property of a debugging session, not of a view worth sharing.
     const requestRenderMode = ref(true);
     // The benchmarking framework (src/modules/benchmark). URL-synced
-    // like every other debug toggle, so a benchmarking session is a shareable
+    // like the other switches in the Render menu, so a benchmarking session is a shareable
     // link and the switch in the menu and the `?bench` parameter are one thing
     // rather than two ways in.
     const showBenchmark = ref(false);
@@ -84,7 +97,8 @@ export const useCesiumStore = defineStore(
       surfaceModel,
       sceneMode,
       cameraMode,
-      qualityPreset,
+      pixelRatio,
+      msaa,
       background,
       showFps,
       pickMode,
@@ -102,7 +116,8 @@ export const useCesiumStore = defineStore(
         { name: "surfaceModel", url: "surface", kind: enumString(SURFACE_MODELS) },
         { name: "sceneMode", url: "scene", kind: enumString(SCENE_MODES) },
         { name: "cameraMode", url: "camera", kind: enumString(CAMERA_MODES) },
-        { name: "qualityPreset", url: "quality", kind: enumString(["low", "high"]) },
+        { name: "pixelRatio", url: "pixelratio", kind: enumString([...PIXEL_RATIOS]) },
+        { name: "msaa", url: "msaa", kind: enumString([...MSAA_RATES]) },
         { name: "showFps", url: "fps", kind: boolean() },
         { name: "showBenchmark", url: "bench", kind: boolean() },
         { name: "background", url: "bg", kind: boolean() },

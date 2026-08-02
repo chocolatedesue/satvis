@@ -15,8 +15,8 @@ and what was _actually drawn_ recorded next to what was asked for.
 
 ## Run it
 
-**Debug menu → Benchmark**, or `?bench=true` in the url. They are the same switch:
-it is `cesium.showBenchmark`, url-synced like every other debug toggle, so a
+**Render menu → Measurement → Benchmark**, or `?bench=true` in the url. They are the same switch:
+it is `cesium.showBenchmark`, url-synced like every other switch in that menu, so a
 benchmarking session is a shareable link.
 
 Opening the panel is what loads the framework, and that is also what puts
@@ -131,7 +131,7 @@ per-satellite propagation and nothing else.
 - **Render-on-demand is switched off as soon as the panel opens**, and put back when
   it closes. With it on, the gap between frames measures how idle the loop is rather
   than what a scene costs, so there is no reading to be had — which is why this is
-  not offered as a choice. Switching it back on from the debug menu while the panel
+  not offered as a choice. Switching it back on from the Render menu while the panel
   is open puts a warning across the top of the panel, beside the readout it
   invalidates. The clock is likewise forced to run for the duration of a sweep: a
   stopped clock means no position updates, and position updates are most of the cost.
