@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build a Cesium sky box from NASA SVS Deep Star Maps 2020.
 #
-#   ./generate.sh                      16K source, 2048px faces, verified
+#   ./generate.sh                      16K source, 2048px and 1024px cuts, verified
+#   ./generate.sh --size 2048          just the one cut
 #   ./generate.sh --res 32k            the sharpest source, ~1.5 GB to fetch once
 #   ./generate.sh --res 8k --size 512  quick pass while changing tone mapping
 #   ./generate.sh --match-edges 0      leave the face boundaries unreconciled

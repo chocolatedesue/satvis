@@ -42,7 +42,7 @@ Every parameter is optional. An absent parameter means "use the default" (see
 | `layers`     | `cesium.layers`          | layer list          | comma-joined; each item `Name` or `Name_<alpha>`; list order is z-order                                           | `OfflineHighres` |
 | `terrain`    | `cesium.terrainProvider` | enum                | `None` \| `CesiumWorldTerrain` \| `ReEarth` \| `Maptiler`                                                         | `None`           |
 | `surface`    | `cesium.surfaceModel`    | enum                | `None` \| `OsmBuildings` \| `GooglePhotorealistic`                                                                | `None`           |
-| `stars`      | `cesium.starMap`         | enum                | `Tycho1K` \| `DeepStar2K`[^2]                                                                                     | `Tycho1K`        |
+| `stars`      | `cesium.starMap`         | enum                | `Tycho1K` \| `DeepStar1K` \| `DeepStar2K`[^2]                                                                     | `Tycho1K`        |
 | `scene`      | `cesium.sceneMode`       | enum                | `3D` \| `2D` \| `Columbus` \| `Sky`                                                                               | `3D`             |
 | `camera`     | `cesium.cameraMode`      | enum                | `Fixed` \| `Inertial`                                                                                             | `Fixed`          |
 | `pixelratio` | `cesium.pixelRatio`      | enum                | `1` \| `1.5` \| `native`                                                                                          | `native`         |
@@ -62,13 +62,13 @@ Every parameter is optional. An absent parameter means "use the default" (see
     suit the display. A link that must pin the rate says so explicitly.
 
 [^2]:
-    `DeepStar2K` is an optional asset, built by `scripts/starmap/generate.sh`, so a
-    deployment may not have it. It stays in the accepted vocabulary regardless, for the
-    same reason `?pixelratio=1.5` is accepted on a display that cannot benefit from it:
-    the parameter says what was asked for, not what this machine can serve. The Map menu
-    offers only the maps it can find, and a link naming one that is missing falls back to
-    `Tycho1K` with the url rewritten to match, so the radio, the address bar and the sky
-    agree.
+    The two `DeepStar` cuts are optional assets, built together by
+    `scripts/starmap/generate.sh`, so a deployment may have neither. They stay in the
+    accepted vocabulary regardless, for the same reason `?pixelratio=1.5` is accepted on
+    a display that cannot benefit from it: the parameter says what was asked for, not
+    what this machine can serve. The Map menu offers only the maps it can find, and a
+    link naming one that is missing falls back to `Tycho1K` with the url rewritten to
+    match, so the radio, the address bar and the sky agree.
 
 `scene=Sky` is the odd one out: the other three name a Cesium `SceneMode` and it does
 not — it is the ground-level sky view, which renders in 3D. It shares the parameter

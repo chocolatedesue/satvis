@@ -17,18 +17,22 @@
  * stars. It is also the one that always exists: it lives under `cesium/Assets`,
  * which the service worker precaches wholesale.
  *
- * `DeepStar2K` is a different catalogue at twice the size — NASA SVS Deep Star
- * Maps 2020, 1.7 billion stars from Hipparcos-2, Tycho-2 and Gaia DR2, built by
- * `scripts/starmap/generate.sh`. Denser and better coloured than Tycho, and
- * reprojected from linear-light EXR rather than resampled from an already
- * tone-mapped JPEG. Generated rather than committed, so it is missing from a
- * checkout where nobody has run the generator (see `starMapAvailable`).
+ * `DeepStar1K` and `DeepStar2K` are two cuts of a different catalogue — NASA SVS
+ * Deep Star Maps 2020, 1.7 billion stars from Hipparcos-2, Tycho-2 and Gaia DR2,
+ * both built by `scripts/starmap/generate.sh` from the same source and the same
+ * exposure. Denser and better coloured than Tycho, and reprojected from
+ * linear-light EXR rather than resampled from an already tone-mapped JPEG.
+ * Generated rather than committed, so both are missing from a checkout where
+ * nobody has run the generator (see `starMapAvailable`).
  *
- * Both cost the same frame time and differ only in resident memory: Cesium
- * builds no mipmaps for a sky box, so six 2048 RGBA faces are ~100 MB against
- * ~25 MB for `Tycho1K`, and the draw is one textured cube either way.
+ * The three are offered in that order because it is the order they cost.
+ * Cesium builds no mipmaps for a sky box, so resident memory is the whole
+ * difference: ~25 MB for either 1K map, ~100 MB for the 2K one, and the draw is
+ * one textured cube in every case. That makes `DeepStar1K` the interesting
+ * middle — a better catalogue than `Tycho1K` for the same memory and a quarter
+ * of `DeepStar2K`'s download — rather than a consolation prize.
  */
-export const STAR_MAPS = ["Tycho1K", "DeepStar2K"] as const;
+export const STAR_MAPS = ["Tycho1K", "DeepStar1K", "DeepStar2K"] as const;
 
 export type StarMapName = (typeof STAR_MAPS)[number];
 
@@ -55,6 +59,10 @@ interface StarMapAsset {
 // which is why the controller fetches these itself rather than handing the urls
 // to Cesium. See `CesiumController.applyStarMap`.
 const ASSETS: Partial<Record<StarMapName, StarMapAsset>> = {
+  DeepStar1K: {
+    prefix: "data/generated/starmap/deepstar_2020_1024",
+    recovery: "scripts/starmap/generate.sh",
+  },
   DeepStar2K: {
     prefix: "data/generated/starmap/deepstar_2020_2048",
     recovery: "scripts/starmap/generate.sh",

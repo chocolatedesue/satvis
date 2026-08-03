@@ -44,15 +44,24 @@ describe("starMapSources", () => {
     expect(starMapSources("Nonsense")).toBeUndefined();
   });
 
-  test("DeepStar2K names all six faces", () => {
-    const sources = starMapSources("DeepStar2K");
+  const optional = STAR_MAPS.filter((name) => starMapSources(name) !== undefined);
+
+  test.each(optional)("%s names all six faces", (name) => {
+    const sources = starMapSources(name);
     expect(sources && Object.keys(sources).toSorted()).toEqual(["negativeX", "negativeY", "negativeZ", "positiveX", "positiveY", "positiveZ"]);
     // Six distinct files, not the same one under six keys.
     expect(new Set(Object.values(sources!)).size).toBe(6);
   });
 
-  test("DeepStar2K is served from the generated directory, not the submodule", () => {
-    expect(starMapSources("DeepStar2K")!.positiveX).toContain("data/generated/starmap/");
+  test.each(optional)("%s is served from the generated directory, not the submodule", (name) => {
+    expect(starMapSources(name)!.positiveX).toContain("data/generated/starmap/");
+  });
+
+  // Two cuts of one catalogue built by one generator run — distinct files, or
+  // the menu would offer the same sky twice under two names.
+  test("no two maps share a face url", () => {
+    const urls = optional.flatMap((name) => Object.values(starMapSources(name)!));
+    expect(new Set(urls).size).toBe(urls.length);
   });
 
   test("every map is either builtin or has sources — no third state", () => {
@@ -168,6 +177,18 @@ describe("availableStarMaps", () => {
     stubFetch(appShell);
     const { availableStarMaps: list } = await freshModule();
     await expect(list()).resolves.toContain(BUILTIN_STAR_MAP);
+  });
+
+  // The two cuts are built together, but `--size 2048` builds only one and a
+  // half-finished run leaves only one. Each is probed on its own, so the menu
+  // offers whichever is actually there.
+  test("offers only the cut that exists when the generator built one size", async () => {
+    stubFetch((url) => (url.includes("_1024_") ? missing() : imagePart()));
+    const { availableStarMaps: list } = await freshModule();
+    const names = await list();
+    expect(names).toContain("DeepStar2K");
+    expect(names).not.toContain("DeepStar1K");
+    expect(names).toContain(BUILTIN_STAR_MAP);
   });
 });
 

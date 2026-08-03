@@ -551,13 +551,52 @@ def verify(out_dir: str, ref_dir: str, prefix: str, ref_prefix: str = "TychoSkym
     return 0
 
 
+def build(src: np.ndarray, size: int, ss: int, exposure: float, feather: int, out_dir: str, quality: int) -> str:
+    """Render, reconcile and write one cut of the source. Returns its file prefix.
+
+    Every cut is reprojected from the source rather than resampled from a larger
+    one. Downscaling would be cheaper and worse on both counts this generator
+    cares about: it inherits the larger cut's JPEG ringing, and it averages a
+    kernel that was sized for a different texel, which is exactly the
+    solid-angle argument in `render_face` run backwards. Reconciling the edges
+    afterwards would also only approximate the fixup rather than reproduce it.
+    """
+    # All six are held at once so the edges can be reconciled before encoding;
+    # 2048px faces are 50 MB each in linear float, which is affordable where the
+    # source is not.
+    faces = {face: render_face(src, face, size, ss) for face in FACE_ORDER}
+
+    pairs = edge_pairs(size)
+    mean, p99 = edge_step(faces, pairs, exposure)
+    print(f"  edge step before: mean {mean:.2f}, p99 {p99:.2f} levels", flush=True)
+    if feather:
+        # A fixed texel count, not a fixed angle: both sides of the trade it was
+        # tuned against — a ramp steep enough to read as its own line, and a
+        # correction carried far enough to land on more of the tone curve — are
+        # counted in texels, so the optimum does not move with the face size.
+        match_edges(faces, pairs, feather)
+        mean, p99 = edge_step(faces, pairs, exposure)
+        print(f"  edge step after:  mean {mean:.2f}, p99 {p99:.2f} levels ({feather}-texel feather)", flush=True)
+
+    prefix = f"deepstar_2020_{size}"
+    total = 0
+    for face in FACE_ORDER:
+        pixels = encode(faces[face], exposure)
+        path = os.path.join(out_dir, f"{prefix}_{face}.jpg")
+        cv2.imwrite(path, np.ascontiguousarray(pixels), [cv2.IMWRITE_JPEG_QUALITY, quality])
+        total += os.path.getsize(path)
+    print(f"  wrote six faces, {total / 2**20:.1f} MB", flush=True)
+    return prefix
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Build a Cesium sky box from NASA SVS Deep Star Maps 2020.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     ap.add_argument("--res", default="16k", choices=["8k", "16k", "32k"], help="source map resolution")
-    ap.add_argument("--size", type=int, default=2048, help="cube face edge in pixels")
+    ap.add_argument("--size", type=int, nargs="+", default=[2048, 1024], metavar="N",
+                    help="cube face edge in pixels; several build several cuts from the one source")
     ap.add_argument("--supersample", default="auto", help="samples per output texel per axis, or auto from the source resolution")
     ap.add_argument("--match-edges", type=int, default=4, metavar="N",
                     help="reconcile adjacent faces over their outermost N texels; 0 leaves them alone")
@@ -570,7 +609,6 @@ def main() -> int:
     ap.add_argument("--ref", default="/ref", help="reference faces for the orientation check")
     args = ap.parse_args()
 
-    prefix = f"deepstar_2020_{args.size}"
     # No mkdir: both are bind mounts of committed directories, and generate.sh
     # has already refused to run if either is missing. Creating them here would
     # only paper over a mount that did not happen.
@@ -580,9 +618,11 @@ def main() -> int:
 
     src = open_source(fetch(f"starmap_2020_{args.res}.exr", args.cache))
     h, w = src.shape[:2]
-    ss = default_supersample(args.size, w) if args.supersample == "auto" else int(args.supersample)
-    print(f"source {w}x{h} float16, {ss}x{ss} samples per texel", flush=True)
+    print(f"source {w}x{h} float16", flush=True)
 
+    # Once, from the source, and shared by every cut. Measuring it per cut would
+    # let two maps of the same sky disagree about how bright it is, which is
+    # exactly what a viewer switching between them would notice first.
     if args.exposure == "auto":
         exposure = auto_exposure(src)
         print(f"auto exposure {exposure:.6g} (p{EXPOSURE_PERCENTILE} of luminance at the knee)", flush=True)
@@ -590,35 +630,24 @@ def main() -> int:
         exposure = float(args.exposure)
         print(f"exposure {exposure:.6g}", flush=True)
 
-    # All six are held at once so the edges can be reconciled before encoding;
-    # 2048px faces are 50 MB each in linear float, which is affordable where the
-    # source is not.
-    faces = {face: render_face(src, face, args.size, ss) for face in FACE_ORDER}
-
-    pairs = edge_pairs(args.size)
-    mean, p99 = edge_step(faces, pairs, exposure)
-    print(f"edge step before: mean {mean:.2f}, p99 {p99:.2f} levels", flush=True)
-    if args.match_edges:
-        match_edges(faces, pairs, args.match_edges)
-        mean, p99 = edge_step(faces, pairs, exposure)
-        print(f"edge step after:  mean {mean:.2f}, p99 {p99:.2f} levels ({args.match_edges}-texel feather)", flush=True)
-
-    total = 0
-    for face in FACE_ORDER:
-        pixels = encode(faces[face], exposure)
-        path = os.path.join(args.out, f"{prefix}_{face}.jpg")
-        cv2.imwrite(path, np.ascontiguousarray(pixels), [cv2.IMWRITE_JPEG_QUALITY, args.quality])
-        total += os.path.getsize(path)
-        print(f"  {os.path.basename(path)}  {os.path.getsize(path) / 1024:.0f} KB", flush=True)
-    print(f"wrote {total / 2**20:.1f} MB", flush=True)
+    prefixes = []
+    for size in args.size:
+        ss = default_supersample(size, w) if args.supersample == "auto" else int(args.supersample)
+        print(f"\n{size}px faces, {ss}x{ss} samples per texel", flush=True)
+        prefixes.append(build(src, size, ss, exposure, args.match_edges, args.out, args.quality))
 
     if args.no_verify:
         return 0
     if not os.path.isdir(args.ref):
         print("\nno reference faces mounted, skipping the orientation check", flush=True)
         return 0
-    print()
-    return verify(args.out, args.ref, prefix)
+    # Each cut on its own: `star_field` takes both sides down to a common 1024
+    # before correlating, so the check reads the same at any face size.
+    failures = 0
+    for prefix in prefixes:
+        print(f"\n{prefix}")
+        failures += verify(args.out, args.ref, prefix)
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

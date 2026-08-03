@@ -174,7 +174,7 @@ export default defineConfig({
             },
           },
           {
-            // The optional generated star map (src/config/starMaps.ts). Not
+            // The optional generated star maps (src/config/starMaps.ts). Not
             // precached — the glob above covers `cesium/Assets`, where the
             // built-in sky box lives, so a first offline load has stars either
             // way. These are only fetched by someone who asked for them, and then
@@ -184,8 +184,8 @@ export default defineConfig({
             options: {
               cacheName: "cesium-starmap-cache",
               expiration: {
-                // Six faces, one optional map.
-                maxEntries: 6,
+                // Six faces each, for the 1K and 2K cuts.
+                maxEntries: 12,
                 maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
                 purgeOnQuotaError: true,
               },
