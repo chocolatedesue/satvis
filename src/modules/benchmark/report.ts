@@ -23,6 +23,44 @@ const cpuMs = (result: BenchmarkResult): number => result.frames.cpu?.mean ?? 0;
 const tickMs = (result: BenchmarkResult): number => result.frames.tick?.mean ?? 0;
 
 /**
+ * Main-thread work for one frame: the render plus the clock tick.
+ *
+ * What every derived fit is built on, and the reason is that the two candidates
+ * either side of it are both unusable.
+ *
+ * `cpuMs` alone misses most of the per-satellite cost, because Cesium's Viewer
+ * runs `dataSourceDisplay.update` — every entity's position evaluation — inside
+ * an `onTick` listener, before `preUpdate`. Fitting it had the Point series
+ * holding 60 fps to 1.66 million satellites.
+ *
+ * `frameMs` cannot be fitted at all, because it is quantised by vsync. Measured
+ * on a 120 Hz display with points only: from 0 to 1,000 satellites main-thread
+ * work went 0.64 → 1.21 ms while `frameMs` sat at exactly 8.33 ms throughout —
+ * the extra work was absorbed by idle time already being spent waiting for the
+ * next tick, so a fit through it reads a slope of zero. Past the interval it
+ * stops being continuous rather than becoming useful: at 5,000 satellites, with
+ * 11.5 ms of main-thread work, the *median* frame still presented at 8.72 ms and
+ * the mean of 11.72 was really "15.5% of frames missed a tick". Its intercept is
+ * the refresh interval, which is a property of the display and not of the app.
+ *
+ * This sum is continuous, monotonic and has no floor: 0.64, 0.96, 1.21, 6.25,
+ * 8.95, 11.52 over 0 → 5,000 satellites.
+ */
+const mainThreadMs = (result: BenchmarkResult): number => cpuMs(result) + tickMs(result);
+
+/**
+ * The frame time this series could not go below, whatever the satellite count.
+ *
+ * Everything outside the main thread — GPU work, and the wait for vsync — lumped
+ * together, because `frameMs` cannot separate them: a vsync-clamped frame hides
+ * how much of its interval the GPU actually used. Reported rather than folded
+ * into the fit, because it is the term that decides whether the fit matters. A
+ * floor already past the frame budget means 60 fps is gone before the first
+ * satellite, and no per-satellite slope will bring it back.
+ */
+const floorMs = (results: readonly BenchmarkResult[]): number => Math.min(...results.map((result) => result.frames.wall?.mean ?? Infinity));
+
+/**
  * The heap figure every memory table is built from: the window's low-water mark.
  *
  * Undefined outside Chrome. Not a footprint on its own — see `FrameSample.heap`
@@ -178,13 +216,28 @@ export interface ScalingFit {
   /** The component set and, where it is not real time, the clock rate. */
   series: string;
   points: number;
-  /** Least-squares slope, restated per 1,000 satellites to be readable. */
-  cpuMsPer1000: number;
-  /** The intercept: what this component set costs before any satellite exists. */
-  baseCpuMs: number;
+  /** Least-squares slope of main-thread work, restated per 1,000 satellites. */
+  mainMsPer1000: number;
+  /** The intercept: the main-thread cost of this set before any satellite exists. */
+  baseMainMs: number;
   /** 1.0 means the cost is linear in the count; well under it means it is not. */
   r2: number;
-  /** Where the mean frame time crosses 16.7 ms, extrapolated from the fit. */
+  /**
+   * The frame time nothing in this series went below — GPU work and the vsync
+   * wait together. Read it against the 16.7 ms budget before reading
+   * `satsAt60fps`: if the floor is already there, the count never mattered.
+   */
+  floorMs: number;
+  /**
+   * Where main-thread work crosses 16.7 ms, extrapolated from the fit.
+   *
+   * A main-thread ceiling, and it assumes the GPU is not the binding constraint —
+   * which is what the measurements show once a scene is big enough to matter: at
+   * 5,000 points, main-thread work was 11.52 ms and the frame 11.72, so the frame
+   * *was* the main thread and the GPU overlapped it. Blank when the floor has
+   * already eaten the budget, because then the answer is "none" rather than a
+   * number.
+   */
   satsAt60fps: number | "";
 }
 
@@ -236,18 +289,23 @@ export function scalingFits(run: BenchmarkRun): ScalingFit[] {
   for (const [series, results] of bySeries(run)) {
     // Against the satellites actually drawn, not the ones asked for — the two
     // part company as soon as a component does not apply to every satellite.
-    const fit = leastSquares(results.map((result) => ({ x: result.applied.satellitesVisible, y: cpuMs(result) })));
+    const fit = leastSquares(results.map((result) => ({ x: result.applied.satellitesVisible, y: mainThreadMs(result) })));
     if (!fit) {
       continue;
     }
+    const floor = floorMs(results);
     const headroom = FRAME_BUDGET_60FPS_MS - fit.intercept;
+    // A floor at or past the budget makes the extrapolation meaningless: no
+    // satellite count is the reason 60 fps is unavailable.
+    const reachable = Number.isFinite(floor) && floor < FRAME_BUDGET_60FPS_MS;
     fits.push({
       series,
       points: results.length,
-      cpuMsPer1000: round(fit.slope * 1000, 3),
-      baseCpuMs: round(fit.intercept),
+      mainMsPer1000: round(fit.slope * 1000, 3),
+      baseMainMs: round(fit.intercept),
       r2: round(fit.r2, 3),
-      satsAt60fps: fit.slope > 0 && headroom > 0 ? Math.round(headroom / fit.slope) : "",
+      floorMs: Number.isFinite(floor) ? round(floor) : 0,
+      satsAt60fps: reachable && fit.slope > 0 && headroom > 0 ? Math.round(headroom / fit.slope) : "",
     });
   }
   return fits;
@@ -366,7 +424,8 @@ export interface MarginalCost {
   /** The components this row adds over the set it is compared against. */
   added: string;
   over: string;
-  deltaCpuMs: number;
+  /** Main-thread cost of the added components — see `mainThreadMs`. */
+  deltaMainMs: number;
   usPerSatellite: number;
 }
 
@@ -409,14 +468,14 @@ export function marginalCosts(run: BenchmarkRun): MarginalCost[] {
         continue;
       }
       const base = new Set(baseline.applied.componentsRequested);
-      const delta = cpuMs(result) - cpuMs(baseline);
+      const delta = mainThreadMs(result) - mainThreadMs(baseline);
       const drawn = result.applied.satellitesVisible;
       costs.push({
         sats: result.applied.satellitesRequested,
         clock: result.applied.clockMultiplier,
         added: formatComponents(result.applied.componentsRequested.filter((component) => !base.has(component))),
         over: formatComponents(baseline.applied.componentsRequested),
-        deltaCpuMs: round(delta),
+        deltaMainMs: round(delta),
         usPerSatellite: drawn > 0 ? round((delta * 1000) / drawn, 1) : 0,
       });
     }
@@ -731,7 +790,7 @@ export function logRun(run: BenchmarkRun): void {
   }
   console.log("%cper step", "font-weight:bold");
   console.table(reportRows(run));
-  console.log("%cscaling with satellite count (cpu frame time)", "font-weight:bold");
+  console.log("%cscaling with satellite count (main-thread frame time: render + clock tick)", "font-weight:bold");
   console.table(scalingFits(run));
   // Absent rather than zeroed where the browser has no reading, and said out
   // loud, so an empty memory table is a known absence like the gpu column.
@@ -812,7 +871,7 @@ export function logRun(run: BenchmarkRun): void {
       "footprint: unavailable — the page is not cross-origin isolated, so measureUserAgentSpecificMemory is not exposed. Needs COOP: same-origin and COEP: credentialless.",
     );
   }
-  console.log("%cmarginal cost per component", "font-weight:bold");
+  console.log("%cmarginal cost per component (main-thread frame time)", "font-weight:bold");
   console.table(marginalCosts(run));
   // Only when the clock was actually swept — an empty table would read as
   // "propagation costs nothing" rather than "nobody asked".

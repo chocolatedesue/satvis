@@ -178,7 +178,7 @@
       </div>
 
       <div v-if="fits.length > 0" class="bench__block bench__block--table">
-        <div class="bench__caption">scaling (cpu ms per 1,000 satellites, and where 60 fps runs out)</div>
+        <div class="bench__caption">scaling (main-thread ms per 1,000 satellites; floor is GPU plus vsync)</div>
         <table class="bench__table">
           <thead>
             <tr>
@@ -186,15 +186,17 @@
               <th class="bench__num">ms/1k</th>
               <th class="bench__num">base</th>
               <th class="bench__num">r²</th>
+              <th class="bench__num">floor</th>
               <th class="bench__num">sats@60</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="fit in fits" :key="fit.series">
               <td>{{ fit.series }}</td>
-              <td class="bench__num">{{ fit.cpuMsPer1000.toFixed(2) }}</td>
-              <td class="bench__num">{{ fit.baseCpuMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ fit.mainMsPer1000.toFixed(2) }}</td>
+              <td class="bench__num">{{ fit.baseMainMs.toFixed(2) }}</td>
               <td :class="['bench__num', fit.r2 < 0.9 ? 'bench__warn' : '']">{{ fit.r2.toFixed(3) }}</td>
+              <td class="bench__num">{{ fit.floorMs.toFixed(2) }}</td>
               <td class="bench__num">{{ fit.satsAt60fps === "" ? "—" : fit.satsAt60fps }}</td>
             </tr>
           </tbody>

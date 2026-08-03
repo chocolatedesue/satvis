@@ -219,7 +219,7 @@ describe("scalingFits", () => {
       ]),
     );
     expect(fits).toHaveLength(1);
-    expect(fits[0]).toMatchObject({ series: "Point", cpuMsPer1000: 10, baseCpuMs: 5, r2: 1 });
+    expect(fits[0]).toMatchObject({ series: "Point", mainMsPer1000: 10, baseMainMs: 5, r2: 1 });
   });
 
   test("clock rates are separate series, never one averaged fit", () => {
@@ -232,7 +232,7 @@ describe("scalingFits", () => {
       ]),
     );
     expect(fits.map((fit) => fit.series)).toEqual(["Point", "Point @ ×100"]);
-    expect(fits[1]?.cpuMsPer1000).toBe(40);
+    expect(fits[1]?.mainMsPer1000).toBe(40);
   });
 
   test("the repeat step is left out, so it cannot weight one point twice", () => {
@@ -243,7 +243,28 @@ describe("scalingFits", () => {
         result({ sats: 0, components: ["Point"], cpuMs: 500, repeat: true }),
       ]),
     );
-    expect(fits[0]).toMatchObject({ points: 2, cpuMsPer1000: 10, baseCpuMs: 5 });
+    expect(fits[0]).toMatchObject({ points: 2, mainMsPer1000: 10, baseMainMs: 5 });
+  });
+
+  // The defect: cpuMs excludes the clock tick, where most per-satellite work
+  // happens, so fitting it alone had the Point series holding 60 fps into the
+  // millions. The fit is over cpuMs + tickMs.
+  test("the fit counts the clock tick, not just the render", () => {
+    const fits = scalingFits(run([result({ sats: 0, components: ["Point"], cpuMs: 1, tickMs: 0 }), result({ sats: 1000, components: ["Point"], cpuMs: 1, tickMs: 10 })]));
+
+    // cpuMs is flat across these two rows; all the growth is in the tick.
+    expect(fits[0]?.mainMsPer1000).toBe(10);
+    expect(fits[0]?.baseMainMs).toBe(1);
+  });
+
+  test("satsAt60fps is blank when the floor alone has eaten the budget", () => {
+    const fits = scalingFits(run([result({ sats: 0, components: ["Point"], cpuMs: 1, wallMs: 40 }), result({ sats: 1000, components: ["Point"], cpuMs: 2, wallMs: 42 })]));
+
+    // Main-thread work is trivial and its slope would extrapolate to a huge
+    // count, but every frame took 40 ms regardless — GPU or vsync bound. No
+    // satellite count is the reason 60 fps is unavailable.
+    expect(fits[0]?.floorMs).toBe(40);
+    expect(fits[0]?.satsAt60fps).toBe("");
   });
 
   test("satsAt60fps is blank when the fixed cost already blows the budget", () => {
@@ -262,8 +283,8 @@ describe("marginalCosts", () => {
       ]),
     );
     expect(costs).toEqual([
-      { sats: 100, clock: 1, added: "Label", over: "Point", deltaCpuMs: 4, usPerSatellite: 40 },
-      { sats: 100, clock: 1, added: "Orbit", over: "Point + Label", deltaCpuMs: 6, usPerSatellite: 60 },
+      { sats: 100, clock: 1, added: "Label", over: "Point", deltaMainMs: 4, usPerSatellite: 40 },
+      { sats: 100, clock: 1, added: "Orbit", over: "Point + Label", deltaMainMs: 6, usPerSatellite: 60 },
     ]);
   });
 

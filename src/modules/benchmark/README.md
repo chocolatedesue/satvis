@@ -83,10 +83,42 @@ nothing when the question is only about drawing.
 
 And derived, across steps:
 
-- **scaling** — a least-squares fit of `cpuMs` against the satellites drawn, per
-  _series_ (component set **and** clock rate, so a fit is never averaged across
-  clocks): ms per 1,000 satellites, the fixed cost at zero, r² (well under 1.0
-  means the cost is _not_ linear in the count), and where 60 fps runs out.
+- **scaling** — a least-squares fit of main-thread frame time, meaning
+  `cpuMs + tickMs`, against the satellites drawn, per _series_ (component set
+  **and** clock rate, so a fit is never averaged across clocks): ms per 1,000
+  satellites, the fixed cost at zero, r² (well under 1.0 means the cost is _not_
+  linear in the count), the frame-time **floor**, and where 60 fps runs out.
+
+  Read `floor` before `sats@60`. The floor is everything outside the main thread —
+  GPU work and the wait for vsync, which `frameMs` cannot separate — and it is the
+  term that decides whether the slope matters at all. A floor already past 16.7 ms
+  means 60 fps was gone before the first satellite, and `sats@60` goes blank
+  rather than extrapolating a count that was never the problem.
+
+  Neither obvious candidate works as the fit basis, which is why it is the sum:
+
+  - `cpuMs` alone misses most of the per-satellite cost. Cesium's `Viewer` runs
+    `dataSourceDisplay.update` — every entity's position evaluation — inside an
+    `onTick` listener, before `preUpdate`. Fitting it had the Point series holding
+    60 fps to **1.66 million** satellites while the measured frame at five
+    thousand was already 14.9 ms.
+  - `frameMs` cannot be fitted at all, because vsync quantises it. Measured on a
+    120 Hz display with points only: from 0 to 1,000 satellites main-thread work
+    went 0.64 → 1.21 ms and `frameMs` sat at exactly 8.33 ms the whole way, the
+    extra work absorbed by idle already being spent waiting for the next tick — a
+    fit through it reads a slope of **zero**. Past the interval it stops being
+    continuous rather than becoming useful: at 5,000 satellites with 11.5 ms of
+    main-thread work, the _median_ frame still presented at 8.72 ms and the mean
+    of 11.72 ms really meant "15.5% of frames missed a tick". Its intercept is the
+    refresh interval, a property of the display rather than of the app.
+
+  `sats@60` is therefore a **main-thread** ceiling, and it assumes the GPU is not
+  the binding constraint. That is what the measurements show once a scene is large
+  enough to matter — at 5,000 points, main-thread work was 11.52 ms and the frame
+  11.72, so the frame _was_ the main thread and the GPU overlapped it — but a
+  bigger canvas or MSAA and HDR at full device pixels raises the floor, and the
+  floor column is how you notice.
+
 - **memory** — a least-squares fit of the heap floor against the satellites drawn,
   per series: MB per 1,000 satellites, KB per satellite, and r². Chrome only, and
   a slope rather than a footprint — **read r² first**, because the whole method
@@ -119,9 +151,9 @@ And derived, across steps:
   those same two rows read 35.0 and 103.3 — a 195% swing against a real 7%.
 
 - **marginal cost** — each set differenced against the largest set measured under
-  the same conditions that is a strict subset of it. In a cumulative sweep that is
-  the cost of the component just added; in an isolated sweep it is that component's
-  cost over a bare point. One function serves both.
+  the same conditions that is a strict subset of it, on main-thread frame time. In
+  a cumulative sweep that is the cost of the component just added; in an isolated
+  sweep it is that component's cost over a bare point. One function serves both.
 - **propagation** — each clock rate differenced against ×1 for the same satellites
   and components, on `tickMs`. Only present when the clock was actually swept,
   because an empty table would read as "propagation is free" rather than "nobody
@@ -273,10 +305,9 @@ with `cacheId`. Both would have to change in one release. PostHog under
   14.90 ms**. The fixed floor is GPU work; the part that grows with the count is
   main-thread work, and almost all of it is the tick.
 
-  `scalingFits` and `marginalCosts` still fit `cpuMs` alone, which is why the
-  Point series reports 60 fps holding to **1.66 million satellites** while the
-  frame at five thousand is already 14.9 ms. Treat those two tables as
-  draw-cost-only until they are moved onto `cpuMs + tickMs`.
+  `scalingFits` and `marginalCosts` fit `cpuMs + tickMs` for exactly this reason,
+  and report the frame-time floor beside the slope so a GPU-bound configuration is
+  visible rather than implied. See **scaling** above.
 
 - **`gpuMs` is withheld rather than guessed when the driver lies.** A frame that
   presented every 14 ms cannot have cost the GPU 49 ms, but that is exactly what
