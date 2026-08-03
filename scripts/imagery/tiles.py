@@ -8,8 +8,9 @@ reproducible from the image alone.
 The source is Natural Earth II with Shaded Relief, Water and Drainages at 10m —
 21600x10800, EPSG:4326, public domain, no attribution required (though the layer
 credits it anyway). https://www.naturalearthdata.com/downloads/10m-raster-data/
-Output is `data/imagery/NaturalEarthII`, a geodetic TMS pyramid of 256px JPEG
-tiles that Cesium's `TileMapServiceImageryProvider` reads directly.
+Output is `data/imagery/NaturalEarthII`, a geodetic TMS pyramid of 256px WebP
+tiles that Cesium's `TileMapServiceImageryProvider` reads directly — it takes the
+extension from the manifest, so nothing in the app names the format.
 
 Three things are worth knowing before changing anything.
 
@@ -55,6 +56,11 @@ BASE_URL = "https://naciscdn.org/naturalearth/10m/raster"
 # Level 5 is the base of the pyramid; everything above it is an average of it.
 MAX_ZOOM = 5
 
+# What this writes, and what the tileset it is compared against wrote. Both are
+# needed at once by `verify`, which reads one of each.
+TILE_EXT = "webp"
+REF_EXT = "jpg"
+
 # The grade the Cesium asset was cut with, as GDAL VRT lookup tables: `in:out`
 # knots per band, linearly interpolated between, clamped outside.
 #
@@ -90,9 +96,10 @@ RECOLOR = (
 )
 
 # What `verify` will accept as a match, per channel, in 8-bit levels. The floor is
-# ~2 (red, green) and ~3 (blue), and it is JPEG: both sides are lossy, so even a
-# perfect curve cannot agree exactly. Six leaves that room and still fails loudly
-# on the thing worth catching — an unapplied or wrong curve, which is 48.
+# ~2 (red, green) and ~3 (blue), and it is lossy encoding on both sides — WebP here
+# against the reference's JPEG — so even a perfect curve cannot agree exactly. Six
+# leaves that room and still fails loudly on the thing worth catching: an unapplied
+# or wrong curve, which is 48.
 MATCH_TOLERANCE = 6.0
 
 
@@ -192,17 +199,27 @@ def recolored(tif: str, vrt_path: str) -> str:
 
 
 def tile(src: str, out_dir: str, zoom: int, quality: int, processes: int) -> None:
-    """Cut `src` into a geodetic TMS pyramid of JPEG tiles.
+    """Cut `src` into a geodetic TMS pyramid of WebP tiles.
 
     `--tmscompatible` is what makes level 0 two tiles at 0.703125 deg/px rather
     than one stretched over the whole globe. That is the scheme Cesium's
     `GeographicTilingScheme` assumes and the one the reference tileset uses;
     without it every tile would be requested at the wrong level.
 
-    JPEG rather than PNG, at roughly a tenth the bytes on imagery like this. There
-    is no transparency to lose: the source is three bands covering the globe edge to
-    edge. Tiles are not precached — they are cached as they are requested, by the
-    `data/imagery` CacheFirst rule in vite.config.ts, and kept for 30 days so a
+    WebP rather than JPEG, measured on all 512 level-4 tiles against a lossless cut
+    of the same pyramid — so this is codec error alone, not the reference's own
+    noise. At matched quality it wins on both axes at once (mean 2.38 levels against
+    JPEG's 2.44, p99 14 against 16, and 23% fewer bytes), and across the curve it is
+    25-35% fewer bytes at equal error. Nothing in the app names the format: Cesium
+    takes the extension from the manifest, so this is the only line that decides it.
+
+    The opposite conclusion to the star map's, and for a reason. That sky is JPEG's
+    worst case, with error at ~18% of signal, so WebP was spent on fidelity there.
+    Here it is ~2% of signal on midtone photography that JPEG handles well, and this
+    is the default layer rather than an opt-in one — so the win is taken as bytes.
+
+    Tiles above level 3 are not precached; they are cached as they are requested, by
+    the `data/imagery` CacheFirst rule in vite.config.ts, and kept for 30 days so a
     region once looked at survives going offline.
     """
     subprocess.run(
@@ -211,8 +228,8 @@ def tile(src: str, out_dir: str, zoom: int, quality: int, processes: int) -> Non
             "--profile=geodetic",
             "--tmscompatible",
             f"--zoom=0-{zoom}",
-            "--tiledriver=JPEG",
-            f"--jpeg-quality={quality}",
+            "--tiledriver=WEBP",
+            f"--webp-quality={quality}",
             # Averaging, so a coarse tile is the mean of the four below it rather
             # than one of their pixels. The alternative shows as shimmering coastlines
             # when the globe is zoomed out, which is most of the time in this app.
@@ -240,8 +257,12 @@ def tile(src: str, out_dir: str, zoom: int, quality: int, processes: int) -> Non
         )
 
 
-def tile_paths(a_dir: str, b_dir: str, zoom: int, stride: int) -> list[tuple[str, str]]:
+def tile_paths(a_dir: str, b_dir: str, zoom: int, stride: int, a_ext: str = TILE_EXT, b_ext: str = REF_EXT) -> list[tuple[str, str]]:
     """Tiles present in both trees at `zoom`, sampled every `stride` in x and y.
+
+    The two extensions are separate because the two sides are: this generator writes
+    WebP and the tileset it is checked against is the JPEG one it replaces. GDAL
+    reads both, so only the filenames differ.
 
     Sampled rather than exhaustive so the check stays a few seconds, and spread over
     the whole grid rather than a corner: a wrong curve is uniform, but a wrong source
@@ -251,8 +272,8 @@ def tile_paths(a_dir: str, b_dir: str, zoom: int, stride: int) -> list[tuple[str
     pairs = []
     for x in range(0, width, stride):
         for y in range(0, width // 2, stride):
-            a = os.path.join(a_dir, str(zoom), str(x), f"{y}.jpg")
-            b = os.path.join(b_dir, str(zoom), str(x), f"{y}.jpg")
+            a = os.path.join(a_dir, str(zoom), str(x), f"{y}.{a_ext}")
+            b = os.path.join(b_dir, str(zoom), str(x), f"{y}.{b_ext}")
             if os.path.exists(a) and os.path.exists(b):
                 pairs.append((a, b))
     return pairs
@@ -271,7 +292,7 @@ def verify(out_dir: str, ref_dir: str, zoom: int) -> int:
     that submodule, and the thing worth proving is that retiring it changes nothing
     a user sees.
 
-    A few levels of disagreement are expected and not a defect: both sides are JPEG,
+    A few levels of disagreement are expected and not a defect: both sides are lossy,
     and the curve was fitted through that same noise. What this catches is the
     failure that matters — a curve not applied, or applied wrongly, which is an
     order of magnitude larger than the floor and instantly visible on the globe.
@@ -316,8 +337,8 @@ def fit_recolor(tif: str, ref_dir: str, cache_dir: str, quality: int, processes:
     the same resampling onto the same grid; comparing source pixels against tiles
     would fold the pyramid's averaging into the curve.
 
-    The conditional median, not the mean: JPEG puts ringing on both sides, and near
-    a coastline that is a long tail rather than symmetric noise.
+    The conditional median, not the mean: lossy encoding puts ringing on both sides,
+    and near a coastline that is a long tail rather than symmetric noise.
     """
     raw_dir = os.path.join(cache_dir, "raw-tiles")
     if not os.path.exists(os.path.join(raw_dir, "tilemapresource.xml")):
@@ -363,12 +384,13 @@ def main() -> int:
     )
     ap.add_argument("--zoom", type=int, default=MAX_ZOOM, metavar="N",
                     help=f"deepest zoom level to cut; above {MAX_ZOOM} the source is only interpolated")
-    # 85 is 25 MB for the whole pyramid, against 49 MB for the tileset it replaces.
-    # Purely a size decision: the disagreement with the reference is 3.30 levels at
-    # 85, 3.55 at 75 and 3.06 at 92, so it is dominated by the reference's own JPEG
-    # noise rather than by this encode, and spending bytes here buys nothing
-    # measurable. Size still matters: the whole pyramid ships in dist/.
-    ap.add_argument("--quality", type=int, default=85, help="JPEG quality")
+    # WebP 85 is ~19 MB for the whole pyramid, against 25 MB as JPEG at the same
+    # number and 49 MB for the tileset it replaces. Measured at level 4 against a
+    # lossless cut: q75 is 47% of JPEG q85's bytes for slightly more error, q80 60%,
+    # q85 77% for less error, q90 106% for clearly less. 85 is where WebP is still
+    # strictly better than the JPEG it replaced on both bytes and error, which makes
+    # it the setting that needs no argument about what was traded away.
+    ap.add_argument("--quality", type=int, default=85, help="WebP quality")
     ap.add_argument("--processes", type=int, default=os.cpu_count() or 4, help="tiler workers")
     ap.add_argument("--no-recolor", action="store_true", help="tile the raw source, skipping the Cesium grade")
     ap.add_argument("--no-verify", action="store_true", help="skip the comparison against the reference tileset")
