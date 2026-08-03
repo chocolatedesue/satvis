@@ -51,6 +51,7 @@ the SPA and the `worker/` package.
 - `pnpm build` to build the application (output in `dist` folder)
 - `pnpm preview` to preview the production build locally
 - `pnpm update-gp` to refresh the static satellite-data snapshot (see below)
+- `pnpm update-imagery` to build the offline base map (needs docker; see below)
 
 ### Full-stack dev (with the worker)
 
@@ -125,6 +126,26 @@ cron — including metadata enrichment — and writes a static snapshot into
 `data/gp/` (`<group>.json`, `index.json`; gitignored). At runtime the app probes
 `/api/groups.json`; if that fails it falls back to the static `data/gp/`
 snapshot, so all presets keep working without the worker.
+
+### Offline base map
+
+The `OfflineHighres` layer — the default base map, and the one that keeps the globe
+usable with no network — is built from source rather than checked in:
+
+```
+pnpm update-imagery
+```
+
+That runs a container (`scripts/imagery/`) which fetches [Natural Earth
+II](https://www.naturalearthdata.com/downloads/10m-raster-data/) at 10m, applies the
+colour grade the original Cesium tileset was cut with, and writes a geodetic TMS
+pyramid of levels 0–5 into the gitignored `data/imagery/` — about 25 MB and a minute
+on a warm cache. Docker is the only host requirement; GDAL runs inside.
+
+Skipping it is safe: the app probes for the tileset and falls back to the
+lower-resolution `Offline` map bundled with Cesium, with a console warning. Run it to
+get the sharper globe. `pnpm update-starmap` does the same job for the optional star
+maps.
 
 ### Satellite metadata
 

@@ -15,11 +15,11 @@ import {
 
 import { formatLayer, parseLayer } from "../config/layers";
 
-// The high-resolution offline tiles live in the `data/cesium-assets` submodule,
-// which `git worktree add` does not populate — so in a fresh worktree they are
-// simply absent, while `Offline` (bundled with @cesium/engine, copied out of
+// The high-resolution offline tiles are built by `pnpm update-imagery` and are
+// gitignored, so in a checkout where nobody has run the generator they are simply
+// absent — while `Offline` (bundled with @cesium/engine, copied out of
 // node_modules) is always there.
-const HIGHRES_NATURAL_EARTH = "data/cesium-assets/imagery/NaturalEarthII";
+const HIGHRES_NATURAL_EARTH = "data/imagery/NaturalEarthII";
 
 let highresProbe: Promise<boolean> | undefined;
 
@@ -48,6 +48,9 @@ let highresProbe: Promise<boolean> | undefined;
  * Hardcoded to the one pair rather than expressed as a general capability of the
  * registry: this is the only provider backed by data that `pnpm install` does not
  * guarantee, and a framework for a single case is harder to read than the case.
+ * (The optional star maps are the other generated asset, but they are probed by
+ * `src/config/starMaps.ts` against a different failure — a sky box has no manifest
+ * to read, only six faces that are there or are not.)
  */
 export async function highresImageryMissing(): Promise<boolean> {
   highresProbe ??= fetch(`${HIGHRES_NATURAL_EARTH}/tilemapresource.xml`)

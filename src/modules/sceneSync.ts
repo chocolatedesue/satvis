@@ -115,7 +115,7 @@ export function startSceneSync(cc: SceneTarget): void {
     // stack captured before the await wrote `Offline` over the OT preset's basemap.
     const swapped = withoutHighresImagery(cesiumStore.layers);
     if (swapped) {
-      console.warn("High-resolution offline imagery is missing, falling back to Offline. Run `git submodule update --init` to fetch data/cesium-assets.");
+      console.warn("High-resolution offline imagery is missing, falling back to Offline. Run `pnpm update-imagery` to build data/imagery.");
       cesiumStore.setLayers(swapped);
     }
   }

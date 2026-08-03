@@ -106,15 +106,15 @@ of the Worker's `fetch` and watch which requests appear.
 
 **Result, 2026-07-30, wrangler dev on the built dist.**
 
-| path                                                 | status                                                                   |
-| ---------------------------------------------------- | ------------------------------------------------------------------------ |
-| `/`, `/ot`                                           | 200 text/html                                                            |
-| `/embedded.html`, `/test.html`                       | 307 to `/embedded`, `/test` (asset router `html_handling`, pre-existing) |
-| `/typo-route`                                        | 404 text/html (the 404 page)                                             |
-| `/api/groups.json`                                   | 200 application/json                                                     |
-| `/cesium/…/tilemapresource.xml` (exists)             | 200 application/xml                                                      |
-| `/data/cesium-assets/…/tilemapresource.xml` (absent) | **404**                                                                  |
-| `/data/gp/weather.json` (absent)                     | **404**                                                                  |
+| path                                           | status                                                                   |
+| ---------------------------------------------- | ------------------------------------------------------------------------ |
+| `/`, `/ot`                                     | 200 text/html                                                            |
+| `/embedded.html`, `/test.html`                 | 307 to `/embedded`, `/test` (asset router `html_handling`, pre-existing) |
+| `/typo-route`                                  | 404 text/html (the 404 page)                                             |
+| `/api/groups.json`                             | 200 application/json                                                     |
+| `/cesium/…/tilemapresource.xml` (exists)       | 200 application/xml                                                      |
+| `/data/imagery/…/tilemapresource.xml` (absent) | **404**                                                                  |
+| `/data/gp/weather.json` (absent)               | **404**                                                                  |
 
 Of those six requests, **only `/api/groups.json` logged `BILLED`** — routes, unknown paths
 and missing files are all answered by the asset router. Two combinations that are _not_
@@ -144,16 +144,21 @@ that is the behaviour you want.
 
 ## Layers: the offline imagery fallback
 
-**Procedure.** Open a checkout whose `data/cesium-assets` submodule is genuinely
-unpopulated — a fresh `git worktree add` is one — and load the default route. Read the
-basemap selection, the url, and the console. Do **not** simulate it by deleting the file
-from a running dev server: see below.
+**Procedure.** Open a checkout where `data/imagery/` is genuinely empty — one where nobody
+has run `pnpm update-imagery`, which any fresh clone is — and load the default route. Read
+the basemap selection, the url, and the console. Do **not** simulate it by deleting the
+file from a running dev server: see below.
 
 **Result, 2026-07-30, Chrome, in a worktree.** Basemap `Offline`, url rewritten to
-`?layers=Offline`, the console warning naming `git submodule update --init`, and the globe
+`?layers=Offline`, the console warning naming the recovery command, and the globe
 tiling normally from `/cesium/Assets/Textures/NaturalEarthII/...`. The fallback target was
 checked directly and is sound: its manifest answers `text/xml` beginning `<?xml`, and its
 tiles answer `image/jpeg`.
+
+Recorded when the tileset came from the `data/cesium-assets` submodule and the warning
+named `git submodule update --init`; the source moved to `pnpm update-imagery` but the
+failure and the fallback are unchanged, and both paths are equally absent in a fresh
+checkout. Worth re-running rather than trusting that equivalence.
 
 **The earlier result recorded here for 2026-07-28 was wrong**, and worth keeping as a
 warning about the method. It reported the fallback firing, but the probe tested only
