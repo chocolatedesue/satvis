@@ -9,17 +9,18 @@ light, half-float EXR, of 1.7 billion stars from Hipparcos-2, Tycho-2 and Gaia
 DR2 — public domain, credit requested. https://svs.gsfc.nasa.gov/4851
 Output is six 8-bit JPEG cube faces named the way `SkyBox` wants them.
 
-Two things are worth knowing before changing anything.
+Three things are worth knowing before changing anything.
 
 **Linear light is the whole point of the EXR.** Averaging supersamples is only
 physically meaningful before the tone curve, so everything stays linear until
 `encode()` at the very end. Downsampling an already tone-mapped JPEG — which is
 what the Tycho asset forces — cannot do this.
 
-**Orientation is checked as a whole, never patched per face.** `--verify`
-correlates each face against the Tycho asset over all eight dihedral transforms;
-anything but identity means the projection is wrong. Rotating one face to make
-it match is a trap, because the set then stops agreeing at the shared edges.
+**Orientation is checked as a whole, never patched per face.** The check (on by
+default, `--no-verify` to skip) correlates each face against the Tycho asset over
+all eight dihedral transforms; anything but identity means the projection is
+wrong. Rotating one face to make it match is a trap, because the set then stops
+agreeing at the shared edges.
 
 **A correct projection still leaves a step at the edges**, and `--match-edges`
 is what removes it. Six square grids cannot tile a sphere evenly: adjacent border
@@ -58,6 +59,10 @@ FACES: dict[str, Callable[[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray
 }
 
 FACE_ORDER = ["px", "mx", "py", "my", "pz", "mz"]
+
+# Where auto exposure puts the tone curve's knee. High enough that only genuine
+# stars sit above it, low enough that the Milky Way is not crushed against it.
+EXPOSURE_PERCENTILE = 99.99
 
 
 def fetch(name: str, cache_dir: str) -> str:
@@ -171,7 +176,7 @@ def sample_bilinear(src: np.ndarray, sx: np.ndarray, sy: np.ndarray) -> np.ndarr
     return top * (1.0 - fy) + bot * fy
 
 
-def render_face(layers: list[tuple[np.ndarray, float]], face: str, size: int, ss: int, block: int = 64) -> np.ndarray:
+def render_face(src: np.ndarray, face: str, size: int, ss: int, block: int = 64) -> np.ndarray:
     """One face, supersampled `ss`x per axis and averaged back down.
 
     Each output texel integrates ss^2 samples of linear radiance, so the result is
@@ -185,11 +190,10 @@ def render_face(layers: list[tuple[np.ndarray, float]], face: str, size: int, ss
     `default_supersample`. Near an edge the widened kernel reaches into directions
     belonging to the neighbouring face, which is what makes the two agree there.
 
-    Layers are summed here rather than up front so `--layers composite` never
-    materialises a combined map; at 32K that array would exceed the VM. Row blocks
-    bound peak memory and, with a memmapped source, the working set too.
+    Row blocks bound peak memory and, with a memmapped source, the working set
+    too: one block touches a band of source rows, not the whole file.
     """
-    h, w = layers[0][0].shape[:2]
+    h, w = src.shape[:2]
     out = np.empty((size, size, 3), np.float32)
     centres = (np.arange(size, dtype=np.float32) + 0.5) / size * 2.0 - 1.0
     offsets = ((np.arange(ss, dtype=np.float32) + 0.5) / ss - 0.5) * (2.0 / size)
@@ -218,8 +222,7 @@ def render_face(layers: list[tuple[np.ndarray, float]], face: str, size: int, ss
         sy = (0.5 - dec / np.pi) * h - 0.5
 
         # (rows, ss, size, ss, 3) from the broadcast above; average the sub-texel axes.
-        block_px = sum(sample_bilinear(array, sx, sy) * gain for array, gain in layers)
-        out[y0:y1] = block_px.mean(axis=(1, 3))
+        out[y0:y1] = sample_bilinear(src, sx, sy).mean(axis=(1, 3))
 
     return out
 
@@ -238,7 +241,7 @@ def encode(linear: np.ndarray, exposure: float) -> np.ndarray:
     return np.clip(srgb * 255.0 + 0.5, 0, 255).astype(np.uint8)
 
 
-def auto_exposure(layers: list[tuple[np.ndarray, float]], percentile: float) -> float:
+def auto_exposure(src: np.ndarray, percentile: float = EXPOSURE_PERCENTILE) -> float:
     """Scale so `percentile` of the sky's luminance lands at the tone curve's knee.
 
     Read on a stride and band by band. Taking `src[::8, ::8]` of a memmap in one
@@ -246,11 +249,7 @@ def auto_exposure(layers: list[tuple[np.ndarray, float]], percentile: float) -> 
     this runs on; the percentile of every 64th pixel is identical to three
     decimals for this purpose anyway.
     """
-    h = layers[0][0].shape[0]
-    samples = []
-    for y0 in range(0, h, 1024):
-        band = sum(array[y0 : y0 + 1024 : 8, ::8].astype(np.float32) * gain for array, gain in layers)
-        samples.append(band.max(axis=2).ravel())
+    samples = [src[y0 : y0 + 1024 : 8, ::8].astype(np.float32).max(axis=2).ravel() for y0 in range(0, src.shape[0], 1024)]
     ref = float(np.percentile(np.concatenate(samples), percentile))
     return 1.0 if ref <= 0.0 else 1.0 / ref
 
@@ -284,10 +283,18 @@ def face_basis(face: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     points recovers the frame exactly — no second copy of the convention to keep
     in step with the first.
     """
-    zero, one = np.zeros(1), np.ones(1)
-    sample = lambda u, v: np.array([float(np.asarray(c).item()) for c in FACES[face](u, v)])  # noqa: E731
-    normal = sample(zero, zero)
-    return normal, sample(one, zero) - normal, sample(zero, one) - normal
+
+    def sample(u: float, v: float) -> np.ndarray:
+        components = FACES[face](np.full(1, u), np.full(1, v))
+        return np.array([float(np.asarray(c).item()) for c in components])
+
+    normal = sample(0.0, 0.0)
+    return normal, sample(1.0, 0.0) - normal, sample(0.0, 1.0) - normal
+
+
+# Read once: `edge_pairs` needs every face's frame against every other's, which
+# is 24 sides x 7 lookups if it asks each time.
+BASES: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {face: face_basis(face) for face in FACE_ORDER}
 
 
 def edge_pairs(size: int) -> list[tuple[tuple[str, np.ndarray, np.ndarray], tuple[str, np.ndarray, np.ndarray]]]:
@@ -317,15 +324,13 @@ def edge_pairs(size: int) -> list[tuple[tuple[str, np.ndarray, np.ndarray], tupl
     seen: set[frozenset] = set()
     pairs = []
     for face, (u, v, (rows, cols)) in ((f, s) for f in FACE_ORDER for s in sides.values()):
-        normal, du, dv = face_basis(face)
+        normal, du, dv = BASES[face]
         edge = normal[:, None] + du[:, None] * u + dv[:, None] * v
 
         # The neighbour is whichever face this boundary direction points into.
         others = [f for f in FACE_ORDER if f != face]
-        bases = [face_basis(f) for f in others]
-        depth = np.array([n @ edge for n, _, _ in bases])
-        far = others[int(np.argmax(depth[:, 0]))]
-        nb_normal, nb_du, nb_dv = face_basis(far)
+        far = max(others, key=lambda f: BASES[f][0] @ edge[:, 0])
+        nb_normal, nb_du, nb_dv = BASES[far]
 
         nu = (nb_du @ edge) / (nb_normal @ edge)
         nv = (nb_dv @ edge) / (nb_normal @ edge)
@@ -468,25 +473,6 @@ def match_edges(faces: dict[str, np.ndarray], pairs, feather: int) -> None:
         faces[face] += vertical + horizontal - bilinear
 
 
-def open_layers(mode: str, res: str, star_gain: float, cache_dir: str) -> list[tuple[np.ndarray, float]]:
-    """The source maps to sum, each with its weight.
-
-    Linear light, so layers simply add — but they are kept apart rather than
-    summed here so the composite path never materialises a combined map. At 32K
-    that array alone would exceed the VM.
-    """
-    if mode == "full":
-        return [(open_source(fetch(f"starmap_2020_{res}.exr", cache_dir)), 1.0)]
-
-    layers = [
-        (open_source(fetch(f"milkyway_2020_{res}.exr", cache_dir)), 1.0),
-        (open_source(fetch(f"hiptyc_2020_{res}.exr", cache_dir)), star_gain),
-    ]
-    if layers[0][0].shape != layers[1][0].shape:
-        raise SystemExit(f"layer size mismatch: {layers[0][0].shape} vs {layers[1][0].shape}")
-    return layers
-
-
 def dihedral(img: np.ndarray, k: int) -> np.ndarray:
     """The eight square symmetries, for the orientation check."""
     out = np.rot90(img, k % 4)
@@ -516,7 +502,7 @@ def star_field(path: str) -> np.ndarray:
     return (high - high.mean()) / (high.std() + 1e-6)
 
 
-def verify(out_dir: str, ref_dir: str, prefix: str, ref_prefix: str) -> int:
+def verify(out_dir: str, ref_dir: str, prefix: str, ref_prefix: str = "TychoSkymapII.t3_08192x04096_80") -> int:
     """Check every generated face against the Tycho asset already in the tree.
 
     Tycho is the reference because it is known to render correctly in Cesium, and
@@ -524,6 +510,10 @@ def verify(out_dir: str, ref_dir: str, prefix: str, ref_prefix: str) -> int:
     with `flipY`, then `CubeMap` with its own `flipY` — so a face that matches
     Tycho's orientation is by construction right for Cesium's lookup. That makes
     the reference worth more than reasoning about the convention.
+
+    The reference is the one thing here that still wants `data/cesium-assets`.
+    generate.sh mounts it read-only when it is there and says so when it is not;
+    nothing the app renders depends on that submodule any more.
     """
     worst = 1.0
     bad = 0
@@ -567,26 +557,20 @@ def main() -> int:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     ap.add_argument("--res", default="16k", choices=["8k", "16k", "32k"], help="source map resolution")
-    ap.add_argument("--layers", default="full", choices=["full", "composite"],
-                    help="'full' is one baked map; 'composite' adds the diffuse and bright star layers separately")
-    ap.add_argument("--star-gain", type=float, default=1.0, help="scale the bright star layer, --layers composite only")
     ap.add_argument("--size", type=int, default=2048, help="cube face edge in pixels")
     ap.add_argument("--supersample", default="auto", help="samples per output texel per axis, or auto from the source resolution")
     ap.add_argument("--match-edges", type=int, default=4, metavar="N",
                     help="reconcile adjacent faces over their outermost N texels; 0 leaves them alone")
     ap.add_argument("--quality", type=int, default=80, help="JPEG quality")
     ap.add_argument("--exposure", default="auto", help="float, or auto")
-    ap.add_argument("--exposure-percentile", type=float, default=99.99)
     ap.add_argument("--no-verify", action="store_true", help="skip the orientation check")
     # Bind mounts, set by generate.sh. Overridable for running this outside docker.
     ap.add_argument("--cache", default="/cache", help="where source EXRs are kept")
     ap.add_argument("--out", default="/out", help="where cube faces are written")
     ap.add_argument("--ref", default="/ref", help="reference faces for the orientation check")
-    ap.add_argument("--prefix", default=None, help="output filename prefix")
-    ap.add_argument("--verify-prefix", default="TychoSkymapII.t3_08192x04096_80")
     args = ap.parse_args()
 
-    prefix = args.prefix or f"deepstar_2020_{args.size}"
+    prefix = f"deepstar_2020_{args.size}"
     # No mkdir: both are bind mounts of committed directories, and generate.sh
     # has already refused to run if either is missing. Creating them here would
     # only paper over a mount that did not happen.
@@ -594,14 +578,14 @@ def main() -> int:
     if free < 2 * 2**30:
         print(f"warning: {free / 2**30:.1f} GiB free in the cache mount", flush=True)
 
-    layers = open_layers(args.layers, args.res, args.star_gain, args.cache)
-    h, w = layers[0][0].shape[:2]
+    src = open_source(fetch(f"starmap_2020_{args.res}.exr", args.cache))
+    h, w = src.shape[:2]
     ss = default_supersample(args.size, w) if args.supersample == "auto" else int(args.supersample)
     print(f"source {w}x{h} float16, {ss}x{ss} samples per texel", flush=True)
 
     if args.exposure == "auto":
-        exposure = auto_exposure(layers, args.exposure_percentile)
-        print(f"auto exposure {exposure:.6g} (p{args.exposure_percentile} of luminance at the knee)", flush=True)
+        exposure = auto_exposure(src)
+        print(f"auto exposure {exposure:.6g} (p{EXPOSURE_PERCENTILE} of luminance at the knee)", flush=True)
     else:
         exposure = float(args.exposure)
         print(f"exposure {exposure:.6g}", flush=True)
@@ -609,7 +593,7 @@ def main() -> int:
     # All six are held at once so the edges can be reconciled before encoding;
     # 2048px faces are 50 MB each in linear float, which is affordable where the
     # source is not.
-    faces = {face: render_face(layers, face, args.size, ss) for face in FACE_ORDER}
+    faces = {face: render_face(src, face, args.size, ss) for face in FACE_ORDER}
 
     pairs = edge_pairs(args.size)
     mean, p99 = edge_step(faces, pairs, exposure)
@@ -634,7 +618,7 @@ def main() -> int:
         print("\nno reference faces mounted, skipping the orientation check", flush=True)
         return 0
     print()
-    return verify(args.out, args.ref, prefix, args.verify_prefix)
+    return verify(args.out, args.ref, prefix)
 
 
 if __name__ == "__main__":
