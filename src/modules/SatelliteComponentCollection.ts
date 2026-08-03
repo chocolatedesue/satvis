@@ -41,9 +41,17 @@ import type { CatalogEntry } from "./SatelliteCatalog";
 import { coneDescription, groundTrackDescription, modelUri, orbitPathTimes, orbitTrackTimes, orbitUsesPathGraphic } from "./satelliteGraphics";
 import { SatelliteProperties } from "./SatelliteProperties";
 import { CesiumTimelineHelper } from "./util/CesiumTimelineHelper";
-import type { OrbitBatch } from "./util/OrbitBatch";
+import type { PolylineBatch } from "./util/PolylineBatch";
 
 type SatelliteComponentName = string;
+
+/** The shared polyline batches a satellite draws its orbit lines into. */
+export interface SatelliteBatches {
+  /** Inertial: the Orbit component's closed ellipse. */
+  orbits: PolylineBatch;
+  /** Fixed: the Orbit track component's Earth-relative path. */
+  tracks: PolylineBatch;
+}
 
 /**
  * The link drawn to a ground station during a pass. Not in SATELLITE_COMPONENTS
@@ -86,10 +94,13 @@ export class SatelliteComponentCollection {
   readonly props: SatelliteProperties;
 
   /**
-   * The batch every untracked orbit is drawn into. Passed in rather than reached
-   * for: it is shared by every satellite, and one owner beats a static.
+   * The batches every untracked orbit and orbit track are drawn into. Passed in
+   * rather than reached for: they are shared by every satellite, and one owner
+   * beats a static.
    */
-  readonly #orbits: OrbitBatch;
+  readonly #orbits: PolylineBatch;
+
+  readonly #tracks: PolylineBatch;
 
   #components: Record<string, Component> = {};
 
@@ -98,10 +109,16 @@ export class SatelliteComponentCollection {
 
   eventListeners: Record<string, () => void> = {};
 
-  constructor(viewer: Viewer, entry: CatalogEntry, orbits: OrbitBatch) {
+  constructor(viewer: Viewer, entry: CatalogEntry, batches: SatelliteBatches) {
     this.viewer = viewer;
     this.props = new SatelliteProperties(entry);
-    this.#orbits = orbits;
+    this.#orbits = batches.orbits;
+    this.#tracks = batches.tracks;
+  }
+
+  /** Which batch a given component's geometry belongs to. */
+  #batchFor(name: SatelliteComponentName): PolylineBatch {
+    return name === "Orbit track" ? this.#tracks : this.#orbits;
   }
 
   get components(): Record<string, Component> {
@@ -209,7 +226,7 @@ export class SatelliteComponentCollection {
       }
       this.defaultEntity ??= component;
     } else if (component instanceof GeometryInstance) {
-      this.#orbits.add(component);
+      this.#batchFor(name).add(component);
     }
 
     if (name === "3D model") {
@@ -228,7 +245,7 @@ export class SatelliteComponentCollection {
     if (component instanceof Entity) {
       this.viewer.entities.remove(component);
     } else if (component instanceof GeometryInstance) {
-      this.#orbits.remove(component);
+      this.#batchFor(name).remove(component);
     }
     delete this.#components[name];
 
@@ -279,6 +296,12 @@ export class SatelliteComponentCollection {
         this.disableComponent("Orbit");
         this.enableComponent("Orbit");
       }
+      if ("Orbit track" in this.components && !this.isCorrectOrbitTrackComponent()) {
+        // Same swap as the Orbit above: the satellite the camera is on gets the
+        // exact per-frame path, everything else gets the batch.
+        this.disableComponent("Orbit track");
+        this.enableComponent("Orbit track");
+      }
     });
   }
 
@@ -315,6 +338,15 @@ export class SatelliteComponentCollection {
           // A geometry cannot be edited in place; it has to be rebuilt
           this.disableComponent("Orbit");
           this.enableComponent("Orbit");
+        }
+      } else if (type === "Orbit track") {
+        if (component instanceof Entity) {
+          component.position = fixed;
+        } else if (update) {
+          // The window it was cut from has just moved, so the samples behind the
+          // batched geometry are the old ones. Re-cut rather than rebuild the
+          // membership: replace() leaves the batch the same size.
+          this.refreshOrbitTrack(this.viewer.clock.currentTime);
         }
       } else if (component instanceof Entity) {
         if (type === "Sensor cone") {
@@ -455,6 +487,36 @@ export class SatelliteComponentCollection {
   }
 
   createOrbitTrack(): void {
+    if (this.usePathGraphicForOrbitTrack) {
+      this.createOrbitTrackPath();
+    } else {
+      this.createOrbitTrackPolylineGeometry();
+    }
+  }
+
+  /**
+   * Whether the Orbit track is currently drawn the way it should be — the same
+   * question `isCorrectOrbitComponent` asks of the Orbit, and for the same
+   * reason: tracking a satellite changes the answer, so the track has to be torn
+   * down and rebuilt when it does.
+   */
+  isCorrectOrbitTrackComponent(): boolean {
+    return this.usePathGraphicForOrbitTrack ? this.components["Orbit track"] instanceof Entity : this.components["Orbit track"] instanceof GeometryInstance;
+  }
+
+  get usePathGraphicForOrbitTrack(): boolean {
+    return orbitUsesPathGraphic(this.isTracked, this.viewer.scene.mode === SceneMode.SCENE3D);
+  }
+
+  /**
+   * The exact track, resampled every frame by Cesium's PathVisualizer.
+   *
+   * Reserved for the tracked satellite, which is the one the camera is sitting
+   * on and the only one whose head anyone can see move. It costs about 60 µs a
+   * frame — irrelevant for one satellite, and 300 ms at five thousand, which is
+   * what the batch below exists to avoid.
+   */
+  createOrbitTrackPath(): void {
     const path = new PathGraphics({
       ...orbitTrackTimes(this.props.orbit.orbitalPeriod),
       material: Color.GOLD.withAlpha(0.15),
@@ -462,6 +524,50 @@ export class SatelliteComponentCollection {
       width: 2,
     });
     this.createCesiumSatelliteEntity("Orbit track", "path", path);
+  }
+
+  /** The track as a geometry for the shared batch — how every untracked track is drawn in 3D. */
+  createOrbitTrackPolylineGeometry(): void {
+    this.components["Orbit track"] = this.#orbitTrackGeometry(this.viewer.clock.currentTime);
+  }
+
+  #orbitTrackGeometry(time: JulianDate): GeometryInstance {
+    return new GeometryInstance({
+      geometry: new PolylineGeometry({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        positions: this.props.trajectory.positionsForTrack(time) as any,
+        width: 2,
+        arcType: ArcType.NONE,
+        vertexFormat: PolylineColorAppearance.VERTEX_FORMAT,
+      }),
+      attributes: {
+        color: ColorGeometryInstanceAttribute.fromColor(Color.GOLD.withAlpha(0.15)),
+      },
+      id: this.props.name,
+    });
+  }
+
+  /**
+   * Re-cut the batched track so its head sits back on the satellite.
+   *
+   * A fixed-frame track goes stale as the clock runs — the satellite advances
+   * along a line that does not move with it — so unlike the inertial orbit there
+   * is no model matrix that keeps it current and the geometry has to be rebuilt.
+   * Cheap enough to do on a timer because the batch coalesces: five thousand
+   * calls to `replace` cost one primitive rebuild, not five thousand.
+   *
+   * A no-op for the tracked satellite, whose track is a PathGraphic that Cesium
+   * already keeps exact, and for anything not currently in the batch.
+   */
+  refreshOrbitTrack(time: JulianDate): void {
+    const current = this.#components["Orbit track"];
+    if (!(current instanceof GeometryInstance)) {
+      return;
+    }
+    const next = this.#orbitTrackGeometry(time);
+    if (this.#tracks.replace(current, next)) {
+      this.#components["Orbit track"] = next;
+    }
   }
 
   createGroundTrack(): void {

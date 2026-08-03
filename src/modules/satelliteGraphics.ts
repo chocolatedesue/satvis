@@ -78,3 +78,30 @@ export function modelUri(name: string, modelUrl?: string): string {
 export function orbitUsesPathGraphic(isTracked: boolean, sceneModeSupportsPrimitive: boolean): boolean {
   return isTracked || !sceneModeSupportsPrimitive;
 }
+
+/** Bounds on how often a batched orbit track is re-cut, in simulation seconds. */
+export const TRACK_REFRESH_MIN_SECONDS = 1;
+export const TRACK_REFRESH_MAX_SECONDS = 10;
+
+/**
+ * How often to re-cut the batched orbit tracks, given how many there are.
+ *
+ * A batched track is a fixed-frame polyline, so unlike the inertial orbit there
+ * is no model matrix that keeps it current: the satellite runs on past the head
+ * of its own track until the geometry is rebuilt, at roughly 7.5 km a second in
+ * LEO. The interval is therefore an error budget, and the reason it is not
+ * simply "as often as possible" is that a rebuild re-tessellates the whole
+ * primitive at once — measured at five thousand tracks, going from ten seconds
+ * to three took the worst frame from 43 ms to 250 ms, to close an error nobody
+ * was in a position to see.
+ *
+ * So it scales with the count. A handful of tracks is a scene someone is looking
+ * closely at, and a second of lag there is under 10 km, which is sub-pixel on a
+ * globe. Thousands of tracks is a scene where the head of any one of them is a
+ * few pixels of gold in a thicket, and ten seconds of lag buys back the frame.
+ * The satellite the camera is actually tracking sidesteps the question entirely:
+ * it gets an exact per-frame PathGraphic (see `orbitUsesPathGraphic`).
+ */
+export function trackRefreshSeconds(trackCount: number): number {
+  return Math.min(TRACK_REFRESH_MAX_SECONDS, Math.max(TRACK_REFRESH_MIN_SECONDS, trackCount / 100));
+}

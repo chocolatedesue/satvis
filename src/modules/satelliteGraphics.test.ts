@@ -1,6 +1,17 @@
 import { describe, expect, test } from "vitest";
 
-import { coneDescription, groundTrackDescription, isLeo, modelUri, orbitPathTimes, orbitTrackTimes, orbitUsesPathGraphic } from "./satelliteGraphics";
+import {
+  coneDescription,
+  groundTrackDescription,
+  isLeo,
+  modelUri,
+  orbitPathTimes,
+  orbitTrackTimes,
+  orbitUsesPathGraphic,
+  TRACK_REFRESH_MAX_SECONDS,
+  TRACK_REFRESH_MIN_SECONDS,
+  trackRefreshSeconds,
+} from "./satelliteGraphics";
 
 const ISS_PERIOD_MIN = 92.6;
 
@@ -70,5 +81,22 @@ describe("orbitUsesPathGraphic", () => {
   test("untracked satellites use the primitive only when the scene supports it", () => {
     expect(orbitUsesPathGraphic(false, true)).toBe(false);
     expect(orbitUsesPathGraphic(false, false)).toBe(true);
+  });
+});
+
+describe("trackRefreshSeconds", () => {
+  test("a handful of tracks refresh at the floor, where the lag would be visible", () => {
+    expect(trackRefreshSeconds(0)).toBe(TRACK_REFRESH_MIN_SECONDS);
+    expect(trackRefreshSeconds(8)).toBe(TRACK_REFRESH_MIN_SECONDS);
+    expect(trackRefreshSeconds(100)).toBe(TRACK_REFRESH_MIN_SECONDS);
+  });
+
+  test("scales with the count between the bounds", () => {
+    expect(trackRefreshSeconds(500)).toBe(5);
+  });
+
+  test("clamps at the ceiling, where a rebuild costs more than the lag", () => {
+    expect(trackRefreshSeconds(1000)).toBe(TRACK_REFRESH_MAX_SECONDS);
+    expect(trackRefreshSeconds(5000)).toBe(TRACK_REFRESH_MAX_SECONDS);
   });
 });

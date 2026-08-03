@@ -54,6 +54,12 @@ import { Suppressible } from "./util/Suppressible";
 dayjs.extend(utc);
 
 /**
+ * The components drawn into a shared polyline primitive rather than per entity,
+ * and so the ones a scene morph has to suppress and wait out. See `sceneMode`.
+ */
+const BATCHED_COMPONENTS = ["Orbit", "Orbit track"] as const;
+
+/**
  * Where the globe opens: Europe's meridian, a little north of the equator.
  *
  * Cesium's own default is `Rectangle.fromDegrees(-95, -20, -70, 90)`, a slice up
@@ -469,23 +475,28 @@ export class CesiumController {
       }
     };
 
-    // Suppressed rather than disabled: the user still has Orbit switched on and
+    // Suppressed rather than disabled: the user still has these switched on and
     // the toolbar has to keep saying so through the morph. Asking the manager
     // whether it actually suppressed anything avoids reading back a value that
     // this call has already changed.
-    if (this.sats.suppressComponent("Orbit")) {
-      const enableOrbits = (): void => {
-        this.sats.releaseComponent("Orbit");
-        this.viewer.scene.morphComplete.removeEventListener(enableOrbits);
+    //
+    // Both batched components, not just Orbit: outside 3D each of them falls
+    // back to a per-entity path graphic, and the only thing that re-asks the
+    // question is a component being created again on release.
+    const suppressed = BATCHED_COMPONENTS.filter((name) => this.sats.suppressComponent(name));
+    if (suppressed.length > 0) {
+      const release = (): void => {
+        suppressed.forEach((name) => this.sats.releaseComponent(name));
+        this.viewer.scene.morphComplete.removeEventListener(release);
       };
-      this.viewer.scene.morphComplete.addEventListener(enableOrbits);
+      this.viewer.scene.morphComplete.addEventListener(release);
 
-      // Suppressing Orbit drops every geometry from the shared batch, and the
-      // batch rebuilds asynchronously — morphing before it has caught up would
-      // rebuild it into the projection being left behind. One await, where this
-      // used to poll a static flag re-exported from the collections' base class
-      // through a requestAnimationFrame loop.
-      void this.sats.orbits.settled().then(morph);
+      // Suppressing them drops every geometry from the shared batches, and a
+      // batch rebuilds asynchronously — morphing before they have caught up
+      // would rebuild them into the projection being left behind. One await,
+      // where this used to poll a static flag re-exported from the collections'
+      // base class through a requestAnimationFrame loop.
+      void Promise.all([this.sats.orbits.settled(), this.sats.tracks.settled()]).then(morph);
     } else {
       morph();
     }

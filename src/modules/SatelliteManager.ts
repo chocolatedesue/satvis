@@ -1,4 +1,4 @@
-import { Cartesian3 } from "@cesium/engine";
+import { Cartesian3, JulianDate } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 
 import { SATELLITE_COMPONENTS } from "../config/components";
@@ -7,11 +7,20 @@ import { GroundStationEntity, type GroundStationPositionData } from "./GroundSta
 import { activeTargetEntries } from "./satelliteActivation";
 import { type CatalogEntry, SatelliteCatalog } from "./SatelliteCatalog";
 import { SatelliteComponentCollection } from "./SatelliteComponentCollection";
+import { TRACK_REFRESH_MIN_SECONDS, trackRefreshSeconds } from "./satelliteGraphics";
+import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
 import { sameValue } from "./util/equality";
 import type { GpRecord } from "./util/gp";
-import { OrbitBatch } from "./util/OrbitBatch";
+import { PolylineBatch } from "./util/PolylineBatch";
 import { SuppressibleSet } from "./util/Suppressible";
+
+/**
+ * How often the track refresh is *considered*, in simulation seconds. Whether it
+ * actually runs is `trackRefreshSeconds`, which scales the real interval with
+ * the number of tracks; this is just the finest grain that decision can have.
+ */
+const TRACK_REFRESH_TICK_SECONDS = TRACK_REFRESH_MIN_SECONDS;
 
 /**
  * Everything the globe should be showing. The manager holds no opinion of its
@@ -65,7 +74,14 @@ export class SatelliteManager {
    * this is what owns the collections that feed it; it used to be four statics on
    * their base class.
    */
-  readonly orbits: OrbitBatch;
+  readonly orbits: PolylineBatch;
+
+  /**
+   * The same, for the Orbit track. A second batch rather than a second colour in
+   * the first one: the orbit is inertial and the track is Earth-relative, so they
+   * need different model matrices and cannot share a primitive.
+   */
+  readonly tracks: PolylineBatch;
 
   // Live collections keyed by catalog entry key. Satellites are instantiated
   // lazily: only entries in the current activation target (see #reconcileActive)
@@ -76,9 +92,15 @@ export class SatelliteManager {
 
   pendingTrackedSatellite: string | undefined;
 
+  /** Simulation time the batched tracks were last re-cut at. See #refreshTracks. */
+  #tracksRefreshedAt: JulianDate;
+
   constructor(viewer: Viewer) {
     this.viewer = viewer;
-    this.orbits = new OrbitBatch(viewer);
+    this.orbits = new PolylineBatch(viewer, "inertial");
+    this.tracks = new PolylineBatch(viewer, "fixed");
+    this.#tracksRefreshedAt = viewer.clock.currentTime;
+    CesiumCallbackHelper.createPeriodicTimeCallback(viewer, TRACK_REFRESH_TICK_SECONDS, (time) => this.#refreshTracks(time));
 
     // Tracking is the one genuinely two-way value: the user can also start it
     // by clicking a satellite on the globe. Report it rather than reaching for
@@ -247,6 +269,42 @@ export class SatelliteManager {
     });
   }
 
+  /**
+   * Re-cut every batched orbit track so its head stays on its satellite.
+   *
+   * On a simulation-time callback, because what makes a track stale is simulated
+   * time passing rather than wall time: at ×1000 the satellites move a thousand
+   * times faster and the tracks have to keep up. The batch's own coalescing
+   * window turns however many satellites there are into a single primitive
+   * rebuild, and a rebuild already in flight holds the window open, so a clock
+   * fast enough to outrun the rebuild degrades into "as often as it can" rather
+   * than into a queue.
+   *
+   * The interval runs from when the last rebuild *finished*, not from when it
+   * was asked for, which is what the second guard below buys: at five thousand
+   * tracks a rebuild can take longer than the interval, and measuring from the
+   * request meant the next refresh was already overdue the moment the previous
+   * one landed. That is a treadmill, and it measured 8.2% janked frames against
+   * 0.5% for a rebuild that simply waits its turn.
+   */
+  #refreshTracks(time: JulianDate): void {
+    if (this.tracks.size === 0) {
+      return;
+    }
+    if (this.tracks.pending) {
+      this.#tracksRefreshedAt = time;
+      return;
+    }
+    const due = trackRefreshSeconds(this.tracks.size);
+    if (Math.abs(JulianDate.secondsDifference(time, this.#tracksRefreshedAt)) < due) {
+      return;
+    }
+    this.#tracksRefreshedAt = time;
+    for (const sat of this.#active.values()) {
+      sat.refreshOrbitTrack(time);
+    }
+  }
+
   // Reconcile the live #active map against the activation target: dispose
   // collections that are no longer targeted, instantiate the ones that are
   // newly targeted, and resolve a pending track once its satellite exists.
@@ -274,7 +332,7 @@ export class SatelliteManager {
       if (this.#active.has(key)) {
         continue;
       }
-      const sat = new SatelliteComponentCollection(this.viewer, entry, this.orbits);
+      const sat = new SatelliteComponentCollection(this.viewer, entry, { orbits: this.orbits, tracks: this.tracks });
       if (this.groundStationAvailable) {
         sat.groundStations = this.#stations;
       }

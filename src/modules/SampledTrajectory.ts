@@ -82,6 +82,25 @@ export class SampledTrajectory {
     return positions;
   }
 
+  /**
+   * The Earth-relative path one full orbit ahead of `start`, for the Orbit track.
+   *
+   * The raw stored samples rather than a resampling: they are already there, and
+   * at 120 a revolution they draw a track no coarser than the position the
+   * satellite is itself interpolated from. Only the head is computed, because
+   * the first stored sample can sit up to a sampling interval (about 45 s, some
+   * 350 km) ahead of the satellite, and a gold line that visibly starts in front
+   * of the point it belongs to is the one artefact of batching that a viewer
+   * would read as a bug rather than as a level of detail.
+   */
+  positionsForTrack(start: JulianDate): Cartesian3[] {
+    if (!this.#data) return [];
+    const end = JulianDate.addSeconds(start, this.#orbit.orbitalPeriod * 60, new JulianDate());
+    const head = this.position(start);
+    const samples = this.#data.fixed.getRawValues(start, end) as Cartesian3[];
+    return head ? [head, ...samples] : samples;
+  }
+
   groundTrack(julianDate: JulianDate, samplesFwd = 1, samplesBwd = 0, interval = 300): (Cartesian3 | undefined)[] {
     const groundTrack: (Cartesian3 | undefined)[] = [];
 
