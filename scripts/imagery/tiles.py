@@ -28,15 +28,24 @@ different answer at every level above the base. The reference graded the source
 and then tiled it, so this does the same — as a VRT, which costs no disk and lets
 GDAL apply the curve as it reads.
 
-**Zoom stops at 5 because that is where the source runs out.** Level 5 of the
-geodetic scheme is 0.02197 deg/px against the source's 0.01667; level 6 would be
-0.01099 and every tile in it interpolation. The reference stops there for the same
-reason, which is why the layer declares `maximumLevel: 5`.
+**Zoom stops at 5 because that is where the source runs out**, and it is not
+adjustable. Level 5 of the geodetic scheme is 0.02197 deg/px against the source's
+0.01667; level 6 would be 0.01099 and every tile in it interpolation. Depth is
+fixed rather than offered as a flag because levels 0-2 are committed and only a
+full-depth run reproduces them — see `MAX_ZOOM`.
+
+**Levels 0-2 are tracked; 3-5 are gitignored.** So a checkout that has never run
+this still has a correct globe, softer than the full one, with no fallback layer
+and nothing to probe for. The manifest declares only the committed levels
+(`write_manifest`), and the app raises Cesium's ceiling to 5 when it finds the
+generated levels present. That is why the source archive is pinned by checksum:
+committed output is only meaningful if its input is fixed.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import shutil
 import subprocess
@@ -53,8 +62,30 @@ gdal.UseExceptions()
 SOURCE = "NE2_HR_LC_SR_W_DR"
 BASE_URL = "https://naciscdn.org/naturalearth/10m/raster"
 
+# The archive the committed base levels were built from.
+#
+# Pinned because levels 0-2 of the output are committed, which only means anything
+# if the input is fixed. Natural Earth 2 has been stable since 2012 (the TIFF is
+# dated 2012-07-16, VERSION.txt says 2.0.0) but the url carries no version, so a
+# new release would silently replace it — and `Content-Length` alone cannot notice
+# a same-size change, nor tell a changed upstream from a half-finished download.
+#
+# A mismatch is fatal rather than retried. Regenerating from a different source
+# would rewrite the committed tiles, and that has to be somebody's decision.
+SOURCE_SHA256 = "e4a6e27c121cab119835ac38f17695768011d12a2a7d9e57d5cddf65566fcec0"
+
 # Level 5 is the base of the pyramid; everything above it is an average of it.
+#
+# Not adjustable, and that is deliberate. Levels 0-2 are committed, and a shallower
+# run does not reproduce them: at depth 5 level 2 is an average of averages down
+# from the base, while at depth 2 it is tiled straight from the source. Measured —
+# the two disagree, so a `--zoom 3` convenience flag would silently rewrite 42
+# tracked files with different pixels. Depth is fixed instead.
 MAX_ZOOM = 5
+
+# How deep the committed part of the pyramid goes. The manifest always declares
+# exactly this, whatever was built — see `write_manifest`.
+COMMITTED_ZOOM = 2
 
 # What this writes, and what the tileset it is compared against wrote. Both are
 # needed at once by `verify`, which reads one of each.
@@ -103,11 +134,47 @@ RECOLOR = (
 MATCH_TOLERANCE = 6.0
 
 
+def checksum(path: str) -> str:
+    """SHA-256 of a file, read in blocks so 311 MB does not become 311 MB of RAM."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def check_source(path: str) -> None:
+    """Stop unless the archive is the one the committed base levels came from.
+
+    Checked on a cache hit as well as after a download, because both can be wrong:
+    the cache may hold a resume that appended a changed upstream's tail onto an old
+    file's head — `Content-Length` matches at the end of that and notices nothing.
+
+    Fatal, and no retry. The two causes are a corrupted cache and a new upstream
+    release, and they want opposite responses: delete the file, or accept a new
+    source and re-commit levels 0-2 from it. Guessing would risk quietly publishing
+    a base map nobody chose.
+    """
+    got = checksum(path)
+    if got == SOURCE_SHA256:
+        return
+    raise SystemExit(
+        f"\n{os.path.basename(path)} is not the archive this generator is pinned to.\n"
+        f"  expected {SOURCE_SHA256}\n"
+        f"  actual   {got}\n\n"
+        "Either the cached copy is damaged — delete it and run again — or Natural Earth\n"
+        "published a new release. If the new source is wanted, update SOURCE_SHA256 in\n"
+        "this file and commit the regenerated levels 0-2 along with it: they are tracked,\n"
+        "and a different source means different pixels."
+    )
+
+
 def fetch(cache_dir: str) -> str:
     """Download the source archive, resuming a partial file and skipping a whole one.
 
     Worth resuming rather than restarting: it is 311 MB and the cache is a bind
-    mount that survives the container.
+    mount that survives the container. Whatever comes out is checksummed by
+    `check_source`, which is what makes resuming safe to attempt at all.
     """
     name = f"{SOURCE}.zip"
     dest = os.path.join(cache_dir, name)
@@ -118,6 +185,7 @@ def fetch(cache_dir: str) -> str:
 
     if want and have == want:
         print(f"cached   {name} ({have / 2**20:.0f} MB)", flush=True)
+        check_source(dest)
         return dest
     if have > want > 0:
         # Longer than the server's copy: truncated download from a different
@@ -148,6 +216,7 @@ def fetch(cache_dir: str) -> str:
     got = os.path.getsize(dest)
     if want and got != want:
         raise SystemExit(f"{name}: expected {want} bytes, got {got}")
+    check_source(dest)
     return dest
 
 
@@ -198,6 +267,43 @@ def recolored(tif: str, vrt_path: str) -> str:
     return vrt_path
 
 
+def write_manifest(out_dir: str) -> None:
+    """Rewrite the manifest to declare only the committed levels.
+
+    gdal2tiles declares every level it built, which would make this a tracked file
+    that changes on every run. Trimming it to `COMMITTED_ZOOM` keeps the committed
+    copy byte-identical, and that copy is the one a checkout without the generated
+    levels serves — so what it claims has to be what such a checkout actually has.
+
+    Which makes the depth a runtime question rather than a manifest one, answered by
+    the probe in `CesiumLayerProviders.ts` and passed as Cesium's `maximumLevel`
+    option, which overrides whatever the manifest says. The bias is deliberate: code
+    that forgets to raise the ceiling serves a soft globe, where a manifest promising
+    levels that may not exist would 404 every tile in them.
+
+    Written out here rather than edited in place because there is nothing to keep
+    from gdal2tiles' copy — every value is a constant of the geodetic scheme or of
+    this generator, and reproducing them is what makes the file deterministic.
+    """
+    upp = [f"{0.703125 / 2**z:.14f}" for z in range(COMMITTED_ZOOM + 1)]
+    tilesets = "\n".join(f'        <TileSet href="{z}" units-per-pixel="{upp[z]}" order="{z}"/>' for z in range(COMMITTED_ZOOM + 1))
+    with open(os.path.join(out_dir, "tilemapresource.xml"), "w") as f:
+        f.write(
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '    <TileMap version="1.0.0" tilemapservice="http://tms.osgeo.org/1.0.0">\n'
+            f"      <Title>{SOURCE}</Title>\n"
+            "      <Abstract></Abstract>\n"
+            "      <SRS>EPSG:4326</SRS>\n"
+            '      <BoundingBox minx="-180.00000000000000" miny="-90.00000000000000" maxx="180.00000000000000" maxy="90.00000000000000"/>\n'
+            '      <Origin x="-180.00000000000000" y="-90.00000000000000"/>\n'
+            f'      <TileFormat width="256" height="256" mime-type="image/{TILE_EXT}" extension="{TILE_EXT}"/>\n'
+            '      <TileSets profile="geodetic">\n'
+            f"{tilesets}\n"
+            "      </TileSets>\n"
+            "    </TileMap>\n"
+        )
+
+
 def tile(src: str, out_dir: str, zoom: int, quality: int, processes: int) -> None:
     """Cut `src` into a geodetic TMS pyramid of WebP tiles.
 
@@ -243,18 +349,17 @@ def tile(src: str, out_dir: str, zoom: int, quality: int, processes: int) -> Non
         check=True,
     )
 
-    # gdal2tiles writes this; `gdal raster tile`, which it becomes in 3.14, does
-    # not. Cesium reads it for the tiling scheme and the app reads it to decide
-    # whether this imagery exists at all, so a run that produced only tiles is a
-    # failed run even though it looks complete.
-    manifest = os.path.join(out_dir, "tilemapresource.xml")
-    if not os.path.exists(manifest):
+    # gdal2tiles writes this; `gdal raster tile`, which it becomes in 3.14, does not.
+    # Its content is replaced below either way, but its absence still means the tiler
+    # is not the one this was written against, and the tiles it produced are not to be
+    # trusted just because they are numerous.
+    if not os.path.exists(os.path.join(out_dir, "tilemapresource.xml")):
         raise SystemExit(
-            f"gdal2tiles wrote no tilemapresource.xml.\n"
-            f"Cesium needs it for the tiling scheme and highresImageryMissing() reads it\n"
-            f"to decide the layer is present. Pin an older GDAL in the Dockerfile, or\n"
-            f"write the manifest here."
+            "gdal2tiles wrote no tilemapresource.xml, so it is no longer the tiler this\n"
+            "expects. Pin an older GDAL in the Dockerfile, or confirm the tile layout\n"
+            "before trusting the output."
         )
+    write_manifest(out_dir)
 
 
 def tile_paths(a_dir: str, b_dir: str, zoom: int, stride: int, a_ext: str = TILE_EXT, b_ext: str = REF_EXT) -> list[tuple[str, str]]:
@@ -382,8 +487,9 @@ def main() -> int:
         description="Build the offline base map tileset from Natural Earth II.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument("--zoom", type=int, default=MAX_ZOOM, metavar="N",
-                    help=f"deepest zoom level to cut; above {MAX_ZOOM} the source is only interpolated")
+    # No --zoom: see MAX_ZOOM. A shallower pyramid does not reproduce the committed
+    # levels 0-2, so the depth is not offered as a convenience.
+    #
     # WebP 85 is ~19 MB for the whole pyramid, against 25 MB as JPEG at the same
     # number and 49 MB for the tileset it replaces. Measured at level 4 against a
     # lossless cut: q75 is 47% of JPEG q85's bytes for slightly more error, q80 60%,
@@ -418,19 +524,19 @@ def main() -> int:
     src = tif if args.no_recolor else recolored(tif, os.path.join(args.cache, f"{SOURCE}_recolored.vrt"))
     print(f"source {SOURCE}.tif, {'raw' if args.no_recolor else 'recolored'}", flush=True)
 
-    # Into a fresh directory, then swapped in. A pyramid written over an older one
-    # of a different depth keeps the levels it no longer builds, and Cesium would
-    # go on serving them from a manifest that no longer lists them.
+    # Built in a staging directory and swapped in, so an interrupted run cannot leave
+    # a half-written pyramid where the app expects a whole one. Levels 0-2 are tracked
+    # and reproduce byte-identically, so the swap shows up as no change to git at all.
     out_dir = os.path.join(args.out, "NaturalEarthII")
     staging = os.path.join(args.out, ".NaturalEarthII.partial")
     shutil.rmtree(staging, ignore_errors=True)
-    tile(src, staging, args.zoom, args.quality, args.processes)
+    tile(src, staging, MAX_ZOOM, args.quality, args.processes)
     shutil.rmtree(out_dir, ignore_errors=True)
     os.rename(staging, out_dir)
 
     total = sum(os.path.getsize(os.path.join(root, f)) for root, _, files in os.walk(out_dir) for f in files)
     tiles = sum(len(files) for _, _, files in os.walk(out_dir))
-    print(f"\nwrote {tiles - 1} tiles to levels 0-{args.zoom}, {total / 2**20:.0f} MB", flush=True)
+    print(f"\nwrote {tiles - 1} tiles to levels 0-{MAX_ZOOM}, {total / 2**20:.0f} MB", flush=True)
 
     if args.no_verify:
         return 0
@@ -443,7 +549,7 @@ def main() -> int:
         print("\n--no-recolor: skipping the comparison, the reference is graded and this is not", flush=True)
         return 0
     print()
-    return verify(out_dir, args.ref, min(args.zoom, MAX_ZOOM))
+    return verify(out_dir, args.ref, MAX_ZOOM)
 
 
 if __name__ == "__main__":

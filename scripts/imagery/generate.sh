@@ -2,11 +2,13 @@
 # Build the offline base map tileset from Natural Earth II.
 #
 #   ./generate.sh                    levels 0-5, recolored, verified
-#   ./generate.sh --zoom 3           a shallow pyramid, quick pass while iterating
 #   ./generate.sh --quality 95       larger tiles, closer to the reference encode
 #   ./generate.sh --no-recolor       raw Natural Earth II, without the Cesium grade
 #   ./generate.sh --fit-recolor      re-derive the grade from the reference tileset
 #   ./generate.sh --help             everything else
+#
+# There is no depth option: levels 0-2 are committed and only a full-depth run
+# reproduces them byte for byte. See MAX_ZOOM in tiles.py.
 #
 # This file only builds the image and starts the container. Downloading, the
 # recolor, the tiling and the comparison all live in tiles.py so that a run is
