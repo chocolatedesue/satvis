@@ -5,19 +5,35 @@ import { useCesiumStore } from "../../stores/cesium";
 import { useSatStore } from "../../stores/sat";
 import type { CesiumController } from "../CesiumController";
 import type { DesiredScene } from "../SatelliteManager";
-import type { BenchmarkTarget, MeasureOptions, SceneApplied, SceneRequest } from "./benchmarkRunner";
+import type { BenchmarkTarget, FootprintSample, MeasureOptions, SceneApplied, SceneRequest } from "./benchmarkRunner";
 import { FrameSampler, type FrameSample } from "./frameSampler";
 
 declare global {
+  /**
+   * `performance.measureUserAgentSpecificMemory()`, absent from the TypeScript dom
+   * lib because it is not Baseline. Declared here rather than cast at the call
+   * site so the shape is stated once.
+   */
+  interface MemoryMeasurement {
+    bytes: number;
+    breakdown: Array<{ bytes: number; types: string[]; attribution: Array<{ url: string; scope: string }> }>;
+  }
+
   interface Performance {
-    // Chrome only, and coarse (bucketed to 5 MB unless the browser was started
-    // with --enable-precise-memory-info). Useful as a trend, not as a figure.
+    measureUserAgentSpecificMemory?: () => Promise<MemoryMeasurement>;
+    // Chrome only. The comment here used to claim 5 MB buckets unless started
+    // with --enable-precise-memory-info; measured on Chrome in 2026 that is not
+    // so — eight consecutive reads gave eight distinct non-round values with and
+    // without the flag. What makes a single read useless is not granularity but
+    // uncollected garbage. See FrameSample.heap.
     memory?: { usedJSHeapSize: number; totalJSHeapSize: number; jsHeapSizeLimit: number };
   }
 }
 
 /** About two seconds at 60 fps — enough for the live readout to be steady. */
 const LIVE_WINDOW_FRAMES = 120;
+
+const BYTES_PER_MB = 1024 * 1024;
 
 /** A GPU query result is usually a frame or two away; give up rather than leak. */
 const GPU_QUERY_POLL_MS = 4;
@@ -30,7 +46,6 @@ export interface LiveSnapshot {
   clockMultiplier: number;
   entities: number;
   primitives: number;
-  heapMb: number | undefined;
 }
 
 export interface TargetOptions {
@@ -97,6 +112,18 @@ const nextFrames = (count: number, timeoutMs = 1000): Promise<void> =>
     requestAnimationFrame(step);
   });
 
+/**
+ * Whether this page can measure an absolute footprint at all.
+ *
+ * Two conditions, and the isolation one is the interesting half: the API is only
+ * exposed to a cross-origin isolated context, so a page served without
+ * `Cross-Origin-Opener-Policy: same-origin` and
+ * `Cross-Origin-Embedder-Policy: credentialless` cannot see it however new the
+ * browser. That is a deployment fact rather than a browser fact, which is why the
+ * panel says which of the two is missing instead of just greying a control.
+ */
+export const canMeasureFootprint = (): boolean => window.crossOriginIsolated && typeof performance.measureUserAgentSpecificMemory === "function";
+
 /** Best effort, and separate from Cesium's context so nothing internal is poked. */
 function gpuName(): string {
   try {
@@ -155,6 +182,15 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       const cpuMs = now - this.#preUpdateAt;
       this.#live.push(now, cpuMs);
       this.#sweep?.push(now, cpuMs);
+      // After the timing marks, so the read is never inside what it would
+      // otherwise inflate. Per frame rather than once per step because a single
+      // reading measures when the last GC happened, not what the scene costs.
+      const bytes = performance.memory?.usedJSHeapSize;
+      if (bytes !== undefined) {
+        const mb = bytes / BYTES_PER_MB;
+        this.#live.pushHeap(mb);
+        this.#sweep?.pushHeap(mb);
+      }
       this.#endGpuQuery();
     });
   }
@@ -249,7 +285,6 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
 
   /** The in-browser readout, sampled continuously whether a sweep is running or not. */
   live(): LiveSnapshot {
-    const bytes = this.memoryBytes();
     return {
       frames: this.#live.snapshot(),
       satellitesVisible: this.#cc.sats.visibleSatellites.length,
@@ -257,7 +292,6 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       clockMultiplier: this.#cc.viewer.clock.multiplier,
       entities: this.#cc.viewer.entities.values.length,
       primitives: this.#cc.viewer.scene.primitives.length,
-      heapMb: bytes === undefined ? undefined : bytes / 1024 / 1024,
     };
   }
 
@@ -274,6 +308,9 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       // Recorded because it invalidates the whole run: a hidden tab presents no
       // frames at all, so every frame figure below would be noise.
       visibility: document.visibilityState,
+      // Whether an absolute footprint was obtainable, which is a property of how
+      // the page was served rather than of the machine.
+      crossOriginIsolated: String(window.crossOriginIsolated),
     };
   }
 
@@ -362,8 +399,36 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     }
   }
 
-  memoryBytes(): number | undefined {
-    return performance.memory?.usedJSHeapSize;
+  /**
+   * An absolute footprint for the scene currently up.
+   *
+   * The `JavaScript`/`Window` breakdown entry is singled out as `jsMb` because it
+   * is the figure comparable with everything else here — `measureUAM`'s total also
+   * counts DOM and shared memory across workers, which is a broader thing than the
+   * heap the rest of the framework talks about. Both are kept: the total is the
+   * honest answer to "what does this tab cost", and measured they are far apart
+   * (427 MB against 297 MB at 5,000 satellites).
+   */
+  async measureFootprint(): Promise<FootprintSample | undefined> {
+    const measure = performance.measureUserAgentSpecificMemory;
+    if (!canMeasureFootprint() || !measure) {
+      return undefined;
+    }
+    const startedAt = performance.now();
+    try {
+      const result = await measure.call(performance);
+      const js = result.breakdown.find((entry) => entry.types.includes("JavaScript") && entry.attribution.some((item) => item.scope === "Window"));
+      return {
+        totalMb: result.bytes / BYTES_PER_MB,
+        jsMb: (js?.bytes ?? result.bytes) / BYTES_PER_MB,
+        elapsedMs: performance.now() - startedAt,
+      };
+    } catch {
+      // A rejected measurement is a missing row, not a failed sweep: the API can
+      // refuse (a detached frame, a browser that changed its mind) and the run
+      // still has every frame timing it came for.
+      return undefined;
+    }
   }
 
   async restore(): Promise<void> {

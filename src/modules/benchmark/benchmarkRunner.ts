@@ -40,6 +40,28 @@ export interface MeasureOptions {
   signal: AbortSignal;
 }
 
+/**
+ * An absolute memory measurement, garbage excluded — as against the relative
+ * slope `memoryFits` derives from sampled heap floors.
+ *
+ * From `performance.measureUserAgentSpecificMemory()`, which is why it is
+ * optional in every sense: the API needs a cross-origin isolated context and
+ * exists only in Chromium, and it resolves only when a collection happens, which
+ * measured at 14-19 s a call. That cost is why capturing this is a choice rather
+ * than something every sweep does.
+ */
+export interface FootprintSample {
+  /** The whole agent: JavaScript, DOM and shared memory, across every scope. */
+  totalMb: number;
+  /**
+   * Just this window's JavaScript. The figure comparable with `memoryFits` and
+   * with a forced collection — measured 0.2% apart from one.
+   */
+  jsMb: number;
+  /** How long the call took, so a row records what it cost to have this number. */
+  elapsedMs: number;
+}
+
 export interface BenchmarkTarget {
   /** Facts about the machine, so a result set can be compared with another. */
   environment(): Record<string, string | number>;
@@ -48,8 +70,19 @@ export interface BenchmarkTarget {
   /** How many satellites are available to draw at all. */
   catalogSize(): number;
   apply(request: SceneRequest): Promise<SceneApplied>;
+  /**
+   * Sample the window. The heap is part of the returned frame sample rather than
+   * a separate reading taken afterwards — see `FrameSample.heap`.
+   */
   measure(options: MeasureOptions): Promise<FrameSample>;
-  memoryBytes(): number | undefined;
+  /**
+   * The absolute footprint of the scene currently up, or undefined where this
+   * browser cannot answer. Called after the sample window and before the next
+   * step tears the scene down, so the figure belongs to the scene it is filed
+   * under — and never during the window, since a 17 s wait inside a 4 s sample
+   * would not be a sample.
+   */
+  measureFootprint(): Promise<FootprintSample | undefined>;
   /** Put the app back the way it was found. */
   restore(): Promise<void>;
 }
@@ -57,7 +90,19 @@ export interface BenchmarkTarget {
 export interface BenchmarkOptions {
   warmupMs: number;
   sampleMs: number;
+  /**
+   * Capture an absolute footprint per step. Off by default because it is the
+   * most expensive thing in the framework — see `FootprintSample`.
+   */
+  captureFootprint?: boolean;
 }
+
+/**
+ * What one footprint capture costs, for the duration estimate. Measured over six
+ * calls: 14, 16, 19, 16, 18 and 19 s. It is a wait for a collection rather than
+ * work, so it does not scale with the scene.
+ */
+export const FOOTPRINT_CAPTURE_MS = 17_000;
 
 /**
  * Long enough that a step is a measurement rather than a glance. The warmup has
@@ -72,11 +117,18 @@ export interface BenchmarkResult {
   step: BenchmarkStep;
   applied: SceneApplied;
   frames: FrameSample;
-  heapMb: number | undefined;
+  /** Present only when asked for, and only where the browser can answer. */
+  footprint: FootprintSample | undefined;
 }
 
 export interface BenchmarkRun {
   startedAtIso: string;
+  /**
+   * The sweep that was asked for. Recorded because a run started from the console
+   * has to be legible in the panel: without it the controls would go on showing
+   * whatever was last typed while a different sweep ran.
+   */
+  spec: PlanSpec;
   environment: Record<string, string | number>;
   options: BenchmarkOptions;
   catalogSize: number;
@@ -90,8 +142,6 @@ export interface RunnerHooks {
   /** Called as each row lands, so a live table does not wait for the sweep. */
   onResult?(result: BenchmarkResult, run: BenchmarkRun): void;
 }
-
-const BYTES_PER_MB = 1024 * 1024;
 
 export class BenchmarkRunner {
   readonly #target: BenchmarkTarget;
@@ -130,6 +180,7 @@ export class BenchmarkRunner {
     const steps = buildPlan(spec);
     const run: BenchmarkRun = {
       startedAtIso: new Date().toISOString(),
+      spec,
       environment: this.#target.environment(),
       options,
       catalogSize: this.#target.catalogSize(),
@@ -158,8 +209,11 @@ export class BenchmarkRunner {
           run.cancelled = true;
           break;
         }
-        const bytes = this.#target.memoryBytes();
-        const result: BenchmarkResult = { step, applied, frames, heapMb: bytes === undefined ? undefined : bytes / BYTES_PER_MB };
+        // After the sample window, with the scene still up: this is the one
+        // measurement that must not happen inside the window it describes.
+        // eslint-disable-next-line no-await-in-loop
+        const footprint = options.captureFootprint ? await this.#target.measureFootprint() : undefined;
+        const result: BenchmarkResult = { step, applied, frames, footprint };
         run.results.push(result);
         hooks.onResult?.(result, run);
       }

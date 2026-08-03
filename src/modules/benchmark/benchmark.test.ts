@@ -1,9 +1,23 @@
 import { describe, expect, test } from "vitest";
 
-import { buildPlan, CUMULATIVE_COMPONENT_SETS, formatSeries, ISOLATED_COMPONENT_SETS, type BenchmarkStep } from "./benchmarkPlan";
+import { buildPlan, CUMULATIVE_COMPONENT_SETS, estimateDurationMs, formatSeries, ISOLATED_COMPONENT_SETS, type BenchmarkStep } from "./benchmarkPlan";
 import type { BenchmarkResult, BenchmarkRun, SceneApplied } from "./benchmarkRunner";
 import { FrameSampler, JANK_MS, seriesStats } from "./frameSampler";
-import { gpuTimerTrustworthy, marginalCosts, propagationCosts, repeatChecks, reportRows, scalingFits, thinRows, toCsv } from "./report";
+import {
+  absoluteFitTrustworthy,
+  formatTable,
+  gpuTimerTrustworthy,
+  hasFootprints,
+  marginalCosts,
+  memoryFits,
+  memoryFitTrustworthy,
+  propagationCosts,
+  repeatChecks,
+  reportRows,
+  scalingFits,
+  thinRows,
+  toCsv,
+} from "./report";
 
 // A result carrying only what the report reads. `cpuMs` is the figure every
 // derived table differences, so it is the one the fixtures set deliberately.
@@ -18,6 +32,8 @@ function result(options: {
   buildMs?: number;
   visible?: number;
   frames?: number;
+  heapMb?: readonly number[];
+  footprintMb?: number;
 }): BenchmarkResult {
   const clock = options.clock ?? 1;
   const components = options.components;
@@ -53,15 +69,17 @@ function result(options: {
       wall: seriesStats([options.wallMs ?? 10]),
       cpu: seriesStats([options.cpuMs]),
       gpu: options.gpuMs === undefined ? undefined : seriesStats([options.gpuMs]),
+      heap: options.heapMb === undefined ? undefined : seriesStats(options.heapMb),
       jankFrames: 0,
       jankRatio: 0,
     },
-    heapMb: undefined,
+    footprint: options.footprintMb === undefined ? undefined : { totalMb: options.footprintMb * 1.4, jsMb: options.footprintMb, elapsedMs: 17_000 },
   };
 }
 
 const run = (results: BenchmarkResult[]): BenchmarkRun => ({
   startedAtIso: "2026-01-01T00:00:00.000Z",
+  spec: { satelliteCounts: [], componentSets: [] },
   environment: {},
   options: { warmupMs: 0, sampleMs: 0 },
   catalogSize: 0,
@@ -393,5 +411,265 @@ describe("toCsv", () => {
 
   test("an empty run is an empty string rather than a lone header", () => {
     expect(toCsv(run([]))).toBe("");
+  });
+});
+
+describe("memoryFits", () => {
+  // The whole reason this is a slope and not a column: the garbage offset is
+  // common to the rows of one series, so it lands in the intercept. These two
+  // series carry wildly different offsets (+400 MB apart) over the same
+  // per-satellite cost, and must produce the same slope.
+  test("the garbage offset lands in the intercept, not the slope", () => {
+    const clean = run([
+      result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [40] }),
+      result({ sats: 1000, components: ["Point"], cpuMs: 1, visible: 1000, heapMb: [93] }),
+      result({ sats: 5000, components: ["Point"], cpuMs: 1, visible: 5000, heapMb: [310] }),
+    ]);
+    const dirty = run([
+      result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [440] }),
+      result({ sats: 1000, components: ["Point"], cpuMs: 1, visible: 1000, heapMb: [493] }),
+      result({ sats: 5000, components: ["Point"], cpuMs: 1, visible: 5000, heapMb: [710] }),
+    ]);
+    expect(memoryFits(clean)[0]?.mbPer1000Sats).toBe(memoryFits(dirty)[0]?.mbPer1000Sats);
+    expect(memoryFits(clean)[0]?.baseMb).not.toBe(memoryFits(dirty)[0]?.baseMb);
+  });
+
+  test("reports the slope per 1,000 and per satellite", () => {
+    const fits = memoryFits(
+      run([
+        result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [40] }),
+        result({ sats: 5000, components: ["Point"], cpuMs: 1, visible: 5000, heapMb: [40 + 250] }),
+      ]),
+    );
+    expect(fits[0]?.mbPer1000Sats).toBe(50);
+    // 50 MB per 1,000 is 51.2 KB each, not 50 — the unit change is binary.
+    expect(fits[0]?.kbPerSatellite).toBe(51.2);
+    expect(fits[0]?.baseMb).toBe(40);
+  });
+
+  test("fits against satellites drawn, not the count asked for", () => {
+    const fits = memoryFits(
+      run([
+        result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [10] }),
+        // Only half applied, so the same heap growth is twice the cost each.
+        result({ sats: 1000, components: ["Point"], cpuMs: 1, visible: 500, heapMb: [60] }),
+      ]),
+    );
+    expect(fits[0]?.mbPer1000Sats).toBe(100);
+  });
+
+  test("clock rates are separate series, as everywhere else", () => {
+    const fits = memoryFits(
+      run([
+        result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [10], clock: 1 }),
+        result({ sats: 1000, components: ["Point"], cpuMs: 1, visible: 1000, heapMb: [60], clock: 1 }),
+        result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [10], clock: 100 }),
+        result({ sats: 1000, components: ["Point"], cpuMs: 1, visible: 1000, heapMb: [110], clock: 100 }),
+      ]),
+    );
+    expect(fits.map((fit) => fit.mbPer1000Sats)).toEqual([50, 100]);
+  });
+
+  // The failure this fit actually has, caught in the wild: a major collection fell
+  // between the zero row and the next, so the offset stopped being common and the
+  // slope came out negative — memory apparently freed by drawing satellites. r² is
+  // the only thing standing between that and being read as a finding.
+  test("a collection landing mid-series shows up as scatter, not a plausible slope", () => {
+    const fits = memoryFits(
+      run([
+        result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [419.2] }),
+        result({ sats: 1000, components: ["Point"], cpuMs: 1, visible: 1001, heapMb: [100.8] }),
+        result({ sats: 5000, components: ["Point"], cpuMs: 1, visible: 5001, heapMb: [299.9] }),
+      ]),
+    );
+    expect(fits[0]?.mbPer1000Sats).toBeLessThan(0);
+    expect(memoryFitTrustworthy(fits[0]!)).toBe(false);
+  });
+
+  test("a clean series clears the r² guard comfortably", () => {
+    const fits = memoryFits(
+      run([
+        result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [50.7] }),
+        result({ sats: 1000, components: ["Point"], cpuMs: 1, visible: 1001, heapMb: [95.4] }),
+        result({ sats: 5000, components: ["Point"], cpuMs: 1, visible: 5001, heapMb: [310.5] }),
+      ]),
+    );
+    // The real measurement this is taken from: 53.7 KB per satellite against a
+    // forced-collection truth of 52.5.
+    expect(fits[0]?.kbPerSatellite).toBeCloseTo(53.7, 0);
+    expect(memoryFitTrustworthy(fits[0]!)).toBe(true);
+  });
+
+  // Two points always lie on their own line, so r² alone would wave this through
+  // at 1.000 — which is precisely where the offset assumption is least tested.
+  test("a two-count sweep is refused however well it fits", () => {
+    const fits = memoryFits(
+      run([result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [53] }), result({ sats: 100, components: ["Point"], cpuMs: 1, visible: 100, heapMb: [73.4] })]),
+    );
+    expect(fits[0]?.r2).toBe(1);
+    expect(memoryFitTrustworthy(fits[0]!)).toBe(false);
+  });
+
+  test("no heap reading means no rows, rather than a fit through zeroes", () => {
+    // A fit through absent data would report every satellite as free, which is
+    // worse than an empty table saying the browser cannot answer.
+    const fits = memoryFits(run([result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0 }), result({ sats: 5000, components: ["Point"], cpuMs: 1, visible: 5000 })]));
+    expect(fits).toEqual([]);
+  });
+
+  test("the repeat step is excluded, as it is from every other fit", () => {
+    const fits = memoryFits(
+      run([
+        result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [10] }),
+        result({ sats: 1000, components: ["Point"], cpuMs: 1, visible: 1000, heapMb: [60] }),
+        result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [500], repeat: true }),
+      ]),
+    );
+    expect(fits[0]?.points).toBe(2);
+    expect(fits[0]?.mbPer1000Sats).toBe(50);
+  });
+});
+
+describe("the footprint capture", () => {
+  const withFootprints = (points: readonly { visible: number; jsMb: number; floorMb: number }[]) =>
+    run(points.map((point) => result({ sats: point.visible, visible: point.visible, components: ["Point"], cpuMs: 1, heapMb: [point.floorMb], footprintMb: point.jsMb })));
+
+  // The two slopes are independent derivations of one quantity: one differenced
+  // out of garbage-contaminated floors, one measured after a collection. That is
+  // the whole reason both are reported.
+  test("the measured slope sits beside the derived one", () => {
+    const fits = memoryFits(
+      withFootprints([
+        { visible: 0, jsMb: 30.2, floorMb: 50.7 },
+        { visible: 1001, jsMb: 82.8, floorMb: 95.4 },
+        { visible: 5001, jsMb: 287.7, floorMb: 310.5 },
+      ]),
+    );
+    // Both land near the 52.5 KB per satellite a forced collection reported.
+    expect(fits[0]?.kbPerSatellite).toBeCloseTo(53.7, 0);
+    expect(fits[0]?.absoluteKbPerSatellite).toBeCloseTo(52.7, 0);
+    // Three captures for three counts, so the absolute slope stands on its own.
+    expect(absoluteFitTrustworthy(fits[0]!)).toBe(true);
+  });
+
+  test("blank where the run never captured one, rather than zero", () => {
+    const fits = memoryFits(
+      run([result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [10] }), result({ sats: 1000, components: ["Point"], cpuMs: 1, visible: 1000, heapMb: [60] })]),
+    );
+    expect(fits[0]?.absoluteKbPerSatellite).toBeUndefined();
+    expect(reportRows(run([result({ sats: 0, components: ["Point"], cpuMs: 1 })]))[0]?.footprintMb).toBe("");
+  });
+
+  // The review finding: `measureFootprint` can be refused for one step, which
+  // leaves the absolute fit two points wide while the floor fit beside it still has
+  // three. Borrowing the floor fit's r² would print that under a green guard.
+  test("a refused capture is judged on its own points, not the floor fit's", () => {
+    const fits = memoryFits(
+      run([
+        result({ sats: 0, components: ["Point"], cpuMs: 1, visible: 0, heapMb: [50.7], footprintMb: 30.2 }),
+        // This step's capture was refused: heap floor present, footprint absent.
+        result({ sats: 1000, components: ["Point"], cpuMs: 1, visible: 1001, heapMb: [95.4] }),
+        result({ sats: 5000, components: ["Point"], cpuMs: 1, visible: 5001, heapMb: [310.5], footprintMb: 287.7 }),
+      ]),
+    );
+    // The floor fit is fine — three points, tight.
+    expect(memoryFitTrustworthy(fits[0]!)).toBe(true);
+    // The absolute one is not, and says so rather than borrowing that verdict.
+    expect(fits[0]?.absolutePoints).toBe(2);
+    expect(fits[0]?.absoluteKbPerSatellite).not.toBeUndefined();
+    expect(absoluteFitTrustworthy(fits[0]!)).toBe(false);
+  });
+
+  test("hasFootprints is the one predicate both readers use", () => {
+    expect(hasFootprints(run([result({ sats: 0, components: ["Point"], cpuMs: 1, heapMb: [40] })]))).toBe(false);
+    expect(hasFootprints(run([result({ sats: 0, components: ["Point"], cpuMs: 1, heapMb: [40], footprintMb: 30 })]))).toBe(true);
+  });
+
+  test("the absolute figures reach the rows, total and js apart", () => {
+    const rows = reportRows(withFootprints([{ visible: 5001, jsMb: 297.4, floorMb: 310.5 }]));
+    expect(rows[0]?.footprintMb).toBe(297.4);
+    // The total counts DOM and worker memory too, so it is the larger number.
+    expect(Number(rows[0]?.footprintTotalMb)).toBeGreaterThan(297.4);
+  });
+
+  // Same rule the gpu column follows: a column of dashes says nothing an absent
+  // column does not.
+  test("the pasted table grows a memory column only when one was captured", () => {
+    expect(formatTable(withFootprints([{ visible: 0, jsMb: 30, floorMb: 50 }])).split("\n")[0]).toContain("footprint");
+    expect(formatTable(run([result({ sats: 0, components: ["Point"], cpuMs: 1 })])).split("\n")[0]).not.toContain("footprint");
+  });
+});
+
+describe("estimateDurationMs with a footprint capture", () => {
+  test("the capture is added per step, not amortised", () => {
+    const steps = buildPlan({ satelliteCounts: [0, 100, 500], componentSets: [["Point"]], repeatFirstStep: false });
+    const plain = estimateDurationMs(steps, 6000);
+    const withCapture = estimateDurationMs(steps, 6000, 17_000);
+    expect(withCapture - plain).toBe(steps.length * 17_000);
+  });
+
+  test("no capture leaves the estimate exactly as it was", () => {
+    const steps = buildPlan({ satelliteCounts: [0, 100], componentSets: [["Point"]], repeatFirstStep: false });
+    expect(estimateDurationMs(steps, 6000, 0)).toBe(estimateDurationMs(steps, 6000));
+  });
+});
+
+describe("the raw heap columns", () => {
+  test("stay out of the pasted table but remain in the csv", () => {
+    const one = run([result({ sats: 0, components: ["Point"], cpuMs: 1, heapMb: [40, 50] })]);
+    expect(formatTable(one).split("\n")[0]).not.toContain("heap");
+    expect(toCsv(one).split("\n")[0]?.split(",")).toEqual(expect.arrayContaining(["heapMb", "heapPeakMb"]));
+  });
+
+  test("carry the window's floor and peak, not an average", () => {
+    const rows = reportRows(run([result({ sats: 5000, components: ["Point"], cpuMs: 1, heapMb: [413, 462.2, 86.3, 300] })]));
+    expect(rows[0]?.heapMb).toBe(86.3);
+    expect(rows[0]?.heapPeakMb).toBe(462.2);
+  });
+
+  test("blank on a browser that offers no reading, rather than zero", () => {
+    const rows = reportRows(run([result({ sats: 0, components: ["Point"], cpuMs: 1 })]));
+    expect(rows[0]?.heapMb).toBe("");
+    expect(rows[0]?.heapPeakMb).toBe("");
+  });
+});
+
+describe("FrameSampler heap series", () => {
+  test("a frame without a reading is still a frame", () => {
+    const sampler = new FrameSampler();
+    sampler.push(0);
+    sampler.push(10);
+    sampler.push(20);
+    expect(sampler.snapshot().frames).toBe(2);
+    expect(sampler.snapshot().heap).toBeUndefined();
+  });
+
+  test("the heap is its own population, min and max over the window", () => {
+    const sampler = new FrameSampler();
+    sampler.push(0);
+    sampler.push(10);
+    sampler.pushHeap(413);
+    sampler.pushHeap(86.3);
+    sampler.pushHeap(462.2);
+    const heap = sampler.snapshot().heap;
+    expect(heap?.min).toBe(86.3);
+    expect(heap?.max).toBe(462.2);
+    expect(heap?.count).toBe(3);
+  });
+
+  test("reset drops the heap samples with the rest of the warmup", () => {
+    const sampler = new FrameSampler();
+    sampler.pushHeap(999);
+    sampler.reset();
+    sampler.pushHeap(40);
+    expect(sampler.snapshot().heap?.max).toBe(40);
+  });
+
+  test("a limit rolls the heap window too, so the live readout stays recent", () => {
+    const sampler = new FrameSampler(2);
+    sampler.pushHeap(900);
+    sampler.pushHeap(41);
+    sampler.pushHeap(42);
+    expect(sampler.snapshot().heap?.max).toBe(42);
   });
 });

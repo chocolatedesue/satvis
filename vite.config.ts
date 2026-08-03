@@ -26,6 +26,28 @@ try {
 
 const port = process.env.PORT ? Number(process.env.PORT) : undefined;
 
+/**
+ * Headers required for `performance.measureUserAgentSpecificMemory()` for the benchmark
+ * panel's accurate memory footprint. See "Cross-origin isolation" in src/modules/benchmark/README.md.
+ */
+const CROSS_ORIGIN_ISOLATION_HEADERS = {
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "credentialless",
+};
+
+/** So the black globe does not have to be deduced. Reads the headers rather than restating them. */
+const isolationNotice = {
+  name: "satvis-isolation-notice",
+  configurePreviewServer() {
+    console.log(
+      `\n  ${Object.keys(CROSS_ORIGIN_ISOLATION_HEADERS).join(" + ")} are set (accurate memory footprint is available).\n` +
+        "  If the globe is black and the satellites are not, a service worker cached\n" +
+        "  Cesium's workers before isolation existed: clear this origin's service worker\n" +
+        "  and caches once.\n",
+    );
+  },
+};
+
 export default defineConfig({
   base: "",
   build: {
@@ -60,6 +82,7 @@ export default defineConfig({
   },
   plugins: [
     vue(),
+    isolationNotice,
     // Neutral gray palette (default `slate` is blue-tinted and clashes with the
     // app's pure-dark toolbar surfaces).
     ui({
@@ -231,6 +254,7 @@ export default defineConfig({
   server: {
     port,
     strictPort: port !== undefined,
+    headers: CROSS_ORIGIN_ISOLATION_HEADERS,
     proxy: {
       // Proxy /api to production by default so `pnpm dev` works out of the box.
       // Point at a local worker with SATVIS_API_PROXY=http://localhost:8080.
@@ -243,6 +267,7 @@ export default defineConfig({
   preview: {
     port,
     strictPort: port !== undefined,
+    headers: CROSS_ORIGIN_ISOLATION_HEADERS,
     // Same proxy as the dev server. `pnpm bench` measures a production build,
     // and a build with no satellite data to draw would measure nothing.
     proxy: {
