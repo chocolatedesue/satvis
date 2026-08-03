@@ -11,6 +11,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { nextTick } from "vue";
 
+import { BUILTIN_STAR_MAP } from "../config/starMaps";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import type { CatalogEntry } from "./SatelliteCatalog";
@@ -39,7 +40,11 @@ function fakeTarget() {
     releaseCamera: 0,
     reconciled: [] as DesiredScene[],
     surfaceModels: [] as [string, string][],
+    starMaps: [] as string[],
   };
+
+  // Which star maps this fake refuses, standing in for faces that are not there.
+  const unavailableStarMaps = new Set<string>();
 
   // Mutable so a test can grow the catalog the way a lazily-loaded group does.
   const catalog = { entries: [] as CatalogEntry[] };
@@ -93,6 +98,10 @@ function fakeTarget() {
       calls.surfaceModels.push([surfaceModel, viewMode]);
       return Promise.resolve();
     },
+    applyStarMap: (starMap) => {
+      calls.starMaps.push(starMap);
+      return unavailableStarMaps.has(starMap) ? Promise.reject(new Error("no faces")) : Promise.resolve();
+    },
     suppressCameraMode: () => {
       calls.suppressCamera += 1;
     },
@@ -105,7 +114,7 @@ function fakeTarget() {
     setTime: () => {},
   };
 
-  return { target, calls, catalog };
+  return { target, calls, catalog, unavailableStarMaps };
 }
 
 /** `count` catalog entries, all carrying `tag`, as the browser would see them. */
@@ -143,6 +152,38 @@ describe("startSceneSync", () => {
     expect(target.terrainProvider).toBe("CesiumWorldTerrain");
     expect(target.cameraMode).toBe("Inertial");
     expect(target.showFps).toBe(true);
+  });
+
+  test("the star map is installed on request, and not before", async () => {
+    const { target, calls } = fakeTarget();
+    startSceneSync(target);
+    const store = useCesiumStore();
+
+    // The viewer is already built with the builtin sky box, so starting the sync
+    // must not re-install it — that would refetch six faces to reach the picture
+    // already on screen.
+    expect(calls.starMaps).toEqual([]);
+
+    store.starMap = "DeepStar2K";
+    await settle();
+
+    expect(calls.starMaps).toEqual(["DeepStar2K"]);
+    expect(store.starMap).toBe("DeepStar2K");
+  });
+
+  test("a star map whose faces are missing falls back, and the store follows", async () => {
+    const { target, calls, unavailableStarMaps } = fakeTarget();
+    unavailableStarMaps.add("DeepStar2K");
+    startSceneSync(target);
+    const store = useCesiumStore();
+
+    store.starMap = "DeepStar2K";
+    await settle();
+
+    // The store is what the radio and the url read, so the fallback has to land
+    // there rather than only on the globe.
+    expect(store.starMap).toBe(BUILTIN_STAR_MAP);
+    expect(calls.starMaps).toEqual(["DeepStar2K", BUILTIN_STAR_MAP]);
   });
 
   test("a projection view mode morphs, and hands the camera back first", async () => {

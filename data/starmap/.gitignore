@@ -1,0 +1,5 @@
+# Sky box faces built by `pnpm update-starmap`. Generated, so ignored —
+# but the directory is tracked so the generator has a bind mount target and does
+# not have to create one (docker would create a missing one owned by root).
+*
+!.gitignore

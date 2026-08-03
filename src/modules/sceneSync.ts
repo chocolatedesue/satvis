@@ -14,6 +14,7 @@ import { JulianDate } from "@cesium/engine";
 import { nextTick, watch } from "vue";
 
 import { currentPosition } from "../composables/useGeolocation";
+import { BUILTIN_STAR_MAP, starMapRecovery } from "../config/starMaps";
 import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
@@ -75,6 +76,7 @@ export interface SceneTarget {
     readonly timeline?: unknown;
   };
   applySurfaceModel(surfaceModel: string, viewMode: string): Promise<void>;
+  applyStarMap(starMap: string): Promise<void>;
   suppressCameraMode(): void;
   releaseCameraMode(): void;
   morphTo(mode: string): void;
@@ -123,6 +125,40 @@ export function startSceneSync(cc: SceneTarget): void {
       cc.terrainProvider = name;
     },
   );
+  // Not immediate, unlike the render settings: the viewer is constructed with
+  // exactly the built-in sky box, so there is nothing to bring into line until
+  // the value moves, and a link that names it fetches nothing.
+  //
+  // The fallback below is the imagery one in reverse. There the stack is applied
+  // first and a probe corrects it afterwards, because a missing tile set only
+  // leaves the globe blank. Here the faces have to be in hand before the sky box
+  // exists at all, so the failure *is* the probe and it arrives as a rejection.
+  watch(
+    () => cesiumStore.starMap,
+    (name) => {
+      void applyStarMap(name);
+    },
+  );
+
+  async function applyStarMap(name: string): Promise<void> {
+    try {
+      await cc.applyStarMap(name);
+    } catch (error) {
+      // The recovery hint travels with the path in starMaps.ts rather than being
+      // written here, because it differs per map and this warning is the only
+      // thing the reader gets.
+      const recovery = starMapRecovery(name);
+      console.warn(`Star map ${name} could not be loaded, falling back to ${BUILTIN_STAR_MAP}.${recovery ? ` Run \`${recovery}\` to build it.` : ""}`, error);
+      // Read back rather than assuming: a second switch while the faces were in
+      // flight has already asked for something else, and the one that failed is
+      // no longer what anybody wants. Writing the built-in re-enters this
+      // watcher, which is what puts it on the globe — and writing it over itself
+      // is not a change, so a built-in that somehow fails cannot loop here.
+      if (cesiumStore.starMap === name) {
+        cesiumStore.starMap = BUILTIN_STAR_MAP;
+      }
+    }
+  }
   // Both arguments, one watcher: what a surface model does depends on the view
   // mode as much as on the selection, and there is nothing to gain from
   // discovering which of the two moved. Immediate, because `?surface=` arrives

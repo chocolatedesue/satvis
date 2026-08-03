@@ -5,6 +5,7 @@
 // so this is the only file that cannot run outside a browser — and everything
 // downstream of it takes the viewer as an argument instead of making one.
 
+import { Tonemapper } from "@cesium/engine";
 import { Viewer } from "@cesium/widgets";
 
 /**
@@ -49,6 +50,26 @@ export function createViewer(container: string | Element, options: { minimalUI: 
   viewer.scene.highDynamicRange = true;
   viewer.scene.maximumRenderTimeChange = 1 / 30;
   viewer.scene.requestRenderMode = true;
+  // Away from Cesium's PBR_NEUTRAL default, because that curve is wrong for a
+  // scene this dark.
+  //
+  // Its black-point term subtracts min(r,g,b) from every channel while that
+  // minimum is under linear 0.08 (see czm_pbrNeutralTonemapping). On a near-black
+  // pixel the minimum is nearly the whole signal, so the subtraction strips the
+  // achromatic part and leaves only the channel imbalance — which czm_inverseGamma
+  // then stretches. A neutral sRGB grey of (18,17,16) comes out around (9,7,2).
+  //
+  // Measured, not assumed. It renders the faint sky as olive mottling at any star
+  // map resolution (src/config/starMaps.ts), and it is not confined to the sky:
+  // over Manhattan with OSM Buildings, 37% of the frame sits under luminance 40,
+  // and there it claims a mean saturation of 0.598 against ACES's 0.260. Shadowed
+  // building faces get the same treatment as the sky.
+  //
+  // ACES costs about 5% luminance and 6% saturation on properly lit surfaces, and
+  // agrees with PBR_NEUTRAL to within 6% in the 80-140 luminance band, with a mean
+  // absolute channel delta under 11 everywhere — the globe and the satellite models
+  // are visually unchanged. Same pass count either way, so no frame-time change.
+  viewer.scene.postProcessStages.tonemapper = Tonemapper.ACES;
 
   return viewer;
 }
