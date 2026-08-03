@@ -55,7 +55,7 @@ export const useCesiumStore = defineStore(
 
     // Read-only: "at most one base layer" is an invariant of the list as a
     // whole, so it cannot be enforced from a per-checkbox write.
-    const activeLayers = ref<string[]>(["OfflineHighres"]);
+    const activeLayers = ref<string[]>(["NaturalEarth"]);
     const layers = computed(() => activeLayers.value);
 
     // null means the clock is live and follows the present; a value means it

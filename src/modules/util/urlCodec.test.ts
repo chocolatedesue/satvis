@@ -24,7 +24,7 @@ const queryString = (params: Readonly<Record<string, string>>): string => {
   const query = new URLSearchParams(params).toString().replaceAll("%2C", ",");
   return query === "" ? "" : `?${query}`;
 };
-const providers = () => ["Offline", "OfflineHighres", "ArcGis", "VersaTiles", "OSM", "BlackMarble", "Tiles", "GOES-IR", "Nextrad"];
+const providers = () => ["NaturalEarth", "ArcGis", "VersaTiles", "OSM", "BlackMarble", "Tiles", "GOES-IR", "Nextrad"];
 
 describe("boolean", () => {
   const kind = boolean();
@@ -277,7 +277,7 @@ const DEFAULTS = {
   enabledSatellites: [] as string[],
   trackedSatellite: "",
   showFps: false,
-  layers: ["OfflineHighres"],
+  layers: ["NaturalEarth"],
   time: null as string | null,
 };
 
@@ -366,7 +366,7 @@ describe("read compatibility with the pre-codec format", () => {
       enabledSatellites: ["IRIDIUM-NEXT 106"],
       trackedSatellite: "ISS (ZARYA)",
       showFps: true,
-      layers: ["OfflineHighres"],
+      layers: ["NaturalEarth"],
       time: null,
     });
   });

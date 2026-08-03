@@ -106,15 +106,15 @@ of the Worker's `fetch` and watch which requests appear.
 
 **Result, 2026-07-30, wrangler dev on the built dist.**
 
-| path                                           | status                                                                   |
-| ---------------------------------------------- | ------------------------------------------------------------------------ |
-| `/`, `/ot`                                     | 200 text/html                                                            |
-| `/embedded.html`, `/test.html`                 | 307 to `/embedded`, `/test` (asset router `html_handling`, pre-existing) |
-| `/typo-route`                                  | 404 text/html (the 404 page)                                             |
-| `/api/groups.json`                             | 200 application/json                                                     |
-| `/cesium/…/tilemapresource.xml` (exists)       | 200 application/xml                                                      |
-| `/data/imagery/…/tilemapresource.xml` (absent) | **404**                                                                  |
-| `/data/gp/weather.json` (absent)               | **404**                                                                  |
+| path                                     | status                                                                   |
+| ---------------------------------------- | ------------------------------------------------------------------------ |
+| `/`, `/ot`                               | 200 text/html                                                            |
+| `/embedded.html`, `/test.html`           | 307 to `/embedded`, `/test` (asset router `html_handling`, pre-existing) |
+| `/typo-route`                            | 404 text/html (the 404 page)                                             |
+| `/api/groups.json`                       | 200 application/json                                                     |
+| `/cesium/…/tilemapresource.xml` (exists) | 200 application/xml                                                      |
+| `/data/imagery/…` (a missing tile)       | **404**                                                                  |
+| `/data/gp/weather.json` (absent)         | **404**                                                                  |
 
 Of those six requests, **only `/api/groups.json` logged `BILLED`** — routes, unknown paths
 and missing files are all answered by the asset router. Two combinations that are _not_
@@ -132,7 +132,8 @@ re-visiting the bare path in the same tab can land on the previously written url
 became `/ot?layers=Offline` from an earlier visit, which looked exactly like the OT preset
 failing to apply. Navigate with a distinct query (`/ot?v=clean`) to be sure of a fresh
 state. Verified that way: `/ot` selects VersaTiles and adds no `layers=` to the url, while
-`/` falls back to `Offline` as it should.
+`/` uses the default basemap as it should. (Recorded when that default was named
+`Offline`; it is `NaturalEarth` now, and the behaviour is what was checked.)
 
 For comparison, production before this change answered a missing data asset with
 `200 text/html`.
@@ -142,31 +143,44 @@ unknown route is answered from precache by `navigateFallback`, so it shows the a
 than the 404 page. The server and the service worker disagree there, deliberately — offline
 that is the behaviour you want.
 
-## Layers: the offline imagery fallback
+## Layers: the base map's depth upgrade
 
-**Procedure.** Open a checkout where `data/imagery/` is genuinely empty — one where nobody
-has run `pnpm update-imagery`, which any fresh clone is — and load the default route. Read
-the basemap selection, the url, and the console. Do **not** simulate it by deleting the
-file from a running dev server: see below.
+**Procedure.** Open a checkout where `data/imagery/NaturalEarthII/3/` is absent — one where
+nobody has run `pnpm update-imagery`, which any fresh clone is — and load the default route.
+Read the basemap selection, the url, and the console, then zoom in past continent scale. Then
+run the generator, reload, and zoom in again. Do **not** simulate the absent case by deleting
+files from a running dev server: see below.
 
-**Result, 2026-07-30, Chrome, in a worktree.** Basemap `Offline`, url rewritten to
-`?layers=Offline`, the console warning naming the recovery command, and the globe
-tiling normally from `/cesium/Assets/Textures/NaturalEarthII/...`. The fallback target was
-checked directly and is sound: its manifest answers `text/xml` beginning `<?xml`, and its
-tiles answer `image/jpeg`.
+**Result, 2026-08-04, Chrome, dev and built preview.** Basemap `NaturalEarth` in both cases,
+url untouched, console clean, and a correct globe either way — `maximumLevel` 2 without the
+generated levels and 5 with them. Nothing about the selection changes; only the ceiling does.
+The ceiling is a build-time `define`, so the restart after running the generator is expected.
 
-Recorded when the tileset came from the `data/cesium-assets` submodule and the warning
-named `git submodule update --init`; the source moved to `pnpm update-imagery` but the
-failure and the fallback are unchanged, and both paths are equally absent in a fresh
-checkout. Worth re-running rather than trusting that equivalence.
+**Above the ceiling the map is complete, not holed.** Checked directly by building with levels
+4–5 removed while the ceiling stayed at 5, so Cesium requested tiles that did not exist: the
+Alps and Italy rendered in full from magnified level-3 imagery, with visible rectangular seams
+where neighbouring terrain tiles magnify by different amounts. That is `TileImagery` walking up
+to the closest ready ancestor, and it is the same path taken offline in a region the runtime
+cache has never held — which is why the precache goes to level 3 rather than 2.
 
-**The earlier result recorded here for 2026-07-28 was wrong**, and worth keeping as a
-warning about the method. It reported the fallback firing, but the probe tested only
-`response.ok`, and in a real unpopulated checkout the request for the missing manifest is
-answered by the SPA fallback with **200 and `index.html`** — measured, `content-type:
-text/html`, 1065 bytes of markup. So the probe concluded the imagery was present and the
-globe stayed blank, which is what was being reported from worktrees all along. The probe
-now reads the body and requires `<TileMap`.
+One measurement worth keeping from the attempt that failed: in the built preview a ranged
+request for a missing tile returns **206 with `content-type: text/html`**, the SPA fallback
+honouring the Range header. `response.ok` is true. Any probe that trusted status alone would
+have reported the deep levels present.
+
+**What this replaced, and why it is worth remembering.** The old arrangement asked whether the
+imagery was _missing_ and, if so, rewrote the layer selection to a second `Offline` provider
+backed by Cesium's own differently-graded tiles — so the failure was visible as a colour shift,
+a changed url and a warning. Two bugs came out of that shape: a probe answering after the
+route's preset had hydrated clobbered the preset's chosen basemap, and
+
+**the result recorded here for 2026-07-28 was simply wrong.** It reported the fallback firing,
+but the probe tested only `response.ok`, and in a real unpopulated checkout the request for the
+missing manifest was answered by the SPA fallback with **200 and `index.html`** — measured,
+`content-type: text/html`, 1065 bytes of markup. The probe concluded the imagery was present
+and the globe stayed blank, which is what was being reported from worktrees all along. That is
+why every probe in this app checks what came back and not just its status, and why the levels
+the globe cannot do without are committed rather than probed for at all.
 
 Deleting the file from a running dev server most likely produced a 404 instead — the
 static-copy middleware owns that path and fails outright, where a file that never existed
@@ -199,7 +213,7 @@ installed. Worth doing after the next deploy — open the url in a tab and confi
 groups, switch basemap, toggle an overlay, and fly somewhere with relief.
 
 **Result, 2026-07-30, Chrome.** Basemap radios listed `Offline`, `OfflineHighres`,
-`ArcGis`, `OSM`, `BlackMarble` with **ArcGis checked** — bound by provider, so the `_0.5`
+`ArcGis`, `OSM`, `BlackMarble` with **ArcGis checked**[^basemaps] — bound by provider, so the `_0.5`
 token still reads as the layer it is, which the old flat checkbox list did not. Overlays
 listed `Tiles`, `GOES-IR`, `Nextrad` with Nextrad checked. Switching to OSM rewrote
 `?layers=OSM,Nextrad`, keeping the overlay and dropping the old basemap's opacity, which
@@ -352,3 +366,8 @@ sky lines up with what the phone is pointed at with no manual trim. What remains
 unverified is the Android path — `deviceorientationabsolute` — which is written
 against the specification only. See `docs/adr/0004-compass-aiming.md` for why an
 untested heading source is required to either work or decline.
+
+[^basemaps]:
+    `Offline` and `OfflineHighres` have since collapsed into the single `NaturalEarth`
+    layer, so that list is one shorter now. What was being checked — that the radios bind
+    by provider, so an `_0.5` token still reads as the layer it is — is unaffected.

@@ -125,15 +125,15 @@ describe("setGroundStations", () => {
 describe("setLayers", () => {
   test("keeps a single base layer with its overlays", () => {
     const cesium = useCesiumStore();
-    cesium.setLayers(["OfflineHighres", "Nextrad"]);
-    expect(cesium.layers).toEqual(["OfflineHighres", "Nextrad"]);
+    cesium.setLayers(["NaturalEarth", "Nextrad"]);
+    expect(cesium.layers).toEqual(["NaturalEarth", "Nextrad"]);
   });
 
   // Reproduced before this action existed: the rule lived in a Vue watcher
   // that wrote back the base layers and discarded every overlay.
   test("the last base layer wins and overlays survive", () => {
     const cesium = useCesiumStore();
-    cesium.setLayers(["OfflineHighres", "Nextrad", "ArcGis"]);
+    cesium.setLayers(["NaturalEarth", "Nextrad", "ArcGis"]);
     expect(cesium.layers).toEqual(["Nextrad", "ArcGis"]);
   });
 
@@ -161,6 +161,6 @@ describe("setLayers", () => {
     // @ts-expect-error layers is read-only; setLayers is the way in
     cesium.layers = ["ArcGis"];
     warn.mockRestore();
-    expect(cesium.layers).toEqual(["OfflineHighres"]);
+    expect(cesium.layers).toEqual(["NaturalEarth"]);
   });
 });
