@@ -7,7 +7,8 @@ reproducible from the image alone.
 The source is a plate carree (equidistant cylindrical) map in ICRF/J2000, linear
 light, half-float EXR, of 1.7 billion stars from Hipparcos-2, Tycho-2 and Gaia
 DR2 — public domain, credit requested. https://svs.gsfc.nasa.gov/4851
-Output is six 8-bit JPEG cube faces named the way `SkyBox` wants them.
+Output is six 8-bit WebP cube faces named the way `SkyBox` wants them (see
+`FORMAT` for why WebP and not JPEG).
 
 Three things are worth knowing before changing anything.
 
@@ -63,6 +64,36 @@ FACE_ORDER = ["px", "mx", "py", "my", "pz", "mz"]
 # Where auto exposure puts the tone curve's knee. High enough that only genuine
 # stars sit above it, low enough that the Milky Way is not crushed against it.
 EXPOSURE_PERCENTILE = 99.99
+
+# WebP, because this content is close to JPEG's worst case and WebP beats it at
+# every point on the curve — about half the bytes at equal error, or clearly less
+# error at equal bytes.
+#
+# The reason is what the histogram says: a face here occupies 200 of 256 levels
+# but its *median* is 13, so nearly everything of interest sits in the bottom 6%
+# of the range, and stars are isolated bright points on that near-black ground.
+# JPEG answers with 8x8 DCT blocking in the darks and ringing haloes around the
+# stars. Measured against `encode()`'s own output on two 2048px faces, mean
+# absolute error per texel:
+#
+#                        KB   mean   dark  stars
+#   jpeg q80 4:2:0      495   2.78   2.32   7.61   <- what this used to write
+#   jpeg q92 4:4:4     1012   2.19   1.90   4.25
+#   webp q90            676   2.17   1.86   5.13
+#   webp q95           1121   1.68   1.43   3.79   <- now
+#   avif q90           1034   1.66   1.27   4.51
+#   webp lossless      4045   0      0      0
+#
+# An error of 2.3 against a median of 13 is about 18% of the signal, which is why
+# q80 JPEG mottled the sky. q95 is chosen rather than lossless because it is
+# where codec error stops dominating: 1.4 levels is close enough to the 1-level
+# quantisation floor of 8-bit that the next real gain would need more bit depth,
+# not a better codec, and lossless costs 4x the bytes to buy 1.4 levels.
+#
+# AVIF scores marginally better in the darks and worse on stars, for a slower
+# decode and a narrower floor of browser support. Not worth it for six textures
+# that are fetched once and cached.
+FORMAT = "webp"
 
 
 def fetch(name: str, cache_dir: str) -> str:
@@ -519,7 +550,7 @@ def verify(out_dir: str, ref_dir: str, prefix: str, ref_prefix: str = "TychoSkym
     bad = 0
     print(f"{'face':6} {'best':>8} {'2nd':>8} {'margin':>8}  verdict")
     for face in FACE_ORDER:
-        gen_path = os.path.join(out_dir, f"{prefix}_{face}.jpg")
+        gen_path = os.path.join(out_dir, f"{prefix}_{face}.{FORMAT}")
         ref_path = os.path.join(ref_dir, f"{ref_prefix}_{face}.jpg")
         if not (os.path.exists(gen_path) and os.path.exists(ref_path)):
             print(f"{face:6} {'-':>8} {'-':>8} {'-':>8}  missing, skipped")
@@ -582,8 +613,8 @@ def build(src: np.ndarray, size: int, ss: int, exposure: float, feather: int, ou
     total = 0
     for face in FACE_ORDER:
         pixels = encode(faces[face], exposure)
-        path = os.path.join(out_dir, f"{prefix}_{face}.jpg")
-        cv2.imwrite(path, np.ascontiguousarray(pixels), [cv2.IMWRITE_JPEG_QUALITY, quality])
+        path = os.path.join(out_dir, f"{prefix}_{face}.{FORMAT}")
+        cv2.imwrite(path, np.ascontiguousarray(pixels), [cv2.IMWRITE_WEBP_QUALITY, quality])
         total += os.path.getsize(path)
     print(f"  wrote six faces, {total / 2**20:.1f} MB", flush=True)
     return prefix
@@ -600,7 +631,7 @@ def main() -> int:
     ap.add_argument("--supersample", default="auto", help="samples per output texel per axis, or auto from the source resolution")
     ap.add_argument("--match-edges", type=int, default=4, metavar="N",
                     help="reconcile adjacent faces over their outermost N texels; 0 leaves them alone")
-    ap.add_argument("--quality", type=int, default=80, help="JPEG quality")
+    ap.add_argument("--quality", type=int, default=95, help=f"{FORMAT} quality; 101 is lossless")
     ap.add_argument("--exposure", default="auto", help="float, or auto")
     ap.add_argument("--no-verify", action="store_true", help="skip the orientation check")
     # Bind mounts, set by generate.sh. Overridable for running this outside docker.

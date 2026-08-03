@@ -28,9 +28,17 @@
  * The three are offered in that order because it is the order they cost.
  * Cesium builds no mipmaps for a sky box, so resident memory is the whole
  * difference: ~25 MB for either 1K map, ~100 MB for the 2K one, and the draw is
- * one textured cube in every case. That makes `DeepStar1K` the interesting
- * middle — a better catalogue than `Tycho1K` for the same memory and a quarter
- * of `DeepStar2K`'s download — rather than a consolation prize.
+ * one textured cube in every case. Download is the other axis — 0.85 MB,
+ * 1.3 MB and 6.4 MB — which makes `DeepStar1K` the interesting middle rather
+ * than a consolation prize: a better catalogue than `Tycho1K` for the same
+ * memory and a fifth of `DeepStar2K`'s bytes.
+ *
+ * The generated pair are WebP where Cesium's own faces are JPEG, which is not a
+ * preference: this sky is nearly black and JPEG spends its error budget exactly
+ * where the content is. See `FORMAT` in scripts/starmap/cubemap.py for the
+ * measurements. It buys nothing in memory — every format decodes to RGBA8, and
+ * `CubeMap` has no compressed-texture path the way `Texture` does — so this is
+ * about what arrives, not what is resident.
  */
 export const STAR_MAPS = ["Tycho1K", "DeepStar1K", "DeepStar2K"] as const;
 
@@ -47,7 +55,7 @@ export const BUILTIN_STAR_MAP: StarMapName = "Tycho1K";
 
 /** An optional star map: where its faces live, and how to obtain them. */
 interface StarMapAsset {
-  /** Path stem the six faces hang off — `_px.jpg` and friends. */
+  /** Path stem the six faces hang off — `_px.webp` and friends. */
   prefix: string;
   /** What to run to get it, for the warning when it turns out to be absent. */
   recovery: string;
@@ -87,12 +95,12 @@ export function starMapSources(name: string): StarMapSources | undefined {
   }
   const { prefix } = asset;
   return {
-    positiveX: `${prefix}_px.jpg`,
-    negativeX: `${prefix}_mx.jpg`,
-    positiveY: `${prefix}_py.jpg`,
-    negativeY: `${prefix}_my.jpg`,
-    positiveZ: `${prefix}_pz.jpg`,
-    negativeZ: `${prefix}_mz.jpg`,
+    positiveX: `${prefix}_px.webp`,
+    negativeX: `${prefix}_mx.webp`,
+    positiveY: `${prefix}_py.webp`,
+    negativeY: `${prefix}_my.webp`,
+    positiveZ: `${prefix}_pz.webp`,
+    negativeZ: `${prefix}_mz.webp`,
   };
 }
 
