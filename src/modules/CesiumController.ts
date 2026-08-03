@@ -714,7 +714,7 @@ export class CesiumController {
    * *inside* the render loop: a face that 404s then throws out of `Scene.render`
    * rather than out of here, and with `rethrowRenderErrors` on that takes the app
    * down instead of falling back. Which is not hypothetical — `DeepStar2K` is
-   * built by `scripts/starmap/generate.sh` and is absent until someone runs it.
+   * built by `pnpm update-starmap` and is absent until someone runs it.
    *
    * The viewer is constructed with exactly the built-in sky box (CesiumWidget
    * calls `SkyBox.createEarthSkyBox()` when it is passed none), so this only ever

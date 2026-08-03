@@ -63,7 +63,7 @@ Every parameter is optional. An absent parameter means "use the default" (see
 
 [^2]:
     The two `DeepStar` cuts are optional assets, built together by
-    `scripts/starmap/generate.sh`, so a deployment may have neither. They stay in the
+    `pnpm update-starmap`, so a deployment may have neither. They stay in the
     accepted vocabulary regardless, for the same reason `?pixelratio=1.5` is accepted on
     a display that cannot benefit from it: the parameter says what was asked for, not
     what this machine can serve. The Map menu offers only the maps it can find, and a

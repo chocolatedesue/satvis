@@ -54,7 +54,7 @@ describe("starMapSources", () => {
   });
 
   test.each(optional)("%s is served from the generated directory, not the submodule", (name) => {
-    expect(starMapSources(name)!.positiveX).toContain("data/generated/starmap/");
+    expect(starMapSources(name)!.positiveX).toContain("data/starmap/");
   });
 
   // Two cuts of one catalogue built by one generator run — distinct files, or
@@ -73,7 +73,7 @@ describe("starMapSources", () => {
 
 describe("starMapRecovery", () => {
   test("names the generator for the map the generator builds", () => {
-    expect(starMapRecovery("DeepStar2K")).toBe("scripts/starmap/generate.sh");
+    expect(starMapRecovery("DeepStar2K")).toBe("pnpm update-starmap");
   });
 
   test("the builtin has nothing to recover", () => {

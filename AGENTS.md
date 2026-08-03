@@ -22,7 +22,7 @@ the SPA and the `worker/` package (a pnpm workspace). CI uses `pnpm ci`.
 | Lint fix           | `pnpm lint:fix` (runs frontend and worker fixes)                         |
 | Type-check only    | `pnpm type-check`                                                        |
 | Refresh static GP  | `pnpm update-gp` (writes the gitignored `data/gp/` snapshot)             |
-| Build the star map | `scripts/starmap/generate.sh` (docker; writes `data/generated/starmap/`) |
+| Build the star map | `pnpm update-starmap` (docker; writes the gitignored `data/starmap/` faces) |
 | Deploy             | `pnpm deploy` (builds frontend, then deploys worker)                     |
 
 Worker-only scripts run via `pnpm --filter satvis-worker <script>`.
@@ -40,7 +40,7 @@ CI runs `lint`, then `test` (frontend + worker), then `build`.
   - **Satellite metadata** (swath extents, sensor FOV, model URL, operator) is attached to each matching record **at refresh time**, under a lowercase `metadata` key, from the merged satellite table. There is no metadata endpoint and no browser-side rule matching: a record either carries the bag or the frontend applies its defaults (`src/config/satelliteMetadata.ts`). See `docs/adr/0002-static-satellite-metadata.md`.
   - **Worker-less mode**: `pnpm update-gp` runs the same evaluator and writes a static snapshot into `data/gp/` (gitignored). The app probes `/api/groups.json` and falls back to that snapshot.
 - **Data assets**: `data/` also contains Cesium assets (imagery, textures, stars) and 3D-model plugins under `data/custom/`. Copied into `dist/` at build time via `vite-plugin-static-copy`.
-  - **`data/generated/`** holds assets a script builds rather than a checkout provides — currently `data/generated/starmap/`, the `DeepStar2K` sky box from `scripts/starmap/generate.sh`. The directories are tracked (each carries a self-ignoring `.gitignore`) so the bind mounts and the copy glob have something to point at; the contents are not. Absent until someone runs the generator, which is why the star map is probed for before the menu offers it (`src/config/starMaps.ts`). The generator itself lives under `scripts/`, not `data/`, precisely because the copy glob takes `data/**` wholesale.
+  - **`data/starmap/`** holds the `DeepStar1K` and `DeepStar2K` sky box faces, built by `pnpm update-starmap`. Generated rather than checked out, and so gitignored — but unlike `data/gp/` the *directory* is tracked, carrying a self-ignoring `.gitignore`, because the generator bind-mounts it and docker would otherwise create a missing mount point owned by root. Absent until someone runs it, which is why the star maps are probed for before the menu offers them (`src/config/starMaps.ts`). The generator itself lives under `scripts/`, not `data/`, precisely because the copy glob takes `data/**` wholesale — anything kept under `data/` ships.
 - Entrypoints: `index.html`, `embedded.html`, `test.html` (all configured as Vite MPA inputs), plus `public/404.html`. `/ot` is **not** a file: `public/_redirects` rewrites it to `/` with a 200, so it serves the same shell at the same url rather than a near-copy that could drift.
 
 ## Key quirks

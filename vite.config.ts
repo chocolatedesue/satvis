@@ -179,7 +179,7 @@ export default defineConfig({
             // built-in sky box lives, so a first offline load has stars either
             // way. These are only fetched by someone who asked for them, and then
             // they should survive going offline.
-            urlPattern: /data\/generated\/starmap\/.*\.jpg$/,
+            urlPattern: /data\/starmap\/.*\.jpg$/,
             handler: "CacheFirst",
             options: {
               cacheName: "cesium-starmap-cache",

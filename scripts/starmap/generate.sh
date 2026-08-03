@@ -19,8 +19,8 @@
 # mistaken for shippable data.
 #
 # Three bind mounts:
-#   .cache                  source EXRs, kept between runs
-#   data/generated/starmap  the faces, picked up by vite's data/** copy
+#   .cache        source EXRs, kept between runs
+#   data/starmap  the faces, picked up by vite's data/** copy
 #   the Tycho asset read-only, for the orientation check
 #
 # Both writable mounts are committed directories carrying a .gitignore, so
@@ -31,7 +31,7 @@ set -euo pipefail
 cd "${0%/*}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 IMAGE="satvis-starmap:1"
-OUT_DIR="$REPO_ROOT/data/generated/starmap"
+OUT_DIR="$REPO_ROOT/data/starmap"
 REF_DIR="$REPO_ROOT/data/cesium-assets/stars/TychoSkymapII.t3_08192x04096"
 
 if ! docker info >/dev/null 2>&1; then

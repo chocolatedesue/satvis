@@ -19,7 +19,7 @@
  *
  * `DeepStar1K` and `DeepStar2K` are two cuts of a different catalogue — NASA SVS
  * Deep Star Maps 2020, 1.7 billion stars from Hipparcos-2, Tycho-2 and Gaia DR2,
- * both built by `scripts/starmap/generate.sh` from the same source and the same
+ * both built by `pnpm update-starmap` from the same source and the same
  * exposure. Denser and better coloured than Tycho, and reprojected from
  * linear-light EXR rather than resampled from an already tone-mapped JPEG.
  * Generated rather than committed, so both are missing from a checkout where
@@ -60,12 +60,12 @@ interface StarMapAsset {
 // to Cesium. See `CesiumController.applyStarMap`.
 const ASSETS: Partial<Record<StarMapName, StarMapAsset>> = {
   DeepStar1K: {
-    prefix: "data/generated/starmap/deepstar_2020_1024",
-    recovery: "scripts/starmap/generate.sh",
+    prefix: "data/starmap/deepstar_2020_1024",
+    recovery: "pnpm update-starmap",
   },
   DeepStar2K: {
-    prefix: "data/generated/starmap/deepstar_2020_2048",
-    recovery: "scripts/starmap/generate.sh",
+    prefix: "data/starmap/deepstar_2020_2048",
+    recovery: "pnpm update-starmap",
   },
 };
 
