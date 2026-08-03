@@ -54,18 +54,33 @@
       }
       #shell h1 {
         margin: 0;
-        font: inherit;
+        color: #edffff;
+        font-weight: 400;
+        font-size: clamp(2.25rem, 10vw, 4rem);
+        line-height: 1.1;
+      }
+      #shell h1 span {
+        display: block;
+        margin-top: 0.6rem;
+        color: #edffffcc;
+        font-size: 0.85rem;
+        line-height: 1.4;
       }
       #shell p {
         margin: 0.6rem 0 0;
         font-size: 0.85rem;
-        color: #7fd2ea99;
       }
       #shell a {
         color: #7fd2ea;
       }
       .shell-pulse {
+        color: #7fd2ea99;
         animation: shell-pulse 1.4s ease-in-out infinite;
+      }
+      .shell-about {
+        position: absolute;
+        inset: auto 0 1.25rem;
+        margin: 0;
       }
       @keyframes shell-pulse {
         50% {
@@ -84,10 +99,13 @@
   <body>
     <div id="cesiumContainer"></div>
     <div id="shell">
-      <h1>Satvis: 3D satellite tracker and pass predictor</h1>
+      <h1>
+        satvis.space
+        <span>3D satellite tracker and pass predictor</span>
+      </h1>
       <p class="shell-pulse">Loading the globe…</p>
-      <p><a href="/about">About</a></p>
       <noscript><p>The globe needs JavaScript.</p></noscript>
+      <p class="shell-about"><a href="/about">About</a></p>
     </div>
     <div id="app" class="dark isolate" v-cloak></div>
     <script type="module" src="/src/app.ts"></script>
