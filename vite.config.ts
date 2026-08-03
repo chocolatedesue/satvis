@@ -133,6 +133,11 @@ export default defineConfig({
           "cesium/Workers/**/*",
           "cesium/Assets/Textures/maki/*",
           "**/*.map",
+          // The embed page's background, 3.8 MB of decoration on a page that is not
+          // the app. The globs above do not match it today because it is a jpg, which
+          // is exactly why it is listed: re-encoding it as png or webp later must not
+          // silently add 3.8 MB to every visitor's install. Hence `bg.*`, not `bg.jpg`.
+          "bg.*",
           // A social card, once there is one worth publishing, belongs here as
           // well: only a scraper unwrapping a shared link ever fetches it, and the
           // png glob above would otherwise precache it for every visitor.
