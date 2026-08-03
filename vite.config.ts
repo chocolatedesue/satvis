@@ -128,6 +128,9 @@ export default defineConfig({
           "cesium/Workers/**/*",
           "cesium/Assets/Textures/maki/*",
           "**/*.map",
+          // A social card, once there is one worth publishing, belongs here as
+          // well: only a scraper unwrapping a shared link ever fetches it, and the
+          // png glob above would otherwise precache it for every visitor.
           // The benchmarking framework (src/modules/benchmark), which
           // rolls up into the panel's chunk because the panel is its only
           // importer. The chunk is lazy, but the precache glob above would pull
