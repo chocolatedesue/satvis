@@ -236,6 +236,54 @@ describe("SampledTrajectory", () => {
       expect(trajectory.position(T0)).toBeUndefined();
     });
 
+    test("only one request is outstanding, however many ticks arrive", async () => {
+      const { trajectory, sampler, periodSeconds } = issTrajectory();
+      await trajectory.ensure(T0);
+
+      let outstanding = 0;
+      let peak = 0;
+      const inline = new InlineSampleSource().samplerFor("25544", issRecord());
+      vi.spyOn(sampler, "samples").mockImplementation(async (from, to) => {
+        outstanding += 1;
+        peak = Math.max(peak, outstanding);
+        await Promise.resolve();
+        outstanding -= 1;
+        return inline.samples(from, to);
+      });
+
+      // Four ticks in one turn, the way a fast clock delivers them.
+      const later = (n: number) => JulianDate.addSeconds(T0, (periodSeconds / 4) * n, new JulianDate());
+      await Promise.all([trajectory.ensure(later(1)), trajectory.ensure(later(2)), trajectory.ensure(later(3)), trajectory.ensure(later(4))]);
+
+      // Without coalescing each of these computes the same missing range against
+      // the same un-updated interval and asks for it again.
+      expect(peak).toBe(1);
+    });
+
+    test("a tick coalesced away is honoured once the fill lands", async () => {
+      const { trajectory, sampler, periodSeconds } = issTrajectory();
+      await trajectory.ensure(T0);
+      const asked: Array<[number, number]> = [];
+      const inline = new InlineSampleSource().samplerFor("25544", issRecord());
+      vi.spyOn(sampler, "samples").mockImplementation(async (from, to) => {
+        asked.push([from, to]);
+        return inline.samples(from, to);
+      });
+
+      const first = trajectory.ensure(JulianDate.addSeconds(T0, periodSeconds / 4, new JulianDate()));
+      // Arrives while the first is still out, and asks about a much later time.
+      const jumped = JulianDate.addSeconds(T0, periodSeconds * 4, new JulianDate());
+      const second = trajectory.ensure(jumped);
+      await Promise.all([first, second]);
+      // The re-run is scheduled from a `finally`, so let it settle.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // The jump is not lost: the window ends up covering where the clock went.
+      expect(asked.length).toBeGreaterThan(1);
+      expect(trajectory.position(jumped)).toBeDefined();
+    });
+
     test("start only arranges the top-ups; it does not fill", async () => {
       const { trajectory, source } = issTrajectory();
       let notified = 0;

@@ -59,6 +59,12 @@ export class SampledTrajectory {
    */
   readonly #sampler: TrajectorySampler;
 
+  /** The fill in flight, if any. At most one — see `ensure`. */
+  #filling: Promise<void> | undefined;
+
+  /** The time a coalesced tick asked about, to be honoured once the fill lands. */
+  #pendingTime: JulianDate | undefined;
+
   constructor(orbit: Orbit, sampler: TrajectorySampler) {
     this.#orbit = orbit;
     this.#sampler = sampler;
@@ -219,8 +225,33 @@ export class SampledTrajectory {
    * derives, and it does not matter: the sampler answers on a grid anchored to the
    * element set's epoch, so a window a few seconds wider or narrower changes which
    * samples come back but never where they sit in time.
+   *
+   * At most one request is outstanding at a time. Without that, a tick arriving
+   * before the previous reply computed the same missing range and asked for it
+   * again: measured at 5,000 satellites and ×10000, the sampler was producing
+   * 2.5 million samples a second where the window needs about 1.1 million.
    */
-  async ensure(time: JulianDate): Promise<void> {
+  ensure(time: JulianDate): Promise<void> {
+    if (this.#filling) {
+      // A tick arrived while a request was already out. Neither queue it — at a
+      // fast clock the ticks outrun the replies and the queue only grows — nor
+      // drop it, which would lose a clock that jumped mid-request. Remember the
+      // latest time and re-run once, when the current fill lands.
+      this.#pendingTime = time;
+      return this.#filling;
+    }
+    this.#filling = this.#fill(time).finally(() => {
+      this.#filling = undefined;
+      const pending = this.#pendingTime;
+      this.#pendingTime = undefined;
+      if (pending) {
+        void this.ensure(pending);
+      }
+    });
+    return this.#filling;
+  }
+
+  async #fill(time: JulianDate): Promise<void> {
     const window = trajectoryWindow(this.#orbit.orbitalPeriod);
     if (window.sampleCount === 0) {
       return;
@@ -383,6 +414,8 @@ export class SampledTrajectory {
     return () => {
       removeCallback();
       this.#data = undefined;
+      // So a fill still in flight does not schedule another one after teardown.
+      this.#pendingTime = undefined;
     };
   }
 
