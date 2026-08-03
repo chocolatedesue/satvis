@@ -5,16 +5,30 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import Orbit from "./Orbit";
 import { SampledTrajectory } from "./SampledTrajectory";
 import { parseGpPayload, type GpRecord } from "./util/gp";
+import { InlineSampleSource, type SampleChunk, type TrajectorySampler } from "./util/sampleSource";
 
 const TLE = "ISS (ZARYA)\n1 25544U 98067A   18342.69352573  .00002284  00000-0  41838-4 0  9992\n2 25544  51.6407 229.0798 0005166 124.8351 329.3296 15.54069892145658";
 
 // Time near the TLE epoch so SGP4 propagation stays meaningful.
 const T0 = JulianDate.fromDate(dayjs("2018-12-08").toDate());
 
-function issTrajectory(): { orbit: Orbit; trajectory: SampledTrajectory; periodSeconds: number } {
-  const orbit = new Orbit("ISS", parseGpPayload(TLE)[0] as GpRecord);
-  return { orbit, trajectory: new SampledTrajectory(orbit), periodSeconds: orbit.orbitalPeriod * 60 };
+const issRecord = (): GpRecord => parseGpPayload(TLE)[0] as GpRecord;
+
+/**
+ * A trajectory sampling inline. The unit tests are the second implementation's
+ * reason for existing: they exercise the same code the worker runs, on this
+ * thread, with no transport in the way.
+ */
+function issTrajectory(): { orbit: Orbit; trajectory: SampledTrajectory; sampler: TrajectorySampler; source: InlineSampleSource; periodSeconds: number } {
+  const record = issRecord();
+  const orbit = new Orbit("ISS", record);
+  const source = new InlineSampleSource();
+  const sampler = source.samplerFor("25544", record);
+  return { orbit, trajectory: new SampledTrajectory(orbit, sampler), sampler, source, periodSeconds: orbit.orbitalPeriod * 60 };
 }
+
+/** `start` only needs a clock and a tick event off the viewer. */
+const fakeViewer = () => ({ clock: { currentTime: T0, onTick: { addEventListener: () => () => {} } } }) as unknown as Parameters<SampledTrajectory["start"]>[0];
 
 beforeEach(() => {
   // The ICRF transform needs async-loaded IAU data that is unavailable in
@@ -24,7 +38,7 @@ beforeEach(() => {
 });
 
 describe("SampledTrajectory", () => {
-  test("is empty before the first update", () => {
+  test("is empty before the first update", async () => {
     const { trajectory } = issTrajectory();
     expect(trajectory.valid).toBe(false);
     expect(trajectory.fixed).toBeUndefined();
@@ -33,9 +47,9 @@ describe("SampledTrajectory", () => {
     expect(trajectory.positionsForNextOrbit(T0)).toHaveLength(0);
   });
 
-  test("update covers half an orbit back and 1.5 orbits forward", () => {
+  test("update covers half an orbit back and 1.5 orbits forward", async () => {
     const { trajectory, periodSeconds } = issTrajectory();
-    trajectory.update(T0);
+    await trajectory.ensure(T0);
 
     expect(trajectory.valid).toBe(true);
     const interval = trajectory.interval!;
@@ -49,12 +63,12 @@ describe("SampledTrajectory", () => {
     expect(Cartesian3.magnitude(position!) / 1000).toBeLessThan(6900);
   });
 
-  test("window slides forward as time advances", () => {
+  test("window slides forward as time advances", async () => {
     const { trajectory, periodSeconds } = issTrajectory();
-    trajectory.update(T0);
+    await trajectory.ensure(T0);
 
     const later = JulianDate.addSeconds(T0, periodSeconds, new JulianDate());
-    trajectory.update(later);
+    await trajectory.ensure(later);
 
     const interval = trajectory.interval!;
     expect(JulianDate.secondsDifference(later, interval.start)).toBeCloseTo(periodSeconds / 2, 5);
@@ -62,9 +76,9 @@ describe("SampledTrajectory", () => {
     expect(trajectory.position(later)).toBeDefined();
   });
 
-  test("positionsForNextOrbit returns one orbit of raw samples closed into a loop", () => {
+  test("positionsForNextOrbit returns one orbit of raw samples closed into a loop", async () => {
     const { trajectory } = issTrajectory();
-    trajectory.update(T0);
+    await trajectory.ensure(T0);
 
     const positions = trajectory.positionsForNextOrbit(T0);
     // ~120 samples per orbit plus the repeated first sample closing the loop.
@@ -75,27 +89,27 @@ describe("SampledTrajectory", () => {
     expect(open.length).toBe(positions.length - 1);
   });
 
-  test("groundTrack samples positions around the given time", () => {
+  test("groundTrack samples positions around the given time", async () => {
     const { trajectory } = issTrajectory();
-    trajectory.update(T0);
+    await trajectory.ensure(T0);
 
     const track = trajectory.groundTrack(T0, 2, 1);
     expect(track).toHaveLength(4);
     expect(track.every((position) => position !== undefined)).toBe(true);
   });
 
-  test("the inertial frame is not sampled until something asks for it", () => {
+  test("the inertial frame is not sampled until something asks for it", async () => {
     const { trajectory } = issTrajectory();
-    trajectory.update(T0);
+    await trajectory.ensure(T0);
 
     // A scene drawing points and nothing else pays for one sample set, not two.
     expect(trajectory.fixed).toBeDefined();
     expect(trajectory.inertial).toBeUndefined();
   });
 
-  test("requireInertial backfills the window already sampled", () => {
+  test("requireInertial backfills the window already sampled", async () => {
     const { trajectory } = issTrajectory();
-    trajectory.update(T0);
+    await trajectory.ensure(T0);
     const fixedSamples = trajectory.fixed?.length() ?? 0;
     expect(fixedSamples).toBeGreaterThan(0);
 
@@ -106,17 +120,17 @@ describe("SampledTrajectory", () => {
     expect(trajectory.inertial?.length()).toBe(fixedSamples);
   });
 
-  test("requireInertial before the first update samples both frames from the start", () => {
+  test("requireInertial before the first update samples both frames from the start", async () => {
     const { trajectory } = issTrajectory();
     trajectory.requireInertial();
-    trajectory.update(T0);
+    await trajectory.ensure(T0);
 
     expect(trajectory.inertial?.length()).toBe(trajectory.fixed?.length());
   });
 
-  test("requireInertial is idempotent and keeps the same property instance", () => {
+  test("requireInertial is idempotent and keeps the same property instance", async () => {
     const { trajectory } = issTrajectory();
-    trajectory.update(T0);
+    await trajectory.ensure(T0);
     trajectory.requireInertial();
     const first = trajectory.inertial;
 
@@ -126,26 +140,113 @@ describe("SampledTrajectory", () => {
     expect(trajectory.inertial).toBe(first);
   });
 
-  test("the inertial window keeps sliding once required", () => {
+  test("the inertial window keeps sliding once required", async () => {
     const { trajectory, periodSeconds } = issTrajectory();
-    trajectory.update(T0);
+    await trajectory.ensure(T0);
     trajectory.requireInertial();
 
-    trajectory.update(JulianDate.addSeconds(T0, periodSeconds, new JulianDate()));
+    await trajectory.ensure(JulianDate.addSeconds(T0, periodSeconds, new JulianDate()));
 
     // Not just backfilled once: the flag has to make every later refresh sample
     // both frames, or the orbit would freeze a window behind the satellite.
     expect(trajectory.inertial?.length()).toBe(trajectory.fixed?.length());
   });
 
-  test("positionsForNextOrbit asking for the inertial frame requires it implicitly", () => {
+  test("positionsForNextOrbit asking for the inertial frame requires it implicitly", async () => {
     const { trajectory } = issTrajectory();
-    trajectory.update(T0);
+    await trajectory.ensure(T0);
     expect(trajectory.inertial).toBeUndefined();
 
     const positions = trajectory.positionsForNextOrbit(T0, "inertial", false);
 
     expect(positions.length).toBeGreaterThan(0);
     expect(trajectory.inertial).toBeDefined();
+  });
+
+  describe("sampling through a source", () => {
+    test("propagates nowhere on this thread — every sample comes from the source", async () => {
+      const { orbit, trajectory, source } = issTrajectory();
+      const sgp4 = vi.spyOn(orbit, "positionECI");
+
+      await trajectory.ensure(T0);
+
+      // Orbit still owns propagation for pass prediction and the info panel, but
+      // the sampling path no longer touches it.
+      expect(sgp4).not.toHaveBeenCalled();
+      expect(source.stats.chunks).toBe(1);
+      expect(source.stats.samples).toBeGreaterThan(200);
+    });
+
+    test("a slid window asks only for what it is missing", async () => {
+      const { trajectory, source, periodSeconds } = issTrajectory();
+      await trajectory.ensure(T0);
+      const openingSamples = source.stats.samples;
+
+      await trajectory.ensure(JulianDate.addSeconds(T0, periodSeconds / 4, new JulianDate()));
+
+      // A quarter revolution on is a quarter revolution of new samples, not
+      // another whole window.
+      const added = source.stats.samples - openingSamples;
+      expect(added).toBeGreaterThan(0);
+      expect(added).toBeLessThan(openingSamples / 2);
+    });
+
+    test("samples from consecutive requests land on one evenly spaced grid", async () => {
+      const { trajectory, periodSeconds } = issTrajectory();
+      await trajectory.ensure(T0);
+      await trajectory.ensure(JulianDate.addSeconds(T0, periodSeconds / 4, new JulianDate()));
+
+      const { times } = trajectory.fixed!.getRawSamples();
+      expect(times.length).toBeGreaterThan(200);
+      const gaps = times.slice(1).map((time, index) => JulianDate.secondsDifference(time, times[index] as JulianDate));
+      const expected = periodSeconds / 120;
+      // The grid is anchored to the element set's epoch, so the seam between two
+      // chunks is indistinguishable from anywhere else in the window. Without
+      // that anchor this is where a duplicated or short gap would show up.
+      for (const gap of gaps) {
+        expect(gap).toBeCloseTo(expected, 3);
+      }
+    });
+
+    test("refused samples are skipped rather than re-propagated", async () => {
+      const { orbit, trajectory, sampler } = issTrajectory();
+      const sgp4 = vi.spyOn(orbit, "positionECI");
+      vi.spyOn(sampler, "samples").mockImplementation(async (from, to) => {
+        const chunk = (await new InlineSampleSource().samplerFor("25544", issRecord()).samples(from, to)) as SampleChunk;
+        // Blank three samples the way the propagator would when it refuses them.
+        return { ...chunk, refusedIndices: [5, 6, 7] };
+      });
+
+      await trajectory.ensure(T0);
+
+      // Retrying would run the same propagator on the same instants and fail the
+      // same way, so the samples are simply absent.
+      expect(sgp4).not.toHaveBeenCalled();
+      expect(trajectory.valid).toBe(true);
+      expect(trajectory.position(T0)).toBeDefined();
+    });
+
+    test("a source that cannot answer leaves the trajectory empty rather than wrong", async () => {
+      const { trajectory, sampler } = issTrajectory();
+      vi.spyOn(sampler, "samples").mockResolvedValue(undefined);
+
+      await trajectory.ensure(T0);
+
+      expect(trajectory.valid).toBe(false);
+      expect(trajectory.position(T0)).toBeUndefined();
+    });
+
+    test("start only arranges the top-ups; it does not fill", async () => {
+      const { trajectory, source } = issTrajectory();
+      let notified = 0;
+
+      const teardown = trajectory.start(fakeViewer(), () => {
+        notified += 1;
+      });
+
+      expect(notified).toBe(1);
+      expect(source.stats.requests).toBe(0);
+      teardown();
+    });
   });
 });

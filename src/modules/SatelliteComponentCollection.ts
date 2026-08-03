@@ -42,6 +42,7 @@ import { coneDescription, groundTrackDescription, modelUri, orbitPathTimes, orbi
 import { SatelliteProperties } from "./SatelliteProperties";
 import { CesiumTimelineHelper } from "./util/CesiumTimelineHelper";
 import type { PolylineBatch } from "./util/PolylineBatch";
+import type { TrajectorySampler } from "./util/sampleSource";
 
 type SatelliteComponentName = string;
 
@@ -109,9 +110,9 @@ export class SatelliteComponentCollection {
 
   eventListeners: Record<string, () => void> = {};
 
-  constructor(viewer: Viewer, entry: CatalogEntry, batches: SatelliteBatches) {
+  constructor(viewer: Viewer, entry: CatalogEntry, batches: SatelliteBatches, sampler: TrajectorySampler) {
     this.viewer = viewer;
-    this.props = new SatelliteProperties(entry);
+    this.props = new SatelliteProperties(entry, sampler);
     this.#orbits = batches.orbits;
     this.#tracks = batches.tracks;
   }

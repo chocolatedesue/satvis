@@ -16,6 +16,8 @@ import type { Viewer } from "@cesium/widgets";
 import type Orbit from "./Orbit";
 import "./util/CesiumSampledPositionRawValueAccess";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
+import type { SampleChunk, TrajectorySampler } from "./util/sampleSource";
+import { trajectoryWindow } from "./util/trajectoryWindow";
 
 // Cesium 1.143 widened the InterpolationAlgorithm interface (type/interpolate) without
 // updating the LagrangePolynomialApproximation namespace declaration; the runtime object
@@ -51,8 +53,15 @@ export class SampledTrajectory {
   /** Whether any consumer has asked for the inertial frame. See requireInertial. */
   #wantsInertial = false;
 
-  constructor(orbit: Orbit) {
+  /**
+   * Where samples come from. Injected rather than reached for, so this class has
+   * no opinion about whether propagation happens on a worker — see sampleSource.
+   */
+  readonly #sampler: TrajectorySampler;
+
+  constructor(orbit: Orbit, sampler: TrajectorySampler) {
     this.#orbit = orbit;
+    this.#sampler = sampler;
   }
 
   /** Whether samples exist and propagation has not failed. */
@@ -175,79 +184,206 @@ export class SampledTrajectory {
   }
 
   /**
-   * Populate samples for the viewer's current time and keep them fresh with a
-   * periodic clock callback; `callback` fires after every refresh. Returns an
-   * unsubscribe function that also tears down the samples.
+   * Take an opening window fetched before this trajectory existed.
+   *
+   * The build fetches it, because a satellite is only worth constructing once its
+   * samples are in hand — and constructing it is `sgp4init`, which belongs inside
+   * the build's frame budget rather than in a loop over the whole activation.
+   *
+   * The interval is the chunk's own extent rather than the policy window: the
+   * first `ensure` computes that and tops up the difference.
+   */
+  adopt(chunk: SampleChunk): void {
+    const sampleCount = Math.floor(chunk.teme.length / 3);
+    if (this.#data || sampleCount === 0) {
+      return;
+    }
+    const start = SampledTrajectory.#sampleTime(chunk, 0);
+    const stop = SampledTrajectory.#sampleTime(chunk, sampleCount - 1);
+    this.#init(start);
+    this.#applyChunk(chunk);
+    this.#setInterval(new TimeInterval({ start, stop }));
+  }
+
+  /**
+   * Make sure the window covers `time`, requesting whatever is missing.
+   *
+   * The single way samples ever enter this class. Awaitable because the samples
+   * come from somewhere else now: the build awaits the first call so a satellite
+   * is only shown once it has a position, and the periodic top-up does not await
+   * at all — the window runs one and a half revolutions ahead of the clock, so a
+   * reply arriving a few frames late is invisible.
+   *
+   * The requested bounds are deliberately approximate. They come from this
+   * satellite's own period, which differs slightly from the one the sampler
+   * derives, and it does not matter: the sampler answers on a grid anchored to the
+   * element set's epoch, so a window a few seconds wider or narrower changes which
+   * samples come back but never where they sit in time.
+   */
+  async ensure(time: JulianDate): Promise<void> {
+    const window = trajectoryWindow(this.#orbit.orbitalPeriod);
+    if (window.sampleCount === 0) {
+      return;
+    }
+    const request = new TimeInterval({
+      start: JulianDate.addSeconds(time, window.offsetSeconds, new JulianDate()),
+      stop: JulianDate.addSeconds(time, window.offsetSeconds + window.spanSeconds, new JulianDate()),
+    });
+
+    // Nothing yet, or the clock has jumped clear of what is held: one request for
+    // the whole window rather than two for its edges.
+    if (!this.#data || !TimeInterval.contains(this.#data.interval, time)) {
+      const chunk = await this.#sampler.samples(JulianDate.toDate(request.start).getTime(), JulianDate.toDate(request.stop).getTime());
+      if (!chunk || chunk.teme.length === 0) {
+        return;
+      }
+      this.#init(request.start);
+      this.#applyChunk(chunk);
+      this.#setInterval(request);
+      return;
+    }
+
+    const held = this.#data.interval;
+    const missingBefore = JulianDate.secondsDifference(held.start, request.start) > 0;
+    const missingAfter = JulianDate.secondsDifference(request.stop, held.stop) > 0;
+    const chunks = await Promise.all([
+      missingBefore ? this.#sampler.samples(JulianDate.toDate(request.start).getTime(), JulianDate.toDate(held.start).getTime()) : undefined,
+      missingAfter ? this.#sampler.samples(JulianDate.toDate(held.stop).getTime(), JulianDate.toDate(request.stop).getTime()) : undefined,
+    ]);
+    // Torn down while the request was in flight.
+    if (!this.#data) {
+      return;
+    }
+    for (const chunk of chunks) {
+      if (chunk) this.#applyChunk(chunk);
+    }
+    this.#evict(request);
+    this.#data.interval = request;
+  }
+
+  /**
+   * Turn one chunk of TEME samples into sampled positions.
+   *
+   * The frame transforms happen here rather than in the sampler: they are Cesium's,
+   * they need IAU data a worker has no business loading a second copy of, and they
+   * were measured at 43% of this work against 57% for the propagation that did
+   * move. Refused samples are skipped, not re-propagated — retrying would run the
+   * same propagator on the same instant and fail the same way, and a sampled
+   * position property interpolates across the gap.
+   */
+  #applyChunk(chunk: SampleChunk): void {
+    const data = this.#data;
+    if (!data) {
+      return;
+    }
+    const sampleCount = Math.floor(chunk.teme.length / 3);
+    const refused = chunk.refusedIndices.length > 0 ? new Set(chunk.refusedIndices) : undefined;
+    const inertialProperty = data.inertial;
+    const times: JulianDate[] = [];
+    const positionsFixed: Cartesian3[] = [];
+    const positionsInertial: Cartesian3[] = [];
+    const anchor = SampledTrajectory.#chunkAnchor(chunk);
+    // One scratch for the TEME position: it is read by the transform and never
+    // kept, so allocating a Cartesian3 per sample was 1.2 million objects that
+    // existed to be thrown away.
+    const teme = new Cartesian3();
+
+    for (let index = 0; index < sampleCount; index += 1) {
+      if (refused?.has(index)) {
+        continue;
+      }
+      const offset = index * 3;
+      teme.x = chunk.teme[offset] as number;
+      teme.y = chunk.teme[offset + 1] as number;
+      teme.z = chunk.teme[offset + 2] as number;
+      const time = SampledTrajectory.#sampleTimeFrom(anchor, chunk, index);
+      const framed = this.#toFrames(time, teme, !!inertialProperty);
+      if (!framed) {
+        continue;
+      }
+      times.push(time);
+      positionsFixed.push(framed.positionFixed);
+      if (inertialProperty) positionsInertial.push(framed.positionInertial);
+    }
+
+    if (times.length === 0) {
+      return;
+    }
+    // Added at once: a sorted array avoids a search per sample.
+    data.fixed.addSamples(times, positionsFixed);
+    inertialProperty?.addSamples(times, positionsInertial);
+  }
+
+  /** Its own method so the caller's narrowing of `#data` does not reach in here. */
+  #setInterval(interval: TimeInterval): void {
+    if (this.#data) {
+      this.#data.interval = interval;
+    }
+  }
+
+  /**
+   * The chunk's grid origin as a JulianDate.
+   *
+   * Hoisted out of the per-sample path deliberately. It is one value for the whole
+   * chunk, and rebuilding it per sample meant a `Date` and a `JulianDate` allocated
+   * for each of 241 samples per satellite — 1.2 million of each across a
+   * 5,000-satellite build, which was the largest single slice of the window
+   * handling.
+   */
+  static #chunkAnchor(chunk: SampleChunk): JulianDate {
+    return JulianDate.fromDate(new Date(chunk.anchorEpochMs));
+  }
+
+  /**
+   * The instant of one sample, from the grid rather than from the chunk's start.
+   *
+   * Every chunk for a satellite carries the same anchor, so the same grid index
+   * always yields the same JulianDate — which is what stops two chunks from
+   * placing one grid instant at two times a fraction of a millisecond apart. See
+   * Sgp4Chunk.anchorEpochMs.
+   */
+  static #sampleTimeFrom(anchor: JulianDate, chunk: SampleChunk, index: number): JulianDate {
+    return JulianDate.addSeconds(anchor, (chunk.firstIndex + index) * chunk.stepSeconds, new JulianDate());
+  }
+
+  /** The same instant, for the two callers that want one sample and not a run of them. */
+  static #sampleTime(chunk: SampleChunk, index: number): JulianDate {
+    return SampledTrajectory.#sampleTimeFrom(SampledTrajectory.#chunkAnchor(chunk), chunk, index);
+  }
+
+  #evict(keep: TimeInterval): void {
+    const data = this.#data;
+    if (!data) {
+      return;
+    }
+    const before = new TimeInterval({ start: JulianDate.fromIso8601("1957"), stop: keep.start, isStartIncluded: false, isStopIncluded: false });
+    const after = new TimeInterval({ start: keep.stop, stop: JulianDate.fromIso8601("2100"), isStartIncluded: false, isStopIncluded: false });
+    data.fixed.removeSamples(before);
+    data.fixed.removeSamples(after);
+    data.inertial?.removeSamples(before);
+    data.inertial?.removeSamples(after);
+  }
+
+  /**
+   * Keep the window fresh, and hand back the teardown.
+   *
+   * The opening window is not filled here — the build awaits `ensure` before the
+   * satellite is shown, so by the time this runs there is one. All this does is
+   * arrange for the top-ups.
    */
   start(viewer: Viewer, callback: () => void): () => void {
-    this.update(viewer.clock.currentTime);
     callback();
-
     const samplingRefreshRate = (this.#orbit.orbitalPeriod * 60) / 4;
     const removeCallback = CesiumCallbackHelper.createPeriodicTimeCallback(viewer, samplingRefreshRate, (time) => {
-      this.update(time);
-      callback();
+      void this.ensure(time).then(() => {
+        // Torn down while the top-up was in flight.
+        if (this.#data) callback();
+      });
     });
     return () => {
       removeCallback();
       this.#data = undefined;
     };
-  }
-
-  update(time: JulianDate): void {
-    // Determine sampling interval based on sampled positions per orbit and orbital period
-    // 120 samples per orbit seems to be a good compromise between performance and accuracy
-    const samplingPointsPerOrbit = 120;
-    const orbitalPeriod = this.#orbit.orbitalPeriod * 60;
-    const samplingInterval = orbitalPeriod / samplingPointsPerOrbit;
-
-    // Always keep half an orbit backwards and 1.5 full orbits forward in the sampled position
-    const request = new TimeInterval({
-      start: JulianDate.addSeconds(time, -orbitalPeriod / 2, new JulianDate()),
-      stop: JulianDate.addSeconds(time, orbitalPeriod * 1.5, new JulianDate()),
-    });
-
-    // (Re)create sampled position if it does not exist or if it does not contain the current time
-    if (!this.#data || !TimeInterval.contains(this.#data.interval, time)) {
-      this.#init(request.start);
-    }
-    const sp = this.#data as SampledPositionData;
-
-    // Determine which parts of the requested interval are missing
-    const intersect = TimeInterval.intersect(sp.interval, request, new TimeInterval());
-    const missingSecondsEnd = JulianDate.secondsDifference(request.stop, intersect.stop);
-    const missingSecondsStart = JulianDate.secondsDifference(intersect.start, request.start);
-
-    if (missingSecondsStart > 0) {
-      const samplingStart = JulianDate.addSeconds(intersect.start, -missingSecondsStart, new JulianDate());
-      const samplingStop = sp.interval.start;
-      this.#addSamples(samplingStart, samplingStop, samplingInterval);
-    }
-    if (missingSecondsEnd > 0) {
-      const samplingStart = sp.interval.stop;
-      const samplingStop = JulianDate.addSeconds(intersect.stop, missingSecondsEnd, new JulianDate());
-      this.#addSamples(samplingStart, samplingStop, samplingInterval);
-    }
-
-    // Remove no longer needed samples
-    const removeBefore = new TimeInterval({
-      start: JulianDate.fromIso8601("1957"),
-      stop: request.start,
-      isStartIncluded: false,
-      isStopIncluded: false,
-    });
-    const removeAfter = new TimeInterval({
-      start: request.stop,
-      stop: JulianDate.fromIso8601("2100"),
-      isStartIncluded: false,
-      isStopIncluded: false,
-    });
-    sp.fixed.removeSamples(removeBefore);
-    sp.fixed.removeSamples(removeAfter);
-    sp.inertial?.removeSamples(removeBefore);
-    sp.inertial?.removeSamples(removeAfter);
-
-    sp.interval = request;
   }
 
   /** Both frames want the same extrapolation and interpolation; only the frame differs. */
@@ -278,49 +414,27 @@ export class SampledTrajectory {
     };
   }
 
-  #addSamples(start: JulianDate, stop: JulianDate, samplingInterval: number): void {
-    if (!this.#data) return;
-    const inertialProperty = this.#data.inertial;
-    const times: JulianDate[] = [];
-    const positionsFixed: Cartesian3[] = [];
-    const positionsInertial: Cartesian3[] = [];
-    for (let time = start; JulianDate.compare(stop, time) >= 0; time = JulianDate.addSeconds(time, samplingInterval, new JulianDate())) {
-      const { positionFixed, positionInertial } = this.#computePosition(time, !!inertialProperty);
-      times.push(time);
-      positionsFixed.push(positionFixed);
-      if (inertialProperty) positionsInertial.push(positionInertial);
-    }
-    // Add all samples at once as adding a sorted array avoids searching for the correct position every time
-    this.#data.fixed.addSamples(times, positionsFixed);
-    inertialProperty?.addSamples(times, positionsInertial);
-  }
-
-  #computePositionInertialTEME(time: JulianDate): Cartesian3 {
-    const eci = this.#orbit.positionECI(JulianDate.toDate(time));
-    if (this.#orbit.error || !eci) {
-      if (this.#data) this.#data.valid = false;
-      return Cartesian3.ZERO;
-    }
-    return new Cartesian3(eci.x * 1000, eci.y * 1000, eci.z * 1000);
-  }
-
   /**
-   * `withInertial` gates the ICRF half, and with it the requirement that ICRF
-   * data be loaded at all. A scene drawing points and nothing else no longer
-   * needs it, so it is no longer a reason to mark the trajectory invalid.
+   * TEME into the frames the scene draws in.
+   *
+   * Undefined when the transform data is not there, which drops the sample rather
+   * than storing a wrong one — multiplying by an undefined matrix throws a
+   * DeveloperError from inside Cesium's render loop. `withInertial` gates the ICRF
+   * half and with it the need for ICRF data at all: a scene drawing points and
+   * nothing else does not need it, so its absence is no longer a reason to
+   * invalidate a trajectory.
    */
-  #computePosition(timestamp: JulianDate, withInertial: boolean): { positionFixed: Cartesian3; positionInertial: Cartesian3 } {
-    const positionInertialTEME = this.#computePositionInertialTEME(timestamp);
-
+  #toFrames(timestamp: JulianDate, positionInertialTEME: Cartesian3, withInertial: boolean): { positionFixed: Cartesian3; positionInertial: Cartesian3 } | undefined {
     const temeToFixed = Transforms.computeTemeToPseudoFixedMatrix(timestamp);
     const fixedToIcrf = withInertial ? Transforms.computeFixedToIcrfMatrix(timestamp) : undefined;
     if (!defined(temeToFixed) || (withInertial && !defined(fixedToIcrf))) {
-      // Reference frame data is not available for this time (outside the preloaded ICRF window or
-      // before the async load resolves). Skip the sample instead of multiplying by an undefined
-      // matrix, which throws a DeveloperError inside Cesium's render loop.
-      console.error("Reference frame transformation data failed to load");
-      if (this.#data) this.#data.valid = false;
-      return { positionFixed: Cartesian3.ZERO, positionInertial: Cartesian3.ZERO };
+      // Reported once per trajectory rather than once per sample: a window is a
+      // couple of hundred of these and the cause is the same for all of them.
+      if (this.#data?.valid) {
+        console.error("Reference frame transformation data failed to load");
+        this.#data.valid = false;
+      }
+      return undefined;
     }
 
     const positionFixed = Matrix3.multiplyByVector(temeToFixed, positionInertialTEME, new Cartesian3());

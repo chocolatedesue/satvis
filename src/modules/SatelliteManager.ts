@@ -11,9 +11,11 @@ import { GEOMETRY_REFRESH_MIN_SECONDS, geometryRefreshSeconds } from "./satellit
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
 import { sameValue } from "./util/equality";
-import type { GpRecord } from "./util/gp";
+import { approximatePeriodMinutes, type GpRecord } from "./util/gp";
 import { PolylineBatch } from "./util/PolylineBatch";
+import { type SampleChunk, type SampleSource, type SampleSourceStats, WorkerSampleSource } from "./util/sampleSource";
 import { SuppressibleSet } from "./util/Suppressible";
+import { WINDOW_ORBITS_BACK, WINDOW_ORBITS_FORWARD } from "./util/trajectoryWindow";
 
 /**
  * How often the geometry refresh is *considered*, in simulation seconds. Whether
@@ -124,6 +126,24 @@ export class SatelliteManager {
 
   /** Simulation time the stale-able geometry was last re-cut at. See #refreshDerivedGeometry. */
   #geometryRefreshedAt: JulianDate;
+
+  /**
+   * Where every satellite's samples come from. Owned here because this is what
+   * knows which satellites exist; handed to each one as a bound sampler.
+   */
+  readonly #samples: SampleSource = new WorkerSampleSource();
+
+  /**
+   * Satellites whose opening window has arrived, waiting to be instantiated.
+   *
+   * The build drains this rather than the queue directly: a satellite is only
+   * created once it has a position, so there is no moment at which one exists
+   * without one and no main-thread propagation to cover the gap.
+   */
+  #ready: Array<{ key: string; entry: CatalogEntry; chunk: SampleChunk }> = [];
+
+  /** Opening windows still in flight. Counted so the build knows to keep waiting. */
+  #opening = 0;
 
   /** Catalog entries waiting to be instantiated, in the order they will be. See #build. */
   #queue: [string, CatalogEntry][] = [];
@@ -378,6 +398,9 @@ export class SatelliteManager {
       [...target].filter(([key]) => !this.#active.has(key)),
       this.pendingTrackedSatellite || this.trackedSatellite || undefined,
     );
+    // Anything still waiting belonged to a scene that has been replaced.
+    this.#ready = [];
+    this.#requestOpeningWindows();
     this.#build();
 
     // Any shrink, not only a shrink to nothing: the glyph billboards Cesium
@@ -423,10 +446,13 @@ export class SatelliteManager {
     // is not a freeze anyone is looking at.
     const unbudgeted = this.#queue.length <= BUILD_SYNCHRONOUS_LIMIT || typeof requestAnimationFrame !== "function";
     const deadline = performance.now() + BUILD_BUDGET_MS;
-    while (this.#queue.length > 0) {
-      const next = this.#queue.shift();
+    // Drains the satellites whose samples have arrived, not the queue itself. A
+    // satellite still waiting for its opening window is simply not here yet.
+    while (this.#ready.length > 0) {
+      const next = this.#ready.shift();
       if (!next) break;
-      this.#instantiate(next[0], next[1]);
+      this.#queue = this.#queue.filter(([queued]) => queued !== next.key);
+      this.#instantiate(next.key, next.entry, next.chunk);
       // Checked after at least one satellite, so a budget smaller than a single
       // satellite still makes progress rather than spinning on the same entry.
       if (!unbudgeted && performance.now() >= deadline) break;
@@ -442,7 +468,7 @@ export class SatelliteManager {
       }
     }
 
-    if (this.#queue.length > 0) {
+    if (this.#ready.length > 0 || this.#opening > 0) {
       // requestAnimationFrame rather than clock.onTick: under requestRenderMode
       // a tick only happens if something asked for a frame, and a half-built
       // scene asking for nothing would stall the rest of itself forever.
@@ -453,13 +479,59 @@ export class SatelliteManager {
 
     this.#buildHandle = undefined;
     this.viewer.scene.requestRender();
+    this.#resolveSettledIfDone();
+  }
+
+  #resolveSettledIfDone(): void {
+    if (this.#ready.length > 0 || this.#opening > 0) {
+      return;
+    }
     const waiters = this.#buildWaiters;
     this.#buildWaiters = [];
     waiters.forEach((resolve) => resolve());
   }
 
-  #instantiate(key: string, entry: CatalogEntry): void {
-    const sat = new SatelliteComponentCollection(this.viewer, entry, { orbits: this.orbits, tracks: this.tracks });
+  /**
+   * Ask for every queued satellite's opening window, in queue order.
+   *
+   * All at once rather than in waves: the source coalesces a synchronous burst
+   * onto one message per turn, and the replies come back in the order they were
+   * asked for, so the build starts consuming the front of the queue while the tail
+   * is still being propagated.
+   */
+  #requestOpeningWindows(): void {
+    const nowMs = JulianDate.toDate(this.viewer.clock.currentTime).getTime();
+    for (const [key, entry] of this.#queue) {
+      // Bounds from the element set, not from a satrec: this loop runs once per
+      // satellite in the activation and `sgp4init` in it would be the freeze the
+      // build budget exists to prevent. Approximate is all a bound needs to be —
+      // the sampler answers on its own exact grid. See approximatePeriodMinutes.
+      const periodMs = approximatePeriodMinutes(entry.record) * 60_000;
+      if (periodMs <= 0) {
+        continue;
+      }
+      this.#opening += 1;
+      void this.#samples
+        .samplerFor(entry.satnum, entry.record)
+        .samples(nowMs - periodMs * WINDOW_ORBITS_BACK, nowMs + periodMs * WINDOW_ORBITS_FORWARD)
+        .then((chunk) => {
+          // The scene may have been replaced while this was in flight; the queue
+          // is the authority on whether this satellite is still wanted.
+          if (chunk && chunk.teme.length > 0 && this.#queue.some(([queued]) => queued === key)) {
+            this.#ready.push({ key, entry, chunk });
+          }
+        })
+        .finally(() => {
+          this.#opening -= 1;
+          this.#resolveSettledIfDone();
+        });
+    }
+  }
+
+  #instantiate(key: string, entry: CatalogEntry, chunk: SampleChunk): void {
+    const sat = new SatelliteComponentCollection(this.viewer, entry, { orbits: this.orbits, tracks: this.tracks }, this.#samples.samplerFor(entry.satnum, entry.record));
+    // Before show(), which is what reads the trajectory.
+    sat.props.trajectory.adopt(chunk);
     if (this.groundStationAvailable) {
       sat.groundStations = this.#stations;
     }
@@ -477,7 +549,7 @@ export class SatelliteManager {
    * synchronous part of `reconcile` returned.
    */
   buildSettled(): Promise<void> {
-    if (this.#queue.length === 0 && this.#buildHandle === undefined) {
+    if (this.#ready.length === 0 && this.#opening === 0) {
       return Promise.resolve();
     }
     return new Promise((resolve) => {
@@ -485,9 +557,14 @@ export class SatelliteManager {
     });
   }
 
-  /** Whether satellites are still being instantiated. */
+  /** Whether satellites are still being instantiated or still waiting for samples. */
   get building(): boolean {
-    return this.#queue.length > 0 || this.#buildHandle !== undefined;
+    return this.#ready.length > 0 || this.#opening > 0;
+  }
+
+  /** Sampling counters, so a benchmark can tell where the propagation happened. */
+  get sampleStats(): SampleSourceStats {
+    return this.#samples.stats;
   }
 
   get selectedSatellite(): string {

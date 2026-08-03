@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { SatelliteCatalog } from "../modules/SatelliteCatalog";
 import { SatelliteProperties } from "../modules/SatelliteProperties";
 import type { GpRecord } from "../modules/util/gp";
+import { InlineSampleSource } from "../modules/util/sampleSource";
 import type { SatelliteMetadata } from "./satelliteMetadata";
 
 // Minimal OMM record. Metadata rides alongside the element set, attached by the
@@ -33,7 +34,8 @@ function ommRecord(name: string, satnum: number, metadata?: SatelliteMetadata): 
 function propertiesFor(metadata?: SatelliteMetadata): SatelliteProperties {
   const catalog = new SatelliteCatalog();
   catalog.addRecords([ommRecord("TEST SAT", 1, metadata)], ["Test"]);
-  return new SatelliteProperties(catalog.getByName("TEST SAT")!);
+  const entry = catalog.getByName("TEST SAT")!;
+  return new SatelliteProperties(entry, new InlineSampleSource().samplerFor(entry.satnum, entry.record));
 }
 
 describe("record-carried satellite metadata", () => {
