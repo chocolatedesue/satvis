@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The urls worth indexing, which is fewer than the site has. /ot is a rewrite of
+  "/" and canonicals to it; /test and /embedded are shipped for development and
+  carry `X-Robots-Tag: noindex` (public/_headers). Listing either here would ask
+  Google to index a page the same deploy tells it to skip.
+
+  No <lastmod>: it has to be a date the content actually changed to be worth
+  anything, and a hand-kept file cannot promise that. An absent one costs nothing;
+  a stale one teaches Google to ignore the field.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://satvis.space/</loc></url>
+  <url><loc>https://satvis.space/about</loc></url>
+</urlset>
