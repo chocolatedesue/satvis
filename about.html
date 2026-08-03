@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>About Satvis - 3D Satellite Tracker &amp; Sky View</title>
+    <link rel="canonical" href="https://satvis.space/about" />
+    <meta
+      name="description"
+      content="How Satvis tracks satellites: CelesTrak GP element sets propagated with SGP4, pass prediction for a ground station you set, and a compass-aimed sky view. Free and open source."
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Satvis" />
+    <meta property="og:url" content="https://satvis.space/about" />
+    <meta property="og:title" content="About Satvis - 3D Satellite Tracker &amp; Sky View" />
+    <meta
+      property="og:description"
+      content="How Satvis tracks satellites: CelesTrak element sets propagated with SGP4, pass prediction for a ground station you set, and a compass-aimed sky view."
+    />
+    <meta name="twitter:card" content="summary" />
+    <!-- No module script and no viewport lock: this page is text, so it should
+         cost one request to render, and it should zoom. Anything interactive added
+         later belongs on top of the markup below rather than in place of it — the
+         content has to survive a reader that runs no javascript, which is most of
+         what quotes a page like this. -->
+    <link rel="stylesheet" href="/src/css/about.css" />
+    <style>
+      body {
+        margin: 0;
+        background: #0b222d;
+      }
+      /* The same column the content uses, so the link lines up with the heading
+         rather than with the window. */
+      .about-back {
+        max-width: 46rem;
+        margin: 2rem auto 0;
+        padding: 0 1.25rem;
+        font-family: sans-serif;
+      }
+      .about-back a {
+        color: #7fd2ea;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="about-back"><a href="/">← Open the globe</a></div>
+    <!-- Everything inside #about-content is what the in-app dialog shows, which is
+         why the link above sits outside it. src/components/AboutDialog.vue fetches
+         this file and lifts this element's innerHTML — so this is the one copy, and
+         the dialog cannot fall behind it. -->
+    <main id="about-content" class="about">
+      <h1>Satvis: 3D satellite tracker and pass predictor</h1>
+      <p class="about-lede">
+        Satvis is a free, open-source satellite tracker that runs in the browser. It draws more than 12,000 satellites on a 3D globe in real time, across fourteen catalogue groups:
+        Starlink, GPS and the other GNSS constellations, weather and Earth-observation craft, the ISS and other crewed stations. Tell it where you are and it works out when each
+        one passes overhead. The sky view then trades the globe for a ground-level camera aimed by your phone's compass and gyroscope. You look for the satellite in the sky rather
+        than on a map of it.
+      </p>
+
+      <h2>What it does</h2>
+      <ul>
+        <li>Sets a ground station from geolocation or a point you pick on the map</li>
+        <li>Lists upcoming passes and sends a local browser notification before one starts</li>
+        <li>Draws orbit tracks, ground tracks, sensor cones and 3D models per satellite</li>
+        <li>Switches catalogue groups on and off, or searches out a single satellite</li>
+        <li>Installs as a Progressive Web App, on a phone or a desktop</li>
+      </ul>
+
+      <h2>Where the data comes from</h2>
+      <p>
+        Element sets come from <a href="https://celestrak.org" rel="noopener">CelesTrak</a> as OMM JSON, the format replacing TLE for new objects, and a
+        <a href="https://workers.cloudflare.com" rel="noopener">Cloudflare Worker</a> refreshes them every six hours. Positions are propagated from them in the browser with SGP4,
+        through <a href="https://github.com/shashwatak/satellite-js" rel="noopener">satellite.js</a>. A snapshot of the same element sets ships inside the app, so everything still
+        works offline.
+      </p>
+
+      <h2>Built with</h2>
+      <p>
+        <a href="https://cesiumjs.org" rel="noopener">CesiumJS</a> draws the globe, <a href="https://vuejs.org" rel="noopener">Vue</a> and
+        <a href="https://ui.nuxt.com" rel="noopener">Nuxt UI</a> the interface, and <a href="https://developers.google.com/web/tools/workbox" rel="noopener">Workbox</a> the service
+        worker. Everything but the data API is static files on a CDN, so there is no server to run. Created by Florian Mauracher and maintained on
+        <a href="https://github.com/Flowm/satvis/" rel="noopener">github.com/Flowm/satvis</a> under the MIT licence. An
+        <a href="https://apps.apple.com/us/app/satvis/id1441084766" rel="noopener">iOS app</a> wraps the same site and schedules pass notifications with UserNotifications.
+      </p>
+    </main>
+  </body>
+</html>

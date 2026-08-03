@@ -20,6 +20,9 @@ body {
   user-select: none;
 }
 
+/* Hides #app until Vue mounts. The `dark` class index.html sets alongside it forces
+   Nuxt UI onto its dark palette, since Vue mode has no color-mode switch and
+   defaults to light while this app is a dark globe ui throughout. */
 [v-cloak] {
   display: none;
 }

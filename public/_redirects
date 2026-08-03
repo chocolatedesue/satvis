@@ -14,4 +14,11 @@
 # router handles it, so it costs no Worker invocation.
 /ot / 200
 
-/next* /:splat
+# 301 and not the default 302. The branch this url was named for is deployed at the
+# apex now, so the move is permanent and the redirect should say so — a 302 asks
+# every crawler to keep checking and passes no signal to the target.
+#
+# Permanent is what browsers hear too: a 301 is cached hard, so anyone who follows
+# this once will not ask for /next again. If /next is ever wanted back as a preview,
+# that cache is the thing that will make it look broken.
+/next* /:splat 301

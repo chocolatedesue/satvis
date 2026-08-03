@@ -64,3 +64,25 @@ app.use(ui);
 
 // Mount the app
 app.mount("#app");
+
+// The loading screen in index.html has served its purpose once the globe is up.
+// Faded rather than cut, so the handover reads as the screen resolving; removed
+// rather than left hidden, because it is a full-screen overlay and leaving it in
+// the tree would leave a second <h1> in the rendered document. Anything that
+// never runs this file keeps it.
+//
+// index.html holds no comments of its own, being served to every visitor exactly
+// as written, so the two things about its markup that are not self-evident live
+// here. #shell sits outside #app because `[v-cloak]` hides that until Vue mounts,
+// and a loading state nobody sees is not one. Its link to /about is the only one
+// in the raw html: Googlebot runs this bundle and finds the toolbar link instead,
+// but a crawler that does not has nothing else pointing at that page.
+const shell = document.getElementById("shell");
+if (shell) {
+  shell.classList.add("is-done");
+  // On the transition rather than a bare timer, so the node goes exactly when the
+  // fade ends — with a timer behind it because transitionend never fires when the
+  // transition is off (prefers-reduced-motion) or the tab is in the background.
+  shell.addEventListener("transitionend", () => shell.remove(), { once: true });
+  setTimeout(() => shell.remove(), 1000);
+}

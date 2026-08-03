@@ -56,6 +56,7 @@ export default defineConfig({
     rolldownOptions: {
       input: {
         index: fileURLToPath(new URL("index.html", import.meta.url)),
+        about: fileURLToPath(new URL("about.html", import.meta.url)),
         embedded: fileURLToPath(new URL("embedded.html", import.meta.url)),
         test: fileURLToPath(new URL("test.html", import.meta.url)),
       },
@@ -127,6 +128,9 @@ export default defineConfig({
           "cesium/Workers/**/*",
           "cesium/Assets/Textures/maki/*",
           "**/*.map",
+          // A social card, once there is one worth publishing, belongs here as
+          // well: only a scraper unwrapping a shared link ever fetches it, and the
+          // png glob above would otherwise precache it for every visitor.
           // The benchmarking framework (src/modules/benchmark), which
           // rolls up into the panel's chunk because the panel is its only
           // importer. The chunk is lazy, but the precache glob above would pull
