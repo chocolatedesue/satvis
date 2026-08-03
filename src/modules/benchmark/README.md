@@ -65,7 +65,8 @@ nothing when the question is only about drawing.
 | Column             | Meaning                                                                                      |
 | ------------------ | -------------------------------------------------------------------------------------------- |
 | `fps`, `frameMs`   | Between presented frames. What the user feels; flattens against vsync at 60/120 fps          |
-| `cpuMs`            | `preUpdate` → `postRender`. Main-thread work only — see the GPU caveat below                 |
+| `cpuMs`            | `preUpdate` → `postRender`. The render only — position updates are in `tickMs`               |
+| `tickMs`           | `clock.tick()`, every `onTick` listener included. Where propagation shows up                 |
 | `gpuMs`            | GPU time per frame, where the driver's clock can be believed. Blank otherwise                |
 | `p95`, `worst`     | Percentiles, not just a max — one 400 ms frame should not define a row                       |
 | `frames`           | The sample size. A handful means the row is noise; read this one first                       |
@@ -122,8 +123,19 @@ And derived, across steps:
   the cost of the component just added; in an isolated sweep it is that component's
   cost over a bare point. One function serves both.
 - **propagation** — each clock rate differenced against ×1 for the same satellites
-  and components. Only present when the clock was actually swept, because an empty
-  table would read as "propagation is free" rather than "nobody asked".
+  and components, on `tickMs`. Only present when the clock was actually swept,
+  because an empty table would read as "propagation is free" rather than "nobody
+  asked".
+
+  It differenced `cpuMs` until it was pointed at a real question and got it
+  wrong. Measured at 5,000 satellites drawing points at ×10000 — a step running
+  at 2.2 fps with 462 ms frames — it reported a delta of **−0.08 ms and 0 µs per
+  satellite**, because all of the cost was in the clock tick that `cpuMs` starts
+  after. Direct instrumentation put 95% of wall time inside
+  `SampledTrajectory.update`. The one table named after propagation could not see
+  propagation; it now differences `tickMs` and prints `cpuMs` beside it for
+  contrast.
+
 - **drift** — the first step, re-run as the last step, against its original.
   A sweep is minutes long and the app it measures does not hold still: shader
   caches fill, the JIT settles, the heap grows. This is the only figure in the run
@@ -228,9 +240,16 @@ with `cacheId`. Both would have to change in one release. PostHog under
   ×1000 would otherwise sweep the sample window forward mid-build, so the build would
   carry propagation belonging to the measurement after it. The rate is applied once
   the scene is up, so the warmup absorbs the first refreshes at the new rate.
-- **`cpuMs` excludes the clock tick.** Cesium runs `clock.onTick` — where sampled
-  positions update — before `scene.preUpdate`, so per-satellite position work lands
-  in `frameMs` but not in `cpuMs`. The gap between the two is the interesting part.
+- **`cpuMs` excludes the clock tick; `tickMs` is that tick.** Cesium runs
+  `clock.onTick` — where sampled positions update — before `scene.preUpdate`, so
+  per-satellite position work lands in `frameMs` but not in `cpuMs`. It is
+  measured separately by wrapping `clock.tick` itself rather than by adding an
+  `onTick` listener: listeners are raised in registration order and two that
+  matter (the manager's derived-geometry refresh, the orbit batch's
+  re-orientation) are registered with the viewer, long before the panel, so a
+  marker of our own would sit behind them and miss the work it was there to find.
+  Read the pair together — `cpuMs` well under `tickMs` is a propagation-bound
+  scene, and the reverse is a draw-bound one.
 - **The derived tables fit against `cpuMs`, which is main-thread time only, and
   this app is usually GPU-bound.** Measured on an M4 Pro at 2560×1440 with zero
   satellites: `frameMs` 14.3, `cpuMs` 0.74 — the CPU is 5% of the frame, and the
@@ -244,6 +263,21 @@ with `cacheId`. Both would have to change in one release. PostHog under
   the marginal-cost table and still cost frames. Read `gpuMs` beside `cpuMs`, and
   where `gpuMs` is blank read `frameMs`: if it sits well above the display's
   fastest observed interval, the scene is GPU-bound whatever `cpuMs` says.
+
+  **That is the empty scene, and it stops being true once satellites are drawn.**
+  What changes it is `tickMs`: Cesium's `Viewer` runs `dataSourceDisplay.update` —
+  every entity visualizer, and so every satellite's position evaluation — inside
+  its own `onTick` listener, which is before `preUpdate` and therefore outside
+  `cpuMs`. Measured with points and nothing else, `cpuMs + tickMs` against
+  `frameMs`: at zero satellites 1.06 of 8.66 ms, at 5,000 satellites **14.65 of
+  14.90 ms**. The fixed floor is GPU work; the part that grows with the count is
+  main-thread work, and almost all of it is the tick.
+
+  `scalingFits` and `marginalCosts` still fit `cpuMs` alone, which is why the
+  Point series reports 60 fps holding to **1.66 million satellites** while the
+  frame at five thousand is already 14.9 ms. Treat those two tables as
+  draw-cost-only until they are moved onto `cpuMs + tickMs`.
+
 - **`gpuMs` is withheld rather than guessed when the driver lies.** A frame that
   presented every 14 ms cannot have cost the GPU 49 ms, but that is exactly what
   `EXT_disjoint_timer_query_webgl2` reported on ANGLE/Metal. Every row's figure is

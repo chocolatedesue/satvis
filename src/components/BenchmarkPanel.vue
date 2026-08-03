@@ -249,15 +249,16 @@
       <!-- Only when the clock was swept: an empty table here would read as
          "propagation is free" rather than "nobody asked". -->
       <div v-if="propagation.length > 0" class="bench__block bench__block--table">
-        <div class="bench__caption">propagation (cpu ms over the same scene at ×1)</div>
+        <div class="bench__caption">propagation (clock-tick ms over the same scene at ×1)</div>
         <table class="bench__table">
           <thead>
             <tr>
               <th class="bench__num">sats</th>
               <th class="bench__num">clock</th>
-              <th class="bench__num">cpu</th>
+              <th class="bench__num">tick</th>
               <th class="bench__num">Δ</th>
               <th class="bench__num">µs/sat</th>
+              <th class="bench__num">cpu</th>
               <th>components</th>
             </tr>
           </thead>
@@ -265,9 +266,10 @@
             <tr v-for="(cost, index) in propagation" :key="index">
               <td class="bench__num">{{ cost.sats }}</td>
               <td class="bench__num">×{{ cost.clock }}</td>
-              <td class="bench__num">{{ cost.cpuMs.toFixed(2) }}</td>
-              <td class="bench__num">{{ cost.deltaCpuMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ cost.tickMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ cost.deltaTickMs.toFixed(2) }}</td>
               <td class="bench__num">{{ cost.usPerSatellite.toFixed(1) }}</td>
+              <td class="bench__num">{{ cost.cpuMs.toFixed(2) }}</td>
               <td>{{ cost.components }}</td>
             </tr>
           </tbody>

@@ -28,6 +28,7 @@ function result(options: {
   cpuMs: number;
   gpuMs?: number;
   wallMs?: number;
+  tickMs?: number;
   repeat?: boolean;
   buildMs?: number;
   visible?: number;
@@ -68,6 +69,7 @@ function result(options: {
       fps: 100,
       wall: seriesStats([options.wallMs ?? 10]),
       cpu: seriesStats([options.cpuMs]),
+      tick: seriesStats([options.tickMs ?? 0]),
       gpu: options.gpuMs === undefined ? undefined : seriesStats([options.gpuMs]),
       heap: options.heapMb === undefined ? undefined : seriesStats(options.heapMb),
       jankFrames: 0,
@@ -280,20 +282,35 @@ describe("propagationCosts", () => {
   test("each rate is differenced against x1 for the same scene", () => {
     const costs = propagationCosts(
       run([
-        result({ sats: 200, components: ["Point"], cpuMs: 10 }),
-        result({ sats: 200, components: ["Point"], clock: 100, cpuMs: 30 }),
-        result({ sats: 200, components: ["Point"], clock: 1000, cpuMs: 110 }),
+        result({ sats: 200, components: ["Point"], cpuMs: 1, tickMs: 10 }),
+        result({ sats: 200, components: ["Point"], clock: 100, cpuMs: 1, tickMs: 30 }),
+        result({ sats: 200, components: ["Point"], clock: 1000, cpuMs: 1, tickMs: 110 }),
       ]),
     );
-    expect(costs.map((cost) => [cost.clock, cost.deltaCpuMs, cost.usPerSatellite])).toEqual([
+    expect(costs.map((cost) => [cost.clock, cost.deltaTickMs, cost.usPerSatellite])).toEqual([
       [100, 20, 100],
       [1000, 100, 500],
     ]);
   });
 
+  // The defect this table was rewritten for: propagation happens in clock.onTick,
+  // which runs before preUpdate and so is outside cpuMs entirely. Differencing
+  // cpuMs reported nothing for a step that had ground to a halt propagating.
+  test("sees a cost that cpuMs cannot", () => {
+    const costs = propagationCosts(
+      run([result({ sats: 5000, components: ["Point"], cpuMs: 1.28, tickMs: 0.2 }), result({ sats: 5000, components: ["Point"], clock: 10000, cpuMs: 1.2, tickMs: 460 })]),
+    );
+
+    // cpuMs went *down* between these two rows; the tick went up by 460 ms.
+    expect(costs).toHaveLength(1);
+    expect(costs[0]?.deltaTickMs).toBeCloseTo(459.8, 1);
+    expect(costs[0]?.usPerSatellite).toBeGreaterThan(90);
+    expect(costs[0]?.cpuMs).toBeLessThan(costs[0]?.tickMs ?? 0);
+  });
+
   test("without a x1 row there is nothing to difference against", () => {
     const costs = propagationCosts(
-      run([result({ sats: 200, components: ["Point"], clock: 100, cpuMs: 30 }), result({ sats: 200, components: ["Point"], clock: 1000, cpuMs: 110 })]),
+      run([result({ sats: 200, components: ["Point"], clock: 100, cpuMs: 1, tickMs: 30 }), result({ sats: 200, components: ["Point"], clock: 1000, cpuMs: 1, tickMs: 110 })]),
     );
     expect(costs).toEqual([]);
   });

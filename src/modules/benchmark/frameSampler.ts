@@ -48,8 +48,23 @@ export interface FrameSample {
    * Time inside one render — Cesium's preUpdate to postRender. The work the app
    * actually did, which is the number that keeps moving after wall time has
    * flattened against vsync.
+   *
+   * Note what this is *not*: Cesium advances the clock and runs every `onTick`
+   * listener before `preUpdate`, so per-satellite position work is outside it.
+   * That is `tick`.
    */
   cpu: SeriesStats | undefined;
+  /**
+   * Time inside `clock.tick()` — the whole of it, every `onTick` listener
+   * included. This is where propagation lives: the sampled-position windows are
+   * refreshed from a simulation-time callback, so the faster the clock runs the
+   * more of this there is, and none of it appears in `cpu`.
+   *
+   * Measured at 5,000 satellites drawing points and nothing else, this is the
+   * difference between a row that reads 1.2 ms of cpu at 2.2 fps and a row that
+   * says where the other 460 ms went.
+   */
+  tick: SeriesStats | undefined;
   /**
    * Time the GPU spent on one frame, from `EXT_disjoint_timer_query_webgl2`.
    *
@@ -111,6 +126,8 @@ export class FrameSampler {
 
   #cpu: number[] = [];
 
+  #tick: number[] = [];
+
   #gpu: number[] = [];
 
   #heap: number[] = [];
@@ -146,8 +163,11 @@ export class FrameSampler {
     }
   }
 
-  /** `now` is a monotonic timestamp; `cpuMs` the render duration for that frame. */
-  push(now: number, cpuMs?: number): void {
+  /**
+   * `now` is a monotonic timestamp, `cpuMs` the render duration for that frame,
+   * and `tickMs` the clock tick that preceded it.
+   */
+  push(now: number, cpuMs?: number, tickMs?: number): void {
     const previous = this.#last;
     this.#last = now;
     if (previous === undefined) {
@@ -158,9 +178,13 @@ export class FrameSampler {
     if (cpuMs !== undefined) {
       this.#cpu.push(cpuMs);
     }
+    if (tickMs !== undefined) {
+      this.#tick.push(tickMs);
+    }
     if (this.#limit > 0 && this.#wall.length > this.#limit) {
       this.#wall.shift();
       this.#cpu.shift();
+      this.#tick.shift();
     }
   }
 
@@ -172,6 +196,7 @@ export class FrameSampler {
   reset(): void {
     this.#wall = [];
     this.#cpu = [];
+    this.#tick = [];
     this.#gpu = [];
     this.#heap = [];
   }
@@ -190,6 +215,7 @@ export class FrameSampler {
       fps: elapsedMs > 0 ? (this.#wall.length / elapsedMs) * 1000 : 0,
       wall,
       cpu: seriesStats(this.#cpu),
+      tick: seriesStats(this.#tick),
       gpu: seriesStats(this.#gpu),
       heap: seriesStats(this.#heap),
       jankFrames,

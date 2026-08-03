@@ -17,6 +17,12 @@ const blankOr = (value: number | undefined, digits = 2): number | "" => (value =
 const cpuMs = (result: BenchmarkResult): number => result.frames.cpu?.mean ?? 0;
 
 /**
+ * Time in `clock.tick` — where propagation happens, and which `cpuMs` excludes
+ * by construction. See FrameSample.tick.
+ */
+const tickMs = (result: BenchmarkResult): number => result.frames.tick?.mean ?? 0;
+
+/**
  * The heap figure every memory table is built from: the window's low-water mark.
  *
  * Undefined outside Chrome. Not a footprint on its own — see `FrameSample.heap`
@@ -94,6 +100,12 @@ export interface ReportRow {
   cpuMs: number;
   cpuP95Ms: number;
   /**
+   * Time in the clock tick, which is the per-satellite position work `cpuMs`
+   * cannot see. Read the two together: a row where `tickMs` dwarfs `cpuMs` is
+   * propagation-bound rather than draw-bound.
+   */
+  tickMs: number;
+  /**
    * GPU time for one frame. Blank where the browser has no timer extension, and
    * blank where it has one that cannot be believed — see `gpuTimerTrustworthy`.
    */
@@ -147,6 +159,7 @@ export function reportRows(run: BenchmarkRun): ReportRow[] {
       worstMs: round(result.frames.wall?.max ?? 0),
       cpuMs: round(cpuMs(result)),
       cpuP95Ms: round(result.frames.cpu?.p95 ?? 0),
+      tickMs: round(tickMs(result)),
       gpuMs: gpu === undefined ? "" : round(gpu),
       jankPct: round(result.frames.jankRatio * 100, 1),
       buildMs: round(result.applied.buildMs),
@@ -415,11 +428,18 @@ export interface PropagationCost {
   sats: number;
   components: string;
   clock: number;
-  cpuMs: number;
+  /** Time in the clock tick, which is where propagation happens. */
+  tickMs: number;
   /** Cost over the same scene at real time. */
-  deltaCpuMs: number;
+  deltaTickMs: number;
   /** That delta shared out per satellite, which is what should scale with the count. */
   usPerSatellite: number;
+  /**
+   * The render, for contrast. Propagation does not touch it, so a large
+   * `deltaTickMs` beside a flat `cpuMs` is the expected shape rather than a
+   * contradiction.
+   */
+  cpuMs: number;
 }
 
 /**
@@ -431,6 +451,15 @@ export interface PropagationCost {
  * a faster clock re-propagates the same satellites more often per wall second.
  * A `usPerSatellite` that holds steady across counts at one clock rate says the
  * cost is per-satellite propagation and nothing else.
+ *
+ * Differenced on `tickMs`, not `cpuMs`. This table used to use `cpuMs` and so
+ * could not see the thing it is named after: Cesium runs every `onTick` listener
+ * — position updates included — before `preUpdate`, which is where `cpuMs`
+ * starts. Measured at 5,000 satellites drawing points at ×10000, the old table
+ * reported `deltaCpuMs` of −0.08 and 0 µs per satellite for a step running at
+ * 2.2 fps with 462 ms frames, of which direct instrumentation put 95% inside
+ * `SampledTrajectory.update`. It said propagation was free at the one point it
+ * cost everything.
  */
 export function propagationCosts(run: BenchmarkRun): PropagationCost[] {
   const byScene = new Map<string, BenchmarkResult[]>();
@@ -450,15 +479,16 @@ export function propagationCosts(run: BenchmarkRun): PropagationCost[] {
       if (result === baseline) {
         continue;
       }
-      const delta = cpuMs(result) - cpuMs(baseline);
+      const delta = tickMs(result) - tickMs(baseline);
       const drawn = result.applied.satellitesVisible;
       costs.push({
         sats: result.applied.satellitesRequested,
         components: formatComponents(result.applied.componentsRequested),
         clock: result.applied.clockMultiplier,
-        cpuMs: round(cpuMs(result)),
-        deltaCpuMs: round(delta),
+        tickMs: round(tickMs(result)),
+        deltaTickMs: round(delta),
         usPerSatellite: drawn > 0 ? round((delta * 1000) / drawn, 1) : 0,
+        cpuMs: round(cpuMs(result)),
       });
     }
   }
@@ -592,6 +622,7 @@ export function formatTable(run: BenchmarkRun): string {
     "worst",
     "cpuMs",
     "cpuP95",
+    "tickMs",
     "gpuMs",
     "jank%",
     "build",
@@ -599,7 +630,7 @@ export function formatTable(run: BenchmarkRun): string {
     "components",
   ];
   // 10 for footprint: the name is 9 characters, and a width of 8 ran it into `build`.
-  const widths = [6, 8, 7, 7, 7, 8, 7, 8, 7, 7, 7, 6, 8, ...(showFootprint ? [10] : [])];
+  const widths = [6, 8, 7, 7, 7, 8, 7, 8, 7, 7, 8, 7, 6, 8, ...(showFootprint ? [10] : [])];
   const lines = [header.map((name, index) => (index < widths.length ? pad(name, widths[index] as number) : ` ${name}`)).join("")];
   for (const row of rows) {
     const values = [
@@ -613,6 +644,7 @@ export function formatTable(run: BenchmarkRun): string {
       row.worstMs,
       row.cpuMs,
       row.cpuP95Ms,
+      row.tickMs,
       row.gpuMs === "" ? "—" : row.gpuMs,
       row.jankPct,
       row.buildMs,

@@ -1,6 +1,8 @@
 // The one Cesium-bound piece: it turns "draw N satellites with these
 // components" into a reconcile, and the render loop into frame samples.
 
+import type { JulianDate } from "@cesium/engine";
+
 import { useCesiumStore } from "../../stores/cesium";
 import { useSatStore } from "../../stores/sat";
 import type { CesiumController } from "../CesiumController";
@@ -144,6 +146,9 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
 
   #preUpdateAt = 0;
 
+  /** Duration of the clock tick that preceded the frame being rendered. See #instrumentClockTick. */
+  #tickMs = 0;
+
   /** `EXT_disjoint_timer_query_webgl2`, or undefined where the browser has no such thing. */
   #timerExt: { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | undefined;
 
@@ -173,6 +178,7 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     // most position updates in clock onTick, before preUpdate, so measuring
     // from preUpdate deliberately excludes them — see README.
     this.#initGpuTimer(scene);
+    this.#instrumentClockTick();
     scene.preUpdate.addEventListener(() => {
       this.#preUpdateAt = performance.now();
       this.#beginGpuQuery();
@@ -180,8 +186,8 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     scene.postRender.addEventListener(() => {
       const now = performance.now();
       const cpuMs = now - this.#preUpdateAt;
-      this.#live.push(now, cpuMs);
-      this.#sweep?.push(now, cpuMs);
+      this.#live.push(now, cpuMs, this.#tickMs);
+      this.#sweep?.push(now, cpuMs, this.#tickMs);
       // After the timing marks, so the read is never inside what it would
       // otherwise inflate. Per frame rather than once per step because a single
       // reading measures when the last GC happened, not what the scene costs.
@@ -312,6 +318,42 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       // the page was served rather than of the machine.
       crossOriginIsolated: String(window.crossOriginIsolated),
     };
+  }
+
+  /**
+   * Time the whole clock tick, by wrapping `clock.tick` rather than by adding a
+   * listener to `clock.onTick`.
+   *
+   * Position updates happen in `onTick` listeners, and an `onTick` listener of
+   * our own could only mark the point it is *itself* reached. Cesium raises
+   * listeners in registration order, and two of the ones that matter — the
+   * manager's derived-geometry refresh and the orbit batch's re-orientation —
+   * are registered when the viewer is built, long before the panel that
+   * constructs this target. A marker would sit behind them and quietly miss
+   * exactly the work it was added to find.
+   *
+   * `clock.tick()` raises the event, so wrapping it captures every listener
+   * whatever the order, which is the only version of this that cannot be wrong.
+   * The cost is two `performance.now()` calls a frame, and it is only ever
+   * installed in a session that has opened the benchmark panel.
+   */
+  #instrumentClockTick(): void {
+    const { clock } = this.#cc.viewer;
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const original = clock.tick;
+    if ((original as { __benchmarkWrapped?: boolean }).__benchmarkWrapped) {
+      return;
+    }
+    const wrapped = (): JulianDate => {
+      const started = performance.now();
+      try {
+        return original.call(clock);
+      } finally {
+        this.#tickMs = performance.now() - started;
+      }
+    };
+    (wrapped as { __benchmarkWrapped?: boolean }).__benchmarkWrapped = true;
+    clock.tick = wrapped;
   }
 
   async prepare(): Promise<void> {
