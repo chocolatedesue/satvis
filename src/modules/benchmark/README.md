@@ -62,23 +62,23 @@ A step is one point in a three-axis sweep: **satellite count × component set ×
 clock rate**. The clock axis is one value (×1) unless asked for, so it costs
 nothing when the question is only about drawing.
 
-| Column             | Meaning                                                                             |
-| ------------------ | ----------------------------------------------------------------------------------- |
-| `fps`, `frameMs`   | Between presented frames. What the user feels; flattens against vsync at 60/120 fps |
-| `cpuMs`            | `preUpdate` → `postRender`. Main-thread work only — see the GPU caveat below        |
-| `gpuMs`            | GPU time per frame, where the driver's clock can be believed. Blank otherwise       |
-| `p95`, `worst`     | Percentiles, not just a max — one 400 ms frame should not define a row              |
-| `frames`           | The sample size. A handful means the row is noise; read this one first              |
-| `jankPct`          | Share of frames slower than 33 ms                                                   |
-| `clock`            | The clock rate the step ran at, as a multiple of real time                          |
-| `buildMs`          | The synchronous cost of building the scene: instantiation plus component creation   |
-| `clearMs`          | Tearing the previous scene down                                                     |
-| `visible`          | Satellites actually drawn, which is **not** always the count requested              |
-| `drawn`            | Components actually drawn, when they differ from the ones requested                 |
-| `heapMb`           | Heap low-water mark. **Not printed** — an input to the memory fit. csv/json only    |
-| `heapPeakMb`       | High-water mark. `heapPeakMb - heapMb` is the window's allocation rate. csv/json    |
-| `footprintMb`      | Absolute JS footprint, garbage excluded. Only with the footprint switch on          |
-| `footprintTotalMb` | The whole agent — JS plus DOM and workers. Broader, and csv/json only               |
+| Column             | Meaning                                                                                      |
+| ------------------ | -------------------------------------------------------------------------------------------- |
+| `fps`, `frameMs`   | Between presented frames. What the user feels; flattens against vsync at 60/120 fps          |
+| `cpuMs`            | `preUpdate` → `postRender`. Main-thread work only — see the GPU caveat below                 |
+| `gpuMs`            | GPU time per frame, where the driver's clock can be believed. Blank otherwise                |
+| `p95`, `worst`     | Percentiles, not just a max — one 400 ms frame should not define a row                       |
+| `frames`           | The sample size. A handful means the row is noise; read this one first                       |
+| `jankPct`          | Share of frames slower than 33 ms                                                            |
+| `clock`            | The clock rate the step ran at, as a multiple of real time                                   |
+| `buildMs`          | Wall time to a **complete** scene: instantiation plus component creation, spread over frames |
+| `clearMs`          | Tearing the previous scene down                                                              |
+| `visible`          | Satellites actually drawn, which is **not** always the count requested                       |
+| `drawn`            | Components actually drawn, when they differ from the ones requested                          |
+| `heapMb`           | Heap low-water mark. **Not printed** — an input to the memory fit. csv/json only             |
+| `heapPeakMb`       | High-water mark. `heapPeakMb - heapMb` is the window's allocation rate. csv/json             |
+| `footprintMb`      | Absolute JS footprint, garbage excluded. Only with the footprint switch on                   |
+| `footprintTotalMb` | The whole agent — JS plus DOM and workers. Broader, and csv/json only                        |
 
 And derived, across steps:
 
@@ -215,6 +215,15 @@ with `cacheId`. Both would have to change in one release. PostHog under
   is open puts a warning across the top of the panel, beside the readout it
   invalidates. The clock is likewise forced to run for the duration of a sweep: a
   stopped clock means no position updates, and position updates are most of the cost.
+- **`buildMs` is wall time, not blocking time, and it is not the freeze.**
+  Satellites are instantiated to a per-frame budget (`SatelliteManager.#build`),
+  so `reconcile` returns with the queue still draining and the step waits on
+  `buildSettled()` before measuring — without that wait every row would report
+  whatever fraction of the population existed when the first frame ended. The
+  consequence is that `buildMs` went **up** when the freeze went away: at 5,000
+  satellites a points-only build blocked for 908 ms as one frame and now
+  completes in about 1,450 ms with no frame over 100 ms. If what you want is the
+  freeze, measure the gaps in the rAF stream; this column cannot see them.
 - **`buildMs` is always measured at ×1**, whatever the step's clock rate. A step at
   ×1000 would otherwise sweep the sample window forward mid-build, so the build would
   carry propagation belonging to the measurement after it. The rate is applied once

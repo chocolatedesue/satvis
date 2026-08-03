@@ -354,8 +354,14 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     const clearMs = performance.now() - clearStart;
     await nextFrames(2);
 
+    // `buildMs` is the wall time to a complete scene, not the synchronous part
+    // of the call. Satellites are instantiated to a per-frame budget now (see
+    // SatelliteManager.#build), so reconcile returns with the queue still
+    // draining — without the await, every row would report whatever fraction of
+    // the population happened to exist when the first frame ended.
     const buildStart = performance.now();
     this.#cc.sats.reconcile(this.#scene(names, request.components));
+    await this.#cc.sats.buildSettled();
     const buildMs = performance.now() - buildStart;
     await nextFrames(2);
 
