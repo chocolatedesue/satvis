@@ -8,9 +8,9 @@ import {
   orbitPathTimes,
   orbitTrackTimes,
   orbitUsesPathGraphic,
-  TRACK_REFRESH_MAX_SECONDS,
-  TRACK_REFRESH_MIN_SECONDS,
-  trackRefreshSeconds,
+  GEOMETRY_REFRESH_MAX_SECONDS,
+  GEOMETRY_REFRESH_MIN_SECONDS,
+  geometryRefreshSeconds,
 } from "./satelliteGraphics";
 
 const ISS_PERIOD_MIN = 92.6;
@@ -84,19 +84,19 @@ describe("orbitUsesPathGraphic", () => {
   });
 });
 
-describe("trackRefreshSeconds", () => {
+describe("geometryRefreshSeconds", () => {
   test("a handful of tracks refresh at the floor, where the lag would be visible", () => {
-    expect(trackRefreshSeconds(0)).toBe(TRACK_REFRESH_MIN_SECONDS);
-    expect(trackRefreshSeconds(8)).toBe(TRACK_REFRESH_MIN_SECONDS);
-    expect(trackRefreshSeconds(100)).toBe(TRACK_REFRESH_MIN_SECONDS);
+    expect(geometryRefreshSeconds(0)).toBe(GEOMETRY_REFRESH_MIN_SECONDS);
+    expect(geometryRefreshSeconds(8)).toBe(GEOMETRY_REFRESH_MIN_SECONDS);
+    expect(geometryRefreshSeconds(100)).toBe(GEOMETRY_REFRESH_MIN_SECONDS);
   });
 
   test("scales with the count between the bounds", () => {
-    expect(trackRefreshSeconds(500)).toBe(5);
+    expect(geometryRefreshSeconds(500)).toBe(5);
   });
 
   test("clamps at the ceiling, where a rebuild costs more than the lag", () => {
-    expect(trackRefreshSeconds(1000)).toBe(TRACK_REFRESH_MAX_SECONDS);
-    expect(trackRefreshSeconds(5000)).toBe(TRACK_REFRESH_MAX_SECONDS);
+    expect(geometryRefreshSeconds(1000)).toBe(GEOMETRY_REFRESH_MAX_SECONDS);
+    expect(geometryRefreshSeconds(5000)).toBe(GEOMETRY_REFRESH_MAX_SECONDS);
   });
 });

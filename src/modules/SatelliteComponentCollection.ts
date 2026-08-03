@@ -570,6 +570,22 @@ export class SatelliteComponentCollection {
     }
   }
 
+  /**
+   * The swath corridor under the satellite, as *constant* positions re-assigned
+   * on a timer rather than a CallbackProperty read every frame.
+   *
+   * A CallbackProperty that reports itself non-constant puts the corridor on
+   * Cesium's dynamic-geometry path, and that path re-tessellates the geometry
+   * and recreates its ground primitive every single frame — for every satellite
+   * that has one. Measured at about 90 µs per drawn corridor per frame, which is
+   * 414 ms of main thread at five thousand satellites, and it bought nothing:
+   * the callback returns two positions 300 s apart, so the shape it was rebuilt
+   * from barely moved between one frame and the next.
+   *
+   * Constant positions put it back on the static path, where the geometry is
+   * only rebuilt when the property actually changes — which is now `refreshGroundTrack`,
+   * on the same schedule as the batched orbit tracks.
+   */
   createGroundTrack(): void {
     const description = groundTrackDescription(this.props.orbitClass, this.props.swath);
     if (!description) {
@@ -582,10 +598,33 @@ export class SatelliteComponentCollection {
       heightReference: HeightReference.CLAMP_TO_GROUND,
       material: Color.DARKRED.withAlpha(0.25),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      positions: new CallbackProperty((time?: JulianDate) => this.props.trajectory.groundTrack(time as JulianDate) as any, false),
+      positions: this.#groundTrackPositions(this.viewer.clock.currentTime) as any,
       width: description.widthMeters,
     });
     this.createCesiumSatelliteEntity("Ground track", "corridor", corridor);
+  }
+
+  /**
+   * Undefined entries are dropped rather than passed on: the sampled position
+   * has no value outside its window, and a corridor handed a hole in its
+   * positions throws from inside Cesium's geometry worker.
+   */
+  #groundTrackPositions(time: JulianDate): Cartesian3[] {
+    return this.props.trajectory.groundTrack(time).filter((position): position is Cartesian3 => position !== undefined);
+  }
+
+  /** Advance the swath corridor to `time`. See createGroundTrack. */
+  refreshGroundTrack(time: JulianDate): void {
+    const entity = this.#components["Ground track"];
+    if (!(entity instanceof Entity) || !entity.corridor) {
+      return;
+    }
+    const positions = this.#groundTrackPositions(time);
+    if (positions.length < 2) {
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    entity.corridor.positions = positions as any;
   }
 
   createCone(fov = this.props.coneFovDeg): void {

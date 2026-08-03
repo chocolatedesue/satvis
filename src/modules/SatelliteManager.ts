@@ -7,7 +7,7 @@ import { GroundStationEntity, type GroundStationPositionData } from "./GroundSta
 import { activeTargetEntries } from "./satelliteActivation";
 import { type CatalogEntry, SatelliteCatalog } from "./SatelliteCatalog";
 import { SatelliteComponentCollection } from "./SatelliteComponentCollection";
-import { TRACK_REFRESH_MIN_SECONDS, trackRefreshSeconds } from "./satelliteGraphics";
+import { GEOMETRY_REFRESH_MIN_SECONDS, geometryRefreshSeconds } from "./satelliteGraphics";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
 import { sameValue } from "./util/equality";
@@ -16,11 +16,11 @@ import { PolylineBatch } from "./util/PolylineBatch";
 import { SuppressibleSet } from "./util/Suppressible";
 
 /**
- * How often the track refresh is *considered*, in simulation seconds. Whether it
- * actually runs is `trackRefreshSeconds`, which scales the real interval with
- * the number of tracks; this is just the finest grain that decision can have.
+ * How often the geometry refresh is *considered*, in simulation seconds. Whether
+ * it actually runs is `geometryRefreshSeconds`, which scales the real interval
+ * with the satellite count; this is just the finest grain that decision can have.
  */
-const TRACK_REFRESH_TICK_SECONDS = TRACK_REFRESH_MIN_SECONDS;
+const GEOMETRY_REFRESH_TICK_SECONDS = GEOMETRY_REFRESH_MIN_SECONDS;
 
 /**
  * Everything the globe should be showing. The manager holds no opinion of its
@@ -92,15 +92,15 @@ export class SatelliteManager {
 
   pendingTrackedSatellite: string | undefined;
 
-  /** Simulation time the batched tracks were last re-cut at. See #refreshTracks. */
-  #tracksRefreshedAt: JulianDate;
+  /** Simulation time the stale-able geometry was last re-cut at. See #refreshDerivedGeometry. */
+  #geometryRefreshedAt: JulianDate;
 
   constructor(viewer: Viewer) {
     this.viewer = viewer;
     this.orbits = new PolylineBatch(viewer, "inertial");
     this.tracks = new PolylineBatch(viewer, "fixed");
-    this.#tracksRefreshedAt = viewer.clock.currentTime;
-    CesiumCallbackHelper.createPeriodicTimeCallback(viewer, TRACK_REFRESH_TICK_SECONDS, (time) => this.#refreshTracks(time));
+    this.#geometryRefreshedAt = viewer.clock.currentTime;
+    CesiumCallbackHelper.createPeriodicTimeCallback(viewer, GEOMETRY_REFRESH_TICK_SECONDS, (time) => this.#refreshDerivedGeometry(time));
 
     // Tracking is the one genuinely two-way value: the user can also start it
     // by clicking a satellite on the globe. Report it rather than reaching for
@@ -270,38 +270,46 @@ export class SatelliteManager {
   }
 
   /**
-   * Re-cut every batched orbit track so its head stays on its satellite.
+   * Advance the geometry that goes stale as the clock runs: the batched orbit
+   * tracks and the ground-track corridors. Both are rebuilt rather than
+   * re-oriented, and neither is cheap enough to do per frame — see
+   * `geometryRefreshSeconds` for the budget this spends.
    *
-   * On a simulation-time callback, because what makes a track stale is simulated
+   * On a simulation-time callback, because what makes them stale is simulated
    * time passing rather than wall time: at ×1000 the satellites move a thousand
-   * times faster and the tracks have to keep up. The batch's own coalescing
+   * times faster and the geometry has to keep up. The orbit batch's coalescing
    * window turns however many satellites there are into a single primitive
    * rebuild, and a rebuild already in flight holds the window open, so a clock
    * fast enough to outrun the rebuild degrades into "as often as it can" rather
    * than into a queue.
    *
    * The interval runs from when the last rebuild *finished*, not from when it
-   * was asked for, which is what the second guard below buys: at five thousand
-   * tracks a rebuild can take longer than the interval, and measuring from the
-   * request meant the next refresh was already overdue the moment the previous
-   * one landed. That is a treadmill, and it measured 8.2% janked frames against
-   * 0.5% for a rebuild that simply waits its turn.
+   * was asked for, which is what the pending guard buys: at five thousand tracks
+   * a rebuild can take longer than the interval, and measuring from the request
+   * meant the next refresh was already overdue the moment the previous one
+   * landed. That is a treadmill, and it measured 8.2% janked frames against 0.5%
+   * for a rebuild that simply waits its turn.
+   *
+   * The cadence is scaled by the number of active satellites rather than by a
+   * count of each kind of geometry: it is an upper bound on both, it is free to
+   * read, and the interval only has to be roughly right.
    */
-  #refreshTracks(time: JulianDate): void {
-    if (this.tracks.size === 0) {
+  #refreshDerivedGeometry(time: JulianDate): void {
+    if (this.#active.size === 0) {
       return;
     }
     if (this.tracks.pending) {
-      this.#tracksRefreshedAt = time;
+      this.#geometryRefreshedAt = time;
       return;
     }
-    const due = trackRefreshSeconds(this.tracks.size);
-    if (Math.abs(JulianDate.secondsDifference(time, this.#tracksRefreshedAt)) < due) {
+    const due = geometryRefreshSeconds(this.#active.size);
+    if (Math.abs(JulianDate.secondsDifference(time, this.#geometryRefreshedAt)) < due) {
       return;
     }
-    this.#tracksRefreshedAt = time;
+    this.#geometryRefreshedAt = time;
     for (const sat of this.#active.values()) {
       sat.refreshOrbitTrack(time);
+      sat.refreshGroundTrack(time);
     }
   }
 

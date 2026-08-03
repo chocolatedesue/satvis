@@ -70,5 +70,23 @@ export function createViewer(container: string | Element, options: { minimalUI: 
   // are visually unchanged. Same pass count either way, so no frame-time change.
   viewer.scene.postProcessStages.tonemapper = Tonemapper.ACES;
 
+  // Otherwise render-on-demand and Cesium's "wait for the data sources" rule
+  // deadlock each other.
+  //
+  // A static geometry primitive is built asynchronously and only advances a
+  // state per render. While it is unfinished `DataSourceDisplay.update` reports
+  // false, and by default the Viewer answers that by clearing `clock.canAnimate`
+  // — so simulation time stops. But `maximumRenderTimeChange` above is what asks
+  // for the next frame, and it asks based on simulation time having moved. Time
+  // cannot move until the primitive is ready, the primitive cannot become ready
+  // without frames, and no frame is requested: the clock stops dead the first
+  // time a ground-track corridor is switched on and never restarts.
+  //
+  // Nothing here needs the guarantee it gives up. Suspending animation exists so
+  // a CZML clip does not run ahead of geometry still streaming in; every
+  // geometry in this app is generated locally from a propagator, and a swath
+  // corridor arriving a frame late is not worth stopping time over.
+  viewer.allowDataSourcesToSuspendAnimation = false;
+
   return viewer;
 }
