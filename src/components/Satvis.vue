@@ -342,9 +342,10 @@ const cesiumStore = useCesiumStore();
 const { layers, terrainProvider, surfaceModel, starMap, sceneMode, cameraMode, pixelRatio, msaa, showFps, showBenchmark, requestRenderMode, pickMode } = storeToRefs(cesiumStore);
 
 // Which star maps the Map menu offers. Starts at the one that cannot be missing
-// so the group is never empty, and widens once the probes answer — a couple of
-// HEAD requests, resolved once per page rather than per menu open, so the list
-// is settled long before anyone opens the panel.
+// so the group is never empty, and widens once the probes answer — a one-byte
+// ranged GET each (never a HEAD; see `starMapAvailable`), resolved once per page
+// rather than per menu open, so the list is settled long before anyone opens the
+// panel.
 const starMapOptions = ref<StarMapName[]>([BUILTIN_STAR_MAP]);
 void availableStarMaps().then((names) => {
   starMapOptions.value = names;

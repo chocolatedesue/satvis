@@ -117,7 +117,7 @@ export class CesiumController {
   // Which `applyStarMap` call owns the sky box. Two switches in quick succession
   // race over a fetch, and the one that started last should win rather than the
   // one whose faces happen to arrive last.
-  private starMapGeneration = 0;
+  #starMapGeneration = 0;
 
   /**
    * Takes the viewer rather than making one (see src/modules/createViewer.ts).
@@ -733,12 +733,12 @@ export class CesiumController {
       return;
     }
 
-    const generation = ++this.starMapGeneration;
+    const generation = ++this.#starMapGeneration;
     const sources = starMapSources(name);
     const faces = sources === undefined ? undefined : await this.loadStarMapFaces(sources);
     // Overtaken while the faces were in flight. Nothing to undo — the swap below
     // is the only thing that touches the scene.
-    if (generation !== this.starMapGeneration) {
+    if (generation !== this.#starMapGeneration) {
       return;
     }
 

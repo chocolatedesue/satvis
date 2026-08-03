@@ -61,20 +61,18 @@ interface StarMapAsset {
   recovery: string;
 }
 
+// One run of the generator produces every cut, so there is one answer to "how do
+// I get this" and it is stated once.
+const GENERATOR = "pnpm update-starmap";
+
 // `Tycho1K` is deliberately absent: Cesium resolves its own faces through
 // `buildModuleUrl`, and restating them here would be a second copy of a path
 // that moves with the Cesium version. Everything else can be missing at runtime,
 // which is why the controller fetches these itself rather than handing the urls
 // to Cesium. See `CesiumController.applyStarMap`.
 const ASSETS: Partial<Record<StarMapName, StarMapAsset>> = {
-  DeepStar1K: {
-    prefix: "data/starmap/deepstar_2020_1024",
-    recovery: "pnpm update-starmap",
-  },
-  DeepStar2K: {
-    prefix: "data/starmap/deepstar_2020_2048",
-    recovery: "pnpm update-starmap",
-  },
+  DeepStar1K: { prefix: "data/starmap/deepstar_2020_1024", recovery: GENERATOR },
+  DeepStar2K: { prefix: "data/starmap/deepstar_2020_2048", recovery: GENERATOR },
 };
 
 /** The six cube map faces, named the way Cesium's `SkyBox` wants them. */

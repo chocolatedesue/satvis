@@ -1,7 +1,7 @@
 # Everything the star map generator needs, so nothing has to be installed on the
 # host. numpy does the reprojection; OpenCV is here for two things it happens to
 # be good at and that are otherwise painful — reading half-float EXR and writing
-# JPEG — rather than for any computer vision.
+# WebP — rather than for any computer vision.
 FROM python:3.12-slim
 
 # OpenCV gates EXR decoding behind this since 4.10; without it imread returns None.

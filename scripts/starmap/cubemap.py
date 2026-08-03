@@ -40,6 +40,7 @@ import os
 import shutil
 import sys
 from collections.abc import Callable
+from typing import NamedTuple
 from urllib.request import Request, urlopen
 
 import cv2
@@ -93,7 +94,13 @@ EXPOSURE_PERCENTILE = 99.99
 # AVIF scores marginally better in the darks and worse on stars, for a slower
 # decode and a narrower floor of browser support. Not worth it for six textures
 # that are fetched once and cached.
+#
+# Declared as a pair, because cv2 picks its encoder from the file extension while
+# the quality parameter is named after a specific one. Changing the suffix alone
+# would write a different format and quietly hand it WebP's quality flag, which
+# it ignores — a wrong file with no error.
 FORMAT = "webp"
+QUALITY_FLAG = cv2.IMWRITE_WEBP_QUALITY
 
 
 def fetch(name: str, cache_dir: str) -> str:
@@ -328,7 +335,20 @@ def face_basis(face: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 BASES: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {face: face_basis(face) for face in FACE_ORDER}
 
 
-def edge_pairs(size: int) -> list[tuple[tuple[str, np.ndarray, np.ndarray], tuple[str, np.ndarray, np.ndarray]]]:
+class Border(NamedTuple):
+    """One face's row of border texels along a shared edge, as (rows, cols) indices.
+
+    The three travel together everywhere they go, and a pair of them is what an
+    edge is, so they are one thing rather than a triple that every consumer has
+    to destructure in the right order.
+    """
+
+    face: str
+    rows: np.ndarray
+    cols: np.ndarray
+
+
+def edge_pairs(size: int) -> list[tuple[Border, Border]]:
     """For each of the 12 shared edges, the two rows of border texels that meet on it.
 
     Derived rather than tabulated. Each side of a face is walked at its exact
@@ -343,18 +363,20 @@ def edge_pairs(size: int) -> list[tuple[tuple[str, np.ndarray, np.ndarray], tupl
     ones = np.ones(size)
     inner = 1.0 - 1.0 / size  # where a border texel's own centre sits
 
-    # (u, v) along the boundary, and the pixels those belong to. v runs bottom to
-    # top while rows run top to bottom, hence -centres for the vertical sides.
-    sides = {
-        "top": (centres, ones, (np.zeros(size, int), idx)),
-        "bottom": (centres, -ones, (np.full(size, size - 1), idx)),
-        "left": (-ones, -centres, (idx, np.zeros(size, int))),
-        "right": (ones, -centres, (idx, np.full(size, size - 1))),
-    }
+    # Each side's name, its (u, v) along the boundary, and the pixels those belong
+    # to. v runs bottom to top while rows run top to bottom, hence -centres for the
+    # vertical sides. The name is carried only so a failed assertion can say which
+    # side it was; nothing downstream keys off it.
+    sides = (
+        ("top", centres, ones, np.zeros(size, int), idx),
+        ("bottom", centres, -ones, np.full(size, size - 1), idx),
+        ("left", -ones, -centres, idx, np.zeros(size, int)),
+        ("right", ones, -centres, idx, np.full(size, size - 1)),
+    )
 
     seen: set[frozenset] = set()
     pairs = []
-    for face, (u, v, (rows, cols)) in ((f, s) for f in FACE_ORDER for s in sides.values()):
+    for face, (side, u, v, rows, cols) in ((f, s) for f in FACE_ORDER for s in sides):
         normal, du, dv = BASES[face]
         edge = normal[:, None] + du[:, None] * u + dv[:, None] * v
 
@@ -375,13 +397,13 @@ def edge_pairs(size: int) -> list[tuple[tuple[str, np.ndarray, np.ndarray], tupl
         ny = (1.0 - nv) * size / 2.0 - 0.5
         drift = max(np.abs(nx - np.round(nx)).max(), np.abs(ny - np.round(ny)).max())
         if drift > 1e-6:
-            raise AssertionError(f"{face} border does not land on {far} texels (off by {drift:.3g})")
+            raise AssertionError(f"{face} {side} border does not land on {far} texels (off by {drift:.3g})")
 
         key = frozenset((face, far))
-        here = (face, rows, cols)
-        there = (far, np.round(ny).astype(int), np.round(nx).astype(int))
         if key not in seen:
             seen.add(key)
+            here = Border(face, rows, cols)
+            there = Border(far, np.round(ny).astype(int), np.round(nx).astype(int))
             pairs.append((here, there))
 
     if len(pairs) != 12:
@@ -406,7 +428,7 @@ def sides_of(y: int, x: int, size: int) -> list[tuple[str, int]]:
     return on
 
 
-def edge_step(faces: dict[str, np.ndarray], pairs, exposure: float) -> tuple[float, float]:
+def edge_step(faces: dict[str, np.ndarray], pairs: list[tuple[Border, Border]], exposure: float) -> tuple[float, float]:
     """Mean and p99 brightness difference across the shared edges, in 8-bit levels.
 
     Measured after `encode`, because the tone curve is steep where this map is
@@ -414,15 +436,15 @@ def edge_step(faces: dict[str, np.ndarray], pairs, exposure: float) -> tuple[flo
     linear radiance, and a linear metric reports it as nothing.
     """
     diffs = []
-    for (fa, ya, xa), (fb, yb, xb) in pairs:
-        a = encode(faces[fa][ya, xa], exposure).astype(np.float32)
-        b = encode(faces[fb][yb, xb], exposure).astype(np.float32)
+    for here, there in pairs:
+        a = encode(faces[here.face][here.rows, here.cols], exposure).astype(np.float32)
+        b = encode(faces[there.face][there.rows, there.cols], exposure).astype(np.float32)
         diffs.append(np.abs(a - b).max(axis=1))
     joined = np.concatenate(diffs)
     return float(joined.mean()), float(np.percentile(joined, 99))
 
 
-def match_edges(faces: dict[str, np.ndarray], pairs, feather: int) -> None:
+def match_edges(faces: dict[str, np.ndarray], pairs: list[tuple[Border, Border]], feather: int) -> None:
     """Reconcile the faces across their shared edges, in place and in linear light.
 
     Two texels meet along an edge and three at each corner; every such group is
@@ -451,22 +473,24 @@ def match_edges(faces: dict[str, np.ndarray], pairs, feather: int) -> None:
 
     # Group the border texels that must agree — pairs along edges, triples at the
     # corners, found by union rather than special-cased.
-    parent: dict[tuple[str, int, int], tuple[str, int, int]] = {}
+    Texel = tuple[str, int, int]
+    parent: dict[Texel, Texel] = {}
 
-    def find(k):
+    def find(k: Texel) -> Texel:
         parent.setdefault(k, k)
         while parent[k] != k:
             parent[k] = parent[parent[k]]
             k = parent[k]
         return k
 
-    for (fa, ya, xa), (fb, yb, xb) in pairs:
-        for i in range(len(ya)):
-            ka, kb = find((fa, int(ya[i]), int(xa[i]))), find((fb, int(yb[i]), int(xb[i])))
+    for here, there in pairs:
+        for i in range(len(here.rows)):
+            ka = find((here.face, int(here.rows[i]), int(here.cols[i])))
+            kb = find((there.face, int(there.rows[i]), int(there.cols[i])))
             if ka != kb:
                 parent[ka] = kb
 
-    groups: dict[tuple[str, int, int], list] = {}
+    groups: dict[Texel, list[Texel]] = {}
     for key in list(parent):
         groups.setdefault(find(key), []).append(key)
 
@@ -614,7 +638,7 @@ def build(src: np.ndarray, size: int, ss: int, exposure: float, feather: int, ou
     for face in FACE_ORDER:
         pixels = encode(faces[face], exposure)
         path = os.path.join(out_dir, f"{prefix}_{face}.{FORMAT}")
-        cv2.imwrite(path, np.ascontiguousarray(pixels), [cv2.IMWRITE_WEBP_QUALITY, quality])
+        cv2.imwrite(path, np.ascontiguousarray(pixels), [QUALITY_FLAG, quality])
         total += os.path.getsize(path)
     print(f"  wrote six faces, {total / 2**20:.1f} MB", flush=True)
     return prefix
