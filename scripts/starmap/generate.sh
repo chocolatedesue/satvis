@@ -32,7 +32,7 @@ cd "${0%/*}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 IMAGE="satvis-starmap:1"
 OUT_DIR="$REPO_ROOT/data/starmap"
-REF_DIR="$REPO_ROOT/data/cesium-assets/stars/TychoSkymapII.t3_08192x04096"
+REF_DIR="$REPO_ROOT/scripts/.reference/cesium-assets/stars/TychoSkymapII.t3_08192x04096"
 
 if ! docker info >/dev/null 2>&1; then
   echo "docker is not running — this script keeps numpy and the EXR reader off" >&2
@@ -50,14 +50,15 @@ done
 echo "building $IMAGE"
 docker build --quiet --tag "$IMAGE" . >/dev/null
 
-# The reference is optional: without the submodule the generator still runs, it
-# just cannot check its own orientation.
+# The reference is optional, and does not affect a single output byte: the faces are
+# written first and read back for the check. It was a submodule everybody had to
+# initialise; it is an on-demand clone now.
 REF_MOUNT=()
 if [ -d "$REF_DIR" ]; then
   REF_MOUNT=(--volume "$REF_DIR:/ref:ro")
 else
-  echo "note: no Tycho reference faces, the orientation check will be skipped."
-  echo "      run 'git submodule update --init data/cesium-assets' to enable it."
+  echo "note: no Tycho reference faces, the orientation check will be skipped. To enable it:"
+  echo "      git clone --depth 1 https://github.com/Flowm/cesium-assets scripts/.reference/cesium-assets"
 fi
 
 # --user so the generated faces belong to whoever ran this, not to root.

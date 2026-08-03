@@ -566,9 +566,11 @@ def verify(out_dir: str, ref_dir: str, prefix: str, ref_prefix: str = "TychoSkym
     Tycho's orientation is by construction right for Cesium's lookup. That makes
     the reference worth more than reasoning about the convention.
 
-    The reference is the one thing here that still wants `data/cesium-assets`.
-    generate.sh mounts it read-only when it is there and says so when it is not;
-    nothing the app renders depends on that submodule any more.
+    The reference is the retired `Flowm/cesium-assets`, an optional clone under
+    `scripts/.reference/` rather than a submodule. generate.sh mounts it read-only
+    when it is there and says how to get it when it is not. It is read only after
+    the faces are written, so the sky box is identical either way — what is lost
+    without it is the check, not the output.
     """
     worst = 1.0
     bad = 0

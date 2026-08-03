@@ -34,7 +34,7 @@ cd "${0%/*}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 IMAGE="satvis-imagery:1"
 OUT_DIR="$REPO_ROOT/data/imagery"
-REF_DIR="$REPO_ROOT/data/cesium-assets/imagery/NaturalEarthII"
+REF_DIR="$REPO_ROOT/scripts/.reference/cesium-assets/imagery/NaturalEarthII"
 
 if ! docker info >/dev/null 2>&1; then
   echo "docker is not running — this script keeps GDAL off the host by doing all" >&2
@@ -52,14 +52,15 @@ done
 echo "building $IMAGE"
 docker build --quiet --tag "$IMAGE" . >/dev/null
 
-# The reference is optional: without the submodule the generator still runs, it
-# just cannot check its output against the tileset it replaces.
+# The reference is optional, and does not affect a single output byte: the tiles are
+# written first and read back for the comparison. It was a submodule everybody had to
+# initialise; it is an on-demand clone now.
 REF_MOUNT=()
 if [ -d "$REF_DIR" ]; then
   REF_MOUNT=(--volume "$REF_DIR:/ref:ro")
 else
-  echo "note: no reference tileset, the comparison will be skipped."
-  echo "      run 'git submodule update --init data/cesium-assets' to enable it."
+  echo "note: no reference tileset, the colour comparison will be skipped. To enable it:"
+  echo "      git clone --depth 1 https://github.com/Flowm/cesium-assets scripts/.reference/cesium-assets"
 fi
 
 # --user so the generated tiles belong to whoever ran this, not to root.

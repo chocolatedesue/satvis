@@ -155,12 +155,7 @@ export default defineConfig({
         // Copy data files (data/gp snapshot flows through here → dist/data/gp/...).
         // data/tle is excluded: the legacy TLE pipeline is gone, but the exclusion
         // stays so stale local files from an old checkout never ship.
-        // data/cesium-assets is excluded because nothing the app loads comes from it
-        // any more — the base map is built by `pnpm update-imagery` into data/imagery,
-        // and the star maps by `pnpm update-starmap`. The submodule survives only as
-        // the reference both generators check themselves against, so on a checkout
-        // that still has it these are 53 MB that would ship and never be requested.
-        { src: ["data/**", "!data/custom/**", "!data/tle/**", "!data/cesium-assets/**"], dest: "data", rename: { stripBase: 1 } },
+        { src: ["data/**", "!data/custom/**", "!data/tle/**"], dest: "data", rename: { stripBase: 1 } },
         { src: ["data/custom/dist/**"], dest: "data", rename: { stripBase: 3 } },
       ],
     }),

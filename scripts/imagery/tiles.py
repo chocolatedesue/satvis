@@ -14,8 +14,8 @@ extension from the manifest, so nothing in the app names the format.
 
 Three things are worth knowing before changing anything.
 
-**The tileset this replaces is not raw Natural Earth II.** `data/cesium-assets`
-was cut from `NE2_HR_LC_SR_W_DR_recolored.tif` — a Photoshop grade over the
+**The tileset this replaces is not raw Natural Earth II.** The retired
+`Flowm/cesium-assets` was cut from `NE2_HR_LC_SR_W_DR_recolored.tif` — a Photoshop grade over the
 public source, darker and cooler, and it is what Cesium's own bundled `Offline`
 layer shows too. Tiling the raw source instead lands 48 levels per channel away
 from it on average, which is not a subtle difference: a markedly brighter, flatter
@@ -392,10 +392,10 @@ def read_tile(path: str) -> np.ndarray:
 def verify(out_dir: str, ref_dir: str, zoom: int) -> int:
     """Compare the generated tiles against the tileset they replace.
 
-    The reference is `data/cesium-assets`, which is the imagery the app shipped for
-    years and so the definition of "unchanged" — this generator exists to retire
-    that submodule, and the thing worth proving is that retiring it changes nothing
-    a user sees.
+    The reference is the retired `Flowm/cesium-assets` tileset, which is the imagery
+    the app shipped for years and so the definition of "unchanged". It is an optional
+    clone under `scripts/.reference/` rather than a submodule, and it is read only
+    after the tiles are written — no output depends on it.
 
     A few levels of disagreement are expected and not a defect: both sides are lossy,
     and the curve was fitted through that same noise. What this catches is the
@@ -518,7 +518,10 @@ def main() -> int:
 
     if args.fit_recolor:
         if not os.path.isdir(args.ref):
-            raise SystemExit("--fit-recolor needs the reference tileset; run `git submodule update --init data/cesium-assets`")
+            raise SystemExit(
+                "--fit-recolor needs the tileset the grade came from. Clone it with:\n"
+                "  git clone --depth 1 https://github.com/Flowm/cesium-assets scripts/.reference/cesium-assets"
+            )
         return fit_recolor(tif, args.ref, args.cache, args.quality, args.processes)
 
     src = tif if args.no_recolor else recolored(tif, os.path.join(args.cache, f"{SOURCE}_recolored.vrt"))
