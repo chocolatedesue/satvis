@@ -9,6 +9,41 @@
       name="description"
       content="Track 12,000+ satellites live on a 3D globe, or point your phone at the sky to spot them. Starlink, GPS, the ISS and more. Pass prediction, alerts, offline PWA."
     />
+    <!-- Absolute urls: a scraper resolves these against nothing. Only `twitter:card`
+         is set for Twitter, which reads the og tags for everything else.
+
+         No og:image yet, so the card is `summary` and not `summary_large_image`,
+         which would reserve a wide slot for a picture that never arrives. Adding
+         one means an og:image, og:image:width/height/alt, the wider card type, and
+         a `globIgnores` entry in vite.config.ts so the png glob does not have every
+         visitor precache an image only scrapers fetch. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Satvis" />
+    <meta property="og:url" content="https://satvis.space/" />
+    <meta property="og:title" content="Satvis - 3D Satellite Tracker &amp; Sky View" />
+    <meta property="og:description" content="Track 12,000+ satellites live on a 3D globe, or point your phone at the sky to spot them. Pass prediction, alerts, offline PWA." />
+    <meta name="twitter:card" content="summary" />
+    <!-- One entity, described where the site is rooted. "satvis" is also a pypi
+         package and several unrelated repositories, so `sameAs` doing the work of
+         saying which one this is matters more here than the rest of the block. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "@id": "https://satvis.space/#app",
+        "name": "Satvis",
+        "url": "https://satvis.space/",
+        "description": "Satellite orbit visualization and pass prediction. Tracks 12,000+ satellites on a 3D globe from CelesTrak element sets, predicts passes for a ground station, and aims a ground-level sky view with a phone's compass.",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Web, iOS",
+        "browserRequirements": "Requires WebGL",
+        "isAccessibleForFree": true,
+        "license": "https://opensource.org/licenses/MIT",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+        "author": { "@type": "Person", "name": "Florian Mauracher" },
+        "sameAs": ["https://github.com/Flowm/satvis", "https://apps.apple.com/us/app/satvis/id1441084766"]
+      }
+    </script>
     <!-- Inline, because main.css arrives with the bundle and this has to style
          something the bundle has not run yet to replace. -->
     <style>
