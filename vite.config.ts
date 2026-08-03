@@ -2,6 +2,7 @@
 /// <reference types="vitest/config" />
 
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import ui from "@nuxt/ui/vite";
@@ -48,6 +49,34 @@ const isolationNotice = {
   },
 };
 
+/**
+ * Say so when the build is about to ship without the offline base map.
+ *
+ * The tiles are generated rather than committed, so a build simply omits them when
+ * nobody has run `pnpm update-imagery` — no error, a smaller precache, and a
+ * deployed site whose default layer silently falls back to the low-resolution
+ * `Offline` one. `pnpm deploy` runs `pnpm build` directly, so forgetting the
+ * generator first is a one-command mistake with no other symptom.
+ *
+ * A warning rather than a failure: CI builds legitimately have no tiles (it neither
+ * runs the generator nor checks out submodules), and the app is designed to work
+ * without them. Making this fatal would break CI to catch a deploy-time slip.
+ */
+const imageryNotice = {
+  name: "satvis-imagery-notice",
+  apply: "build" as const,
+  buildStart() {
+    if (existsSync(fileURLToPath(new URL("data/imagery/NaturalEarthII/tilemapresource.xml", import.meta.url)))) {
+      return;
+    }
+    console.warn(
+      "\n  data/imagery is empty — building without the high-resolution base map.\n" +
+        "  OfflineHighres will fall back to the bundled Offline layer at runtime.\n" +
+        "  Run `pnpm update-imagery` first if this build is going to be deployed.\n",
+    );
+  },
+};
+
 export default defineConfig({
   base: "",
   build: {
@@ -84,6 +113,7 @@ export default defineConfig({
   plugins: [
     vue(),
     isolationNotice,
+    imageryNotice,
     // Neutral gray palette (default `slate` is blue-tinted and clashes with the
     // app's pure-dark toolbar surfaces).
     ui({
@@ -126,7 +156,26 @@ export default defineConfig({
       },
       workbox: {
         maximumFileSizeToCacheInBytes: 5000000,
-        globPatterns: ["**/*.{js,css,html,svg,png,ico}", "cesium/Assets/**/*.{jpg,png,xml,json}"],
+        globPatterns: [
+          "**/*.{js,css,html,svg,png,ico}",
+          "cesium/Assets/**/*.{jpg,png,xml,json}",
+          // The offline base map, down to level 3 only — 170 tiles and 1.4 MB, against
+          // 17.5 MB for the whole pyramid. Level 3 is a 4096x2048 world, which is about
+          // what a full-globe viewport resolves (~1280 px across 360°), so this is the
+          // depth at which the globe is guaranteed correct offline at any rotation
+          // rather than only where someone happened to look. Levels 4 and 5 are zoomed-in
+          // detail and stay with the CacheFirst rule below.
+          //
+          // Levels 0-2 are in here even though Cesium's own precached `Offline` covers
+          // the same ground at the same resolution: that is a different layer at a
+          // different url, and Cesium walks *this* pyramid from its root, so a precache
+          // starting at 3 would leave holes at the top.
+          //
+          // The manifest too, or the probe that decides this layer exists would depend
+          // on having been runtime-cached first.
+          "data/imagery/NaturalEarthII/{0,1,2,3}/**/*.webp",
+          "data/imagery/NaturalEarthII/tilemapresource.xml",
+        ],
         globIgnores: [
           "cesium/ThirdParty/**/*",
           "cesium/Widgets/**/*",
@@ -175,7 +224,11 @@ export default defineConfig({
             // The generated base map (scripts/imagery). Absent from a checkout
             // where nobody has run `pnpm update-imagery`, which is why the layer
             // probes for its manifest before Cesium is pointed at it.
-            urlPattern: /data\/imagery\/.*\.(jpg|png|xml)$/,
+            //
+            // Levels 0-3 are precached by the glob above and served from there; this
+            // rule is what carries levels 4 and 5, which are 16 of the pyramid's 17.5
+            // MB and only wanted once someone zooms in.
+            urlPattern: /data\/imagery\/.*\.(webp|jpg|png|xml)$/,
             handler: "CacheFirst",
             options: {
               cacheName: "cesium-tile-cache",

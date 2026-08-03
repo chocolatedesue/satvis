@@ -139,13 +139,16 @@ pnpm update-imagery
 That runs a container (`scripts/imagery/`) which fetches [Natural Earth
 II](https://www.naturalearthdata.com/downloads/10m-raster-data/) at 10m, applies the
 colour grade the original Cesium tileset was cut with, and writes a geodetic TMS
-pyramid of levels 0–5 into the gitignored `data/imagery/` — about 25 MB and a minute
-on a warm cache. Docker is the only host requirement; GDAL runs inside.
+pyramid of levels 0–5 as WebP into the gitignored `data/imagery/` — about 17.5 MB and
+a minute on a warm cache. Docker is the only host requirement; GDAL runs inside.
 
-Skipping it is safe: the app probes for the tileset and falls back to the
-lower-resolution `Offline` map bundled with Cesium, with a console warning. Run it to
-get the sharper globe. `pnpm update-starmap` does the same job for the optional star
-maps.
+Levels 0–3 (1.4 MB) are precached by the service worker, so the globe is complete
+offline wherever it is turned; 4 and 5 are cached as they are requested.
+
+Skipping the generator is safe: the app probes for the tileset and falls back to the
+lower-resolution `Offline` map bundled with Cesium, with a console warning. **Run it
+before `pnpm deploy`, though** — the build only warns, so a deploy without it silently
+ships the fallback. `pnpm update-starmap` does the same job for the optional star maps.
 
 ### Satellite metadata
 
