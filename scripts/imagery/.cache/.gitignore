@@ -1,0 +1,5 @@
+# The Natural Earth source raster is a 326 MB download that expands to 700 MB,
+# and is re-downloadable. The directory itself is tracked so the bind mount in
+# generate.sh has a target.
+*
+!.gitignore
