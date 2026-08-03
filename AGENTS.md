@@ -12,17 +12,18 @@ the SPA and the `worker/` package (a pnpm workspace). CI uses `pnpm ci`.
 
 ## Commands
 
-| Task              | Command                                                               |
-| ----------------- | --------------------------------------------------------------------- |
-| Dev server        | `pnpm dev` (proxies `/api` → <https://satvis.space>)                  |
-| Full-stack dev    | `pnpm dev:worker` + `SATVIS_API_PROXY=http://localhost:8080 pnpm dev` |
-| Build             | `pnpm build`                                                          |
-| Test (CI)         | `pnpm test` (frontend) and `pnpm --filter satvis-worker test`         |
-| Lint (CI)         | `pnpm lint` (runs frontend and worker lint)                           |
-| Lint fix          | `pnpm lint:fix` (runs frontend and worker fixes)                      |
-| Type-check only   | `pnpm type-check`                                                     |
-| Refresh static GP | `pnpm update-gp` (writes the gitignored `data/gp/` snapshot)          |
-| Deploy            | `pnpm deploy` (builds frontend, then deploys worker)                  |
+| Task               | Command                                                                  |
+| ------------------ | ------------------------------------------------------------------------ |
+| Dev server         | `pnpm dev` (proxies `/api` → <https://satvis.space>)                     |
+| Full-stack dev     | `pnpm dev:worker` + `SATVIS_API_PROXY=http://localhost:8080 pnpm dev`    |
+| Build              | `pnpm build`                                                             |
+| Test (CI)          | `pnpm test` (frontend) and `pnpm --filter satvis-worker test`            |
+| Lint (CI)          | `pnpm lint` (runs frontend and worker lint)                              |
+| Lint fix           | `pnpm lint:fix` (runs frontend and worker fixes)                         |
+| Type-check only    | `pnpm type-check`                                                        |
+| Refresh static GP  | `pnpm update-gp` (writes the gitignored `data/gp/` snapshot)             |
+| Build the star map | `scripts/starmap/generate.sh` (docker; writes `data/generated/starmap/`) |
+| Deploy             | `pnpm deploy` (builds frontend, then deploys worker)                     |
 
 Worker-only scripts run via `pnpm --filter satvis-worker <script>`.
 
@@ -39,12 +40,13 @@ CI runs `lint`, then `test` (frontend + worker), then `build`.
   - **Satellite metadata** (swath extents, sensor FOV, model URL, operator) is attached to each matching record **at refresh time**, under a lowercase `metadata` key, from the merged satellite table. There is no metadata endpoint and no browser-side rule matching: a record either carries the bag or the frontend applies its defaults (`src/config/satelliteMetadata.ts`). See `docs/adr/0002-static-satellite-metadata.md`.
   - **Worker-less mode**: `pnpm update-gp` runs the same evaluator and writes a static snapshot into `data/gp/` (gitignored). The app probes `/api/groups.json` and falls back to that snapshot.
 - **Data assets**: `data/` also contains Cesium assets (imagery, textures, stars) and 3D-model plugins under `data/custom/`. Copied into `dist/` at build time via `vite-plugin-static-copy`.
+  - **`data/generated/`** holds assets a script builds rather than a checkout provides — currently `data/generated/starmap/`, the `DeepStar2K` sky box from `scripts/starmap/generate.sh`. The directories are tracked (each carries a self-ignoring `.gitignore`) so the bind mounts and the copy glob have something to point at; the contents are not. Absent until someone runs the generator, which is why the star map is probed for before the menu offers it (`src/config/starMaps.ts`). The generator itself lives under `scripts/`, not `data/`, precisely because the copy glob takes `data/**` wholesale.
 - Entrypoints: `index.html`, `embedded.html`, `test.html` (all configured as Vite MPA inputs), plus `public/404.html`. `/ot` is **not** a file: `public/_redirects` rewrites it to `/` with a 200, so it serves the same shell at the same url rather than a near-copy that could drift.
 
 ## Key quirks
 
 - **Cesium static assets**: Vite copies Cesium engine assets from `node_modules/@cesium/engine` and `@cesium/widgets` into `dist/cesium/`. The global `CESIUM_BASE_URL` is defined as `"./cesium"` in `vite.config.ts`.
-- **Git submodules**: Required — `data/` content depends on them. Run `git submodule update --init` before first build. **`git worktree add` does not populate them**, so a fresh worktree has an empty `data/cesium-assets` (high-resolution offline imagery) and `data/models` (3D models). Imagery covers for this: the `OfflineHighres` layer probes its `tilemapresource.xml` and, when it is missing, the selection is switched to the bundled `Offline` layer with a console warning. The probe exists because Cesium cannot report the failure — `TileMapServiceImageryProvider.fromUrl` treats a missing `tilemapresource.xml` as "carry on with defaults" and resolves happily, then 404s every tile behind a blank globe. It **reads** the manifest rather than checking the status, because nothing serving this app answers a missing file with an error status: the dev server falls back to `index.html` with a 200, and the deployed Worker used to as well. Checking `response.ok` alone made the probe pass on exactly the checkouts it was written for, and it still would under `pnpm dev`. The 3D models have no such fallback yet.
+- **Git submodules**: Required — `data/` content depends on them. Run `git submodule update --init` before first build. **`git worktree add` does not populate them**, so a fresh worktree has an empty `data/cesium-assets` (high-resolution offline imagery) and `data/models` (3D models). Imagery covers for this: the `OfflineHighres` layer probes its `tilemapresource.xml` and, when it is missing, the selection is switched to the bundled `Offline` layer with a console warning. The probe exists because Cesium cannot report the failure — `TileMapServiceImageryProvider.fromUrl` treats a missing `tilemapresource.xml` as "carry on with defaults" and resolves happily, then 404s every tile behind a blank globe. It **reads** the manifest rather than checking the status, because nothing serving this app answers a missing file with an error status: the dev server falls back to `index.html` with a 200, and the deployed Worker used to as well. Checking `response.ok` alone made the probe pass on exactly the checkouts it was written for, and it still would under `pnpm dev`. The 3D models have no such fallback yet. Nothing the app renders at runtime needs `data/cesium-assets` for stars any more — the star maps are Cesium's own built-in and the generated one — but `scripts/starmap/generate.sh` still bind-mounts the submodule's Tycho faces read-only as the reference for its orientation check, and skips that check with a note when they are absent.
 - **Dev and preview are cross-origin isolated**: `vite.config.ts` sends `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` on every `pnpm dev` and `pnpm preview` response. That is what exposes `performance.measureUserAgentSpecificMemory()` for the benchmark panel's accurate memory footprint; production does **not** send them. `credentialless` rather than `require-corp` because the globe's tile hosts send no CORP header. One symptom to recognise: an isolated document refuses to start a dedicated worker from a service-worker-cached response that has no COEP header, and the result is a **black globe with the satellites still drawing** — clear that origin's service worker. See "Cross-origin isolation" in `src/modules/benchmark/README.md`.
 - **Build globals**: `__BUILD_DATE__` and `__BUILD_SHA__` are injected via `vite.config.ts` `define`.
 - **Path aliases**: `@/*` → `src/*` (in `tsconfig.json`).

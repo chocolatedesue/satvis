@@ -37,6 +37,7 @@ import argparse
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from urllib.request import Request, urlopen
 
 import cv2
@@ -47,7 +48,7 @@ BASE_URL = "https://svs.gsfc.nasa.gov/vis/a000000/a004800/a004851"
 # Cube map face directions. `u` runs left to right across the face image and `v`
 # runs bottom to top, both over [-1, 1]; the third axis is the face normal. This
 # is the OpenGL convention, which is what Cesium's CubeMap ultimately uploads to.
-FACES: dict[str, callable] = {
+FACES: dict[str, Callable[[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray]]] = {
     "px": lambda u, v: (np.ones_like(u), -v, -u),
     "mx": lambda u, v: (-np.ones_like(u), -v, u),
     "py": lambda u, v: (u, np.ones_like(u), v),
@@ -394,9 +395,7 @@ def match_edges(faces: dict[str, np.ndarray], pairs, feather: int) -> None:
 
     The feather is what makes it a fix rather than a smear: the correction each
     border texel needs is carried `feather` texels inward on a linear ramp, so the
-    two faces converge over a band instead of jumping at the last row. Near a
-    corner two ramps overlap and are averaged, which keeps the corner texel's own
-    correction intact.
+    two faces converge over a band instead of jumping at the last row.
 
     Linear light, before the tone curve, for the same reason supersampling is:
     averaging radiance is meaningful, averaging sRGB is not.
@@ -408,6 +407,12 @@ def match_edges(faces: dict[str, np.ndarray], pairs, feather: int) -> None:
     it is a 12 level smear where at 4 it is 4. The residual step at 4 is 0.17
     levels at worst, against the 5.67 it started from.
     """
+    size = next(iter(faces.values())).shape[0]
+    # Below 1 the ramp divides by zero; at size/2 opposite ramps meet in the
+    # middle and the interpolation below stops reproducing its own boundary.
+    if not 1 <= feather < size // 2:
+        raise SystemExit(f"--match-edges must be between 1 and {size // 2 - 1} for {size}px faces, got {feather}")
+
     # Group the border texels that must agree — pairs along edges, triples at the
     # corners, found by union rather than special-cased.
     parent: dict[tuple[str, int, int], tuple[str, int, int]] = {}
@@ -431,7 +436,6 @@ def match_edges(faces: dict[str, np.ndarray], pairs, feather: int) -> None:
 
     # Corrections are held per side rather than as six full-size images: they are
     # four texels wide out of 2048 and the zeros would cost 300 MB.
-    size = next(iter(faces.values())).shape[0]
     deltas = {face: {side: np.zeros((size, 3), np.float32) for side in SIDES} for face in faces}
     for members in groups.values():
         mean = np.mean([faces[f][y, x] for f, y, x in members], axis=0)
@@ -440,20 +444,28 @@ def match_edges(faces: dict[str, np.ndarray], pairs, feather: int) -> None:
                 deltas[f][side][along] = mean - faces[f][y, x]
 
     ramp = np.clip(1.0 - np.arange(size, dtype=np.float32) / feather, 0.0, 1.0)
+    wt, wb = ramp[:, None], ramp[::-1, None]  # by row, from the top and bottom
+    wl, wr = ramp[None, :], ramp[None, ::-1]  # by column, from the left and right
     for face, delta in deltas.items():
-        weight = np.zeros((size, size), np.float32)
-        spread = np.zeros((size, size, 3), np.float32)
-        for w, band in (
-            (ramp[:, None], delta["top"][None, :, :]),
-            (ramp[::-1, None], delta["bottom"][None, :, :]),
-            (ramp[None, :], delta["left"][:, None, :]),
-            (ramp[None, ::-1], delta["right"][:, None, :]),
-        ):
-            weight += w
-            spread += w[..., None] * band
-        # Only corners see more than one ramp; normalising there averages them
-        # instead of applying both.
-        faces[face] += spread / np.maximum(1.0, weight)[..., None]
+        top, bottom, left, right = (delta[side] for side in SIDES)
+        # Transfinite (Coons) interpolation, and the third term is the whole
+        # point of it. Near a corner the vertical and horizontal ramps both reach
+        # the same texel and both carry that corner's delta, so adding them
+        # double-counts it; the bilinear term is exactly that double count, and
+        # subtracting it leaves every border texel sitting on the delta it was
+        # assigned. Averaging the overlaps instead — which is what this did
+        # first — diluted the outer `feather` texels of each edge end with the
+        # perpendicular edge's correction, measured at up to 63% of the intended
+        # value three texels in and exactly zero everywhere else.
+        vertical = wt[..., None] * top[None, :, :] + wb[..., None] * bottom[None, :, :]
+        horizontal = wl[..., None] * left[:, None, :] + wr[..., None] * right[:, None, :]
+        bilinear = (
+            (wt * wl)[..., None] * top[0]
+            + (wt * wr)[..., None] * top[-1]
+            + (wb * wl)[..., None] * bottom[0]
+            + (wb * wr)[..., None] * bottom[-1]
+        )
+        faces[face] += vertical + horizontal - bilinear
 
 
 def open_layers(mode: str, res: str, star_gain: float, cache_dir: str) -> list[tuple[np.ndarray, float]]:
@@ -575,9 +587,9 @@ def main() -> int:
     args = ap.parse_args()
 
     prefix = args.prefix or f"deepstar_2020_{args.size}"
-    os.makedirs(args.out, exist_ok=True)
-    os.makedirs(args.cache, exist_ok=True)
-
+    # No mkdir: both are bind mounts of committed directories, and generate.sh
+    # has already refused to run if either is missing. Creating them here would
+    # only paper over a mount that did not happen.
     free = shutil.disk_usage(args.cache).free
     if free < 2 * 2**30:
         print(f"warning: {free / 2**30:.1f} GiB free in the cache mount", flush=True)

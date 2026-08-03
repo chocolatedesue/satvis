@@ -705,22 +705,21 @@ export class CesiumController {
   }
 
   /**
-   * Put a star map behind the globe — `Tycho1K` or `Tycho2K` (`STAR_MAPS`).
-   * Resolves once it is drawing, and rejects if its faces could not be fetched.
+   * Put a star map behind the globe — one of `STAR_MAPS`. Resolves once it is
+   * drawing, and rejects if its faces could not be fetched.
    *
    * An action rather than a setter, unlike the rest of the scene settings,
-   * because `Tycho2K` has to be in hand before the sky box is built. Cesium is
-   * willing to take urls and fetch them itself, but it does that *inside* the
-   * render loop: a face that 404s then throws out of `Scene.render` rather than
-   * out of here, and with `rethrowRenderErrors` on that takes the app down
-   * instead of falling back to `Tycho1K`. Which is not hypothetical — the
-   * 2048x2048 faces live in the `data/cesium-assets` submodule, and a checkout
-   * without `git submodule update --init` does not have them.
+   * because an optional map has to be in hand before the sky box is built.
+   * Cesium is willing to take urls and fetch them itself, but it does that
+   * *inside* the render loop: a face that 404s then throws out of `Scene.render`
+   * rather than out of here, and with `rethrowRenderErrors` on that takes the app
+   * down instead of falling back. Which is not hypothetical — `DeepStar2K` is
+   * built by `scripts/starmap/generate.sh` and is absent until someone runs it.
    *
-   * The viewer is constructed with exactly the `Tycho1K` sky box (CesiumWidget
+   * The viewer is constructed with exactly the built-in sky box (CesiumWidget
    * calls `SkyBox.createEarthSkyBox()` when it is passed none), so this only ever
    * runs to move off that or back to it — hence the watcher in sceneSync is not
-   * immediate, and a link that says `stars=Tycho1K` re-fetches nothing.
+   * immediate, and a link naming the built-in re-fetches nothing.
    */
   async applyStarMap(name: string): Promise<void> {
     if (!(STAR_MAPS as readonly string[]).includes(name)) {
@@ -746,9 +745,10 @@ export class CesiumController {
     const previous = this.viewer.scene.skyBox;
     this.viewer.scene.skyBox = faces === undefined ? SkyBox.createEarthSkyBox() : new SkyBox({ sources: faces });
     // Scene destroys its sky box only when the scene itself goes, so a swap
-    // without this leaks the outgoing cube map — 100 MB of it leaving `Tycho2K`,
-    // which Cesium keeps unmipmapped. Safe here because the scene no longer holds
-    // the reference: the next frame builds its command from the new one.
+    // without this leaks the outgoing cube map — 100 MB of it leaving
+    // `DeepStar2K`, which Cesium keeps unmipmapped. Safe here because the scene
+    // no longer holds the reference: the next frame builds its command from the
+    // new one. Same reasoning in `set background`.
     previous?.destroy();
     // Nothing in Cesium asks for a frame when a cube map lands, so under
     // render-on-demand with a paused clock the swap would sit invisible.
@@ -779,7 +779,12 @@ export class CesiumController {
       this.viewer.scene.backgroundColor = Color.TRANSPARENT;
       this.viewer.scene.moon = undefined;
       this.viewer.scene.skyAtmosphere = undefined;
+      // Destroyed, not merely dropped, for the reason `applyStarMap` gives: Scene
+      // lets go of a sky box without freeing its cube map, which is up to 100 MB
+      // once a 2048 map is the one being taken away.
+      const skyBox = this.viewer.scene.skyBox;
       this.viewer.scene.skyBox = undefined;
+      skyBox?.destroy();
       this.viewer.scene.sun = undefined;
       document.documentElement.style.background = "transparent";
       document.body.style.background = "transparent";
