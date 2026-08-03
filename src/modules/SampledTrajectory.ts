@@ -25,7 +25,13 @@ const lagrangeInterpolation = LagrangePolynomialApproximation as unknown as Inte
 interface SampledPositionData {
   interval: TimeInterval;
   fixed: SampledPositionProperty;
-  inertial: SampledPositionProperty;
+  /**
+   * Absent until something asks for it. Only the Orbit component reads the
+   * inertial frame, and carrying a second full sample set for every satellite in
+   * a scene that never draws one measured 8.7 KB a satellite — 43 MB across five
+   * thousand. See `requireInertial`.
+   */
+  inertial: SampledPositionProperty | undefined;
   valid: boolean;
 }
 
@@ -42,6 +48,9 @@ export class SampledTrajectory {
 
   #data: SampledPositionData | undefined;
 
+  /** Whether any consumer has asked for the inertial frame. See requireInertial. */
+  #wantsInertial = false;
+
   constructor(orbit: Orbit) {
     this.#orbit = orbit;
   }
@@ -56,9 +65,55 @@ export class SampledTrajectory {
     return this.#data?.fixed;
   }
 
-  /** Inertial-frame (ICRF) sampled position for orbit visualization. */
+  /**
+   * Inertial-frame (ICRF) sampled position for orbit visualization.
+   *
+   * Call `requireInertial` first. Reading this without doing so returns undefined
+   * on a trajectory that has never been asked for the inertial frame, rather than
+   * quietly building one — the point of the flag is that the cost is opted into.
+   */
   get inertial(): SampledPositionProperty | undefined {
     return this.#data?.inertial;
+  }
+
+  /**
+   * Declare that the inertial frame is needed, and make it so.
+   *
+   * Idempotent, and safe to call before or after `start`: the flag makes every
+   * later refresh sample both frames, and if a window is already up its inertial
+   * half is backfilled from the fixed samples already in it. That backfill is a
+   * frame transform per sample and no SGP4 — the propagation has already been
+   * paid for, and only the rotation into ICRF is missing.
+   */
+  requireInertial(): void {
+    if (this.#wantsInertial) {
+      return;
+    }
+    this.#wantsInertial = true;
+    this.#backfillInertial();
+  }
+
+  #backfillInertial(): void {
+    const data = this.#data;
+    if (!data || data.inertial) {
+      return;
+    }
+    const inertial = SampledTrajectory.#createProperty(ReferenceFrame.INERTIAL);
+    const { times, values } = data.fixed.getRawSamples();
+    const positions: Cartesian3[] = [];
+    const kept: JulianDate[] = [];
+    for (const [index, time] of times.entries()) {
+      const fixedToIcrf = Transforms.computeFixedToIcrfMatrix(time);
+      if (!defined(fixedToIcrf)) {
+        continue;
+      }
+      kept.push(time);
+      positions.push(Matrix3.multiplyByVector(fixedToIcrf, values[index] as Cartesian3, new Cartesian3()));
+    }
+    if (kept.length > 0) {
+      inertial.addSamples(kept, positions);
+    }
+    data.inertial = inertial;
   }
 
   /** The time interval currently covered by samples. */
@@ -73,8 +128,14 @@ export class SampledTrajectory {
 
   positionsForNextOrbit(start: JulianDate, reference: "inertial" | "fixed" = "inertial", loop = true): unknown[] {
     if (!this.#data) return [];
+    if (reference === "inertial") {
+      // The caller wants the inertial frame, which is the declaration itself.
+      this.requireInertial();
+    }
+    const property = this.#data[reference];
+    if (!property) return [];
     const end = JulianDate.addSeconds(start, this.#orbit.orbitalPeriod * 60, new JulianDate());
-    const positions = this.#data[reference].getRawValues(start, end);
+    const positions = property.getRawValues(start, end);
     if (loop) {
       // Readd the first position to the end of the array to close the loop
       return [...positions, positions[0]];
@@ -182,28 +243,26 @@ export class SampledTrajectory {
       isStopIncluded: false,
     });
     sp.fixed.removeSamples(removeBefore);
-    sp.inertial.removeSamples(removeBefore);
     sp.fixed.removeSamples(removeAfter);
-    sp.inertial.removeSamples(removeAfter);
+    sp.inertial?.removeSamples(removeBefore);
+    sp.inertial?.removeSamples(removeAfter);
 
     sp.interval = request;
   }
 
+  /** Both frames want the same extrapolation and interpolation; only the frame differs. */
+  static #createProperty(referenceFrame?: ReferenceFrame): SampledPositionProperty {
+    const property = new SampledPositionProperty(referenceFrame);
+    property.backwardExtrapolationType = ExtrapolationType.HOLD;
+    property.forwardExtrapolationType = ExtrapolationType.HOLD;
+    property.setInterpolationOptions({
+      interpolationDegree: 5,
+      interpolationAlgorithm: lagrangeInterpolation,
+    });
+    return property;
+  }
+
   #init(currentTime: JulianDate): void {
-    const fixed = new SampledPositionProperty();
-    fixed.backwardExtrapolationType = ExtrapolationType.HOLD;
-    fixed.forwardExtrapolationType = ExtrapolationType.HOLD;
-    fixed.setInterpolationOptions({
-      interpolationDegree: 5,
-      interpolationAlgorithm: lagrangeInterpolation,
-    });
-    const inertial = new SampledPositionProperty(ReferenceFrame.INERTIAL);
-    inertial.backwardExtrapolationType = ExtrapolationType.HOLD;
-    inertial.forwardExtrapolationType = ExtrapolationType.HOLD;
-    inertial.setInterpolationOptions({
-      interpolationDegree: 5,
-      interpolationAlgorithm: lagrangeInterpolation,
-    });
     this.#data = {
       interval: new TimeInterval({
         start: currentTime,
@@ -211,26 +270,29 @@ export class SampledTrajectory {
         isStartIncluded: false,
         isStopIncluded: false,
       }),
-      fixed,
-      inertial,
+      fixed: SampledTrajectory.#createProperty(),
+      // Only if something has already asked. A re-init mid-life keeps whatever
+      // the trajectory was already committed to sampling.
+      inertial: this.#wantsInertial ? SampledTrajectory.#createProperty(ReferenceFrame.INERTIAL) : undefined,
       valid: true,
     };
   }
 
   #addSamples(start: JulianDate, stop: JulianDate, samplingInterval: number): void {
     if (!this.#data) return;
+    const inertialProperty = this.#data.inertial;
     const times: JulianDate[] = [];
     const positionsFixed: Cartesian3[] = [];
     const positionsInertial: Cartesian3[] = [];
     for (let time = start; JulianDate.compare(stop, time) >= 0; time = JulianDate.addSeconds(time, samplingInterval, new JulianDate())) {
-      const { positionFixed, positionInertial } = this.#computePosition(time);
+      const { positionFixed, positionInertial } = this.#computePosition(time, !!inertialProperty);
       times.push(time);
       positionsFixed.push(positionFixed);
-      positionsInertial.push(positionInertial);
+      if (inertialProperty) positionsInertial.push(positionInertial);
     }
     // Add all samples at once as adding a sorted array avoids searching for the correct position every time
     this.#data.fixed.addSamples(times, positionsFixed);
-    this.#data.inertial.addSamples(times, positionsInertial);
+    inertialProperty?.addSamples(times, positionsInertial);
   }
 
   #computePositionInertialTEME(time: JulianDate): Cartesian3 {
@@ -242,12 +304,17 @@ export class SampledTrajectory {
     return new Cartesian3(eci.x * 1000, eci.y * 1000, eci.z * 1000);
   }
 
-  #computePosition(timestamp: JulianDate): { positionFixed: Cartesian3; positionInertial: Cartesian3 } {
+  /**
+   * `withInertial` gates the ICRF half, and with it the requirement that ICRF
+   * data be loaded at all. A scene drawing points and nothing else no longer
+   * needs it, so it is no longer a reason to mark the trajectory invalid.
+   */
+  #computePosition(timestamp: JulianDate, withInertial: boolean): { positionFixed: Cartesian3; positionInertial: Cartesian3 } {
     const positionInertialTEME = this.#computePositionInertialTEME(timestamp);
 
     const temeToFixed = Transforms.computeTemeToPseudoFixedMatrix(timestamp);
-    const fixedToIcrf = Transforms.computeFixedToIcrfMatrix(timestamp);
-    if (!defined(temeToFixed) || !defined(fixedToIcrf)) {
+    const fixedToIcrf = withInertial ? Transforms.computeFixedToIcrfMatrix(timestamp) : undefined;
+    if (!defined(temeToFixed) || (withInertial && !defined(fixedToIcrf))) {
       // Reference frame data is not available for this time (outside the preloaded ICRF window or
       // before the async load resolves). Skip the sample instead of multiplying by an undefined
       // matrix, which throws a DeveloperError inside Cesium's render loop.
@@ -257,7 +324,7 @@ export class SampledTrajectory {
     }
 
     const positionFixed = Matrix3.multiplyByVector(temeToFixed, positionInertialTEME, new Cartesian3());
-    const positionInertialICRF = Matrix3.multiplyByVector(fixedToIcrf, positionFixed, new Cartesian3());
+    const positionInertialICRF = fixedToIcrf ? Matrix3.multiplyByVector(fixedToIcrf, positionFixed, new Cartesian3()) : Cartesian3.ZERO;
 
     return { positionFixed, positionInertial: positionInertialICRF };
   }

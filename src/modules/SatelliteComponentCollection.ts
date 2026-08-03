@@ -327,13 +327,18 @@ export class SatelliteComponentCollection {
   }
 
   updatedSampledPositionForComponents(update = false): void {
-    const { fixed, inertial } = this.props.trajectory;
-    if (!fixed || !inertial) return;
+    const { fixed } = this.props.trajectory;
+    // Not the inertial frame: it is absent unless an Orbit asked for it, and
+    // requiring it here would have stopped every other component updating in
+    // exactly the scenes this laziness exists to make cheaper.
+    if (!fixed) return;
 
     Object.entries(this.components).forEach(([type, component]) => {
       if (type === "Orbit") {
         if (component instanceof Entity) {
-          component.position = inertial;
+          // An Orbit exists, so createOrbit has already required the frame.
+          this.props.trajectory.requireInertial();
+          component.position = this.props.trajectory.inertial;
         } else if (update && component instanceof GeometryInstance) {
           // A geometry cannot be edited in place; it has to be rebuilt
           this.disableComponent("Orbit");
@@ -434,6 +439,10 @@ export class SatelliteComponentCollection {
   }
 
   createOrbit(): void {
+    // The Orbit is the only component drawn in the inertial frame, so it is the
+    // only thing that makes the second sample set worth keeping. Declared here,
+    // once, rather than at each of the two places below that go on to read it.
+    this.props.trajectory.requireInertial();
     if (this.usePathGraphicForOrbit) {
       this.createOrbitPath();
     } else {

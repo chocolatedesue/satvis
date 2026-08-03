@@ -83,4 +83,69 @@ describe("SampledTrajectory", () => {
     expect(track).toHaveLength(4);
     expect(track.every((position) => position !== undefined)).toBe(true);
   });
+
+  test("the inertial frame is not sampled until something asks for it", () => {
+    const { trajectory } = issTrajectory();
+    trajectory.update(T0);
+
+    // A scene drawing points and nothing else pays for one sample set, not two.
+    expect(trajectory.fixed).toBeDefined();
+    expect(trajectory.inertial).toBeUndefined();
+  });
+
+  test("requireInertial backfills the window already sampled", () => {
+    const { trajectory } = issTrajectory();
+    trajectory.update(T0);
+    const fixedSamples = trajectory.fixed?.length() ?? 0;
+    expect(fixedSamples).toBeGreaterThan(0);
+
+    trajectory.requireInertial();
+
+    // Backfilled from the fixed samples rather than re-propagated, so the two
+    // frames cover exactly the same instants.
+    expect(trajectory.inertial?.length()).toBe(fixedSamples);
+  });
+
+  test("requireInertial before the first update samples both frames from the start", () => {
+    const { trajectory } = issTrajectory();
+    trajectory.requireInertial();
+    trajectory.update(T0);
+
+    expect(trajectory.inertial?.length()).toBe(trajectory.fixed?.length());
+  });
+
+  test("requireInertial is idempotent and keeps the same property instance", () => {
+    const { trajectory } = issTrajectory();
+    trajectory.update(T0);
+    trajectory.requireInertial();
+    const first = trajectory.inertial;
+
+    trajectory.requireInertial();
+
+    // Entities bind to this object, so replacing it would silently strand them.
+    expect(trajectory.inertial).toBe(first);
+  });
+
+  test("the inertial window keeps sliding once required", () => {
+    const { trajectory, periodSeconds } = issTrajectory();
+    trajectory.update(T0);
+    trajectory.requireInertial();
+
+    trajectory.update(JulianDate.addSeconds(T0, periodSeconds, new JulianDate()));
+
+    // Not just backfilled once: the flag has to make every later refresh sample
+    // both frames, or the orbit would freeze a window behind the satellite.
+    expect(trajectory.inertial?.length()).toBe(trajectory.fixed?.length());
+  });
+
+  test("positionsForNextOrbit asking for the inertial frame requires it implicitly", () => {
+    const { trajectory } = issTrajectory();
+    trajectory.update(T0);
+    expect(trajectory.inertial).toBeUndefined();
+
+    const positions = trajectory.positionsForNextOrbit(T0, "inertial", false);
+
+    expect(positions.length).toBeGreaterThan(0);
+    expect(trajectory.inertial).toBeDefined();
+  });
 });
