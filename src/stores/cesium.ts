@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 
 import { layerProvider } from "../config/layers";
 import { MSAA_RATES, PIXEL_RATIOS, currentDevicePixelRatio, defaultMsaaRate } from "../config/rendering";
-import { STAR_MAPS } from "../config/starMaps";
+import { BUILTIN_STAR_MAP, STAR_MAPS } from "../config/starMaps";
 import { SURFACE_MODELS } from "../config/surfaceModels";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
 import { baseLayerNames, imageryProviderNames, terrainProviderNames } from "../modules/CesiumLayerProviders";
@@ -20,9 +20,9 @@ export const useCesiumStore = defineStore(
     const surfaceModel = ref("None");
     // The star field behind the globe. In the Map menu with the imagery rather
     // than in Render with the quality ladders, because it is a choice about what
-    // is drawn rather than about how finely: both options cost the same frame,
+    // is drawn rather than about how finely: the options cost the same frame,
     // and only memory and download size separate them (`src/config/starMaps.ts`).
-    const starMap = ref("Tycho1K");
+    const starMap = ref<string>(BUILTIN_STAR_MAP);
     const sceneMode = ref("3D");
     const cameraMode = ref("Fixed");
     // Drawing-buffer pixels per CSS pixel; `native` is the display's own ratio.

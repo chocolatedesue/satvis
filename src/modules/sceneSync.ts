@@ -14,6 +14,7 @@ import { JulianDate } from "@cesium/engine";
 import { nextTick, watch } from "vue";
 
 import { currentPosition } from "../composables/useGeolocation";
+import { BUILTIN_STAR_MAP, starMapRecovery } from "../config/starMaps";
 import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
@@ -125,8 +126,8 @@ export function startSceneSync(cc: SceneTarget): void {
     },
   );
   // Not immediate, unlike the render settings: the viewer is constructed with
-  // exactly the `Tycho1K` sky box, so there is nothing to bring into line until
-  // the value moves, and a link that says `stars=Tycho1K` fetches nothing.
+  // exactly the built-in sky box, so there is nothing to bring into line until
+  // the value moves, and a link that names it fetches nothing.
   //
   // The fallback below is the imagery one in reverse. There the stack is applied
   // first and a probe corrects it afterwards, because a missing tile set only
@@ -143,14 +144,18 @@ export function startSceneSync(cc: SceneTarget): void {
     try {
       await cc.applyStarMap(name);
     } catch (error) {
-      console.warn(`Star map ${name} could not be loaded, falling back to Tycho1K. Run \`git submodule update --init\` to fetch data/cesium-assets.`, error);
+      // The recovery hint travels with the path in starMaps.ts rather than being
+      // written here, because it differs per map and this warning is the only
+      // thing the reader gets.
+      const recovery = starMapRecovery(name);
+      console.warn(`Star map ${name} could not be loaded, falling back to ${BUILTIN_STAR_MAP}.${recovery ? ` Run \`${recovery}\` to build it.` : ""}`, error);
       // Read back rather than assuming: a second switch while the faces were in
       // flight has already asked for something else, and the one that failed is
-      // no longer what anybody wants. Writing Tycho1K re-enters this watcher,
-      // which is what puts it on the globe — and writing it over itself is not a
-      // change, so a Tycho1K that somehow fails cannot loop here.
+      // no longer what anybody wants. Writing the built-in re-enters this
+      // watcher, which is what puts it on the globe — and writing it over itself
+      // is not a change, so a built-in that somehow fails cannot loop here.
       if (cesiumStore.starMap === name) {
-        cesiumStore.starMap = "Tycho1K";
+        cesiumStore.starMap = BUILTIN_STAR_MAP;
       }
     }
   }

@@ -6,16 +6,18 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { STAR_MAPS, starMapAvailable, starMapSources } from "./starMaps";
+import { BUILTIN_STAR_MAP, STAR_MAPS, starMapAvailable, starMapRecovery, starMapSources } from "./starMaps";
 
-/** A fetch whose answer per url is chosen by the test. */
+/** A fetch whose answer per url is chosen by the test; `init` is kept for inspection. */
 function stubFetch(answer: (url: string) => Response | Promise<Response>) {
-  const spy = vi.fn((input: RequestInfo | URL) => Promise.resolve(answer(String(input))));
+  const spy = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => Promise.resolve(answer(String(input))));
   vi.stubGlobal("fetch", spy);
   return spy;
 }
 
-const imageHead = () => new Response(null, { status: 200, headers: { "content-type": "image/jpeg" } });
+// 206, because the probe asks for one byte; `response.ok` has to accept it.
+const imagePart = () => new Response(null, { status: 206, headers: { "content-type": "image/jpeg" } });
+const imageWhole = () => new Response(null, { status: 200, headers: { "content-type": "image/jpeg" } });
 const missing = () => new Response(null, { status: 404 });
 const appShell = () => new Response(null, { status: 200, headers: { "content-type": "text/html" } });
 
@@ -42,33 +44,78 @@ describe("starMapSources", () => {
     expect(starMapSources("Nonsense")).toBeUndefined();
   });
 
-  test.each(["Tycho2K", "DeepStar2K"])("%s names all six faces", (name) => {
-    const sources = starMapSources(name);
+  test("DeepStar2K names all six faces", () => {
+    const sources = starMapSources("DeepStar2K");
     expect(sources && Object.keys(sources).toSorted()).toEqual(["negativeX", "negativeY", "negativeZ", "positiveX", "positiveY", "positiveZ"]);
     // Six distinct files, not the same one under six keys.
     expect(new Set(Object.values(sources!)).size).toBe(6);
   });
 
-  test("the two 2K maps come from different places", () => {
-    expect(starMapSources("Tycho2K")!.positiveX).toContain("data/cesium-assets/stars/");
+  test("DeepStar2K is served from the generated directory, not the submodule", () => {
     expect(starMapSources("DeepStar2K")!.positiveX).toContain("data/generated/starmap/");
+  });
+
+  test("every map is either builtin or has sources — no third state", () => {
+    for (const name of STAR_MAPS) {
+      expect(name === BUILTIN_STAR_MAP || starMapSources(name) !== undefined).toBe(true);
+    }
+  });
+});
+
+describe("starMapRecovery", () => {
+  test("names the generator for the map the generator builds", () => {
+    expect(starMapRecovery("DeepStar2K")).toBe("scripts/starmap/generate.sh");
+  });
+
+  test("the builtin has nothing to recover", () => {
+    expect(starMapRecovery(BUILTIN_STAR_MAP)).toBeUndefined();
+  });
+
+  // The warning in sceneSync is the only thing a reader gets, and it used to
+  // tell everyone to init a submodule regardless of which map had failed.
+  test("a hint exists for every map that can actually go missing", () => {
+    for (const name of STAR_MAPS) {
+      if (starMapSources(name) !== undefined) {
+        expect(starMapRecovery(name)).toBeTruthy();
+      }
+    }
   });
 });
 
 describe("starMapAvailable", () => {
-  test("Tycho1K needs no probe: it ships inside Cesium", async () => {
+  test("the builtin needs no probe: it ships inside Cesium", async () => {
     const spy = stubFetch(missing);
-    await expect(starMapAvailable("Tycho1K")).resolves.toBe(true);
+    await expect(starMapAvailable(BUILTIN_STAR_MAP)).resolves.toBe(true);
     expect(spy).not.toHaveBeenCalled();
   });
 
   test("an unknown name is never available", async () => {
-    stubFetch(imageHead);
+    stubFetch(imagePart);
     await expect(starMapAvailable("Nonsense")).resolves.toBe(false);
   });
 
-  test("an image answer means present", async () => {
-    stubFetch(imageHead);
+  // Not a HEAD: the Cache API ignores requests whose method is not GET, so a
+  // HEAD never sees the service worker's runtime cache and would report the map
+  // missing to someone merely offline. Same rule as the imagery probe in
+  // CesiumLayerProviders.ts. Ranged, because a face is ~600 kB.
+  test("probes with a one-byte ranged GET, never a HEAD", async () => {
+    const spy = stubFetch(imagePart);
+    const { starMapAvailable: probe } = await freshModule();
+    await probe("DeepStar2K");
+    const init = spy.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(init?.method ?? "GET").toBe("GET");
+    expect((init?.headers as Record<string, string>)?.Range).toBe("bytes=0-0");
+  });
+
+  test("a partial image answer means present", async () => {
+    stubFetch(imagePart);
+    const { starMapAvailable: probe } = await freshModule();
+    await expect(probe("DeepStar2K")).resolves.toBe(true);
+  });
+
+  // A cache hit, or a server that ignores Range, answers with the whole file.
+  test("a whole image answer means present too", async () => {
+    stubFetch(imageWhole);
     const { starMapAvailable: probe } = await freshModule();
     await expect(probe("DeepStar2K")).resolves.toBe(true);
   });
@@ -95,7 +142,7 @@ describe("starMapAvailable", () => {
   });
 
   test("the answer is remembered rather than re-asked", async () => {
-    const spy = stubFetch(imageHead);
+    const spy = stubFetch(imagePart);
     const { starMapAvailable: probe } = await freshModule();
     await Promise.all([probe("DeepStar2K"), probe("DeepStar2K"), probe("DeepStar2K")]);
     expect(spy).toHaveBeenCalledTimes(1);
@@ -104,22 +151,23 @@ describe("starMapAvailable", () => {
 
 describe("availableStarMaps", () => {
   test("keeps STAR_MAPS order rather than probe completion order", async () => {
-    // Answer DeepStar2K first, so a list built from resolution order would invert.
-    stubFetch((url) => (url.includes("generated") ? imageHead() : new Promise((r) => setTimeout(() => r(imageHead()), 5))));
+    // Delay the probed map, so a list built from resolution order would put the
+    // unprobed builtin first only by accident — it has to be by construction.
+    stubFetch(() => new Promise((r) => setTimeout(() => r(imagePart()), 5)));
     const { availableStarMaps: list } = await freshModule();
     await expect(list()).resolves.toEqual([...STAR_MAPS]);
   });
 
   test("drops what is missing and always keeps the builtin", async () => {
-    stubFetch((url) => (url.includes("generated") ? missing() : imageHead()));
-    const { availableStarMaps: list } = await freshModule();
-    await expect(list()).resolves.toEqual(["Tycho1K", "Tycho2K"]);
-  });
-
-  test("with neither optional asset the group is still not empty", async () => {
     stubFetch(missing);
     const { availableStarMaps: list } = await freshModule();
-    await expect(list()).resolves.toEqual(["Tycho1K"]);
+    await expect(list()).resolves.toEqual([BUILTIN_STAR_MAP]);
+  });
+
+  test("the group is never empty, whatever the probes say", async () => {
+    stubFetch(appShell);
+    const { availableStarMaps: list } = await freshModule();
+    await expect(list()).resolves.toContain(BUILTIN_STAR_MAP);
   });
 });
 

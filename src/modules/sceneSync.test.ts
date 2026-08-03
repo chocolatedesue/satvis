@@ -11,6 +11,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { nextTick } from "vue";
 
+import { BUILTIN_STAR_MAP } from "../config/starMaps";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import type { CatalogEntry } from "./SatelliteCatalog";
@@ -158,31 +159,31 @@ describe("startSceneSync", () => {
     startSceneSync(target);
     const store = useCesiumStore();
 
-    // The viewer is already built with the Tycho1K sky box, so starting the sync
+    // The viewer is already built with the builtin sky box, so starting the sync
     // must not re-install it — that would refetch six faces to reach the picture
     // already on screen.
     expect(calls.starMaps).toEqual([]);
 
-    store.starMap = "Tycho2K";
+    store.starMap = "DeepStar2K";
     await settle();
 
-    expect(calls.starMaps).toEqual(["Tycho2K"]);
-    expect(store.starMap).toBe("Tycho2K");
+    expect(calls.starMaps).toEqual(["DeepStar2K"]);
+    expect(store.starMap).toBe("DeepStar2K");
   });
 
   test("a star map whose faces are missing falls back, and the store follows", async () => {
     const { target, calls, unavailableStarMaps } = fakeTarget();
-    unavailableStarMaps.add("Tycho2K");
+    unavailableStarMaps.add("DeepStar2K");
     startSceneSync(target);
     const store = useCesiumStore();
 
-    store.starMap = "Tycho2K";
+    store.starMap = "DeepStar2K";
     await settle();
 
     // The store is what the radio and the url read, so the fallback has to land
     // there rather than only on the globe.
-    expect(store.starMap).toBe("Tycho1K");
-    expect(calls.starMaps).toEqual(["Tycho2K", "Tycho1K"]);
+    expect(store.starMap).toBe(BUILTIN_STAR_MAP);
+    expect(calls.starMaps).toEqual(["DeepStar2K", BUILTIN_STAR_MAP]);
   });
 
   test("a projection view mode morphs, and hands the camera back first", async () => {

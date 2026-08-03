@@ -145,10 +145,10 @@
              one is and what it costs.
 
              Narrowed to the maps actually on the server, the same way the pixel
-             ratio ladder is narrowed to the rungs below this display: two of the
-             three are optional assets, and a radio that selects a sky nobody can
-             load is worse than one that is absent. The url vocabulary is not
-             narrowed with it — `?stars=` still accepts all three. -->
+             ratio ladder is narrowed to the rungs below this display: the
+             non-builtin ones are optional assets, and a radio that selects a sky
+             nobody can load is worse than one that is absent. The url vocabulary
+             is not narrowed with it — `?stars=` still accepts every name. -->
         <div class="toolbarTitle">Star map</div>
         <label v-for="name in starMapOptions" :key="name" class="toolbarSwitch">
           <input v-model="starMap" type="radio" :value="name" />
@@ -308,7 +308,7 @@ import { useGeolocation } from "../composables/useGeolocation";
 import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
 import { layerProvider } from "../config/layers";
 import { MSAA_RATES, pixelRatiosFor } from "../config/rendering";
-import { availableStarMaps, type StarMapName } from "../config/starMaps";
+import { availableStarMaps, BUILTIN_STAR_MAP, type StarMapName } from "../config/starMaps";
 import { type MapGroup, SURFACE_MODELS, type SurfaceModelName, surfaceEffects, viewModeNote } from "../config/surfaceModels";
 import { SKY_MODE } from "../config/viewModes";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
@@ -345,7 +345,7 @@ const { layers, terrainProvider, surfaceModel, starMap, sceneMode, cameraMode, p
 // so the group is never empty, and widens once the probes answer — a couple of
 // HEAD requests, resolved once per page rather than per menu open, so the list
 // is settled long before anyone opens the panel.
-const starMapOptions = ref<StarMapName[]>(["Tycho1K"]);
+const starMapOptions = ref<StarMapName[]>([BUILTIN_STAR_MAP]);
 void availableStarMaps().then((names) => {
   starMapOptions.value = names;
 });

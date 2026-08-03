@@ -174,18 +174,18 @@ export default defineConfig({
             },
           },
           {
-            // The optional 2K star maps (src/config/starMaps.ts): the Tycho cut
-            // from the submodule and the Deep Star Maps cut from the generator.
-            // Not precached — the glob above covers `cesium/Assets`, where the
-            // Tycho1K sky box lives, so a first offline load has stars either way.
-            // These are only fetched by someone who asked for them, and then they
-            // should survive going offline.
-            urlPattern: /(data\/cesium-assets\/stars|data\/generated\/starmap)\/.*\.jpg$/,
+            // The optional generated star map (src/config/starMaps.ts). Not
+            // precached — the glob above covers `cesium/Assets`, where the
+            // built-in sky box lives, so a first offline load has stars either
+            // way. These are only fetched by someone who asked for them, and then
+            // they should survive going offline.
+            urlPattern: /data\/generated\/starmap\/.*\.jpg$/,
             handler: "CacheFirst",
             options: {
               cacheName: "cesium-starmap-cache",
               expiration: {
-                maxEntries: 12,
+                // Six faces, one optional map.
+                maxEntries: 6,
                 maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
                 purgeOnQuotaError: true,
               },
