@@ -21,9 +21,8 @@ export function createViewer(container: string | Element, options: { minimalUI: 
   const viewer = new Viewer(container, {
     animation: !minimalUI,
     // No base layer here: the store's layer stack is the only default, and it
-    // arrives through sceneSync's immediate watcher a tick later. Naming one
-    // here as well meant two defaults that could drift, and it created the
-    // layer without the availability probe that watcher applies.
+    // arrives through sceneSync's immediate watcher a tick later. Naming one here
+    // as well meant two defaults that could drift.
     baseLayer: false,
     baseLayerPicker: false,
     fullscreenButton: !minimalUI,

@@ -2,6 +2,7 @@
 /// <reference types="vitest/config" />
 
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import ui from "@nuxt/ui/vite";
@@ -48,6 +49,52 @@ const isolationNotice = {
   },
 };
 
+/**
+ * How deep the base map goes — the canonical home for this decision.
+ *
+ * A build-time constant rather than a runtime probe, because whether levels 3-5 ship
+ * is a fact about the build. Two things a probe got wrong, both measured: it requests
+ * a file that is *expected* to be missing, which vite's static-copy middleware answers
+ * with a thrown ENOENT and a full-screen overlay on a fresh clone's first `pnpm dev`;
+ * and since `maximumLevel` stops Cesium requesting anything deeper, a probe failing
+ * while offline stranded every level 4-5 tile already cached. The cost is that running
+ * the generator mid-`pnpm dev` needs a restart.
+ *
+ * Level 3 is the marker rather than the manifest, which is committed and so always
+ * present.
+ */
+const generatedImagery = existsSync(fileURLToPath(new URL("data/imagery/NaturalEarthII/3/0/0.webp", import.meta.url)));
+const COMMITTED_MAX_LEVEL = 2;
+const GENERATED_MAX_LEVEL = 5;
+
+/**
+ * Say so when the build is about to ship the base map capped at level 2.
+ *
+ * Levels 3-5 are generated rather than committed, so a build simply omits them when
+ * nobody has run `pnpm update-imagery` — no error, a smaller precache, and a deployed
+ * site whose globe goes soft the moment anyone zooms in. `pnpm deploy` runs
+ * `pnpm build` directly, so forgetting the generator first is a one-command mistake
+ * with no other symptom.
+ *
+ * A warning rather than a failure: CI legitimately has no generated levels, and the
+ * app is designed to work without them. Making this fatal would break CI to catch a
+ * deploy-time slip.
+ */
+const imageryNotice = {
+  name: "satvis-imagery-notice",
+  apply: "build" as const,
+  buildStart() {
+    if (generatedImagery) {
+      return;
+    }
+    console.warn(
+      "\n  data/imagery holds only the committed levels 0-2 — building without the\n" +
+        "  generated ones. The base map will work, capped at level 2, and go soft as\n" +
+        "  soon as anyone zooms in. Run `pnpm update-imagery` before deploying.\n",
+    );
+  },
+};
+
 export default defineConfig({
   base: "",
   build: {
@@ -80,10 +127,12 @@ export default defineConfig({
     CESIUM_BASE_URL: JSON.stringify("./cesium"),
     __BUILD_DATE__: JSON.stringify(buildDate),
     __BUILD_SHA__: JSON.stringify(buildSha),
+    __IMAGERY_MAX_LEVEL__: JSON.stringify(generatedImagery ? GENERATED_MAX_LEVEL : COMMITTED_MAX_LEVEL),
   },
   plugins: [
     vue(),
     isolationNotice,
+    imageryNotice,
     // Neutral gray palette (default `slate` is blue-tinted and clashes with the
     // app's pure-dark toolbar surfaces).
     ui({
@@ -121,13 +170,41 @@ export default defineConfig({
       },
       workbox: {
         maximumFileSizeToCacheInBytes: 5000000,
-        globPatterns: ["**/*.{js,css,html,svg,png,ico}", "cesium/Assets/**/*.{jpg,png,xml,json}"],
+        globPatterns: [
+          "**/*.{js,css,html,svg,png,ico}",
+          "cesium/Assets/**/*.{jpg,png,xml,json}",
+          // The offline base map, down to level 3 only — 170 tiles and 1.4 MB, against
+          // 17.5 MB for the whole pyramid. Level 3 is a 4096x2048 world, which is about
+          // what a full-globe viewport resolves (~1280 px across 360°), so this is the
+          // depth at which the globe is guaranteed correct offline at any rotation
+          // rather than only where someone happened to look. Levels 4 and 5 are zoomed-in
+          // detail and stay with the CacheFirst rule below.
+          //
+          // Level 3 also sets the floor for everything below it. `maximumLevel` lets
+          // Cesium ask for levels 4 and 5, and offline it will miss on any the runtime
+          // cache has never held — at which point it magnifies the deepest tile it does
+          // have. Precaching to 3 is what guarantees there is always one to magnify.
+          //
+          //
+          // The manifest too: it carries the tiling scheme, and without it Cesium falls
+          // back to WebMercator and `.png`, which is not this tileset in any respect.
+          "data/imagery/NaturalEarthII/{0,1,2,3}/**/*.webp",
+          "data/imagery/NaturalEarthII/tilemapresource.xml",
+        ],
         globIgnores: [
           "cesium/ThirdParty/**/*",
           "cesium/Widgets/**/*",
           "cesium/Workers/**/*",
           "cesium/Assets/Textures/maki/*",
+          // Cesium's own low-resolution Natural Earth II. Nothing requests it, so
+          // precaching it spent 536 KB and 43 entries on imagery never fetched.
+          "cesium/Assets/Textures/NaturalEarthII/**/*",
           "**/*.map",
+          // The embed page's background, 3.8 MB of decoration on a page that is not
+          // the app. The globs above do not match it today because it is a jpg, which
+          // is exactly why it is listed: re-encoding it as png or webp later must not
+          // silently add 3.8 MB to every visitor's install. Hence `bg.*`, not `bg.jpg`.
+          "bg.*",
           // A social card, once there is one worth publishing, belongs here as
           // well: only a scraper unwrapping a shared link ever fetches it, and the
           // png glob above would otherwise precache it for every visitor.
@@ -162,7 +239,10 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: /data\/cesium-assets\/imagery\/.*\.(jpg|png|xml)$/,
+            // Levels 0-3 are precached by the glob above and served from there; this
+            // rule carries 4 and 5, which are 16 of the pyramid's 17.5 MB and only
+            // wanted once someone zooms in.
+            urlPattern: /data\/imagery\/.*\.(webp|jpg|png|xml)$/,
             handler: "CacheFirst",
             options: {
               cacheName: "cesium-tile-cache",

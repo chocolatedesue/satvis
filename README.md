@@ -51,6 +51,7 @@ the SPA and the `worker/` package.
 - `pnpm build` to build the application (output in `dist` folder)
 - `pnpm preview` to preview the production build locally
 - `pnpm update-gp` to refresh the static satellite-data snapshot (see below)
+- `pnpm update-imagery` to build the offline base map (needs docker; see below)
 
 ### Full-stack dev (with the worker)
 
@@ -125,6 +126,34 @@ cron — including metadata enrichment — and writes a static snapshot into
 `data/gp/` (`<group>.json`, `index.json`; gitignored). At runtime the app probes
 `/api/groups.json`; if that fails it falls back to the static `data/gp/`
 snapshot, so all presets keep working without the worker.
+
+### Offline base map
+
+The `NaturalEarth` layer — the default base map, and the one that keeps the globe
+usable with no network — is **part committed, part generated**. Levels 0–2 are in the
+repository (42 WebP tiles, 0.35 MB), so a fresh clone already renders a correct globe.
+The sharp levels are built on demand:
+
+```
+pnpm update-imagery
+```
+
+That runs a container (`scripts/imagery/`) which fetches [Natural Earth
+II](https://www.naturalearthdata.com/downloads/10m-raster-data/) at 10m, applies the
+colour grade the original Cesium tileset was cut with, and writes levels 3–5 into the
+gitignored part of `data/imagery/` — about 17.2 MB more, and a minute on a warm cache.
+Docker is the only host requirement; GDAL runs inside.
+
+The build raises the zoom ceiling when it sees those levels, so skipping the generator
+costs sharpness and nothing else: the globe still works, capped at level 2, and goes
+soft when you zoom in. **Run it before `pnpm deploy`, though** — the build only warns,
+so a deploy without it ships that cap. Running it during a `pnpm dev` session needs a
+restart to take effect.
+
+Levels 0–3 (1.4 MB) are precached by the service worker, so the globe is complete
+offline wherever it is turned; 4 and 5 are cached as they are requested, and anywhere
+you have not been shows level 3 magnified rather than nothing at all.
+`pnpm update-starmap` does the same job for the optional star maps.
 
 ### Satellite metadata
 

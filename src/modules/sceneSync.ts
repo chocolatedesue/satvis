@@ -18,7 +18,6 @@ import { BUILTIN_STAR_MAP, starMapRecovery } from "../config/starMaps";
 import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
-import { highresImageryMissing, withoutHighresImagery } from "./CesiumLayerProviders";
 import { activeTargetEntries } from "./satelliteActivation";
 import type { CatalogEntry } from "./SatelliteCatalog";
 import type { DesiredScene } from "./SatelliteManager";
@@ -89,36 +88,19 @@ export function startSceneSync(cc: SceneTarget): void {
 
   // --- globe settings -------------------------------------------------------
 
-  // Immediate, because the store is the only owner of the layer stack: the viewer
-  // is constructed with no base layer at all and the first stack arrives here.
+  // Immediate, because the store is the only owner of the layer stack: the viewer is
+  // constructed with no base layer at all and the first stack arrives here.
   //
-  // The imagery is applied synchronously, and the availability check is a
-  // *correction* that follows. A missing tile set is then something the store is
-  // told about — the swap re-enters this watcher and the checkbox, the url and the
-  // pixels never disagree — while nothing has to wait on a probe to see a globe.
+  // Nothing corrects the stack afterwards, which is what keeps this safe to run
+  // immediately — an async correction racing the route preset's hydration is how it
+  // used to clobber the preset's basemap (docs/manual-verification.md).
   watch(
     () => cesiumStore.layers,
     (layers) => {
       cc.imageryLayers = [...layers];
-      void correctMissingImagery();
     },
     { deep: true, immediate: true },
   );
-
-  async function correctMissingImagery(): Promise<void> {
-    if (!(await highresImageryMissing())) {
-      return;
-    }
-    // Read *after* waiting, not before. This watcher is immediate, so it first runs
-    // on the store's own default — and by the time a probe answers, the route's
-    // preset has hydrated and the user may have picked something else. Swapping a
-    // stack captured before the await wrote `Offline` over the OT preset's basemap.
-    const swapped = withoutHighresImagery(cesiumStore.layers);
-    if (swapped) {
-      console.warn("High-resolution offline imagery is missing, falling back to Offline. Run `git submodule update --init` to fetch data/cesium-assets.");
-      cesiumStore.setLayers(swapped);
-    }
-  }
   watch(
     () => cesiumStore.terrainProvider,
     (name) => {
@@ -129,10 +111,11 @@ export function startSceneSync(cc: SceneTarget): void {
   // exactly the built-in sky box, so there is nothing to bring into line until
   // the value moves, and a link that names it fetches nothing.
   //
-  // The fallback below is the imagery one in reverse. There the stack is applied
-  // first and a probe corrects it afterwards, because a missing tile set only
-  // leaves the globe blank. Here the faces have to be in hand before the sky box
-  // exists at all, so the failure *is* the probe and it arrives as a rejection.
+  // Unlike the base map, this one still needs a fallback. The base map's shallow
+  // levels are committed, so its only question is how deep to go and the provider
+  // answers it for itself. A sky box has no such floor: the faces are either built
+  // or absent, so the failure arrives here as a rejection and something has to put
+  // the built-in back.
   watch(
     () => cesiumStore.starMap,
     (name) => {

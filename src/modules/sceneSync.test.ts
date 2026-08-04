@@ -19,15 +19,6 @@ import type { DesiredScene } from "./SatelliteManager";
 import { type SceneTarget, startSceneSync } from "./sceneSync";
 import type { Observer } from "./SkyView";
 
-// Only the probe is stubbed — it is a network read, and nothing here is about
-// the imagery fallback. The registry the store builds its url schema from is the
-// real one.
-vi.mock(import("./CesiumLayerProviders"), async (importOriginal) => ({
-  ...(await importOriginal()),
-  highresImageryMissing: () => Promise.resolve(false),
-  withoutHighresImagery: () => undefined,
-}));
-
 /** Everything sceneSync writes to, recorded rather than enacted. */
 function fakeTarget() {
   const calls = {

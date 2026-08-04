@@ -271,10 +271,11 @@ export class CesiumController {
         this.viewer.scene.imageryLayers.add(layer);
       }
     });
-    // The stack now arrives asynchronously — the availability probe resolves
-    // after `requestRenderMode` is on — and a globe whose imagery changed
-    // between frames is not something Cesium's input handling can notice, so
-    // without this the new layer is never tiled and the globe stays blank.
+    // Providers resolve asynchronously — `fromUrl` fetches a manifest before the
+    // layer exists — so the imagery lands after `requestRenderMode` has gone quiet,
+    // and a globe whose imagery changed between frames is not something Cesium's
+    // input handling can notice. Without this the new layer is never tiled and the
+    // globe stays blank.
     this.viewer.scene.requestRender();
   }
 

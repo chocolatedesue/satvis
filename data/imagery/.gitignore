@@ -1,0 +1,13 @@
+# The base map is part tracked, part generated. Levels 0-2 and the manifest are
+# committed — 42 tiles and 0.35 MB — so every checkout has a correct globe without
+# running docker, and the app has no absent-imagery case to handle. Levels 3-5 are
+# 17.2 MB and come from `pnpm update-imagery`.
+#
+# Safe to commit because the generator is reproducible: levels 0-2 come out
+# byte-identical across repeated runs, process counts, and arm64 against amd64. The
+# source archive is pinned by checksum (`SOURCE_SHA256`) so that stays true, and the
+# depth is fixed because a shallower run would produce different pixels for these
+# same levels.
+NaturalEarthII/3/
+NaturalEarthII/4/
+NaturalEarthII/5/
