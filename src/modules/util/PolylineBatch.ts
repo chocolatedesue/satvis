@@ -42,6 +42,17 @@ const FRAME_UPDATE_SECONDS = 0.5;
 export type BatchFrame = "inertial" | "fixed";
 
 export class PolylineBatch {
+  /** So a broken assumption is reported once rather than on every tick. */
+  static #reportedMissingState = false;
+
+  static #reportMissingState(): void {
+    if (PolylineBatch.#reportedMissingState) {
+      return;
+    }
+    PolylineBatch.#reportedMissingState = true;
+    console.error("Cesium Primitive has no _state; driving it every tick instead. Cesium internals have moved — see PolylineBatch.");
+  }
+
   #viewer: Viewer;
 
   readonly #frame: BatchFrame;
@@ -180,6 +191,18 @@ export class PolylineBatch {
       if (!primitive.ready) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const state = (primitive as any)._state;
+        if (state === undefined) {
+          // Cesium-internal, and the one reach here that would fail in silence:
+          // `update` would run exactly once, the primitive would never become
+          // ready, `#building` would stick, and orbits, tracks, `settled()` and
+          // therefore every scene morph would stop — with nothing logged. Say so,
+          // and drive it anyway, which is what the state check was only avoiding
+          // for the sake of one update per state.
+          PolylineBatch.#reportMissingState();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (primitive as any).update(this.#viewer.scene.frameState);
+          return;
+        }
         if (state !== lastState) {
           lastState = state;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
