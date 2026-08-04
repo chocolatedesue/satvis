@@ -1,6 +1,9 @@
+import { SceneMode } from "@cesium/engine";
 import { describe, expect, test } from "vitest";
 
+import { SCENE_MODES, SKY_MODE } from "../config/viewModes";
 import {
+  cesiumSceneMode,
   coneDescription,
   groundTrackDescription,
   isLeo,
@@ -98,5 +101,24 @@ describe("geometryRefreshSeconds", () => {
   test("clamps at the ceiling, where a rebuild costs more than the lag", () => {
     expect(geometryRefreshSeconds(1000)).toBe(GEOMETRY_REFRESH_MAX_SECONDS);
     expect(geometryRefreshSeconds(5000)).toBe(GEOMETRY_REFRESH_MAX_SECONDS);
+  });
+});
+
+describe("cesiumSceneMode", () => {
+  test("maps the three projections and refuses the one that is not", () => {
+    expect(cesiumSceneMode("3D")).toBe(SceneMode.SCENE3D);
+    expect(cesiumSceneMode("2D")).toBe(SceneMode.SCENE2D);
+    expect(cesiumSceneMode("Columbus")).toBe(SceneMode.COLUMBUS_VIEW);
+    // Sky renders in 3D but is a camera placement, so morphing on its behalf is
+    // SkyView's business and this must not answer for it.
+    expect(cesiumSceneMode("Sky")).toBeUndefined();
+    expect(cesiumSceneMode("nonsense")).toBeUndefined();
+  });
+
+  test("every projection name in the app's vocabulary maps", () => {
+    // A mode added to SCENE_MODES without a projection here would silently stop
+    // morphing, so the list is checked rather than restated.
+    const unmapped = SCENE_MODES.filter((mode) => mode !== SKY_MODE && cesiumSceneMode(mode) === undefined);
+    expect(unmapped).toEqual([]);
   });
 });

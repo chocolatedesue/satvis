@@ -1,4 +1,4 @@
-import { Math as CesiumMath } from "@cesium/engine";
+import { Math as CesiumMath, SceneMode } from "@cesium/engine";
 
 import type { OrbitClass } from "../config/orbitClass";
 
@@ -77,6 +77,28 @@ export function modelUri(name: string, modelUrl?: string): string {
  */
 export function orbitUsesPathGraphic(isTracked: boolean, sceneModeSupportsPrimitive: boolean): boolean {
   return isTracked || !sceneModeSupportsPrimitive;
+}
+
+/**
+ * The Cesium projection a view-mode name asks for, or undefined for one that is
+ * not a projection at all.
+ *
+ * Here rather than in config/viewModes so that file stays Cesium-free, and here
+ * rather than inline in CesiumController so the mapping is testable without a
+ * viewer. "Sky" is deliberately absent: it renders in 3D but is a camera
+ * placement, and morphing on its behalf is what SkyView does for itself.
+ */
+export function cesiumSceneMode(viewMode: string): SceneMode | undefined {
+  switch (viewMode) {
+    case "3D":
+      return SceneMode.SCENE3D;
+    case "2D":
+      return SceneMode.SCENE2D;
+    case "Columbus":
+      return SceneMode.COLUMBUS_VIEW;
+    default:
+      return undefined;
+  }
 }
 
 /** Bounds on how often time-dependent geometry is re-cut, in simulation seconds. */
