@@ -22,8 +22,8 @@
     "lint:fix:web": "oxlint --disable-nested-config --fix && oxfmt --disable-nested-config --write",
     "lint:fix:worker": "pnpm --filter satvis-worker lint:fix",
     "update-gp": "pnpm --filter satvis-worker generate-groups && node worker/scripts/update-static-gp.mjs",
-    "update-imagery": "bash scripts/imagery/generate.sh",
-    "update-starmap": "bash scripts/starmap/generate.sh",
+    "update-imagery": "bash scripts/generate.sh imagery",
+    "update-starmap": "bash scripts/generate.sh starmap",
     "update-custom-data": "bash data/custom/update-custom-data.sh",
     "deploy": "pnpm build && pnpm --filter satvis-worker deploy",
     "deploy:preview": "pnpm build && pnpm --filter satvis-worker deploy:preview"

@@ -651,7 +651,8 @@ def main() -> int:
         description="Build a Cesium sky box from NASA SVS Deep Star Maps 2020.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument("--res", default="16k", choices=["8k", "16k", "32k"], help="source map resolution")
+    # Fetched once into the cache and kept: 8k is 106 MB, 16k 423 MB, 32k ~1.5 GB.
+    ap.add_argument("--res", default="16k", choices=["8k", "16k", "32k"], help="source map resolution (8k/16k/32k download about 106 MB/423 MB/1.5 GB, cached)")
     ap.add_argument("--size", type=int, nargs="+", default=[2048, 1024], metavar="N",
                     help="cube face edge in pixels; several build several cuts from the one source")
     ap.add_argument("--supersample", default="auto", help="samples per output texel per axis, or auto from the source resolution")
