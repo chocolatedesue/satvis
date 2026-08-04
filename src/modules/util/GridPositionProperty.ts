@@ -24,8 +24,12 @@
 // reproduced (11.08/11.44/9.31 before, 4.91/4.63 after) far outside the noise the
 // other columns carry.
 //
-// It costs 7.4 KB a satellite, measured — 46.1 against 38.7 KB/sat, some 37 MB at
-// 5,000 — because the samples are currently stored twice. See SampledTrajectory.
+// It also *saves* memory, which was not the point but is the larger effect: 25.7
+// against 38.7 KB a satellite for everything a satellite owns, some 74 MB less at
+// 5,000. A `SampledPositionProperty` keeps a `JulianDate` object per sample and
+// there are 241 of them per satellite; deriving the times from the anchor instead
+// means the samples are three doubles each and nothing else. See SampledTrajectory,
+// which now builds the irregular-capable properties on demand from this one.
 //
 // Accuracy is checked against an independent SGP4 — python-sgp4, Vallado's
 // reference implementation — given the same element sets and the same instants,
@@ -166,6 +170,15 @@ export class GridPositionProperty {
     this.#anchor = JulianDate.fromDate(new Date(anchorEpochMs));
     this.#firstIndex = 0;
     this.#count = 0;
+    this._definitionChanged.raiseEvent(this);
+  }
+
+  /** Drop everything and release the buffer, for a grid that is being abandoned. */
+  clear(): void {
+    this.#firstIndex = 0;
+    this.#count = 0;
+    this.#stepSeconds = 0;
+    this.#positions = new Float64Array(0);
     this._definitionChanged.raiseEvent(this);
   }
 
@@ -364,6 +377,36 @@ export class GridPositionProperty {
   /** The grid index at or after `time`, for turning an instant into a range. */
   indexAtOrAfter(time: JulianDate): number {
     return Math.ceil(JulianDate.secondsDifference(time, this.#anchor) / this.#stepSeconds);
+  }
+
+  /**
+   * Every sample held between two instants, with the times they sit at.
+   *
+   * The times are derived from the anchor rather than stored, which is the point:
+   * a caller that needs `(time, position)` pairs — drawing a track, transforming a
+   * window into another frame — can have them without this keeping a JulianDate
+   * per sample, and a JulianDate per sample is most of what a
+   * `SampledPositionProperty` costs.
+   */
+  samplesBetween(from: JulianDate, to: JulianDate): { times: JulianDate[]; positions: Cartesian3[] } {
+    const times: JulianDate[] = [];
+    const positions: Cartesian3[] = [];
+    if (this.#count === 0 || this.#stepSeconds <= 0) {
+      return { times, positions };
+    }
+    const first = Math.max(this.indexAtOrAfter(from), this.#firstIndex);
+    const last = Math.min(Math.floor(JulianDate.secondsDifference(to, this.#anchor) / this.#stepSeconds), this.#firstIndex + this.#count - 1);
+    for (let index = first; index <= last; index += 1) {
+      const at = (index - this.#firstIndex) * 3;
+      times.push(this.timeAt(index));
+      positions.push(new Cartesian3(this.#positions[at] as number, this.#positions[at + 1] as number, this.#positions[at + 2] as number));
+    }
+    return { times, positions };
+  }
+
+  /** The instants and positions of everything held. */
+  allSamples(): { times: JulianDate[]; positions: Cartesian3[] } {
+    return this.samplesBetween(this.timeAt(this.#firstIndex), this.timeAt(this.#firstIndex + Math.max(0, this.#count - 1)));
   }
 
   equals(other?: GridPositionProperty): boolean {

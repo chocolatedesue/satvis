@@ -102,22 +102,25 @@ describe("SampledTrajectory", () => {
     const { trajectory } = issTrajectory();
     await trajectory.ensure(T0);
 
-    // A scene drawing points and nothing else pays for one sample set, not two.
-    expect(trajectory.fixed).toBeDefined();
+    // A scene drawing points and nothing else pays for one sample set, not three:
+    // the grid, and neither irregular-capable property.
+    expect(trajectory.entityPosition).toBeDefined();
+    expect(trajectory.sampleCount).toBeGreaterThan(0);
+    expect(trajectory.fixed).toBeUndefined();
     expect(trajectory.inertial).toBeUndefined();
   });
 
   test("requireInertial backfills the window already sampled", async () => {
     const { trajectory } = issTrajectory();
     await trajectory.ensure(T0);
-    const fixedSamples = trajectory.fixed?.length() ?? 0;
-    expect(fixedSamples).toBeGreaterThan(0);
+    const samples = trajectory.sampleCount;
+    expect(samples).toBeGreaterThan(0);
 
     trajectory.requireInertial();
 
-    // Backfilled from the fixed samples rather than re-propagated, so the two
-    // frames cover exactly the same instants.
-    expect(trajectory.inertial?.length()).toBe(fixedSamples);
+    // Backfilled from the samples already held rather than re-propagated, so the
+    // two frames cover exactly the same instants.
+    expect(trajectory.inertial?.length()).toBe(samples);
   });
 
   test("requireInertial before the first update samples both frames from the start", async () => {
@@ -125,7 +128,7 @@ describe("SampledTrajectory", () => {
     trajectory.requireInertial();
     await trajectory.ensure(T0);
 
-    expect(trajectory.inertial?.length()).toBe(trajectory.fixed?.length());
+    expect(trajectory.inertial?.length()).toBe(trajectory.sampleCount);
   });
 
   test("requireInertial is idempotent and keeps the same property instance", async () => {
@@ -149,7 +152,7 @@ describe("SampledTrajectory", () => {
 
     // Not just backfilled once: the flag has to make every later refresh sample
     // both frames, or the orbit would freeze a window behind the satellite.
-    expect(trajectory.inertial?.length()).toBe(trajectory.fixed?.length());
+    expect(trajectory.inertial?.length()).toBe(trajectory.sampleCount);
   });
 
   test("positionsForNextOrbit asking for the inertial frame requires it implicitly", async () => {
@@ -196,6 +199,9 @@ describe("SampledTrajectory", () => {
       await trajectory.ensure(T0);
       await trajectory.ensure(JulianDate.addSeconds(T0, periodSeconds / 4, new JulianDate()));
 
+      // Through the sampled property, whose stored times are the thing under test;
+      // asking for it backfills them from the grid.
+      trajectory.requireSampled();
       const { times } = trajectory.fixed!.getRawSamples();
       expect(times.length).toBeGreaterThan(200);
       const gaps = times.slice(1).map((time, index) => JulianDate.secondsDifference(time, times[index] as JulianDate));
@@ -217,6 +223,7 @@ describe("SampledTrajectory", () => {
       // Cesium's six-point quintic over identical samples. The bound is what makes
       // the swap safe — a bug in the grid's index arithmetic would put the
       // satellite a whole sample step away, which is tens of kilometres.
+      trajectory.requireSampled();
       expect(trajectory.entityPosition).not.toBe(trajectory.fixed);
       for (let offset = 0; offset < periodSeconds; offset += periodSeconds / 40) {
         const time = JulianDate.addSeconds(T0, periodSeconds / 4 + offset, new JulianDate());
@@ -224,6 +231,48 @@ describe("SampledTrajectory", () => {
         const sampled = trajectory.fixed!.getValue(time) as Cartesian3;
         expect(Cartesian3.distance(grid, sampled)).toBeLessThan(50);
       }
+    });
+
+    test("requireSampled backfills the window already held, without re-propagating", async () => {
+      const { orbit, trajectory, source } = issTrajectory();
+      await trajectory.ensure(T0);
+      const requests = source.stats.requests;
+      const sgp4 = vi.spyOn(orbit, "positionECI");
+
+      trajectory.requireSampled();
+
+      // The samples are already in hand; only the times have to be rebuilt, and
+      // those come from the grid's anchor.
+      expect(trajectory.fixed?.length()).toBe(trajectory.sampleCount);
+      expect(source.stats.requests).toBe(requests);
+      expect(sgp4).not.toHaveBeenCalled();
+    });
+
+    test("requireSampled keeps the window sliding once asked for", async () => {
+      const { trajectory, periodSeconds } = issTrajectory();
+      await trajectory.ensure(T0);
+      trajectory.requireSampled();
+      const property = trajectory.fixed;
+
+      await trajectory.ensure(JulianDate.addSeconds(T0, periodSeconds, new JulianDate()));
+
+      // A path graphic binds to this object, so it has to keep being fed rather
+      // than freeze at the window it was created from.
+      expect(trajectory.fixed).toBe(property);
+      expect(trajectory.fixed?.length()).toBe(trajectory.sampleCount);
+      expect(trajectory.fixed?.getValue(JulianDate.addSeconds(T0, periodSeconds, new JulianDate()))).toBeDefined();
+    });
+
+    test("a trajectory re-initialised after asking still gets the sampled property", async () => {
+      const { trajectory, periodSeconds } = issTrajectory();
+      await trajectory.ensure(T0);
+      trajectory.requireSampled();
+
+      // A clock jump clear of the window re-inits, which must honour what the
+      // trajectory was already committed to sampling.
+      await trajectory.ensure(JulianDate.addSeconds(T0, periodSeconds * 50, new JulianDate()));
+
+      expect(trajectory.fixed?.length()).toBe(trajectory.sampleCount);
     });
 
     test("a gap in a chunk falls back to the sampled property rather than closing it", async () => {
@@ -235,10 +284,60 @@ describe("SampledTrajectory", () => {
 
       await trajectory.ensure(T0);
 
-      // The grid read assumes no holes, so a chunk with any is not mirrored into
-      // it at all and entities keep reading the property that interpolates across.
+      // The grid read assumes no holes, so a chunk with any abandons the grid and
+      // brings the sampled property into being unasked — that is the whole point of
+      // the fallback, and without it a gapped satellite would have nowhere to read.
+      expect(trajectory.fixed).toBeDefined();
       expect(trajectory.entityPosition).toBe(trajectory.fixed);
+      expect(trajectory.sampleCount).toBeGreaterThan(0);
       expect(trajectory.position(T0)).toBeDefined();
+    });
+
+    test("an abandoned grid does not go on answering with the window it stopped at", async () => {
+      const { periodSeconds } = issTrajectory();
+      const inline = new InlineSampleSource().samplerFor("25544", issRecord());
+      let gap = false;
+      // A gap only on the second fill, so the grid is populated and then abandoned.
+      const sampler: TrajectorySampler = {
+        samples: async (from, to) => {
+          const chunk = (await inline.samples(from, to)) as SampleChunk;
+          return gap ? { ...chunk, refusedIndices: [2] } : chunk;
+        },
+      };
+      const subject = new SampledTrajectory(new Orbit("ISS", issRecord()), sampler);
+
+      await subject.ensure(T0);
+      // Captured from the grid, before the gap, so it is an independent value to
+      // compare against rather than the same store asked twice — comparing
+      // `position()` with `fixed.getValue()` after the fallback is comparing one
+      // property to itself, which passes at distance 0 however broken the handover.
+      const gridCount = subject.sampleCount;
+      // A quarter orbit on, so it is comfortably inside the window both before and
+      // after the refill. T0 itself is no good: the new window starts exactly there,
+      // and a read at a window's first sample HOLDs rather than interpolates, which
+      // is a legitimate ~350 km at one grid step and says nothing about the handover.
+      const probe = JulianDate.addSeconds(T0, periodSeconds / 4, new JulianDate());
+      const atProbe = subject.position(probe)!;
+      expect(gridCount).toBeGreaterThan(200);
+
+      gap = true;
+      const later = JulianDate.addSeconds(T0, periodSeconds / 2, new JulianDate());
+      await subject.ensure(later);
+
+      // The window the grid held has to survive into the sampled property. If the
+      // backfill came up empty the property would hold only the gapped chunk, and
+      // HOLD would answer T0 with that chunk's first sample — most of an orbit away.
+      expect(subject.entityPosition).toBe(subject.fixed);
+      // A whole window, not just the gapped chunk — eviction trims the far end, so
+      // the count lands near the pre-gap one rather than above it.
+      expect(subject.sampleCount).toBeGreaterThan(gridCount / 2);
+      // If the backfill came up empty, `fixed` would hold only the gapped chunk and
+      // HOLD would answer this with a sample 1.25 revolutions away.
+      expect(Cartesian3.distance(subject.position(probe)!, atProbe)).toBeLessThan(50);
+      expect(subject.position(later)).toBeDefined();
+      // And the raw-sample readers follow the same store, or the track would be cut
+      // from a window the satellite has already left.
+      expect(subject.positionsForTrack(later).length).toBeGreaterThan(1);
     });
 
     test("refused samples are skipped rather than re-propagated", async () => {

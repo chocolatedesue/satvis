@@ -328,11 +328,11 @@ export class SatelliteComponentCollection {
   }
 
   updatedSampledPositionForComponents(update = false): void {
-    const { fixed, entityPosition } = this.props.trajectory;
-    // Not the inertial frame: it is absent unless an Orbit asked for it, and
-    // requiring it here would have stopped every other component updating in
-    // exactly the scenes this laziness exists to make cheaper.
-    if (!fixed || !entityPosition) return;
+    const { entityPosition } = this.props.trajectory;
+    // Neither the inertial frame nor the sampled property: both are absent unless
+    // a component asked for them, and requiring either here would have stopped
+    // every other component updating in exactly the scenes the laziness is for.
+    if (!entityPosition) return;
 
     Object.entries(this.components).forEach(([type, component]) => {
       if (type === "Orbit") {
@@ -347,8 +347,10 @@ export class SatelliteComponentCollection {
         }
       } else if (type === "Orbit track") {
         if (component instanceof Entity) {
-          // The sampled property, not the grid — this one is a path. See createOrbitTrackPath.
-          component.position = fixed;
+          // The sampled property, not the grid — this one is a path, and an Orbit
+          // track Entity exists only because createOrbitTrackPath asked for it.
+          this.props.trajectory.requireSampled();
+          component.position = this.props.trajectory.fixed;
         } else if (update) {
           // The window it was cut from has just moved, so the samples behind the
           // batched geometry are the old ones. Re-cut rather than rebuild the
@@ -543,7 +545,9 @@ export class SatelliteComponentCollection {
       width: 2,
     });
     // The sampled property, so PathVisualizer sub-samples at the stored sample
-    // times rather than at `resolution`.
+    // times rather than at `resolution`. Asking is what brings it into being —
+    // only the tracked satellite and the non-3D scene modes draw a path.
+    this.props.trajectory.requireSampled();
     this.createCesiumEntity("Orbit track", "path", path, this.props.name, this.props.trajectory.fixed, true);
   }
 

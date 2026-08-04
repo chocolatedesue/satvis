@@ -27,7 +27,14 @@ const lagrangeInterpolation = LagrangePolynomialApproximation as unknown as Inte
 
 interface SampledPositionData {
   interval: TimeInterval;
-  fixed: SampledPositionProperty;
+  /**
+   * Absent until a path graphic asks for it, exactly like `inertial`. The grid is
+   * what everything else reads, and a `SampledPositionProperty` over the same
+   * window is expensive in a way that is easy to miss: a `JulianDate` object per
+   * sample, and 241 of those per satellite. Measured at 13.2 KB a satellite — 66 MB
+   * across five thousand. See `requireSampled`.
+   */
+  fixed: SampledPositionProperty | undefined;
   /**
    * Absent until something asks for it. Only the Orbit component reads the
    * inertial frame, and carrying a second full sample set for every satellite in
@@ -54,6 +61,9 @@ export class SampledTrajectory {
   /** Whether any consumer has asked for the inertial frame. See requireInertial. */
   #wantsInertial = false;
 
+  /** Whether any consumer has asked for the sampled property. See requireSampled. */
+  #wantsSampled = false;
+
   /**
    * Where samples come from. Injected rather than reached for, so this class has
    * no opinion about whether propagation happens on a worker — see sampleSource.
@@ -68,11 +78,12 @@ export class SampledTrajectory {
    * `dataSourceDisplay.update` from 12.0 ms to 5.1 and taking the frame rate from
    * 71 to 97. See GridPositionProperty for why, and for the caveats.
    *
-   * Held alongside the sampled property rather than instead of it, for now: the
-   * sampled property is still what path graphics sub-sample and what the raw
-   * accessors read. Storing the positions twice measures at 7.4 KB a satellite —
-   * 46.1 against 38.7 KB/sat, some 37 MB at 5,000 — which is the price of this
-   * being one change rather than three. Making the grid the only store is filed.
+   * The authoritative store, and the only one most satellites have: `fixed` and
+   * `inertial` are both built on demand from this. A flat array of doubles is also
+   * far cheaper than a `SampledPositionProperty` over the same window — 25.7
+   * against 38.7 KB a satellite for everything a satellite owns, some 74 MB less
+   * at 5,000 — because it derives sample times from the anchor instead of keeping
+   * a `JulianDate` object per sample.
    */
   #gridFixed = new GridPositionProperty();
 
@@ -104,9 +115,84 @@ export class SampledTrajectory {
    * Fixed-frame samples, irregular-capable. What path graphics need: Cesium's
    * PathVisualizer sub-samples a `SampledPositionProperty` at its stored sample
    * times and anything else at `resolution`, which would be far coarser.
+   *
+   * Call `requireSampled` first — like `inertial`, this returns undefined on a
+   * trajectory nothing has asked for it on rather than quietly building one.
    */
   get fixed(): SampledPositionProperty | undefined {
     return this.#data?.fixed;
+  }
+
+  /**
+   * Declare that the irregular-capable property is needed, and make it so.
+   *
+   * The same shape as `requireInertial`: a flag so every later refresh feeds it,
+   * and a backfill from the grid so a window already up is not re-propagated. The
+   * backfill is the grid's own samples with times derived from the anchor, so it
+   * costs no SGP4 and no frame transforms.
+   */
+  requireSampled(): void {
+    if (this.#wantsSampled) {
+      return;
+    }
+    this.#wantsSampled = true;
+    this.#backfillSampled();
+  }
+
+  #backfillSampled(): void {
+    const data = this.#data;
+    if (!data || data.fixed) {
+      return;
+    }
+    const fixed = SampledTrajectory.#createProperty(ReferenceFrame.FIXED);
+    const { times, positions } = this.#windowSamples();
+    if (times.length > 0) {
+      fixed.addSamples(times, positions);
+    }
+    data.fixed = fixed;
+  }
+
+  /**
+   * The window's samples, from whichever store currently owns them.
+   *
+   * Normally the grid. Once a gap has made the grid unusable it is abandoned and
+   * cleared, and the sampled property is the only complete record — reading the
+   * grid then would hand back the window it happened to stop at, which is a
+   * position for the wrong time rather than a missing one.
+   */
+  #windowSamples(): { times: JulianDate[]; positions: Cartesian3[] } {
+    if (this.#gridUsable && this.#gridFixed.length > 0) {
+      return this.#gridFixed.allSamples();
+    }
+    const fixed = this.#data?.fixed;
+    if (!fixed) {
+      return { times: [], positions: [] };
+    }
+    const { times, values } = fixed.getRawSamples();
+    return { times, positions: values as Cartesian3[] };
+  }
+
+  /**
+   * How many samples the window holds, whichever store owns them.
+   *
+   * Exists so a caller can ask about the window without first working out which
+   * property is live — and because the two stores spell it differently (`length` a
+   * getter here, `length()` a method on Cesium's).
+   */
+  get sampleCount(): number {
+    if (this.#gridUsable && this.#gridFixed.length > 0) {
+      return this.#gridFixed.length;
+    }
+    return this.#data?.fixed?.length() ?? 0;
+  }
+
+  /** Positions between two instants, from whichever store owns them. See `#windowSamples`. */
+  #positionsBetween(start: JulianDate, end: JulianDate): Cartesian3[] {
+    if (this.#gridUsable && this.#gridFixed.length > 0) {
+      return this.#gridFixed.samplesBetween(start, end).positions;
+    }
+    const fixed = this.#data?.fixed;
+    return fixed ? (fixed.getRawValues(start, end) as Cartesian3[]) : [];
   }
 
   /**
@@ -156,7 +242,9 @@ export class SampledTrajectory {
       return;
     }
     const inertial = SampledTrajectory.#createProperty(ReferenceFrame.INERTIAL);
-    const { times, values } = data.fixed.getRawSamples();
+    // From the grid, which always holds the window; the sampled property may not
+    // exist at all, and when it does it holds the same samples anyway.
+    const { times, positions: values } = this.#windowSamples();
     const positions: Cartesian3[] = [];
     const kept: JulianDate[] = [];
     for (const [index, time] of times.entries()) {
@@ -190,14 +278,20 @@ export class SampledTrajectory {
 
   positionsForNextOrbit(start: JulianDate, reference: "inertial" | "fixed" = "inertial", loop = true): unknown[] {
     if (!this.#data) return [];
-    if (reference === "inertial") {
+    const end = JulianDate.addSeconds(start, this.#orbit.orbitalPeriod * 60, new JulianDate());
+    let positions: unknown[];
+    if (reference === "fixed") {
+      // The grid holds the same samples and always exists, so asking for the
+      // Earth-relative path does not drag a sampled property into being.
+      positions = this.#positionsBetween(start, end);
+    } else {
       // The caller wants the inertial frame, which is the declaration itself.
       this.requireInertial();
+      const inertial = this.#data.inertial;
+      if (!inertial) return [];
+      positions = inertial.getRawValues(start, end);
     }
-    const property = this.#data[reference];
-    if (!property) return [];
-    const end = JulianDate.addSeconds(start, this.#orbit.orbitalPeriod * 60, new JulianDate());
-    const positions = property.getRawValues(start, end);
+    if (positions.length === 0) return [];
     if (loop) {
       // Readd the first position to the end of the array to close the loop
       return [...positions, positions[0]];
@@ -220,7 +314,7 @@ export class SampledTrajectory {
     if (!this.#data) return [];
     const end = JulianDate.addSeconds(start, this.#orbit.orbitalPeriod * 60, new JulianDate());
     const head = this.position(start);
-    const samples = this.#data.fixed.getRawValues(start, end) as Cartesian3[];
+    const samples = this.#positionsBetween(start, end);
     return head ? [head, ...samples] : samples;
   }
 
@@ -387,13 +481,15 @@ export class SampledTrajectory {
     if (times.length === 0) {
       return;
     }
-    // Added at once: a sorted array avoids a search per sample.
-    data.fixed.addSamples(times, positionsFixed);
-    inertialProperty?.addSamples(times, positionsInertial);
-    // Any shortfall at all, not just a refusal: a missing frame transform drops a
-    // sample the same way, and the grid's indices only line up with the chunk's
-    // when nothing was dropped.
+    // The grid first, and only then the sampled property: a gap here forces the
+    // sampled property into being, and its backfill reads the grid as it was
+    // before this chunk. Any shortfall counts as a gap, not just a refusal — a
+    // missing frame transform drops a sample the same way, and the grid's indices
+    // only line up with the chunk's when nothing was dropped.
     this.#addToGrid(chunk, positionsFixed, positionsFixed.length !== sampleCount);
+    // Added at once: a sorted array avoids a search per sample.
+    this.#data?.fixed?.addSamples(times, positionsFixed);
+    inertialProperty?.addSamples(times, positionsInertial);
   }
 
   /**
@@ -411,7 +507,16 @@ export class SampledTrajectory {
       return;
     }
     if (hadGaps) {
+      // Order is the whole of it. The grid is still the authoritative record at
+      // this instant and the backfill reads whichever store is authoritative, so
+      // asking for the sampled property has to happen *before* the grid is
+      // disowned — flipping the flag first made `#windowSamples` skip the grid,
+      // find a `fixed` that did not exist yet, and hand back nothing, leaving the
+      // new property holding only this chunk. Then let the buffer go: an abandoned
+      // grid that keeps its samples is a window frozen where it was abandoned.
+      this.requireSampled();
       this.#gridUsable = false;
+      this.#gridFixed.clear();
       return;
     }
     if (!this.#gridFixed.isOnGrid(chunk.anchorEpochMs, chunk.stepSeconds)) {
@@ -475,8 +580,8 @@ export class SampledTrajectory {
     }
     const before = new TimeInterval({ start: JulianDate.fromIso8601("1957"), stop: keep.start, isStartIncluded: false, isStopIncluded: false });
     const after = new TimeInterval({ start: keep.stop, stop: JulianDate.fromIso8601("2100"), isStartIncluded: false, isStopIncluded: false });
-    data.fixed.removeSamples(before);
-    data.fixed.removeSamples(after);
+    data.fixed?.removeSamples(before);
+    data.fixed?.removeSamples(after);
     data.inertial?.removeSamples(before);
     data.inertial?.removeSamples(after);
     if (this.#gridFixed.length > 0) {
@@ -530,9 +635,9 @@ export class SampledTrajectory {
         isStartIncluded: false,
         isStopIncluded: false,
       }),
-      fixed: SampledTrajectory.#createProperty(),
-      // Only if something has already asked. A re-init mid-life keeps whatever
-      // the trajectory was already committed to sampling.
+      // Both only if something has already asked. A re-init mid-life keeps
+      // whatever the trajectory was already committed to sampling.
+      fixed: this.#wantsSampled ? SampledTrajectory.#createProperty() : undefined,
       inertial: this.#wantsInertial ? SampledTrajectory.#createProperty(ReferenceFrame.INERTIAL) : undefined,
       valid: true,
     };
