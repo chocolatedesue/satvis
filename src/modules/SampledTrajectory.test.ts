@@ -208,6 +208,39 @@ describe("SampledTrajectory", () => {
       }
     });
 
+    test("the grid entities read from agrees with the sampled property", async () => {
+      const { trajectory, periodSeconds } = issTrajectory();
+      await trajectory.ensure(T0);
+      await trajectory.ensure(JulianDate.addSeconds(T0, periodSeconds / 4, new JulianDate()));
+
+      // Not the same property, so not the same answer: a four-point cubic against
+      // Cesium's six-point quintic over identical samples. The bound is what makes
+      // the swap safe — a bug in the grid's index arithmetic would put the
+      // satellite a whole sample step away, which is tens of kilometres.
+      expect(trajectory.entityPosition).not.toBe(trajectory.fixed);
+      for (let offset = 0; offset < periodSeconds; offset += periodSeconds / 40) {
+        const time = JulianDate.addSeconds(T0, periodSeconds / 4 + offset, new JulianDate());
+        const grid = trajectory.entityPosition!.getValue(time) as Cartesian3;
+        const sampled = trajectory.fixed!.getValue(time) as Cartesian3;
+        expect(Cartesian3.distance(grid, sampled)).toBeLessThan(50);
+      }
+    });
+
+    test("a gap in a chunk falls back to the sampled property rather than closing it", async () => {
+      const { trajectory, sampler } = issTrajectory();
+      vi.spyOn(sampler, "samples").mockImplementation(async (from, to) => {
+        const chunk = (await new InlineSampleSource().samplerFor("25544", issRecord()).samples(from, to)) as SampleChunk;
+        return { ...chunk, refusedIndices: [5, 6, 7] };
+      });
+
+      await trajectory.ensure(T0);
+
+      // The grid read assumes no holes, so a chunk with any is not mirrored into
+      // it at all and entities keep reading the property that interpolates across.
+      expect(trajectory.entityPosition).toBe(trajectory.fixed);
+      expect(trajectory.position(T0)).toBeDefined();
+    });
+
     test("refused samples are skipped rather than re-propagated", async () => {
       const { orbit, trajectory, sampler } = issTrajectory();
       const sgp4 = vi.spyOn(orbit, "positionECI");

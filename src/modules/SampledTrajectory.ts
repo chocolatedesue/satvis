@@ -16,6 +16,7 @@ import type { Viewer } from "@cesium/widgets";
 import type Orbit from "./Orbit";
 import "./util/CesiumSampledPositionRawValueAccess";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
+import { GridPositionProperty } from "./util/GridPositionProperty";
 import type { SampleChunk, TrajectorySampler } from "./util/sampleSource";
 import { trajectoryWindow } from "./util/trajectoryWindow";
 
@@ -59,6 +60,30 @@ export class SampledTrajectory {
    */
   readonly #sampler: TrajectorySampler;
 
+  /**
+   * The same fixed-frame samples again, on a uniform grid, for entities to read.
+   *
+   * Entities are evaluated once each per frame and that evaluation was the largest
+   * single cost in a large scene — measured at 5,000 satellites, halving
+   * `dataSourceDisplay.update` from 12.0 ms to 5.1 and taking the frame rate from
+   * 71 to 97. See GridPositionProperty for why, and for the caveats.
+   *
+   * Held alongside the sampled property rather than instead of it, for now: the
+   * sampled property is still what path graphics sub-sample and what the raw
+   * accessors read. Storing the positions twice measures at 7.4 KB a satellite —
+   * 46.1 against 38.7 KB/sat, some 37 MB at 5,000 — which is the price of this
+   * being one change rather than three. Making the grid the only store is filed.
+   */
+  #gridFixed = new GridPositionProperty();
+
+  /**
+   * False when a chunk arrived with samples the propagator refused. The grid read
+   * depends on there being no holes in it, so such a satellite falls back to the
+   * sampled property — correct, merely slower. Measured across the live catalog
+   * this has never fired.
+   */
+  #gridUsable = true;
+
   /** The fill in flight, if any. At most one — see `ensure`. */
   #filling: Promise<void> | undefined;
 
@@ -75,9 +100,26 @@ export class SampledTrajectory {
     return this.#data?.valid ?? false;
   }
 
-  /** Fixed-frame sampled position for entity binding. */
+  /**
+   * Fixed-frame samples, irregular-capable. What path graphics need: Cesium's
+   * PathVisualizer sub-samples a `SampledPositionProperty` at its stored sample
+   * times and anything else at `resolution`, which would be far coarser.
+   */
   get fixed(): SampledPositionProperty | undefined {
     return this.#data?.fixed;
+  }
+
+  /**
+   * What an entity should bind its position to — the grid property where usable.
+   *
+   * Everything that only ever asks "where is it now" goes through here. Path
+   * graphics deliberately do not; see `fixed`.
+   */
+  get entityPosition(): GridPositionProperty | SampledPositionProperty | undefined {
+    if (!this.#data) {
+      return undefined;
+    }
+    return this.#gridUsable && this.#gridFixed.length > 0 ? this.#gridFixed : this.#data.fixed;
   }
 
   /**
@@ -136,9 +178,14 @@ export class SampledTrajectory {
     return this.#data?.interval;
   }
 
-  /** Fixed-frame position at `time`, interpolated from the samples. */
+  /**
+   * Fixed-frame position at `time`, interpolated from the samples.
+   *
+   * Through `entityPosition`, because the callers are the same shape as an entity:
+   * the sky HUD and the sensor cone's orientation both ask this once per frame.
+   */
   position(time: JulianDate): Cartesian3 | undefined {
-    return this.#data?.fixed.getValue(time);
+    return this.entityPosition?.getValue(time);
   }
 
   positionsForNextOrbit(start: JulianDate, reference: "inertial" | "fixed" = "inertial", loop = true): unknown[] {
@@ -343,6 +390,45 @@ export class SampledTrajectory {
     // Added at once: a sorted array avoids a search per sample.
     data.fixed.addSamples(times, positionsFixed);
     inertialProperty?.addSamples(times, positionsInertial);
+    // Any shortfall at all, not just a refusal: a missing frame transform drops a
+    // sample the same way, and the grid's indices only line up with the chunk's
+    // when nothing was dropped.
+    this.#addToGrid(chunk, positionsFixed, positionsFixed.length !== sampleCount);
+  }
+
+  /**
+   * Mirror a chunk into the grid property.
+   *
+   * A gap makes the grid unusable rather than approximated: the grid read assumes
+   * no holes, and closing one by interpolating across a 45 s gap would put the
+   * satellite kilometres out at that instant. Such a satellite reads from the
+   * sampled property instead, which is slower and correct — and unusable is
+   * permanent, because the samples that would have filled the hole are not coming.
+   * The next refresh rebinds the entities (see updatedSampledPositionForComponents).
+   */
+  #addToGrid(chunk: SampleChunk, positionsFixed: Cartesian3[], hadGaps: boolean): void {
+    if (!this.#gridUsable) {
+      return;
+    }
+    if (hadGaps) {
+      this.#gridUsable = false;
+      return;
+    }
+    if (!this.#gridFixed.isOnGrid(chunk.anchorEpochMs, chunk.stepSeconds)) {
+      this.#gridFixed.reset(chunk.anchorEpochMs, chunk.stepSeconds);
+    }
+    const flat = new Float64Array(positionsFixed.length * 3);
+    for (const [index, position] of positionsFixed.entries()) {
+      flat[index * 3] = position.x;
+      flat[index * 3 + 1] = position.y;
+      flat[index * 3 + 2] = position.z;
+    }
+    if (!this.#gridFixed.add(chunk.firstIndex, flat)) {
+      // Not contiguous with what is held — a clock jump landing between windows.
+      // Start the grid again from this chunk rather than leave a hole in it.
+      this.#gridFixed.reset(chunk.anchorEpochMs, chunk.stepSeconds);
+      this.#gridFixed.add(chunk.firstIndex, flat);
+    }
   }
 
   /** Its own method so the caller's narrowing of `#data` does not reach in here. */
@@ -393,6 +479,10 @@ export class SampledTrajectory {
     data.fixed.removeSamples(after);
     data.inertial?.removeSamples(before);
     data.inertial?.removeSamples(after);
+    if (this.#gridFixed.length > 0) {
+      this.#gridFixed.dropBefore(this.#gridFixed.indexAtOrAfter(keep.start));
+      this.#gridFixed.dropAfter(this.#gridFixed.indexAtOrAfter(keep.stop));
+    }
   }
 
   /**
@@ -432,6 +522,7 @@ export class SampledTrajectory {
   }
 
   #init(currentTime: JulianDate): void {
+    this.#gridUsable = true;
     this.#data = {
       interval: new TimeInterval({
         start: currentTime,

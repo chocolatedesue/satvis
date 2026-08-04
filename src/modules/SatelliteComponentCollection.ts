@@ -328,11 +328,11 @@ export class SatelliteComponentCollection {
   }
 
   updatedSampledPositionForComponents(update = false): void {
-    const { fixed } = this.props.trajectory;
+    const { fixed, entityPosition } = this.props.trajectory;
     // Not the inertial frame: it is absent unless an Orbit asked for it, and
     // requiring it here would have stopped every other component updating in
     // exactly the scenes this laziness exists to make cheaper.
-    if (!fixed) return;
+    if (!fixed || !entityPosition) return;
 
     Object.entries(this.components).forEach(([type, component]) => {
       if (type === "Orbit") {
@@ -347,6 +347,7 @@ export class SatelliteComponentCollection {
         }
       } else if (type === "Orbit track") {
         if (component instanceof Entity) {
+          // The sampled property, not the grid — this one is a path. See createOrbitTrackPath.
           component.position = fixed;
         } else if (update) {
           // The window it was cut from has just moved, so the samples behind the
@@ -356,15 +357,15 @@ export class SatelliteComponentCollection {
         }
       } else if (component instanceof Entity) {
         if (type === "Sensor cone") {
-          component.position = fixed;
+          component.position = entityPosition;
           component.orientation = new CallbackProperty((time?: JulianDate) => {
             const position = this.props.trajectory.position(time as JulianDate);
             const hpr = new HeadingPitchRoll(0, CesiumMath.toRadians(180), 0);
             return Transforms.headingPitchRollQuaternion(position as Cartesian3, hpr);
           }, false);
         } else {
-          component.position = fixed;
-          component.orientation = new VelocityOrientationProperty(fixed);
+          component.position = entityPosition;
+          component.orientation = new VelocityOrientationProperty(entityPosition);
         }
       }
     });
@@ -389,9 +390,17 @@ export class SatelliteComponentCollection {
     create(this);
   }
 
+  /**
+   * An entity at the satellite, positioned by the grid property.
+   *
+   * Everything that only asks where the satellite is right now belongs here. A
+   * path graphic does not — it sub-samples the property it is given, and Cesium
+   * only knows how to do that densely for its own `SampledPositionProperty` — so
+   * `createOrbitTrackPath` and `createOrbitPath` build their entities directly.
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createCesiumSatelliteEntity(entityName: string, entityKey: string, entityValue: any): void {
-    this.createCesiumEntity(entityName, entityKey, entityValue, this.props.name, this.props.trajectory.fixed, true);
+    this.createCesiumEntity(entityName, entityKey, entityValue, this.props.name, this.props.trajectory.entityPosition, true);
   }
 
   // Coloured by orbit regime, matching the badge the satellite browser shows on
@@ -533,7 +542,9 @@ export class SatelliteComponentCollection {
       resolution: 600,
       width: 2,
     });
-    this.createCesiumSatelliteEntity("Orbit track", "path", path);
+    // The sampled property, so PathVisualizer sub-samples at the stored sample
+    // times rather than at `resolution`.
+    this.createCesiumEntity("Orbit track", "path", path, this.props.name, this.props.trajectory.fixed, true);
   }
 
   /** The track as a geometry for the shared batch — how every untracked track is drawn in 3D. */
