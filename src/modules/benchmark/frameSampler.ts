@@ -134,6 +134,8 @@ export class FrameSampler {
 
   #last: number | undefined;
 
+  #epoch = 0;
+
   constructor(limit = 0) {
     this.#limit = limit;
   }
@@ -199,6 +201,20 @@ export class FrameSampler {
     this.#tick = [];
     this.#gpu = [];
     this.#heap = [];
+    this.#epoch += 1;
+  }
+
+  /**
+   * Bumped by every `reset`, so a reading that was started before the reset can
+   * tell that it no longer belongs here.
+   *
+   * The GPU clock needs it: its results arrive some frames after the frame they
+   * measure, so a query issued during the warmup resolves after the warmup has
+   * been thrown away. Pushing it anyway put shader compiles and buffer uploads —
+   * the very frames the warmup exists to discard — into the sampled population.
+   */
+  get epoch(): number {
+    return this.#epoch;
   }
 
   get frames(): number {

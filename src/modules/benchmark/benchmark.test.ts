@@ -8,12 +8,14 @@ import {
   formatTable,
   gpuTimerTrustworthy,
   hasFootprints,
+  isDrifted,
   marginalCosts,
   memoryFits,
   memoryFitTrustworthy,
   propagationCosts,
   repeatChecks,
   reportRows,
+  type RepeatCheck,
   scalingFits,
   thinRows,
   toCsv,
@@ -124,6 +126,28 @@ describe("FrameSampler", () => {
     expect(snapshot.elapsedMs).toBe(30);
     expect(snapshot.fps).toBeCloseTo(100);
     expect(snapshot.wall?.mean).toBe(10);
+  });
+
+  test("reset bumps the epoch, so a reading in flight can tell it is stale", () => {
+    // The GPU clock's only defence against attributing a warmup frame to the
+    // sample, or the tail of one step to the next: a query records the epoch it
+    // started in and the delivery is dropped when the sampler has moved on.
+    const sampler = new FrameSampler();
+    const issued = sampler.epoch;
+    sampler.pushGpu(5);
+    expect(sampler.snapshot().gpu?.mean).toBe(5);
+
+    sampler.reset();
+    expect(sampler.epoch).not.toBe(issued);
+    // What the collector does with a stale reading: nothing.
+    if (sampler.epoch === issued) {
+      sampler.pushGpu(250);
+    }
+    expect(sampler.snapshot().gpu).toBeUndefined();
+
+    // A reading issued after the reset still lands.
+    sampler.pushGpu(7);
+    expect(sampler.snapshot().gpu?.mean).toBe(7);
   });
 
   test("frames slower than 30 fps count as jank", () => {
@@ -351,7 +375,29 @@ describe("repeatChecks", () => {
       ]),
     );
     expect(checks).toHaveLength(1);
-    expect(checks[0]).toMatchObject({ sats: 100, firstCpuMs: 10, repeatCpuMs: 11, cpuDriftPct: 10, firstBuildMs: 800, repeatBuildMs: 200, buildDriftPct: -75 });
+    expect(checks[0]).toMatchObject({ sats: 100, firstMainMs: 10, repeatMainMs: 11, mainDriftPct: 10, firstBuildMs: 800, repeatBuildMs: 200, buildDriftPct: -75 });
+  });
+
+  test("drift is only untrustworthy when it is both proportional and material", () => {
+    const check = (firstMainMs: number, repeatMainMs: number): RepeatCheck => ({
+      sats: 0,
+      components: "Point",
+      clock: 1,
+      firstMainMs,
+      repeatMainMs,
+      mainDriftPct: ((repeatMainMs - firstMainMs) / firstMainMs) * 100,
+      firstBuildMs: 0,
+      repeatBuildMs: 0,
+      buildDriftPct: 0,
+    });
+
+    // A fifth of a millisecond on a two-millisecond control step. This is what a
+    // clean run looks like at the bottom of the range, and it used to warn.
+    expect(isDrifted(check(2.2, 1.79))).toBe(false);
+    // The same proportion where it is worth milliseconds.
+    expect(isDrifted(check(11, 18))).toBe(true);
+    // Material but proportionally small: a big scene that moved a little.
+    expect(isDrifted(check(200, 202))).toBe(false);
   });
 
   test("a run without a repeat step reports nothing", () => {

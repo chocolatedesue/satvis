@@ -559,10 +559,10 @@ export interface RepeatCheck {
   sats: number;
   components: string;
   clock: number;
-  firstCpuMs: number;
-  repeatCpuMs: number;
+  firstMainMs: number;
+  repeatMainMs: number;
   /** Positive means the app got slower over the course of the run. */
-  cpuDriftPct: number;
+  mainDriftPct: number;
   firstBuildMs: number;
   repeatBuildMs: number;
   /** Usually strongly negative: the first build pays for warming the app up. */
@@ -580,6 +580,22 @@ export interface RepeatCheck {
 
 /** Above this the run measured a moving target, not a scene. */
 export const MAX_TRUSTWORTHY_DRIFT_PCT = 10;
+
+/**
+ * How much absolute drift is worth mentioning, whatever the percentage.
+ *
+ * A percentage on its own cries wolf at the bottom of the range: with a control
+ * step of no satellites, `mainThreadMs` is under two milliseconds, so a fifth of a
+ * millisecond of ordinary noise is a 10% drift and the check fires on runs that are
+ * perfectly clean. Requiring both means the warning keeps its meaning at 5,000
+ * satellites — where 10% is milliseconds and worth knowing — without firing on
+ * every sweep that happens to start at zero.
+ */
+export const MIN_MEANINGFUL_DRIFT_MS = 1;
+
+/** Whether a repeat check says the run measured a moving target rather than a scene. */
+export const isDrifted = (check: RepeatCheck): boolean =>
+  Math.abs(check.mainDriftPct) > MAX_TRUSTWORTHY_DRIFT_PCT && Math.abs(check.repeatMainMs - check.firstMainMs) >= MIN_MEANINGFUL_DRIFT_MS;
 
 /**
  * Below this a memory fit is noise rather than a slope.
@@ -628,11 +644,18 @@ const driftPct = (first: number, repeat: number): number => (first === 0 ? 0 : r
  * caches fill, the JIT settles, the heap grows. Measuring one scene at the start
  * and again at the finish is the only thing in the run that can tell a rising
  * line that is the scene from a rising line that is the clock — so a small
- * `cpuDriftPct` is what licenses reading the rest of the tables at all.
+ * `mainDriftPct` is what licenses reading the rest of the tables at all.
  *
  * `buildDriftPct` is usually the louder of the two and is expected to be
  * negative: the first build of a population pays for warming it up, which is why
  * `buildMs` is not comparable across component sets.
+ *
+ * Measured on `mainThreadMs`, not on `cpuMs`. Once propagation moved off the main
+ * thread `cpuMs` at a small satellite count fell under two milliseconds, where a
+ * quarter of a millisecond of ordinary noise reads as a 25% drift — so the check
+ * fired on essentially every run and stopped distinguishing a drifted one from a
+ * clean one. `mainThreadMs` is the same quantity every other fit here is built on,
+ * and it is large enough for the percentage to mean something.
  */
 export function repeatChecks(run: BenchmarkRun): RepeatCheck[] {
   const checks: RepeatCheck[] = [];
@@ -650,9 +673,9 @@ export function repeatChecks(run: BenchmarkRun): RepeatCheck[] {
       sats: repeat.applied.satellitesRequested,
       components: formatComponents(repeat.applied.componentsRequested),
       clock: repeat.applied.clockMultiplier,
-      firstCpuMs: round(cpuMs(first)),
-      repeatCpuMs: round(cpuMs(repeat)),
-      cpuDriftPct: driftPct(cpuMs(first), cpuMs(repeat)),
+      firstMainMs: round(mainThreadMs(first)),
+      repeatMainMs: round(mainThreadMs(repeat)),
+      mainDriftPct: driftPct(mainThreadMs(first), mainThreadMs(repeat)),
       firstBuildMs: round(first.applied.buildMs),
       repeatBuildMs: round(repeat.applied.buildMs),
       buildDriftPct: driftPct(first.applied.buildMs, repeat.applied.buildMs),
@@ -887,11 +910,11 @@ export function logRun(run: BenchmarkRun): void {
     // Said out loud rather than left to be spotted in a column: this is the one
     // number that says whether the rest of the run measured a scene or a
     // moving target.
-    const drifted = repeats.filter((check) => Math.abs(check.cpuDriftPct) > MAX_TRUSTWORTHY_DRIFT_PCT);
+    const drifted = repeats.filter(isDrifted);
     if (drifted.length > 0) {
       console.warn(
-        `The first step measured ${drifted.map((check) => `${check.cpuDriftPct > 0 ? "+" : ""}${check.cpuDriftPct}%`).join(", ")} differently when re-run at the end — ` +
-          `over ${MAX_TRUSTWORTHY_DRIFT_PCT}%, so the app moved under the sweep and the trends above are that as much as the scenes.`,
+        `The first step measured ${drifted.map((check) => `${check.mainDriftPct > 0 ? "+" : ""}${check.mainDriftPct}% (${round(check.repeatMainMs - check.firstMainMs)} ms)`).join(", ")} differently when re-run at the end — ` +
+          `over ${MAX_TRUSTWORTHY_DRIFT_PCT}% and ${MIN_MEANINGFUL_DRIFT_MS} ms, so the app moved under the sweep and the trends above are that as much as the scenes.`,
       );
     }
   }

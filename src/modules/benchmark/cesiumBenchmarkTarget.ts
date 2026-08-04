@@ -124,6 +124,15 @@ const nextFrames = (count: number, timeoutMs = 1000): Promise<void> =>
  * browser. That is a deployment fact rather than a browser fact, which is why the
  * panel says which of the two is missing instead of just greying a control.
  */
+/**
+ * Where one GPU reading belongs: the sampler that was collecting when the query
+ * was started, and the epoch it was then on. See `#endGpuQuery`.
+ */
+interface GpuTarget {
+  sampler: FrameSampler;
+  epoch: number;
+}
+
 export const canMeasureFootprint = (): boolean => window.crossOriginIsolated && typeof performance.measureUserAgentSpecificMemory === "function";
 
 /** Best effort, and separate from Cesium's context so nothing internal is poked. */
@@ -159,7 +168,7 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
    * query objects and force a flush on each; one at a time samples a subset of
    * frames, which is all a median needs.
    */
-  #queryInFlight: WebGLQuery | undefined;
+  #queryInFlight: { query: WebGLQuery; targets: GpuTarget[] } | undefined;
 
   options: TargetOptions = {};
 
@@ -234,7 +243,11 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
         return;
       }
       gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
-      this.#queryInFlight = query;
+      const targets: GpuTarget[] = [{ sampler: this.#live, epoch: this.#live.epoch }];
+      if (this.#sweep) {
+        targets.push({ sampler: this.#sweep, epoch: this.#sweep.epoch });
+      }
+      this.#queryInFlight = { query, targets };
     } catch {
       this.#timerExt = undefined;
     }
@@ -243,10 +256,11 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
   #endGpuQuery(): void {
     const gl = this.#gl;
     const ext = this.#timerExt;
-    const query = this.#queryInFlight;
-    if (!gl || !ext || !query) {
+    const pending = this.#queryInFlight;
+    if (!gl || !ext || !pending) {
       return;
     }
+    const { query, targets } = pending;
     this.#queryInFlight = undefined;
     try {
       gl.endQuery(ext.TIME_ELAPSED_EXT);
@@ -255,9 +269,13 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       this.#timerExt = undefined;
       return;
     }
-    // The result lands some frames later, so poll rather than block. A frame
-    // whose timing arrives after its sample window closed simply joins the next
-    // one — the population is a median, not a per-frame pairing.
+    // The result lands some frames later, so poll rather than block — and it is
+    // delivered to the samplers this query was *started* for, at the epoch they
+    // were then on. Delivering it to whatever was open on arrival is what made this
+    // column untrustworthy: a query from the tail of a heavy step landed in the
+    // next step's window, and a query from a warmup frame landed in the sample the
+    // warmup exists to protect. A 5,000-satellite step reported 34.5 ms and the
+    // 0-satellite step after it reported 24.
     let attempts = 0;
     const poll = (): void => {
       attempts += 1;
@@ -266,8 +284,11 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
           // A disjoint means the GPU was interrupted and the timing is garbage.
           if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) {
             const ns = gl.getQueryParameter(query, gl.QUERY_RESULT) as number;
-            this.#live.pushGpu(ns / 1e6);
-            this.#sweep?.pushGpu(ns / 1e6);
+            for (const target of targets) {
+              if (target.sampler.epoch === target.epoch) {
+                target.sampler.pushGpu(ns / 1e6);
+              }
+            }
           }
           gl.deleteQuery(query);
           return;

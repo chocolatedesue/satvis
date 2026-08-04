@@ -172,7 +172,7 @@ And derived, across steps:
   A sweep is minutes long and the app it measures does not hold still: shader
   caches fill, the JIT settles, the heap grows. This is the only figure in the run
   that can tell a rising line that is the scene from a rising line that is the
-  clock, so a small `cpuDriftPct` is what licenses reading the other tables at
+  clock, so a small `mainDriftPct` is what licenses reading the other tables at
   all — over 10% and both the panel and `logRun` say so. The repeat step is
   excluded from every other table: it is a second sample of a scene already in the
   set, and averaging it in would weight one point twice and hide the drift it was

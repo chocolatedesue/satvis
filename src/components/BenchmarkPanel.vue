@@ -288,8 +288,8 @@
           <thead>
             <tr>
               <th class="bench__num">sats</th>
-              <th class="bench__num">cpu 1st</th>
-              <th class="bench__num">cpu again</th>
+              <th class="bench__num">main 1st</th>
+              <th class="bench__num">main again</th>
               <th class="bench__num">drift</th>
               <th class="bench__num">build 1st</th>
               <th class="bench__num">build again</th>
@@ -299,9 +299,9 @@
           <tbody>
             <tr v-for="(check, index) in repeats" :key="index">
               <td class="bench__num">{{ check.sats }}</td>
-              <td class="bench__num">{{ check.firstCpuMs.toFixed(2) }}</td>
-              <td class="bench__num">{{ check.repeatCpuMs.toFixed(2) }}</td>
-              <td :class="['bench__num', Math.abs(check.cpuDriftPct) > MAX_TRUSTWORTHY_DRIFT_PCT ? 'bench__bad' : 'bench__good']">{{ signed(check.cpuDriftPct) }}</td>
+              <td class="bench__num">{{ check.firstMainMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ check.repeatMainMs.toFixed(2) }}</td>
+              <td :class="['bench__num', isDrifted(check) ? 'bench__bad' : 'bench__good']">{{ signed(check.mainDriftPct) }}</td>
               <td class="bench__num">{{ check.firstBuildMs.toFixed(0) }}</td>
               <td class="bench__num">{{ check.repeatBuildMs.toFixed(0) }}</td>
               <td class="bench__num">{{ signed(check.buildDriftPct) }}</td>
@@ -348,7 +348,6 @@ import {
   toJson,
   formatTable,
   GPU_TIMER_TRUST_FACTOR,
-  MAX_TRUSTWORTHY_DRIFT_PCT,
   MIN_MEMORY_FIT_POINTS,
   MIN_TRUSTWORTHY_FRAMES,
   MIN_TRUSTWORTHY_MEMORY_R2,
@@ -358,6 +357,7 @@ import {
   type BenchmarkRun,
   type MemoryFit,
   type PropagationCost,
+  isDrifted,
   type RepeatCheck,
   type ReportRow,
   type ScalingFit,
