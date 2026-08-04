@@ -58,6 +58,15 @@ export interface FootprintSample {
    * with a forced collection — measured 0.2% apart from one.
    */
   jsMb: number;
+  /**
+   * Every worker scope's JavaScript.
+   *
+   * Separated because `totalMb` counts it and nothing else does, so moving work
+   * into a worker makes the total go up while the main thread gets cheaper — and a
+   * comparison against a revision that has no workers reads that move as a
+   * regression unless the two parts can be told apart.
+   */
+  workerMb: number;
   /** How long the call took, so a row records what it cost to have this number. */
   elapsedMs: number;
 }

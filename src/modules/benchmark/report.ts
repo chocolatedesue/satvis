@@ -170,6 +170,8 @@ export interface ReportRow {
    * run asked for it. Unlike `heapMb` this *is* a total and can be read as one.
    */
   footprintMb: number | "";
+  /** Worker heaps, kept apart from the total. See FootprintSample.workerMb. */
+  footprintWorkerMb: number | "";
   /** The whole agent including DOM and worker memory, which is a broader figure. */
   footprintTotalMb: number | "";
 }
@@ -208,6 +210,7 @@ export function reportRows(run: BenchmarkRun): ReportRow[] {
       heapPeakMb: blankOr(heapPeakMb(result), 1),
       footprintMb: blankOr(footprintJsMb(result), 1),
       footprintTotalMb: blankOr(result.footprint?.totalMb, 1),
+      footprintWorkerMb: blankOr(result.footprint?.workerMb, 1),
     };
   });
 }
@@ -884,6 +887,7 @@ export function logRun(run: BenchmarkRun): void {
         components: formatComponents(result.applied.componentsRequested),
         jsMb: round(result.footprint?.jsMb ?? 0, 1),
         totalMb: round(result.footprint?.totalMb ?? 0, 1),
+        workerMb: round(result.footprint?.workerMb ?? 0, 1),
       })),
     );
     console.log(`${captured.length} captures cost ${Math.round(waitedMs / 1000)} s of waiting — the call resolves only when a collection happens.`);

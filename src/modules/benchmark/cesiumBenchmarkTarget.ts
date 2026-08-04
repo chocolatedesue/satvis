@@ -65,6 +65,16 @@ export interface TargetOptions {
   groundStation?: { lat: number; lon: number };
 }
 
+/**
+ * How long to let the app go quiet before reading the footprint.
+ *
+ * Long enough for the sample-window top-ups already in flight to land and their
+ * buffers to become collectable. Six seconds was where the reading stopped moving:
+ * the same scene read 550 MB at +6 s and 544 MB at +16 s, against 1044 and 1295 MB
+ * with the clock running.
+ */
+const FOOTPRINT_QUIESCE_MS = 6000;
+
 const wait = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     if (signal.aborted || ms <= 0) {
@@ -484,12 +494,35 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       return undefined;
     }
     const startedAt = performance.now();
+    // Stop the clock and let the app go quiet first, which is the difference
+    // between measuring a scene and measuring the garbage it happens to be
+    // producing. At 5,000 satellites with orbits the app propagates and
+    // re-transforms sample windows continuously, and the reading lands wherever
+    // that churn is at the time — measured on one scene, seconds apart:
+    //
+    //     clock running   1044 MB total (worker 557)   then 1295 MB (window 1106)
+    //     clock stopped    550 MB total (worker  51)   then  544 MB (window  357)
+    //
+    // so the running figures were a factor of two and a half apart on a scene that
+    // had not changed. Safe to do here and nowhere else: the footprint is captured
+    // after the sample window has closed, so no frame timing can see it.
+    const clock = this.#cc.viewer.clock;
+    const wasAnimating = clock.shouldAnimate;
+    clock.shouldAnimate = false;
     try {
+      await new Promise((resolve) => setTimeout(resolve, FOOTPRINT_QUIESCE_MS));
       const result = await measure.call(performance);
       const js = result.breakdown.find((entry) => entry.types.includes("JavaScript") && entry.attribution.some((item) => item.scope === "Window"));
+      // Worker heaps are in the total but nowhere else, so a run that moved work
+      // off the main thread looks heavier than one that never had a worker unless
+      // the two are separable. `next` has no workers at all, which made a
+      // branch-to-branch comparison of `totalMb` alone read the move itself as a
+      // regression.
+      const workerBytes = result.breakdown.filter((entry) => entry.attribution.some((item) => (item.scope ?? "").includes("Worker"))).reduce((sum, entry) => sum + entry.bytes, 0);
       return {
         totalMb: result.bytes / BYTES_PER_MB,
         jsMb: (js?.bytes ?? result.bytes) / BYTES_PER_MB,
+        workerMb: workerBytes / BYTES_PER_MB,
         elapsedMs: performance.now() - startedAt,
       };
     } catch {
@@ -497,6 +530,8 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       // refuse (a detached frame, a browser that changed its mind) and the run
       // still has every frame timing it came for.
       return undefined;
+    } finally {
+      clock.shouldAnimate = wasAnimating;
     }
   }
 

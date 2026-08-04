@@ -77,7 +77,7 @@ function result(options: {
       jankFrames: 0,
       jankRatio: 0,
     },
-    footprint: options.footprintMb === undefined ? undefined : { totalMb: options.footprintMb * 1.4, jsMb: options.footprintMb, elapsedMs: 17_000 },
+    footprint: options.footprintMb === undefined ? undefined : { totalMb: options.footprintMb * 1.4, jsMb: options.footprintMb, workerMb: 0, elapsedMs: 17_000 },
   };
 }
 
