@@ -156,6 +156,9 @@ export class SatelliteManager {
   /** Catalog entries waiting to be instantiated, in the order they will be. See #build. */
   #queue: [string, CatalogEntry][] = [];
 
+  /** Whether this activation is small enough to skip the per-frame budget. See #build. */
+  #unbudgetedBuild = true;
+
   #buildHandle: number | undefined;
 
   #buildWaiters: Array<() => void> = [];
@@ -406,6 +409,8 @@ export class SatelliteManager {
       [...target].filter(([key]) => !this.#active.has(key)),
       this.pendingTrackedSatellite || this.trackedSatellite || undefined,
     );
+    // Small enough to build in one go, judged once. See #build.
+    this.#unbudgetedBuild = this.#queue.length <= BUILD_SYNCHRONOUS_LIMIT;
     // Anything still waiting belonged to a scene that has been replaced.
     this.#ready = [];
     this.#requestOpeningWindows();
@@ -452,7 +457,12 @@ export class SatelliteManager {
     // queue left half-drained would never be picked up again. That is the unit
     // test environment rather than any browser, and there the freeze this avoids
     // is not a freeze anyone is looking at.
-    const unbudgeted = this.#queue.length <= BUILD_SYNCHRONOUS_LIMIT || typeof requestAnimationFrame !== "function";
+    // Decided from the queue as it stood when the activation started, not from the
+    // queue as it drains. Re-deciding on every call meant the last
+    // BUILD_SYNCHRONOUS_LIMIT satellites of every large build ran unbudgeted — a
+    // frame of tens of milliseconds at the tail of exactly the builds the budget
+    // exists to smooth.
+    const unbudgeted = this.#unbudgetedBuild || typeof requestAnimationFrame !== "function";
     const deadline = performance.now() + BUILD_BUDGET_MS;
     // Drains the satellites whose samples have arrived, not the queue itself. A
     // satellite still waiting for its opening window is simply not here yet.
