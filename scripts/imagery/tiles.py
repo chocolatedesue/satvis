@@ -16,11 +16,11 @@ Three things are worth knowing before changing anything.
 
 **The tileset this replaces is not raw Natural Earth II.** The retired
 `Flowm/cesium-assets` was cut from `NE2_HR_LC_SR_W_DR_recolored.tif` — a Photoshop grade over the
-public source, darker and cooler, and it is what Cesium's own bundled `Offline`
-layer shows too. Tiling the raw source instead lands 48 levels per channel away
-from it on average, which is not a subtle difference: a markedly brighter, flatter
-globe that clashes with the low-resolution layer the app falls back to. `RECOLOR`
-below is that grade, recovered from the two tilesets; see `fit_recolor`.
+public source, darker and cooler, and it is the imagery the app showed for years.
+Tiling the raw source instead lands 48 levels per channel away from it on average,
+which is not a subtle difference: a markedly brighter, flatter globe that nobody
+asked for. `RECOLOR` below is that grade, recovered from the two tilesets; see
+`fit_recolor`.
 
 **The recolor goes on before the pyramid, never after.** Averaging and a
 nonlinear curve do not commute, so a curve applied to finished tiles would give a
@@ -35,11 +35,12 @@ fixed rather than offered as a flag because levels 0-2 are committed and only a
 full-depth run reproduces them — see `MAX_ZOOM`.
 
 **Levels 0-2 are tracked; 3-5 are gitignored.** So a checkout that has never run
-this still has a correct globe, softer than the full one, with no fallback layer
-and nothing to probe for. The manifest declares only the committed levels
-(`write_manifest`), and the app raises Cesium's ceiling to 5 when it finds the
-generated levels present. That is why the source archive is pinned by checksum:
-committed output is only meaningful if its input is fixed.
+this still has a correct globe, softer than the full one, and there is no
+absent-imagery case for the app to handle. The manifest declares only the committed
+levels (`write_manifest`); the build raises Cesium's ceiling to 5 when it sees the
+generated ones (`__IMAGERY_MAX_LEVEL__` in vite.config.ts). That is why the source
+archive is pinned by checksum: committed output is only meaningful if its input is
+fixed.
 """
 
 from __future__ import annotations
@@ -86,6 +87,19 @@ MAX_ZOOM = 5
 # How deep the committed part of the pyramid goes. The manifest always declares
 # exactly this, whatever was built — see `write_manifest`.
 COMMITTED_ZOOM = 2
+
+# WebP 85 is ~19 MB for the whole pyramid, against 25 MB as JPEG at the same number
+# and 49 MB for the tileset it replaces. Measured at level 4 against a lossless cut:
+# q75 is 47% of JPEG q85's bytes for slightly more error, q80 60%, q85 77% for less
+# error, q90 106% for clearly less. 85 is where WebP is still strictly better than
+# the JPEG it replaced on both bytes and error, which makes it the setting that needs
+# no argument about what was traded away.
+#
+# A constant and not a flag, for the same reason the depth is one: it decides the
+# bytes of levels 0-2, which are committed. `--quality 95` would have rewritten 42
+# tracked files as a side effect of an experiment. Changing the encode is a change to
+# this line plus a deliberate commit of the regenerated levels, like `SOURCE_SHA256`.
+QUALITY = 85
 
 # What this writes, and what the tileset it is compared against wrote. Both are
 # needed at once by `verify`, which reads one of each.
@@ -275,11 +289,11 @@ def write_manifest(out_dir: str) -> None:
     copy byte-identical, and that copy is the one a checkout without the generated
     levels serves — so what it claims has to be what such a checkout actually has.
 
-    Which makes the depth a runtime question rather than a manifest one, answered by
-    the probe in `CesiumLayerProviders.ts` and passed as Cesium's `maximumLevel`
-    option, which overrides whatever the manifest says. The bias is deliberate: code
-    that forgets to raise the ceiling serves a soft globe, where a manifest promising
-    levels that may not exist would 404 every tile in them.
+    Which leaves the real depth to be settled elsewhere: the build decides it from
+    what is on disk and passes Cesium a `maximumLevel` that overrides whatever the
+    manifest says (`__IMAGERY_MAX_LEVEL__` in vite.config.ts). The bias is deliberate
+    — code that forgets to raise the ceiling serves a soft globe, where a manifest
+    promising levels that may not exist would 404 every tile in them.
 
     Written out here rather than edited in place because there is nothing to keep
     from gdal2tiles' copy — every value is a constant of the geodetic scheme or of
@@ -304,7 +318,7 @@ def write_manifest(out_dir: str) -> None:
         )
 
 
-def tile(src: str, out_dir: str, zoom: int, quality: int, processes: int) -> None:
+def tile(src: str, out_dir: str, zoom: int, processes: int) -> None:
     """Cut `src` into a geodetic TMS pyramid of WebP tiles.
 
     `--tmscompatible` is what makes level 0 two tiles at 0.703125 deg/px rather
@@ -335,7 +349,7 @@ def tile(src: str, out_dir: str, zoom: int, quality: int, processes: int) -> Non
             "--tmscompatible",
             f"--zoom=0-{zoom}",
             "--tiledriver=WEBP",
-            f"--webp-quality={quality}",
+            f"--webp-quality={QUALITY}",
             # Averaging, so a coarse tile is the mean of the four below it rather
             # than one of their pixels. The alternative shows as shimmering coastlines
             # when the globe is zoomed out, which is most of the time in this app.
@@ -430,7 +444,7 @@ def verify(out_dir: str, ref_dir: str, zoom: int) -> int:
     return 0
 
 
-def fit_recolor(tif: str, ref_dir: str, cache_dir: str, quality: int, processes: int) -> int:
+def fit_recolor(tif: str, ref_dir: str, cache_dir: str, processes: int) -> int:
     """Re-derive `RECOLOR` from the raw source and the reference tileset.
 
     Not part of a normal run — the curve is a property of an asset that has not
@@ -449,7 +463,7 @@ def fit_recolor(tif: str, ref_dir: str, cache_dir: str, quality: int, processes:
     if not os.path.exists(os.path.join(raw_dir, "tilemapresource.xml")):
         print("tiling the raw source for comparison", flush=True)
         shutil.rmtree(raw_dir, ignore_errors=True)
-        tile(tif, raw_dir, MAX_ZOOM, quality, processes)
+        tile(tif, raw_dir, MAX_ZOOM, processes)
 
     pairs = tile_paths(raw_dir, ref_dir, MAX_ZOOM, stride=1)
     if not pairs:
@@ -487,16 +501,9 @@ def main() -> int:
         description="Build the offline base map tileset from Natural Earth II.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    # No --zoom: see MAX_ZOOM. A shallower pyramid does not reproduce the committed
-    # levels 0-2, so the depth is not offered as a convenience.
-    #
-    # WebP 85 is ~19 MB for the whole pyramid, against 25 MB as JPEG at the same
-    # number and 49 MB for the tileset it replaces. Measured at level 4 against a
-    # lossless cut: q75 is 47% of JPEG q85's bytes for slightly more error, q80 60%,
-    # q85 77% for less error, q90 106% for clearly less. 85 is where WebP is still
-    # strictly better than the JPEG it replaced on both bytes and error, which makes
-    # it the setting that needs no argument about what was traded away.
-    ap.add_argument("--quality", type=int, default=85, help="WebP quality")
+    # Neither --zoom nor --quality: both decide the bytes of the committed levels 0-2,
+    # so both are constants (MAX_ZOOM, QUALITY) rather than conveniences that could
+    # rewrite tracked files.
     ap.add_argument("--processes", type=int, default=os.cpu_count() or 4, help="tiler workers")
     ap.add_argument("--no-recolor", action="store_true", help="tile the raw source, skipping the Cesium grade")
     ap.add_argument("--no-verify", action="store_true", help="skip the comparison against the reference tileset")
@@ -522,7 +529,7 @@ def main() -> int:
                 "--fit-recolor needs the tileset the grade came from. Clone it with:\n"
                 "  git clone --depth 1 https://github.com/Flowm/cesium-assets scripts/.reference/cesium-assets"
             )
-        return fit_recolor(tif, args.ref, args.cache, args.quality, args.processes)
+        return fit_recolor(tif, args.ref, args.cache, args.processes)
 
     src = tif if args.no_recolor else recolored(tif, os.path.join(args.cache, f"{SOURCE}_recolored.vrt"))
     print(f"source {SOURCE}.tif, {'raw' if args.no_recolor else 'recolored'}", flush=True)
@@ -533,7 +540,7 @@ def main() -> int:
     out_dir = os.path.join(args.out, "NaturalEarthII")
     staging = os.path.join(args.out, ".NaturalEarthII.partial")
     shutil.rmtree(staging, ignore_errors=True)
-    tile(src, staging, MAX_ZOOM, args.quality, args.processes)
+    tile(src, staging, MAX_ZOOM, args.processes)
     shutil.rmtree(out_dir, ignore_errors=True)
     os.rename(staging, out_dir)
 

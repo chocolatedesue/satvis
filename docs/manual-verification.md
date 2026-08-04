@@ -171,10 +171,11 @@ have reported the deep levels present.
 **What this replaced, and why it is worth remembering.** The old arrangement asked whether the
 imagery was _missing_ and, if so, rewrote the layer selection to a second `Offline` provider
 backed by Cesium's own differently-graded tiles — so the failure was visible as a colour shift,
-a changed url and a warning. Two bugs came out of that shape: a probe answering after the
-route's preset had hydrated clobbered the preset's chosen basemap, and
+a changed url and a warning. Two bugs came out of that shape. The first: a probe answering
+after the route's preset had hydrated clobbered the preset's chosen basemap. The second is
+worth its own paragraph, because it is about method rather than code.
 
-**the result recorded here for 2026-07-28 was simply wrong.** It reported the fallback firing,
+**The result recorded here for 2026-07-28 was simply wrong.** It reported the fallback firing,
 but the probe tested only `response.ok`, and in a real unpopulated checkout the request for the
 missing manifest was answered by the SPA fallback with **200 and `index.html`** — measured,
 `content-type: text/html`, 1065 bytes of markup. The probe concluded the imagery was present

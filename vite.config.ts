@@ -50,19 +50,6 @@ const isolationNotice = {
 };
 
 /**
- * Say so when the build is about to ship without the offline base map.
- *
- * The tiles are generated rather than committed, so a build simply omits them when
- * nobody has run `pnpm update-imagery` — no error, a smaller precache, and a
- * deployed site whose default layer silently falls back to the low-resolution
- * `Offline` one. `pnpm deploy` runs `pnpm build` directly, so forgetting the
- * generator first is a one-command mistake with no other symptom.
- *
- * A warning rather than a failure: CI builds legitimately have no tiles (it neither
- * runs the generator nor checks out submodules), and the app is designed to work
- * without them. Making this fatal would break CI to catch a deploy-time slip.
- */
-/**
  * How deep the base map goes, decided here rather than probed for at runtime.
  *
  * Levels 0-2 of `data/imagery` are committed and 3-5 come from `pnpm update-imagery`,
@@ -85,7 +72,19 @@ const generatedImagery = existsSync(fileURLToPath(new URL("data/imagery/NaturalE
 const COMMITTED_MAX_LEVEL = 2;
 const GENERATED_MAX_LEVEL = 5;
 
-/** Says so once, at build time, when a deploy would ship the shallow base map. */
+/**
+ * Say so when the build is about to ship the base map capped at level 2.
+ *
+ * Levels 3-5 are generated rather than committed, so a build simply omits them when
+ * nobody has run `pnpm update-imagery` — no error, a smaller precache, and a deployed
+ * site whose globe goes soft the moment anyone zooms in. `pnpm deploy` runs
+ * `pnpm build` directly, so forgetting the generator first is a one-command mistake
+ * with no other symptom.
+ *
+ * A warning rather than a failure: CI legitimately has no generated levels, and the
+ * app is designed to work without them. Making this fatal would break CI to catch a
+ * deploy-time slip.
+ */
 const imageryNotice = {
   name: "satvis-imagery-notice",
   apply: "build" as const,
@@ -186,14 +185,13 @@ export default defineConfig({
           // rather than only where someone happened to look. Levels 4 and 5 are zoomed-in
           // detail and stay with the CacheFirst rule below.
           //
-          // Level 3 is load-bearing beyond sharpness: it is what the depth probe asks
-          // for, and `maximumLevel` means Cesium never *requests* anything deeper than
-          // the ceiling that probe sets. A probe that failed offline would therefore
-          // strand every level 4-5 tile the user had already cached, so the tile it
-          // reads has to be one that is always cached.
+          // Level 3 also sets the floor for everything below it. `maximumLevel` lets
+          // Cesium ask for levels 4 and 5, and offline it will miss on any the runtime
+          // cache has never held — at which point it magnifies the deepest tile it does
+          // have. Precaching to 3 is what guarantees there is always one to magnify.
           //
-          // On a build with only the committed levels this glob simply matches 0-2, the
-          // probe fails, and the layer caps itself there — consistent either way.
+          // On a build with only the committed levels this glob simply matches 0-2, and
+          // `__IMAGERY_MAX_LEVEL__` caps the layer at 2 to match — consistent either way.
           //
           // The manifest too: it carries the tiling scheme, and without it Cesium falls
           // back to WebMercator and `.png`, which is not this tileset in any respect.
@@ -250,9 +248,9 @@ export default defineConfig({
             },
           },
           {
-            // The generated base map (scripts/imagery). Absent from a checkout
-            // where nobody has run `pnpm update-imagery`, which is why the layer
-            // probes for its manifest before Cesium is pointed at it.
+            // The base map (scripts/imagery). Levels 0-2 ship in every checkout; 3-5
+            // are there only where `pnpm update-imagery` has run, and the build caps
+            // the layer accordingly — see `__IMAGERY_MAX_LEVEL__` above.
             //
             // Levels 0-3 are precached by the glob above and served from there; this
             // rule is what carries levels 4 and 5, which are 16 of the pyramid's 17.5
