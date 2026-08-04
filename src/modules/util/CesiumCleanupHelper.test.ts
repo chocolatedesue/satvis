@@ -114,14 +114,28 @@ describe("CesiumCleanupHelper.drain", () => {
     expect(error.mock.calls[0]?.[0]).toContain("_glyphBillboardCollection");
   });
 
-  test("reports a primitive tree with no label collection", () => {
+  test("a primitive tree with no label collection is silent, not reported", () => {
+    // EntityCluster makes its label collection on the first label, so a scene that
+    // has only ever drawn points legitimately has none. This used to report, which
+    // meant the commonest scene in the app logged an internals-have-moved error on
+    // every teardown. A collection that exists but cannot be read still reports —
+    // that is the test above.
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
     expect(drain({ scene: { primitives: { _primitives: [] }, requestRender: vi.fn() } })).toBe(0);
-    expect(error).toHaveBeenCalledTimes(1);
 
-    // Once, not once per reconcile.
-    drain({ scene: { primitives: { _primitives: [] }, requestRender: vi.fn() } });
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  test("a broken assumption is reported once, not once per reconcile", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { viewer, labelCollection } = sceneWith(200);
+    delete (labelCollection as { _spareBillboards?: unknown })._spareBillboards;
+
+    drain(viewer);
+    drain(viewer);
+    drain(viewer);
+
     expect(error).toHaveBeenCalledTimes(1);
   });
 });
