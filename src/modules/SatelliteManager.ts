@@ -12,6 +12,7 @@ import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
 import { sameValue } from "./util/equality";
 import { approximatePeriodMinutes, type GpRecord } from "./util/gp";
+import { type PassSource, WorkerPassSource } from "./util/passSource";
 import { PolylineBatch } from "./util/PolylineBatch";
 import { type SampleChunk, type SampleSource, type SampleSourceStats, WorkerSampleSource } from "./util/sampleSource";
 import { SuppressibleSet } from "./util/Suppressible";
@@ -132,6 +133,13 @@ export class SatelliteManager {
    * knows which satellites exist; handed to each one as a bound sampler.
    */
   readonly #samples: SampleSource = new WorkerSampleSource();
+
+  /**
+   * Where pass prediction happens. Its own worker, not the sampling one — see
+   * passWorker for why a slow batch job must not queue behind the samples that
+   * keep satellites moving.
+   */
+  readonly #passes: PassSource = new WorkerPassSource();
 
   /**
    * Satellites whose opening window has arrived, waiting to be instantiated.
@@ -529,7 +537,13 @@ export class SatelliteManager {
   }
 
   #instantiate(key: string, entry: CatalogEntry, chunk: SampleChunk): void {
-    const sat = new SatelliteComponentCollection(this.viewer, entry, { orbits: this.orbits, tracks: this.tracks }, this.#samples.samplerFor(entry.satnum, entry.record));
+    const sat = new SatelliteComponentCollection(
+      this.viewer,
+      entry,
+      { orbits: this.orbits, tracks: this.tracks },
+      this.#samples.samplerFor(entry.satnum, entry.record),
+      this.#passes.predictorFor(entry.satnum, entry.record),
+    );
     // Before show(), which is what reads the trajectory.
     sat.props.trajectory.adopt(chunk);
     if (this.groundStationAvailable) {

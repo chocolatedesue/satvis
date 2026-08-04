@@ -1,10 +1,11 @@
 import { JulianDate } from "@cesium/engine";
 import dayjs from "dayjs";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import Orbit from "./Orbit";
 import { PassPredictor, filterPasses, formatCountdown, stationPasses, toPassRows, type GroundStation, type Pass } from "./PassPredictor";
 import { parseGpPayload, type GpRecord } from "./util/gp";
+import { InlinePassSource, type PassPredictorSource, type PassQuery } from "./util/passSource";
 
 const T0 = Date.UTC(2026, 6, 1, 12, 0, 0); // 2026-07-01T12:00:00Z
 const NOW = JulianDate.fromDate(new Date(T0));
@@ -48,87 +49,161 @@ const EPOCH_TIME = JulianDate.fromDate(dayjs("2018-12-08").toDate());
 const MUNICH: GroundStation = { name: "Munich", position: { latitude: 48.177, longitude: 11.7476, height: 0 } };
 const VIENNA: GroundStation = { name: "Vienna", position: { latitude: 48.2082, longitude: 16.3738, height: 0 } };
 
-function issPredictor(swathKm = 500): { orbit: Orbit; predictor: PassPredictor } {
-  const orbit = new Orbit("ISS", parseGpPayload(TLE)[0] as GpRecord);
+/**
+ * A predictor over an inline source, with every query recorded.
+ *
+ * The queries are what the assertions watch. Spying on the test's own `Orbit`
+ * would prove nothing now that prediction happens behind the source — the source
+ * builds its own from the record, so a spy here would never fire whether the
+ * predictor asked or not.
+ */
+function issPredictor(swathKm = 500): { orbit: Orbit; predictor: PassPredictor; queries: PassQuery[] } {
+  const record = parseGpPayload(TLE)[0] as GpRecord;
+  const orbit = new Orbit("ISS", record);
+  const inline = new InlinePassSource();
+  const bound = inline.predictorFor(orbit.satnum, record);
+  const queries: PassQuery[] = [];
+  const source: PassPredictorSource = {
+    passes: (query) => {
+      queries.push(query);
+      return bound.passes(query);
+    },
+  };
   // A symmetric split of the total, which is what a satellite without per-side
   // extents of its own gets from SatelliteProperties.
-  const predictor = new PassPredictor(orbit, () => ({ starboardKm: swathKm / 2, portKm: swathKm / 2 }));
-  return { orbit, predictor };
+  const predictor = new PassPredictor(orbit, () => ({ starboardKm: swathKm / 2, portKm: swathKm / 2 }), source);
+  return { orbit, predictor, queries };
 }
 
 describe("PassPredictor", () => {
-  test("returns no passes without a ground station", () => {
-    const { orbit, predictor } = issPredictor();
-    const spy = vi.spyOn(orbit, "computePassesElevation");
-    expect(predictor.passes(EPOCH_TIME)).toHaveLength(0);
-    expect(spy).not.toHaveBeenCalled();
+  test("asks for nothing without a ground station", async () => {
+    const { predictor, queries } = issPredictor();
+    expect(await predictor.ensurePasses(EPOCH_TIME)).toHaveLength(0);
+    expect(queries).toHaveLength(0);
   });
 
-  test("computes passes with the station name attached and intervals in sync", () => {
+  test("computes passes with the station name attached and intervals in sync", async () => {
     const { predictor } = issPredictor();
     predictor.groundStations = [MUNICH];
-    const passes = predictor.passes(EPOCH_TIME);
+    const passes = await predictor.ensurePasses(EPOCH_TIME);
     expect(passes.length).toBeGreaterThan(0);
     expect(passes.every((pass) => pass.groundStationName === "Munich")).toBe(true);
+    // Stamped on this side, because the worker is keyed on satnum and holds no name.
+    expect(passes.every((pass) => pass.name === "ISS")).toBe(true);
     expect(predictor.passIntervals.length).toBe(passes.length);
   });
 
-  test("recomputes only when time leaves the pass window", () => {
-    const { orbit, predictor } = issPredictor();
-    predictor.groundStations = [MUNICH];
-    const spy = vi.spyOn(orbit, "computePassesElevation");
-
-    predictor.passes(EPOCH_TIME);
-    expect(spy).toHaveBeenCalledTimes(1);
-
-    // Inside the ±1 day window: no recompute.
-    predictor.passes(JulianDate.addSeconds(EPOCH_TIME, 3600, new JulianDate()));
-    expect(spy).toHaveBeenCalledTimes(1);
-
-    // A jump beyond the window forces a recompute.
-    predictor.passes(JulianDate.addDays(EPOCH_TIME, 2, new JulianDate()));
-    expect(spy).toHaveBeenCalledTimes(2);
-  });
-
-  test("changing ground stations clears the computed passes", () => {
+  test("a read before the answer lands is empty rather than blocking", async () => {
     const { predictor } = issPredictor();
     predictor.groundStations = [MUNICH];
+
+    // The whole point of the change: this used to be 8 ms of SGP4 inline.
+    expect(predictor.passes(EPOCH_TIME)).toHaveLength(0);
+
+    await predictor.ensurePasses(EPOCH_TIME);
     expect(predictor.passes(EPOCH_TIME).length).toBeGreaterThan(0);
+  });
+
+  test("asks again only when time leaves the pass window", async () => {
+    const { predictor, queries } = issPredictor();
+    predictor.groundStations = [MUNICH];
+
+    await predictor.ensurePasses(EPOCH_TIME);
+    expect(queries).toHaveLength(1);
+
+    // Inside the ±1 day window: no new request.
+    await predictor.ensurePasses(JulianDate.addSeconds(EPOCH_TIME, 3600, new JulianDate()));
+    expect(queries).toHaveLength(1);
+
+    // A jump beyond the window forces one.
+    await predictor.ensurePasses(JulianDate.addDays(EPOCH_TIME, 2, new JulianDate()));
+    expect(queries).toHaveLength(2);
+  });
+
+  test("only one request is outstanding, however many reads arrive", async () => {
+    const { predictor, queries } = issPredictor();
+    predictor.groundStations = [MUNICH];
+
+    const first = predictor.ensurePasses(EPOCH_TIME);
+    predictor.passes(JulianDate.addDays(EPOCH_TIME, 3, new JulianDate()));
+    predictor.passes(JulianDate.addDays(EPOCH_TIME, 5, new JulianDate()));
+    await first;
+
+    // Three reads, two requests: the one that was already out, then a single
+    // re-ask for the latest time the other two wanted. At a fast clock the reads
+    // outrun the replies, and queueing each would only grow the queue.
+    expect(queries).toHaveLength(2);
+    expect(queries[1]!.startEpochMs).toBeGreaterThan(queries[0]!.startEpochMs);
+  });
+
+  test("changing ground stations clears the computed passes", async () => {
+    const { predictor } = issPredictor();
+    predictor.groundStations = [MUNICH];
+    expect((await predictor.ensurePasses(EPOCH_TIME)).length).toBeGreaterThan(0);
 
     predictor.groundStations = [];
+    expect(await predictor.ensurePasses(EPOCH_TIME)).toHaveLength(0);
+    expect(predictor.passIntervals.length).toBe(0);
+  });
+
+  test("a reply computed against stations that have since changed is dropped", async () => {
+    const { predictor, queries } = issPredictor();
+    predictor.groundStations = [MUNICH];
+    const inFlight = predictor.ensurePasses(EPOCH_TIME);
+
+    // The station goes away while the request is out.
+    predictor.groundStations = [];
+    await inFlight;
+
+    expect(queries).toHaveLength(1);
     expect(predictor.passes(EPOCH_TIME)).toHaveLength(0);
     expect(predictor.passIntervals.length).toBe(0);
   });
 
-  test("swath mode hands the per-side extents to the orbit", () => {
-    const { orbit, predictor } = issPredictor(290);
+  test("swath mode asks with the per-side extents", async () => {
+    const { predictor, queries } = issPredictor(290);
     predictor.groundStations = [MUNICH];
-    const spy = vi.spyOn(orbit, "computePassesSwath");
 
     predictor.mode = "swath";
-    const passes = predictor.passes(EPOCH_TIME);
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy.mock.calls[0]![1]).toEqual({ starboardKm: 145, portKm: 145 });
+    const passes = await predictor.ensurePasses(EPOCH_TIME);
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.mode).toBe("swath");
+    expect(queries[0]!.swath).toEqual({ starboardKm: 145, portKm: 145 });
     expect(passes.every((pass) => "minDistance" in pass)).toBe(true);
   });
 
-  test("setting the same mode keeps the window intact", () => {
-    const { orbit, predictor } = issPredictor();
+  test("setting the same mode keeps the window intact", async () => {
+    const { predictor, queries } = issPredictor();
     predictor.groundStations = [MUNICH];
-    predictor.passes(EPOCH_TIME);
-    const spy = vi.spyOn(orbit, "computePassesElevation");
+    await predictor.ensurePasses(EPOCH_TIME);
 
     predictor.mode = "elevation";
-    predictor.passes(EPOCH_TIME);
-    expect(spy).not.toHaveBeenCalled();
+    await predictor.ensurePasses(EPOCH_TIME);
+    expect(queries).toHaveLength(1);
+  });
+
+  test("notifies listeners when a pass list lands", async () => {
+    const { predictor } = issPredictor();
+    predictor.groundStations = [MUNICH];
+    let notified = 0;
+    const unsubscribe = predictor.onChanged(() => {
+      notified += 1;
+    });
+
+    await predictor.ensurePasses(EPOCH_TIME);
+    expect(notified).toBe(1);
+
+    unsubscribe();
+    await predictor.ensurePasses(JulianDate.addDays(EPOCH_TIME, 2, new JulianDate()));
+    expect(notified).toBe(1);
   });
 });
 
 describe("stationPasses", () => {
-  test("keeps only the named station's passes, sorted by start", () => {
+  test("keeps only the named station's passes, sorted by start", async () => {
     const { predictor } = issPredictor();
     predictor.groundStations = [MUNICH, VIENNA];
-    const all = predictor.passes(EPOCH_TIME);
+    const all = await predictor.ensurePasses(EPOCH_TIME);
     expect(all.some((pass) => pass.groundStationName === "Vienna")).toBe(true);
 
     const munich = stationPasses([predictor], EPOCH_TIME, "Munich");
@@ -137,9 +212,10 @@ describe("stationPasses", () => {
     expect(munich).toEqual(munich.toSorted((a, b) => a.start - b.start));
   });
 
-  test("drops passes starting beyond the deltaHours horizon", () => {
+  test("drops passes starting beyond the deltaHours horizon", async () => {
     const { predictor } = issPredictor();
     predictor.groundStations = [MUNICH];
+    await predictor.ensurePasses(EPOCH_TIME);
     const horizon = stationPasses([predictor], EPOCH_TIME, "Munich", 1);
     const startLimit = JulianDate.toDate(EPOCH_TIME).getTime() + 2 * HOUR;
     expect(horizon.every((pass) => pass.start < startLimit)).toBe(true);

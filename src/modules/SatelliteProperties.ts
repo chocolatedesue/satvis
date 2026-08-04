@@ -4,6 +4,7 @@ import Orbit from "./Orbit";
 import { PassPredictor } from "./PassPredictor";
 import { SampledTrajectory } from "./SampledTrajectory";
 import type { CatalogEntry } from "./SatelliteCatalog";
+import type { PassPredictorSource } from "./util/passSource";
 import type { TrajectorySampler } from "./util/sampleSource";
 
 export class SatelliteProperties {
@@ -22,12 +23,12 @@ export class SatelliteProperties {
   // Owns the sampled position window (fixed/inertial frames, gap-filling).
   readonly trajectory: SampledTrajectory;
 
-  constructor(entry: CatalogEntry, sampler: TrajectorySampler) {
+  constructor(entry: CatalogEntry, sampler: TrajectorySampler, passes: PassPredictorSource) {
     this.entry = entry;
     this.name = entry.name;
     this.satnum = entry.satnum;
     this.orbit = new Orbit(entry.name, entry.record);
-    this.passPredictor = new PassPredictor(this.orbit, () => this.swathExtents);
+    this.passPredictor = new PassPredictor(this.orbit, () => this.swathExtents, passes);
     this.trajectory = new SampledTrajectory(this.orbit, sampler);
   }
 

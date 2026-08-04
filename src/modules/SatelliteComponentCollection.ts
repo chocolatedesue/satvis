@@ -41,6 +41,7 @@ import type { CatalogEntry } from "./SatelliteCatalog";
 import { coneDescription, groundTrackDescription, modelUri, orbitPathTimes, orbitTrackTimes, orbitUsesPathGraphic } from "./satelliteGraphics";
 import { SatelliteProperties } from "./SatelliteProperties";
 import { CesiumTimelineHelper } from "./util/CesiumTimelineHelper";
+import type { PassPredictorSource } from "./util/passSource";
 import type { PolylineBatch } from "./util/PolylineBatch";
 import type { TrajectorySampler } from "./util/sampleSource";
 
@@ -110,11 +111,31 @@ export class SatelliteComponentCollection {
 
   eventListeners: Record<string, () => void> = {};
 
-  constructor(viewer: Viewer, entry: CatalogEntry, batches: SatelliteBatches, sampler: TrajectorySampler) {
+  constructor(viewer: Viewer, entry: CatalogEntry, batches: SatelliteBatches, sampler: TrajectorySampler, passes: PassPredictorSource) {
     this.viewer = viewer;
-    this.props = new SatelliteProperties(entry, sampler);
+    this.props = new SatelliteProperties(entry, sampler, passes);
     this.#orbits = batches.orbits;
     this.#tracks = batches.tracks;
+  }
+
+  /**
+   * Put this satellite's passes on the timeline, once they exist.
+   *
+   * Prediction is off-thread, so the list a read returns may be the previous one
+   * or nothing at all. Highlighting what is known now and again when the answer
+   * lands is the whole adaptation: the first call paints a stale or empty band and
+   * costs nothing, the second paints the real one.
+   */
+  #highlightPasses(): void {
+    const predictor = this.props.passPredictor;
+    const time = this.viewer.clock.currentTime;
+    if (this.isSelected) {
+      CesiumTimelineHelper.updateHighlightRanges(this.viewer, predictor.passes(time));
+    } else {
+      // Not selected: nothing to paint, but the tracked satellite still wants the
+      // window computed for its ground-station link.
+      predictor.passes(time);
+    }
   }
 
   /** Which batch a given component's geometry belongs to. */
@@ -275,6 +296,16 @@ export class SatelliteComponentCollection {
       this.updatedSampledPositionForComponents(true);
     });
 
+    // Pass prediction answers late now, so the things derived from a pass list
+    // have to be told rather than to ask. The ground-station link reads
+    // passIntervals through a CallbackProperty and needs nothing; the timeline
+    // bands are painted once and do.
+    this.eventListeners.passesChanged = this.props.passPredictor.onChanged(() => {
+      if (this.isSelected) {
+        CesiumTimelineHelper.updateHighlightRanges(this.viewer, this.props.passPredictor.passes(this.viewer.clock.currentTime));
+      }
+    });
+
     // Set up event listeners
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.eventListeners.selectedEntity = this.viewer.selectedEntityChanged.addEventListener((entity: any) => {
@@ -283,8 +314,7 @@ export class SatelliteComponentCollection {
         return;
       }
       if (this.isSelected) {
-        const passes = this.props.passPredictor.passes(this.viewer.clock.currentTime);
-        CesiumTimelineHelper.updateHighlightRanges(this.viewer, passes);
+        this.#highlightPasses();
       }
     });
 
@@ -307,10 +337,10 @@ export class SatelliteComponentCollection {
   }
 
   deinit(): void {
-    // Remove event listeners
-    this.eventListeners.sampledPosition?.();
-    this.eventListeners.selectedEntity?.();
-    this.eventListeners.trackedEntity?.();
+    // Every one of them, by iterating rather than by naming: the pass listener was
+    // added to `init` and missed here, and an enable/disable cycle then left one
+    // more subscriber on the predictor's list every time round.
+    Object.values(this.eventListeners).forEach((remove) => remove?.());
     this.eventListeners = {};
   }
 
@@ -720,14 +750,12 @@ export class SatelliteComponentCollection {
       return;
     }
 
-    // The setter clears the predictor's window; recompute eagerly for the
-    // selected/tracked satellite so pass-dependent visuals update immediately.
+    // The setter clears the predictor's window; ask for the new one now so
+    // pass-dependent visuals update without waiting for a read. The answer is
+    // off-thread, so it arrives via the listener rather than here.
     this.props.passPredictor.groundStations = groundStations;
     if (this.isSelected || this.isTracked) {
-      const passes = this.props.passPredictor.passes(this.viewer.clock.currentTime);
-      if (this.isSelected) {
-        CesiumTimelineHelper.updateHighlightRanges(this.viewer, passes);
-      }
+      this.#highlightPasses();
     }
     if (this.created) {
       this.createGroundStationLink();

@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { SatelliteCatalog } from "../modules/SatelliteCatalog";
 import { SatelliteProperties } from "../modules/SatelliteProperties";
 import type { GpRecord } from "../modules/util/gp";
+import { InlinePassSource } from "../modules/util/passSource";
 import { InlineSampleSource } from "../modules/util/sampleSource";
 import type { SatelliteMetadata } from "./satelliteMetadata";
 
@@ -35,7 +36,7 @@ function propertiesFor(metadata?: SatelliteMetadata): SatelliteProperties {
   const catalog = new SatelliteCatalog();
   catalog.addRecords([ommRecord("TEST SAT", 1, metadata)], ["Test"]);
   const entry = catalog.getByName("TEST SAT")!;
-  return new SatelliteProperties(entry, new InlineSampleSource().samplerFor(entry.satnum, entry.record));
+  return new SatelliteProperties(entry, new InlineSampleSource().samplerFor(entry.satnum, entry.record), new InlinePassSource().predictorFor(entry.satnum, entry.record));
 }
 
 describe("record-carried satellite metadata", () => {
