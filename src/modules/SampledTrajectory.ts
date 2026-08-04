@@ -324,7 +324,20 @@ export class SampledTrajectory {
     const end = JulianDate.addSeconds(start, this.#orbit.orbitalPeriod * 60, new JulianDate());
     const head = this.position(start);
     const samples = this.#positionsBetween(start, end);
-    return head ? [head, ...samples] : samples;
+    if (!head) {
+      return samples;
+    }
+    if (samples.length === 0) {
+      // The window holds nothing for this range — a clock jump, or the moment
+      // after a gap abandoned the grid — but a position is still known. Two points
+      // rather than one, because `PolylineGeometry`'s constructor throws below two
+      // and that throw escapes into Cesium's render loop, which stops it for the
+      // rest of the session. A zero-length segment is not drawn: `createGeometry`
+      // collapses the duplicate and returns undefined, which the pipeline skips.
+      // The next re-cut, once the refill lands, replaces it with the real track.
+      return [head, head];
+    }
+    return [head, ...samples];
   }
 
   groundTrack(julianDate: JulianDate, samplesFwd = 1, samplesBwd = 0, interval = 300): (Cartesian3 | undefined)[] {

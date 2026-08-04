@@ -83,6 +83,14 @@ const CREATORS: Record<(typeof SATELLITE_COMPONENTS)[number] | typeof GROUND_STA
 };
 
 /**
+ * Below this a polyline is not a polyline. `PolylineGeometry`'s constructor throws
+ * rather than declining, and a throw raised while geometry is rebuilt escapes
+ * through `clock.tick` into Cesium's render loop, which turns
+ * `_useDefaultRenderLoop` off and stops the app for the rest of the session.
+ */
+const MIN_POLYLINE_POSITIONS = 2;
+
+/**
  * An Entity when the component is drawn on its own, a GeometryInstance when it is
  * merged into the shared orbit batch. Never a Primitive: the one creator that made
  * one was dead code, and the branch checking for it could never be true.
@@ -521,10 +529,14 @@ export class SatelliteComponentCollection {
 
   /** The orbit as a geometry for the shared batch — how every untracked orbit is drawn in 3D. */
   createOrbitPolylineGeometry(): void {
+    const positions = this.props.trajectory.positionsForNextOrbit(this.viewer.clock.currentTime);
+    if (positions.length < MIN_POLYLINE_POSITIONS) {
+      return;
+    }
     const geometryInstance = new GeometryInstance({
       geometry: new PolylineGeometry({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        positions: this.props.trajectory.positionsForNextOrbit(this.viewer.clock.currentTime) as any,
+        positions: positions as any,
         width: 2,
         arcType: ArcType.NONE,
         vertexFormat: PolylineColorAppearance.VERTEX_FORMAT,
@@ -583,14 +595,21 @@ export class SatelliteComponentCollection {
 
   /** The track as a geometry for the shared batch — how every untracked track is drawn in 3D. */
   createOrbitTrackPolylineGeometry(): void {
-    this.components["Orbit track"] = this.#orbitTrackGeometry(this.viewer.clock.currentTime);
+    const geometry = this.#orbitTrackGeometry(this.viewer.clock.currentTime);
+    if (geometry) {
+      this.components["Orbit track"] = geometry;
+    }
   }
 
-  #orbitTrackGeometry(time: JulianDate): GeometryInstance {
+  #orbitTrackGeometry(time: JulianDate): GeometryInstance | undefined {
+    const positions = this.props.trajectory.positionsForTrack(time);
+    if (positions.length < MIN_POLYLINE_POSITIONS) {
+      return undefined;
+    }
     return new GeometryInstance({
       geometry: new PolylineGeometry({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        positions: this.props.trajectory.positionsForTrack(time) as any,
+        positions: positions as any,
         width: 2,
         arcType: ArcType.NONE,
         vertexFormat: PolylineColorAppearance.VERTEX_FORMAT,
@@ -620,7 +639,7 @@ export class SatelliteComponentCollection {
       return;
     }
     const next = this.#orbitTrackGeometry(time);
-    if (this.#tracks.replace(current, next)) {
+    if (next && this.#tracks.replace(current, next)) {
       this.#components["Orbit track"] = next;
     }
   }
