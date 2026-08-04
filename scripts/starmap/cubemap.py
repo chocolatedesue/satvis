@@ -566,11 +566,9 @@ def verify(out_dir: str, ref_dir: str, prefix: str, ref_prefix: str = "TychoSkym
     Tycho's orientation is by construction right for Cesium's lookup. That makes
     the reference worth more than reasoning about the convention.
 
-    The reference is the retired `Flowm/cesium-assets`, an optional clone under
-    `scripts/.reference/` rather than a submodule. generate.sh mounts it read-only
-    when it is there and says how to get it when it is not. It is read only after
-    the faces are written, so the sky box is identical either way — what is lost
-    without it is the check, not the output.
+    Read only after the faces are written, so the sky box is identical whether or
+    not the reference is there — what is lost without it is the check, not the
+    output. generate.sh mounts it when present and says how to get it when not.
     """
     worst = 1.0
     bad = 0
@@ -651,7 +649,6 @@ def main() -> int:
         description="Build a Cesium sky box from NASA SVS Deep Star Maps 2020.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    # Fetched once into the cache and kept: 8k is 106 MB, 16k 423 MB, 32k ~1.5 GB.
     ap.add_argument("--res", default="16k", choices=["8k", "16k", "32k"], help="source map resolution (8k/16k/32k download about 106 MB/423 MB/1.5 GB, cached)")
     ap.add_argument("--size", type=int, nargs="+", default=[2048, 1024], metavar="N",
                     help="cube face edge in pixels; several build several cuts from the one source")

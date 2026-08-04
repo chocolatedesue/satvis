@@ -1,11 +1,8 @@
 // The imagery registry: what the Map menu may offer, and what the url may name.
 //
-// There is deliberately no probe left to test. The base map's depth is
-// `__IMAGERY_MAX_LEVEL__`, decided in vite.config.ts from whether the generated
-// levels were present at build time, so what used to be a network read with an
-// offline failure mode is now a constant. What is worth pinning down is the shape
-// that replaced the old `Offline` / `OfflineHighres` pair, because the whole point
-// of collapsing them was that the app no longer has an absent-imagery case.
+// No probe to test — the depth is a build-time constant (`__IMAGERY_MAX_LEVEL__`).
+// What is worth pinning down is that exactly one offline basemap survives, since
+// collapsing the pair is what removed the app's absent-imagery case.
 
 import { describe, expect, test } from "vitest";
 

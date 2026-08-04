@@ -13,13 +13,9 @@ import {
   WebMapServiceImageryProvider,
 } from "@cesium/engine";
 
-// Levels 0-2 of this tileset are committed, so it is always there. Levels 3-5 come
-// from `pnpm update-imagery` and are gitignored — see data/imagery/.gitignore.
-//
-// How deep it goes is `__IMAGERY_MAX_LEVEL__`, set in vite.config.ts from whether
-// those generated levels were present at build time. Nothing is probed for: the
-// answer is a property of the build, and a constant cannot fail the way a request
-// can. See that file for what asking at runtime cost.
+// Always present — see data/imagery/.gitignore for what is tracked. How deep it goes
+// is `__IMAGERY_MAX_LEVEL__`, decided in vite.config.ts, which is also where the
+// reasoning lives.
 const NATURAL_EARTH = "data/imagery/NaturalEarthII";
 
 export interface ImageryProviderEntry {
@@ -34,15 +30,9 @@ export interface TerrainProviderEntry {
 }
 
 export const imageryProviders: Record<string, ImageryProviderEntry> = {
-  // The offline base map, and the default. One entry rather than the `Offline` /
-  // `OfflineHighres` pair it replaces: the shallow one was never a choice anybody
-  // would make, only somewhere to land when the sharp one was missing, and it came
-  // from Cesium's own differently-graded copy — which is why the swap used to be
-  // visible. Now both depths are the same tiles from the same generator, so the
-  // difference is sharpness alone and there is nothing to choose between.
-  //
-  // Named for its source like every other base layer here, rather than for a quality
-  // tier that no longer has a sibling.
+  // The offline base map, and the default. Named for its source like every other
+  // base layer here; there is only one, because both depths are now the same tiles
+  // from the same generator and sharpness is the only difference.
   NaturalEarth: {
     // `maximumLevel` overrides the manifest, which declares only the committed
     // levels. It has to be passed at construction — the property is readonly, so a

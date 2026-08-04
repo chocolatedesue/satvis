@@ -19,10 +19,6 @@ import type { DesiredScene } from "./SatelliteManager";
 import { type SceneTarget, startSceneSync } from "./sceneSync";
 import type { Observer } from "./SkyView";
 
-// Nothing to stub here any more: the base map's depth is a build-time constant
-// rather than a network read, so the real registry is used as it is — which is also
-// what the store builds its url schema from.
-
 /** Everything sceneSync writes to, recorded rather than enacted. */
 function fakeTarget() {
   const calls = {

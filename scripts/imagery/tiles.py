@@ -2,45 +2,27 @@
 
 Fetches the source raster, applies the recolor the Cesium asset was graded with,
 cuts it into a TMS pyramid and checks the result against the tileset it replaces.
-Everything runs here rather than being split with the shell wrapper, so a run is
-reproducible from the image alone.
+Everything runs here rather than in the shell wrapper, so a run is reproducible
+from the image alone.
 
 The source is Natural Earth II with Shaded Relief, Water and Drainages at 10m —
-21600x10800, EPSG:4326, public domain, no attribution required (though the layer
-credits it anyway). https://www.naturalearthdata.com/downloads/10m-raster-data/
-Output is `data/imagery/NaturalEarthII`, a geodetic TMS pyramid of 256px WebP
-tiles that Cesium's `TileMapServiceImageryProvider` reads directly — it takes the
-extension from the manifest, so nothing in the app names the format.
+21600x10800, EPSG:4326, public domain. Output is `data/imagery/NaturalEarthII`,
+a geodetic TMS pyramid of 256px WebP that `TileMapServiceImageryProvider` reads
+directly, taking the extension from the manifest so nothing in the app names the
+format. Levels 0-2 are tracked and 3-5 are gitignored; see data/imagery/.gitignore.
 
-Three things are worth knowing before changing anything.
+Two things are worth knowing before changing anything.
 
 **The tileset this replaces is not raw Natural Earth II.** The retired
-`Flowm/cesium-assets` was cut from `NE2_HR_LC_SR_W_DR_recolored.tif` — a Photoshop grade over the
-public source, darker and cooler, and it is the imagery the app showed for years.
-Tiling the raw source instead lands 48 levels per channel away from it on average,
-which is not a subtle difference: a markedly brighter, flatter globe that nobody
-asked for. `RECOLOR` below is that grade, recovered from the two tilesets; see
-`fit_recolor`.
+`Flowm/cesium-assets` was cut from a Photoshop grade of the public source, darker
+and cooler, and that is the imagery the app showed for years. Tiling the raw source
+lands 48 levels per channel away from it — a markedly brighter, flatter globe.
+`RECOLOR` below is that grade, recovered rather than guessed; see `fit_recolor`.
 
-**The recolor goes on before the pyramid, never after.** Averaging and a
-nonlinear curve do not commute, so a curve applied to finished tiles would give a
-different answer at every level above the base. The reference graded the source
-and then tiled it, so this does the same — as a VRT, which costs no disk and lets
-GDAL apply the curve as it reads.
-
-**Zoom stops at 5 because that is where the source runs out**, and it is not
-adjustable. Level 5 of the geodetic scheme is 0.02197 deg/px against the source's
-0.01667; level 6 would be 0.01099 and every tile in it interpolation. Depth is
-fixed rather than offered as a flag because levels 0-2 are committed and only a
-full-depth run reproduces them — see `MAX_ZOOM`.
-
-**Levels 0-2 are tracked; 3-5 are gitignored.** So a checkout that has never run
-this still has a correct globe, softer than the full one, and there is no
-absent-imagery case for the app to handle. The manifest declares only the committed
-levels (`write_manifest`); the build raises Cesium's ceiling to 5 when it sees the
-generated ones (`__IMAGERY_MAX_LEVEL__` in vite.config.ts). That is why the source
-archive is pinned by checksum: committed output is only meaningful if its input is
-fixed.
+**The recolor goes on before the pyramid, never after.** Averaging and a nonlinear
+curve do not commute, so a curve applied to finished tiles would give a different
+answer at every level above the base. Applied as a VRT, which costs no disk and
+lets GDAL apply it as it reads.
 """
 
 from __future__ import annotations
@@ -77,11 +59,10 @@ SOURCE_SHA256 = "e4a6e27c121cab119835ac38f17695768011d12a2a7d9e57d5cddf65566fcec
 
 # Level 5 is the base of the pyramid; everything above it is an average of it.
 #
-# Not adjustable, and that is deliberate. Levels 0-2 are committed, and a shallower
-# run does not reproduce them: at depth 5 level 2 is an average of averages down
-# from the base, while at depth 2 it is tiled straight from the source. Measured —
-# the two disagree, so a `--zoom 3` convenience flag would silently rewrite 42
-# tracked files with different pixels. Depth is fixed instead.
+# Fixed rather than a flag, because it decides the bytes of the committed levels: at
+# depth 5 level 2 is an average of averages down from the base, at depth 2 it is
+# tiled straight from the source, and the two measurably disagree. A `--zoom 3`
+# convenience would have rewritten 42 tracked files with different pixels.
 MAX_ZOOM = 5
 
 # How deep the committed part of the pyramid goes. The manifest always declares
@@ -91,14 +72,10 @@ COMMITTED_ZOOM = 2
 # WebP 85 is ~19 MB for the whole pyramid, against 25 MB as JPEG at the same number
 # and 49 MB for the tileset it replaces. Measured at level 4 against a lossless cut:
 # q75 is 47% of JPEG q85's bytes for slightly more error, q80 60%, q85 77% for less
-# error, q90 106% for clearly less. 85 is where WebP is still strictly better than
-# the JPEG it replaced on both bytes and error, which makes it the setting that needs
-# no argument about what was traded away.
+# error, q90 106% for clearly less. 85 is the point where WebP is strictly better
+# than the JPEG it replaced on bytes and on error at once.
 #
-# A constant and not a flag, for the same reason the depth is one: it decides the
-# bytes of levels 0-2, which are committed. `--quality 95` would have rewritten 42
-# tracked files as a side effect of an experiment. Changing the encode is a change to
-# this line plus a deliberate commit of the regenerated levels, like `SOURCE_SHA256`.
+# A constant for the same reason the depth is one — see `MAX_ZOOM`.
 QUALITY = 85
 
 # What this writes, and what the tileset it is compared against wrote. Both are
@@ -160,14 +137,11 @@ def checksum(path: str) -> str:
 def check_source(path: str) -> None:
     """Stop unless the archive is the one the committed base levels came from.
 
-    Checked on a cache hit as well as after a download, because both can be wrong:
-    the cache may hold a resume that appended a changed upstream's tail onto an old
-    file's head — `Content-Length` matches at the end of that and notices nothing.
+    Checked on a cache hit too: a resume can append a changed upstream's tail onto
+    an old file's head, and `Content-Length` matches at the end of that.
 
-    Fatal, and no retry. The two causes are a corrupted cache and a new upstream
-    release, and they want opposite responses: delete the file, or accept a new
-    source and re-commit levels 0-2 from it. Guessing would risk quietly publishing
-    a base map nobody chose.
+    Fatal, and no retry — a corrupted cache and a new upstream release want opposite
+    responses, and guessing risks quietly publishing a base map nobody chose.
     """
     got = checksum(path)
     if got == SOURCE_SHA256:
@@ -257,14 +231,12 @@ def extract(zip_path: str, cache_dir: str) -> str:
 def recolored(tif: str, vrt_path: str) -> str:
     """The source with `RECOLOR` applied, as a VRT.
 
-    A VRT rather than a second GeoTIFF: the curve is applied by GDAL as blocks are
-    read, so this costs no disk and no separate pass over 667 MB.
+    A VRT rather than a second GeoTIFF: GDAL applies the curve as blocks are read,
+    so this costs no disk and no separate pass over 667 MB.
 
-    Built by translating the source and then rewriting each band's source element
-    in place. `SimpleSource` becomes `ComplexSource` because only the latter carries
-    a `<LUT>`; everything else — size, geotransform, projection, block layout — is
-    whatever GDAL wrote, so there is no second transcription of the georeferencing
-    to drift out of step with the file it describes.
+    Only the source element is rewritten — `SimpleSource` to `ComplexSource`, since
+    only the latter carries a `<LUT>`. Everything else stays as GDAL wrote it, so the
+    georeferencing is never transcribed twice and cannot drift.
     """
     gdal.Translate(vrt_path, tif, format="VRT")
     tree = ET.parse(vrt_path)
@@ -284,20 +256,17 @@ def recolored(tif: str, vrt_path: str) -> str:
 def write_manifest(out_dir: str) -> None:
     """Rewrite the manifest to declare only the committed levels.
 
-    gdal2tiles declares every level it built, which would make this a tracked file
-    that changes on every run. Trimming it to `COMMITTED_ZOOM` keeps the committed
-    copy byte-identical, and that copy is the one a checkout without the generated
-    levels serves — so what it claims has to be what such a checkout actually has.
+    gdal2tiles declares every level it built, which would make this tracked file
+    change on every run. Trimming it to `COMMITTED_ZOOM` keeps the committed copy
+    byte-identical, and that copy is what a checkout without the generated levels
+    serves — so what it claims has to be what such a checkout has.
 
-    Which leaves the real depth to be settled elsewhere: the build decides it from
-    what is on disk and passes Cesium a `maximumLevel` that overrides whatever the
-    manifest says (`__IMAGERY_MAX_LEVEL__` in vite.config.ts). The bias is deliberate
-    — code that forgets to raise the ceiling serves a soft globe, where a manifest
-    promising levels that may not exist would 404 every tile in them.
+    The real depth is settled by `__IMAGERY_MAX_LEVEL__`, which overrides it. That
+    bias is deliberate: forgetting to raise the ceiling serves a soft globe, where a
+    manifest promising absent levels would 404 every tile in them.
 
-    Written out here rather than edited in place because there is nothing to keep
-    from gdal2tiles' copy — every value is a constant of the geodetic scheme or of
-    this generator, and reproducing them is what makes the file deterministic.
+    Written out rather than edited because every value is a constant of the geodetic
+    scheme or of this generator — which is what makes the file deterministic.
     """
     upp = [f"{0.703125 / 2**z:.14f}" for z in range(COMMITTED_ZOOM + 1)]
     tilesets = "\n".join(f'        <TileSet href="{z}" units-per-pixel="{upp[z]}" order="{z}"/>' for z in range(COMMITTED_ZOOM + 1))
@@ -321,26 +290,13 @@ def write_manifest(out_dir: str) -> None:
 def tile(src: str, out_dir: str, zoom: int, processes: int) -> None:
     """Cut `src` into a geodetic TMS pyramid of WebP tiles.
 
-    `--tmscompatible` is what makes level 0 two tiles at 0.703125 deg/px rather
-    than one stretched over the whole globe. That is the scheme Cesium's
-    `GeographicTilingScheme` assumes and the one the reference tileset uses;
-    without it every tile would be requested at the wrong level.
+    `--tmscompatible` is what makes level 0 two tiles at 0.703125 deg/px rather than
+    one stretched over the whole globe. That is the scheme Cesium's
+    `GeographicTilingScheme` assumes and the one the reference tileset uses; without
+    it every tile would be requested at the wrong level.
 
-    WebP rather than JPEG, measured on all 512 level-4 tiles against a lossless cut
-    of the same pyramid — so this is codec error alone, not the reference's own
-    noise. At matched quality it wins on both axes at once (mean 2.38 levels against
-    JPEG's 2.44, p99 14 against 16, and 23% fewer bytes), and across the curve it is
-    25-35% fewer bytes at equal error. Nothing in the app names the format: Cesium
-    takes the extension from the manifest, so this is the only line that decides it.
-
-    The opposite conclusion to the star map's, and for a reason. That sky is JPEG's
-    worst case, with error at ~18% of signal, so WebP was spent on fidelity there.
-    Here it is ~2% of signal on midtone photography that JPEG handles well, and this
-    is the default layer rather than an opt-in one — so the win is taken as bytes.
-
-    Tiles above level 3 are not precached; they are cached as they are requested, by
-    the `data/imagery` CacheFirst rule in vite.config.ts, and kept for 30 days so a
-    region once looked at survives going offline.
+    WebP rather than JPEG for the reasons measured at `QUALITY`. Cesium takes the
+    extension from the manifest, so this is the only line that decides the format.
     """
     subprocess.run(
         [
@@ -379,13 +335,12 @@ def tile(src: str, out_dir: str, zoom: int, processes: int) -> None:
 def tile_paths(a_dir: str, b_dir: str, zoom: int, stride: int, a_ext: str = TILE_EXT, b_ext: str = REF_EXT) -> list[tuple[str, str]]:
     """Tiles present in both trees at `zoom`, sampled every `stride` in x and y.
 
-    The two extensions are separate because the two sides are: this generator writes
-    WebP and the tileset it is checked against is the JPEG one it replaces. GDAL
-    reads both, so only the filenames differ.
+    Two extensions because the two sides differ: this writes WebP, the tileset it is
+    checked against is JPEG. GDAL reads both.
 
-    Sampled rather than exhaustive so the check stays a few seconds, and spread over
-    the whole grid rather than a corner: a wrong curve is uniform, but a wrong source
-    or a misplaced pyramid shows up regionally.
+    Sampled rather than exhaustive to keep the check to a few seconds, and spread
+    over the whole grid: a wrong curve is uniform, but a wrong source or a misplaced
+    pyramid shows up regionally.
     """
     width = 2 ** (zoom + 1)
     pairs = []
@@ -406,15 +361,12 @@ def read_tile(path: str) -> np.ndarray:
 def verify(out_dir: str, ref_dir: str, zoom: int) -> int:
     """Compare the generated tiles against the tileset they replace.
 
-    The reference is the retired `Flowm/cesium-assets` tileset, which is the imagery
-    the app shipped for years and so the definition of "unchanged". It is an optional
-    clone under `scripts/.reference/` rather than a submodule, and it is read only
-    after the tiles are written — no output depends on it.
+    The reference is the imagery the app shipped for years, and so the definition of
+    "unchanged". Read only after the tiles are written — no output depends on it.
 
-    A few levels of disagreement are expected and not a defect: both sides are lossy,
-    and the curve was fitted through that same noise. What this catches is the
-    failure that matters — a curve not applied, or applied wrongly, which is an
-    order of magnitude larger than the floor and instantly visible on the globe.
+    A few levels of disagreement are expected, not a defect: both sides are lossy and
+    the curve was fitted through that same noise. What this catches is a curve not
+    applied, or applied wrongly — an order of magnitude larger, and instantly visible.
     """
     pairs = tile_paths(out_dir, ref_dir, zoom, stride=3)
     if not pairs:
@@ -501,9 +453,6 @@ def main() -> int:
         description="Build the offline base map tileset from Natural Earth II.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    # Neither --zoom nor --quality: both decide the bytes of the committed levels 0-2,
-    # so both are constants (MAX_ZOOM, QUALITY) rather than conveniences that could
-    # rewrite tracked files.
     ap.add_argument("--processes", type=int, default=os.cpu_count() or 4, help="tiler workers")
     ap.add_argument("--no-recolor", action="store_true", help="tile the raw source, skipping the Cesium grade")
     ap.add_argument("--no-verify", action="store_true", help="skip the comparison against the reference tileset")
@@ -535,8 +484,7 @@ def main() -> int:
     print(f"source {SOURCE}.tif, {'raw' if args.no_recolor else 'recolored'}", flush=True)
 
     # Built in a staging directory and swapped in, so an interrupted run cannot leave
-    # a half-written pyramid where the app expects a whole one. Levels 0-2 are tracked
-    # and reproduce byte-identically, so the swap shows up as no change to git at all.
+    # a half-written pyramid where the app expects a whole one.
     out_dir = os.path.join(args.out, "NaturalEarthII")
     staging = os.path.join(args.out, ".NaturalEarthII.partial")
     shutil.rmtree(staging, ignore_errors=True)

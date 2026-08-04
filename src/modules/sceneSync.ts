@@ -88,15 +88,12 @@ export function startSceneSync(cc: SceneTarget): void {
 
   // --- globe settings -------------------------------------------------------
 
-  // Immediate, because the store is the only owner of the layer stack: the viewer
-  // is constructed with no base layer at all and the first stack arrives here.
+  // Immediate, because the store is the only owner of the layer stack: the viewer is
+  // constructed with no base layer at all and the first stack arrives here.
   //
-  // No availability correction any more. The base map's shallow levels are committed,
-  // so there is no missing-imagery case to detect, and how deep it goes is settled
-  // inside the provider's own construction rather than by rewriting the store. That
-  // retires the one race this watcher used to have: being immediate, it first ran on
-  // the store's default, and a probe answering after the route's preset had hydrated
-  // wrote a swap of the *old* stack over the preset's chosen basemap.
+  // Nothing corrects the stack afterwards, which is what keeps this safe to run
+  // immediately — an async correction racing the route preset's hydration is how it
+  // used to clobber the preset's basemap (docs/manual-verification.md).
   watch(
     () => cesiumStore.layers,
     (layers) => {

@@ -50,23 +50,18 @@ const isolationNotice = {
 };
 
 /**
- * How deep the base map goes, decided here rather than probed for at runtime.
+ * How deep the base map goes — the canonical home for this decision.
  *
- * Levels 0-2 of `data/imagery` are committed and 3-5 come from `pnpm update-imagery`,
- * so the ceiling depends on whether the generator has run — which is a fact about the
- * build, known here, and not something the browser needs to discover. Asking at
- * runtime meant a request for a file that is *expected* to be missing, and vite's
- * static-copy middleware answers that with a thrown ENOENT and a full-screen error
- * overlay: the worst possible greeting for a fresh clone's first `pnpm dev`.
+ * A build-time constant rather than a runtime probe, because whether levels 3-5 ship
+ * is a fact about the build. Two things a probe got wrong, both measured: it requests
+ * a file that is *expected* to be missing, which vite's static-copy middleware answers
+ * with a thrown ENOENT and a full-screen overlay on a fresh clone's first `pnpm dev`;
+ * and since `maximumLevel` stops Cesium requesting anything deeper, a probe failing
+ * while offline stranded every level 4-5 tile already cached. The cost is that running
+ * the generator mid-`pnpm dev` needs a restart.
  *
- * Deciding it at build time also removes a subtler hazard. `maximumLevel` stops
- * Cesium *requesting* anything deeper, so a probe that failed while offline would
- * have stranded every level 4-5 tile the user had already cached. A constant cannot
- * fail. The cost is that running the generator during a `pnpm dev` session needs a
- * restart to take effect.
- *
- * Level 3 is the marker rather than the manifest, which is committed and therefore
- * always present.
+ * Level 3 is the marker rather than the manifest, which is committed and so always
+ * present.
  */
 const generatedImagery = existsSync(fileURLToPath(new URL("data/imagery/NaturalEarthII/3/0/0.webp", import.meta.url)));
 const COMMITTED_MAX_LEVEL = 2;
@@ -190,8 +185,6 @@ export default defineConfig({
           // cache has never held — at which point it magnifies the deepest tile it does
           // have. Precaching to 3 is what guarantees there is always one to magnify.
           //
-          // On a build with only the committed levels this glob simply matches 0-2, and
-          // `__IMAGERY_MAX_LEVEL__` caps the layer at 2 to match — consistent either way.
           //
           // The manifest too: it carries the tiling scheme, and without it Cesium falls
           // back to WebMercator and `.png`, which is not this tileset in any respect.
@@ -203,10 +196,8 @@ export default defineConfig({
           "cesium/Widgets/**/*",
           "cesium/Workers/**/*",
           "cesium/Assets/Textures/maki/*",
-          // Cesium's own low-resolution Natural Earth II. It used to back the
-          // `Offline` layer; now that the generated tileset carries its own committed
-          // levels 0-2 nothing requests it, so precaching it was 536 KB and 43 entries
-          // spent on a layer that no longer exists.
+          // Cesium's own low-resolution Natural Earth II. Nothing requests it, so
+          // precaching it spent 536 KB and 43 entries on imagery never fetched.
           "cesium/Assets/Textures/NaturalEarthII/**/*",
           "**/*.map",
           // The embed page's background, 3.8 MB of decoration on a page that is not
@@ -248,13 +239,9 @@ export default defineConfig({
             },
           },
           {
-            // The base map (scripts/imagery). Levels 0-2 ship in every checkout; 3-5
-            // are there only where `pnpm update-imagery` has run, and the build caps
-            // the layer accordingly — see `__IMAGERY_MAX_LEVEL__` above.
-            //
             // Levels 0-3 are precached by the glob above and served from there; this
-            // rule is what carries levels 4 and 5, which are 16 of the pyramid's 17.5
-            // MB and only wanted once someone zooms in.
+            // rule carries 4 and 5, which are 16 of the pyramid's 17.5 MB and only
+            // wanted once someone zooms in.
             urlPattern: /data\/imagery\/.*\.(webp|jpg|png|xml)$/,
             handler: "CacheFirst",
             options: {

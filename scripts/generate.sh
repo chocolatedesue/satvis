@@ -9,13 +9,11 @@
 # look like. Each generator documents its own flags in its argparse; this file
 # knows nothing about them.
 #
-# One script rather than one per generator because they had drifted into 26
-# identical lines out of 32, differing only in an image tag, two paths and a
-# noun. They are *run* separately and deliberately so: the base map's shallow
-# levels are committed and its source is checksum-pinned, so it is regenerated
-# about never and always ends in a commit, while the sky box is an opt-in asset
-# somebody builds when they want it. Chaining them would make each pay the
-# other's download — 734 MB between them — for no case that wants both.
+# Run separately and deliberately so: the base map's shallow levels are committed
+# and its source is checksum-pinned, so it is regenerated about never and always
+# ends in a commit, while the sky box is an opt-in asset somebody builds when they
+# want it. Chaining them would make each pay the other's download — 734 MB between
+# them — for no case that wants both.
 #
 # What every generator here has in common, and all this file does:
 #
@@ -74,8 +72,7 @@ done
 echo "building $IMAGE"
 docker build --quiet --tag "$IMAGE" "$CONTEXT" >/dev/null
 
-# Mounted when it happens to be there. It used to be a submodule everybody had to
-# initialise for a check most people never run; it is an on-demand clone now.
+# Mounted when it happens to be there; no generator needs it to run.
 REF_MOUNT=()
 if [ -d "$REF_DIR" ]; then
   REF_MOUNT=(--volume "$REF_DIR:/ref:ro")
