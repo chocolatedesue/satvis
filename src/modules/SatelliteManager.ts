@@ -537,6 +537,16 @@ export class SatelliteManager {
   }
 
   #instantiate(key: string, entry: CatalogEntry, chunk: SampleChunk): void {
+    // Already built. Reachable whenever a reconcile lands while opening windows are
+    // in flight — a group's records arriving, a component toggled, a ground station
+    // edited — because that re-requests every queued satellite without cancelling
+    // the requests already out, and both replies find their key still queued. Two
+    // instantiations put two of everything on the globe and left the first
+    // collection unreachable in `#active`, so its entities, its batch geometry and
+    // its per-satellite tick listeners were never torn down.
+    if (this.#active.has(key)) {
+      return;
+    }
     const sat = new SatelliteComponentCollection(
       this.viewer,
       entry,
