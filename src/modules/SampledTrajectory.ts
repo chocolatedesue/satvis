@@ -101,6 +101,15 @@ export class SampledTrajectory {
   /** The time a coalesced tick asked about, to be honoured once the fill lands. */
   #pendingTime: JulianDate | undefined;
 
+  /**
+   * Set once `start`'s teardown has run.
+   *
+   * A separate flag rather than `!this.#data`, because the branch that needs it —
+   * the whole-window fill — is entered precisely when `#data` is already undefined,
+   * so that test cannot tell "never had a window" from "window taken away".
+   */
+  #stopped = false;
+
   constructor(orbit: Orbit, sampler: TrajectorySampler) {
     this.#orbit = orbit;
     this.#sampler = sampler;
@@ -406,7 +415,11 @@ export class SampledTrajectory {
     // the whole window rather than two for its edges.
     if (!this.#data || !TimeInterval.contains(this.#data.interval, time)) {
       const chunk = await this.#sampler.samples(JulianDate.toDate(request.start).getTime(), JulianDate.toDate(request.stop).getTime());
-      if (!chunk || chunk.teme.length === 0) {
+      // Torn down while the request was in flight — the same check the two-chunk
+      // path below makes. Without it `#init` rebuilt `#data` after `start`'s
+      // teardown had cleared it, leaving a disposed trajectory reporting itself
+      // valid, with a fresh grid buffer and nothing left to refresh it.
+      if (!chunk || chunk.teme.length === 0 || this.#stopped) {
         return;
       }
       this.#init(request.start);
@@ -608,6 +621,7 @@ export class SampledTrajectory {
     });
     return () => {
       removeCallback();
+      this.#stopped = true;
       this.#data = undefined;
       // So a fill still in flight does not schedule another one after teardown.
       this.#pendingTime = undefined;
