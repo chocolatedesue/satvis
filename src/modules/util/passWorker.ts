@@ -137,10 +137,7 @@ export function runPassCommand(cache: OrbitCache, command: PassCommand): PassRep
   return { kind: "passes", satnum: command.satnum, passes };
 }
 
-// Guarded on the absence of `window` rather than on `self` existing: on the main
-// thread `self` *is* the window, so a looser check would install this listener on
-// the page whenever the module is imported for its pure functions — as the unit
-// tests and the inline source both do.
+// Guarded on the absence of `window`, not on `self` existing — see sgp4Worker.
 const inWorkerScope = typeof (globalThis as { window?: unknown }).window === "undefined" && typeof (globalThis as { postMessage?: unknown }).postMessage === "function";
 
 if (inWorkerScope) {

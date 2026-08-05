@@ -146,7 +146,6 @@ export class SatelliteComponentCollection {
     }
   }
 
-  /** Which batch a given component's geometry belongs to. */
   #batchFor(name: SatelliteComponentName): PolylineBatch {
     return name === "Orbit track" ? this.#tracks : this.#orbits;
   }
@@ -687,7 +686,7 @@ export class SatelliteComponentCollection {
     return this.props.trajectory.groundTrack(time).filter((position): position is Cartesian3 => position !== undefined);
   }
 
-  /** Advance the swath corridor to `time`. See createGroundTrack. */
+  /** See createGroundTrack. */
   refreshGroundTrack(time: JulianDate): void {
     const entity = this.#components["Ground track"];
     if (!(entity instanceof Entity) || !entity.corridor) {

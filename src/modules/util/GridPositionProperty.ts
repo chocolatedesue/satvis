@@ -42,13 +42,8 @@
 //     Meteosat     1436 min        0.1 m   (Cesium: 0.0 m)
 //     MMS 1        5114 min       37.9 m   (Cesium: 38.5 m)
 //
-// The stencil is six for that last row and no other reason; see STENCIL. Two
-// earlier figures quoted here were wrong and are worth naming: 36 m came from a
-// probe that read the interpolation at the clock's time and the truth at
-// `Date.now()`, so it mostly measured the gap between them; and a later "5 m
-// median, 13 m worst over 600 satellites" was true but useless, because 600
-// satellites off the front of this catalog are all one Starlink shell and the
-// orbits that break a low-order fit are the eccentric ones.
+// The stencil is six for that last row and no other reason; see STENCIL, which
+// also says why re-checking this has to reach past the head of the catalog.
 //
 // Note what this is *not* an optimisation of. Lowering Cesium's
 // `interpolationDegree` from 5 to 1 saves 0.88 ms of 12 (7%) and costs 2.5 km of
@@ -141,7 +136,6 @@ export class GridPositionProperty {
     return this._definitionChanged;
   }
 
-  /** How many samples are held. The trajectory reports this as its length. */
   get length(): number {
     return this.#count;
   }
@@ -182,7 +176,6 @@ export class GridPositionProperty {
     this._definitionChanged.raiseEvent(this);
   }
 
-  /** Whether this property is already on the given grid. */
   isOnGrid(anchorEpochMs: number, stepSeconds: number): boolean {
     return this.#count > 0 && this.#anchorEpochMs === anchorEpochMs && this.#stepSeconds === stepSeconds;
   }
@@ -241,7 +234,7 @@ export class GridPositionProperty {
     return true;
   }
 
-  /** Drop samples before `gridIndex`, which is how the window slides. */
+  /** How the window slides. */
   dropBefore(gridIndex: number): void {
     const drop = gridIndex - this.#firstIndex;
     if (drop <= 0 || this.#count === 0) {
@@ -257,7 +250,6 @@ export class GridPositionProperty {
     this.#count -= drop;
   }
 
-  /** Drop samples after `gridIndex`. The other end of the same bookkeeping. */
   dropAfter(gridIndex: number): void {
     const keep = gridIndex - this.#firstIndex + 1;
     if (keep < 0) {
@@ -358,11 +350,10 @@ export class GridPositionProperty {
     if (referenceFrame === this.#frame) {
       return target;
     }
-    // Cesium's own frame conversion, which the typings do not carry as a static.
     return convertToReferenceFrame(time, target, this.#frame, referenceFrame, target);
   }
 
-  /** Every sample held, for the callers that draw a line through them. */
+  /** For the callers that draw a line through the samples rather than reading one. */
   rawPositions(fromGridIndex = this.#firstIndex, toGridIndex = this.#firstIndex + this.#count - 1): Cartesian3[] {
     const from = Math.max(fromGridIndex, this.#firstIndex);
     const to = Math.min(toGridIndex, this.#firstIndex + this.#count - 1);
@@ -404,7 +395,6 @@ export class GridPositionProperty {
     return { times, positions };
   }
 
-  /** The instants and positions of everything held. */
   allSamples(): { times: JulianDate[]; positions: Cartesian3[] } {
     return this.samplesBetween(this.timeAt(this.#firstIndex), this.timeAt(this.#firstIndex + Math.max(0, this.#count - 1)));
   }

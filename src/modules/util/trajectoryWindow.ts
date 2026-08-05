@@ -24,11 +24,10 @@ export const WINDOW_ORBITS_FORWARD = 1.5;
 export interface TrajectoryWindow {
   /** Seconds from the reference time to the first sample. Negative. */
   offsetSeconds: number;
-  /** Seconds between samples. */
   stepSeconds: number;
   /** How many samples span the whole window, first and last inclusive. */
   sampleCount: number;
-  /** The full span, for the caller that wants an interval rather than a count. */
+  /** For the caller that wants an interval rather than a count. */
   spanSeconds: number;
 }
 

@@ -9,8 +9,7 @@
 // creation states calls into Cesium's renderer, which needs a real WebGL context,
 // so the cases here stop at the point a build starts and pick up again on the
 // paths that never reach one. That still leaves the scheduling, the coalescing,
-// the empty-batch teardown and settled() — all the bookkeeping that used to be
-// four statics on a base class and could not be reached at all.
+// the empty-batch teardown and settled().
 
 import { ArcType, Cartesian3, Color, ColorGeometryInstanceAttribute, GeometryInstance, JulianDate, PolylineColorAppearance, PolylineGeometry, SceneMode } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";

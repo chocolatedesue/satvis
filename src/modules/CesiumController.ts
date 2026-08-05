@@ -511,9 +511,7 @@ export class CesiumController {
 
       // Suppressing them drops every geometry from the shared batches, and a
       // batch rebuilds asynchronously — morphing before they have caught up
-      // would rebuild them into the projection being left behind. One await,
-      // where this used to poll a static flag re-exported from the collections'
-      // base class through a requestAnimationFrame loop.
+      // would rebuild them into the projection being left behind.
       void Promise.all([this.sats.orbits.settled(), this.sats.tracks.settled()]).then(() => {
         morph();
         // A morph that did not start raises no completion. The guard above catches

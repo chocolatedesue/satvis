@@ -88,7 +88,7 @@ describe("PassPredictor", () => {
     const passes = await predictor.ensurePasses(EPOCH_TIME);
     expect(passes.length).toBeGreaterThan(0);
     expect(passes.every((pass) => pass.groundStationName === "Munich")).toBe(true);
-    // Stamped on this side, because the worker is keyed on satnum and holds no name.
+    // Stamped on this side — see PassPredictor's #apply.
     expect(passes.every((pass) => pass.name === "ISS")).toBe(true);
     expect(predictor.passIntervals.length).toBe(passes.length);
   });

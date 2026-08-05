@@ -225,7 +225,6 @@ export class PassPredictor {
     return this.#inFlight;
   }
 
-  /** Whether the window currently held is valid at `time`. */
   #covers(time: JulianDate): boolean {
     return this.#window !== undefined && TimeInterval.contains(new TimeInterval({ start: this.#window.start, stop: this.#window.stop }), time);
   }

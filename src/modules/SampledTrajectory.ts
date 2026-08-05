@@ -58,10 +58,10 @@ export class SampledTrajectory {
 
   #data: SampledPositionData | undefined;
 
-  /** Whether any consumer has asked for the inertial frame. See requireInertial. */
+  /** See requireInertial. */
   #wantsInertial = false;
 
-  /** Whether any consumer has asked for the sampled property. See requireSampled. */
+  /** See requireSampled. */
   #wantsSampled = false;
 
   /**
@@ -79,11 +79,9 @@ export class SampledTrajectory {
    * 71 to 97. See GridPositionProperty for why, and for the caveats.
    *
    * The authoritative store, and the only one most satellites have: `fixed` and
-   * `inertial` are both built on demand from this. A flat array of doubles is also
-   * far cheaper than a `SampledPositionProperty` over the same window — 25.7
-   * against 38.7 KB a satellite for everything a satellite owns, some 74 MB less
-   * at 5,000 — because it derives sample times from the anchor instead of keeping
-   * a `JulianDate` object per sample.
+   * `inertial` are both built on demand from this. It is also the smaller of the
+   * two, because it derives sample times from the anchor instead of keeping a
+   * `JulianDate` object per sample — GridPositionProperty has the figures.
    */
   #gridFixed = new GridPositionProperty();
 
@@ -294,7 +292,7 @@ export class SampledTrajectory {
       // Earth-relative path does not drag a sampled property into being.
       positions = this.#positionsBetween(start, end);
     } else {
-      // The caller wants the inertial frame, which is the declaration itself.
+      // Asking for the inertial frame is the declaration itself.
       this.requireInertial();
       const inertial = this.#data.inertial;
       if (!inertial) return [];

@@ -115,11 +115,10 @@ describe("CesiumCleanupHelper.drain", () => {
   });
 
   test("a primitive tree with no label collection is silent, not reported", () => {
-    // EntityCluster makes its label collection on the first label, so a scene that
-    // has only ever drawn points legitimately has none. This used to report, which
-    // meant the commonest scene in the app logged an internals-have-moved error on
-    // every teardown. A collection that exists but cannot be read still reports —
-    // that is the test above.
+    // A points-only scene has no label collection at all, and used to log an
+    // internals-have-moved error on every teardown for it. See CesiumCleanupHelper.drain.
+    // The test above pins the case that must still report: a collection that
+    // exists but cannot be read.
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
     expect(drain({ scene: { primitives: { _primitives: [] }, requestRender: vi.fn() } })).toBe(0);

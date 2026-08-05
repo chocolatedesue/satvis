@@ -453,15 +453,16 @@ export class SatelliteManager {
       this.#buildHandle = undefined;
     }
 
+    // `#unbudgetedBuild` was decided from the queue as it stood when the activation
+    // started, not from the queue as it drains. Re-deciding on every call meant the
+    // last BUILD_SYNCHRONOUS_LIMIT satellites of every large build ran unbudgeted —
+    // a frame of tens of milliseconds at the tail of exactly the builds the budget
+    // exists to smooth.
+    //
     // Without a frame callback there is nothing to spread the work over, and a
     // queue left half-drained would never be picked up again. That is the unit
     // test environment rather than any browser, and there the freeze this avoids
     // is not a freeze anyone is looking at.
-    // Decided from the queue as it stood when the activation started, not from the
-    // queue as it drains. Re-deciding on every call meant the last
-    // BUILD_SYNCHRONOUS_LIMIT satellites of every large build ran unbudgeted — a
-    // frame of tens of milliseconds at the tail of exactly the builds the budget
-    // exists to smooth.
     const unbudgeted = this.#unbudgetedBuild || typeof requestAnimationFrame !== "function";
     const deadline = performance.now() + BUILD_BUDGET_MS;
     // Drains the satellites whose samples have arrived, not the queue itself. A

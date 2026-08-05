@@ -125,6 +125,15 @@ const nextFrames = (count: number, timeoutMs = 1000): Promise<void> =>
   });
 
 /**
+ * Where one GPU reading belongs: the sampler that was collecting when the query
+ * was started, and the epoch it was then on. See `#endGpuQuery`.
+ */
+interface GpuTarget {
+  sampler: FrameSampler;
+  epoch: number;
+}
+
+/**
  * Whether this page can measure an absolute footprint at all.
  *
  * Two conditions, and the isolation one is the interesting half: the API is only
@@ -134,15 +143,6 @@ const nextFrames = (count: number, timeoutMs = 1000): Promise<void> =>
  * browser. That is a deployment fact rather than a browser fact, which is why the
  * panel says which of the two is missing instead of just greying a control.
  */
-/**
- * Where one GPU reading belongs: the sampler that was collecting when the query
- * was started, and the epoch it was then on. See `#endGpuQuery`.
- */
-interface GpuTarget {
-  sampler: FrameSampler;
-  epoch: number;
-}
-
 export const canMeasureFootprint = (): boolean => window.crossOriginIsolated && typeof performance.measureUserAgentSpecificMemory === "function";
 
 /** Best effort, and separate from Cesium's context so nothing internal is poked. */
@@ -513,11 +513,8 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       await new Promise((resolve) => setTimeout(resolve, FOOTPRINT_QUIESCE_MS));
       const result = await measure.call(performance);
       const js = result.breakdown.find((entry) => entry.types.includes("JavaScript") && entry.attribution.some((item) => item.scope === "Window"));
-      // Worker heaps are in the total but nowhere else, so a run that moved work
-      // off the main thread looks heavier than one that never had a worker unless
-      // the two are separable. `next` has no workers at all, which made a
-      // branch-to-branch comparison of `totalMb` alone read the move itself as a
-      // regression.
+      // Separated out because `totalMb` counts them and nothing else does — see
+      // FootprintSample.workerMb.
       const workerBytes = result.breakdown.filter((entry) => entry.attribution.some((item) => (item.scope ?? "").includes("Worker"))).reduce((sum, entry) => sum + entry.bytes, 0);
       return {
         totalMb: result.bytes / BYTES_PER_MB,

@@ -15,14 +15,6 @@
 //   it current; instead the owner re-supplies geometry periodically through
 //   `replace`, and the coalescing window collapses those thousands of swaps into
 //   one rebuild. See SatelliteManager's track refresh.
-//
-// This used to be four `static` fields on CesiumComponentCollection, reached
-// through `this.constructor` from instance methods and re-exported two levels up
-// as `SatelliteManager.pendingUpdate` so CesiumController could busy-poll it in a
-// requestAnimationFrame loop. Statics on a base class are module state with extra
-// steps: the geometry array was mutated in place in one method and reassigned in
-// another (installing an own static on the subclass that shadowed the base's),
-// which only worked because exactly one subclass ever created a GeometryInstance.
 
 import { type GeometryInstance, type JulianDate, Matrix4, PolylineColorAppearance, Primitive, SceneMode, Transforms, defined } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
@@ -85,7 +77,7 @@ export class PolylineBatch {
     return this.#scheduled || this.#building;
   }
 
-  /** How many geometries are in the batch. What a rebuild costs is a function of this. */
+  /** What a rebuild costs is a function of this. */
   get size(): number {
     return this.#geometries.length;
   }
