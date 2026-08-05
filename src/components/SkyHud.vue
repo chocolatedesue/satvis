@@ -97,7 +97,7 @@ const TAPE_LENGTH = 12;
 
 const cc = useController();
 const { compass, elevation, locked, trace, calibrated, settled, start, stop } = useSkyHud(cc);
-const { active: compassActive, stopped: compassStopped } = useSkyCompass(cc);
+const { active: compassActive } = useSkyCompass(cc);
 
 const { sceneMode } = storeToRefs(useCesiumStore());
 const visible = computed(() => sceneMode.value === SKY_MODE);
@@ -126,16 +126,15 @@ watch(
     }
     stop();
     // Leaving the view stops the interaction, which drops the sensor subscription
-    // with it, so the control must not go on claiming the compass is aiming.
+    // with it. The control follows on its own: dropping it is reported, so there
+    // is nothing to tell it here.
     cc.skyInteraction.disableDeviceOrientation();
-    compassStopped();
   },
   { immediate: true },
 );
 onUnmounted(() => {
   stop();
   cc.skyInteraction.disableDeviceOrientation();
-  compassStopped();
 });
 </script>
 

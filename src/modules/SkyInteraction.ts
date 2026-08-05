@@ -51,7 +51,13 @@ export type CompassOutcome =
   /** The event exists and was granted, but never fired. Desktop browsers do this. */
   | "silent"
   /** Orientation works, but nothing on this device can say where north is. */
-  | "no-heading";
+  | "no-heading"
+  /**
+   * The aim was taken back by hand while the sensor was still proving itself.
+   * Nothing failed and there is nothing to say about it — the user did it — but
+   * the control still has to hear that it is not aiming.
+   */
+  | "taken-back";
 
 /** How far the crosshair reaches, in CSS pixels. */
 export const CAPTURE_RADIUS = 60;
@@ -93,7 +99,16 @@ export class SkyInteraction {
 
   #pointerId: number | undefined;
 
+  /** How far this gesture has actually moved the pointer, in CSS pixels. */
   #dragged = 0;
+
+  /**
+   * Whether this gesture has been a pinch at any point. Kept apart from
+   * `#dragged` because the two answer different questions of the same gesture —
+   * "was that a tap" and "did the user take hold of the view" — and a pinch is
+   * not a tap while its fingers may not have dragged at all.
+   */
+  #pinched = false;
 
   #last = new Cartesian2();
 
@@ -116,6 +131,8 @@ export class SkyInteraction {
   readonly movement: SkyMovement;
 
   #observerMoved: ((observer: Observer) => void) | undefined;
+
+  #orientationStopped: (() => void) | undefined;
 
   #orientationActive = false;
 
@@ -189,6 +206,12 @@ export class SkyInteraction {
     this.#sawOrientation = false;
     this.#sawHeadingSource = false;
     await new Promise((resolve) => setTimeout(resolve, SENSOR_PROBE_MS));
+    // The aim can be taken back while the probe runs — a drag does exactly that,
+    // and readings are already steering the view by then — so what is reported
+    // has to be what is actually in force rather than what was asked for.
+    if (!this.#orientationActive) {
+      return "taken-back";
+    }
     if (!this.#sawOrientation) {
       this.disableDeviceOrientation();
       return "silent";
@@ -203,6 +226,15 @@ export class SkyInteraction {
     return this.compass.calibrated ? "aiming" : "aiming-uncalibrated";
   }
 
+  /**
+   * Take the aim back from the device, whoever asked — the control, a drag, or
+   * the view closing.
+   *
+   * The view is levelled on the way out. Nothing but the sensor ever rolls it,
+   * so a roll left behind is one the pointer cannot straighten, and a horizon
+   * stuck at the angle a phone happened to be held at does not read as a held
+   * angle. It reads as a broken view.
+   */
   disableDeviceOrientation(): void {
     if (!this.#orientationActive) {
       return;
@@ -210,6 +242,17 @@ export class SkyInteraction {
     window.removeEventListener("deviceorientationabsolute", this.#onDeviceOrientation);
     window.removeEventListener("deviceorientation", this.#onDeviceOrientation);
     this.#orientationActive = false;
+    this.#options.skyView.look({ roll: 0 });
+    this.#orientationStopped?.();
+  }
+
+  /**
+   * Called whenever the aim stops following the device, including when nobody
+   * asked for it — a drag takes the aim back, and the control that says the
+   * compass is on has no other way to find out.
+   */
+  onOrientationStop(callback: () => void): void {
+    this.#orientationStopped = callback;
   }
 
   #onDeviceOrientation = (event: DeviceOrientationEvent): void => {
@@ -346,12 +389,14 @@ export class SkyInteraction {
       // other: letting the pair drag as well would pan the sky while zooming it,
       // and zoom is meant to change the field of view and nothing else.
       this.#pointerId = undefined;
+      this.#pinched = true;
       this.#pinch = { startDistance: this.#pinchDistance() ?? 1, startFovy: this.#options.skyView.fovy };
       return;
     }
     if (this.#pointers.size === 1) {
       this.#pointerId = event.pointerId;
       this.#dragged = 0;
+      this.#pinched = false;
       this.#last = new Cartesian2(event.clientX, event.clientY);
     }
   };
@@ -380,10 +425,26 @@ export class SkyInteraction {
     this.#last = new Cartesian2(event.clientX, event.clientY);
     this.#dragged += Math.abs(dx) + Math.abs(dy);
 
-    // The device is aiming; a drag would be overwritten by the next sensor
-    // reading anyway. Still counted above, so it stays a drag rather than a tap.
+    // Taking hold of the view takes the aim back from the device. A drag under
+    // sensor aiming is overwritten by the next reading, so the alternative is a
+    // gesture that visibly does nothing — and there is no reading of "I dragged
+    // and the sky sprang back" that is not "the compass is broken". Turning the
+    // compass off is also the only handover that survives: the sensor writes the
+    // aim every reading, so nothing short of unsubscribing can share it.
+    //
+    // Past the tap slop rather than on the first pixel, because a tap is how a
+    // satellite is selected and the hand tremor inside one must not cost the
+    // compass. Pixels this gesture actually travelled, which is why `#dragged` may
+    // not stand in for "not a tap": a pinch is not a tap either, and one that ends
+    // with a finger still down would otherwise hand the aim over on its first
+    // pixel — zoom is meant to change the field of view and nothing else. The keys
+    // are the same trade from the other side: walking never touches the aim, so it
+    // leaves the compass alone.
     if (this.#orientationActive) {
-      return;
+      if (this.#dragged <= TAP_SLOP) {
+        return;
+      }
+      this.disableDeviceOrientation();
     }
 
     // Degrees per pixel straight off the vertical field of view, so dragging
@@ -416,10 +477,11 @@ export class SkyInteraction {
       if (remaining) {
         // Re-seeded, not resumed: the surviving finger moved while it was pinching,
         // and taking that as drag would swing the sky by however far it travelled.
-        // Past the tap slop on purpose — a gesture that pinched is not a tap.
+        // `#dragged` restarts from where the finger is now — `#pinched` is what
+        // remembers this was no tap, so the counter can stay honest about pixels.
         this.#pointerId = remaining[0];
         this.#last = remaining[1];
-        this.#dragged = TAP_SLOP + 1;
+        this.#dragged = 0;
       }
       return;
     }
@@ -428,7 +490,7 @@ export class SkyInteraction {
       return;
     }
     this.#pointerId = undefined;
-    if (this.#dragged > TAP_SLOP) {
+    if (this.#dragged > TAP_SLOP || this.#pinched) {
       return;
     }
     // A tap selects whatever the crosshair is on — not what is under the finger.

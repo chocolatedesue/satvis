@@ -89,14 +89,18 @@ discussion; sharpen them here when they drift.
   horizontal, and roll about the view axis. Pitch, not elevation: the two are
   equal whenever the camera is looking at something, but a camera has an
   attitude where a satellite has a position. Roll is only ever driven by the
-  device's own orientation; nothing the user does with a pointer rolls the view.
+  device's own orientation; nothing the user does with a pointer rolls the view,
+  and taking the aim back by hand levels it rather than leaving a roll no pointer
+  can straighten.
 - **Field of view**: how much sky the view shows, held as the vertical angle
   because that is the one a phone's two orientations agree on. Zoom is a change
   to it and to nothing else: the aim does not move when the view zooms.
 - **Heading reference**: where the device's idea of north comes from when the
   sky view aims by compass. Without one an orientation sensor gives a yaw from an
   arbitrary zero, so the sky view declines to aim by compass rather than aim at a
-  bearing nobody measured (`docs/adr/0004-compass-aiming.md`).
+  bearing nobody measured (`docs/adr/0004-compass-aiming.md`). Compass aiming ends
+  when the control says so or when a drag takes the aim back — the sensor rewrites
+  the aim every reading, so the two cannot share it.
 - **Lock**: the satellite the crosshair currently holds — the nearest one above
   the horizon within the crosshair's reach. What a tap acts on, and what the
   detail card and the on-sky track describe.

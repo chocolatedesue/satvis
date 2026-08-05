@@ -30,7 +30,17 @@ const FAILURES: Record<string, string> = {
   no_heading: "This device reports orientation but cannot tell where north is, so the sky would be aimed at an arbitrary bearing.",
 };
 
-export function useSkyCompass(cc: CesiumController): { active: Readonly<Ref<boolean>>; pending: Readonly<Ref<boolean>>; toggle: () => Promise<void>; stopped: () => void } {
+export function useSkyCompass(cc: CesiumController): { active: Readonly<Ref<boolean>>; pending: Readonly<Ref<boolean>>; toggle: () => Promise<void> } {
+  // The control is not the only thing that can switch the compass off — a drag
+  // takes the aim back, and the view closing stops the sensor — so it listens as
+  // well as writes, and there is no second "and now tell the control" call for a
+  // caller to forget. Registered on every call rather than once: the callback is
+  // a single slot and this closure is the same thing however many components ask
+  // for the compass.
+  cc.skyInteraction.onOrientationStop(() => {
+    active.value = false;
+  });
+
   async function toggle(): Promise<void> {
     const { skyInteraction } = cc;
     if (active.value) {
@@ -66,7 +76,10 @@ export function useSkyCompass(cc: CesiumController): { active: Readonly<Ref<bool
       });
       return;
     }
-    if (outcome === "aiming") {
+    if (outcome === "aiming" || outcome === "taken-back") {
+      // Nothing failed in either case, and in the second the user is the one who
+      // ended it — by dragging while the sensor was still proving itself — so a
+      // warning about it would be telling them what they just did.
       return;
     }
     useToastProxy().add({
@@ -76,10 +89,5 @@ export function useSkyCompass(cc: CesiumController): { active: Readonly<Ref<bool
     });
   }
 
-  /** The sky view closed, taking the sensor subscription with it. */
-  function stopped(): void {
-    active.value = false;
-  }
-
-  return { active: readonly(active), pending: readonly(pending), toggle, stopped };
+  return { active: readonly(active), pending: readonly(pending), toggle };
 }
