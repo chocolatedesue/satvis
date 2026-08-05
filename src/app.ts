@@ -27,7 +27,6 @@ declare global {
   }
 }
 
-// Register Service Worker with automatic reload on update
 usePWAUpdate({ autoUpdate: true });
 
 // Before the viewer: everything ion-backed resolves through this one token, and
@@ -43,7 +42,6 @@ const cc = new CesiumController(viewer);
 app.provide(controllerKey, cc);
 window.cc = cc;
 
-// Setup Pinia with customConfig from preset
 const pinia = createPinia();
 pinia.use(({ store }) => {
   store.router = markRaw(router);
@@ -56,13 +54,11 @@ app.use(pinia);
 // panel, and it must not depend on component mount order.
 startSceneSync(cc);
 
-// Setup router guards to handle configuration changes on route changes
 setupRouterGuards(router, cc);
 app.use(router);
 
 app.use(ui);
 
-// Mount the app
 app.mount("#app");
 
 // The loading screen in index.html has served its purpose once the globe is up.

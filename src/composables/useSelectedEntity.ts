@@ -37,7 +37,6 @@ export interface PositionRow {
   value: string;
 }
 
-// --- Module-scoped state (lazy singleton) ---
 const selection: ShallowRef<Selection | null> = shallowRef(null);
 const isTracked = ref(false);
 const name = ref("");

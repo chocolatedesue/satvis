@@ -1,5 +1,4 @@
 <template>
-  <!-- Group row: expand chevron + tri-state checkbox + tag name + count badge. -->
   <div v-if="row.kind === 'group'" class="browser-row browser-row--group">
     <button type="button" class="browser-chevron" :aria-label="row.expanded ? 'Collapse group' : 'Expand group'" @click="emit('toggle-expand', row.tag)">
       <UIcon :name="row.expanded ? 'lucide:chevron-down' : 'lucide:chevron-right'" />
@@ -16,7 +15,6 @@
     <span class="browser-badge">{{ row.activeCount }}/{{ row.count }}</span>
   </div>
 
-  <!-- Satellite row: indent + checkbox + name + orbit class badge + dimmed satnum (+ dimmed group labels in search mode). -->
   <div v-else class="browser-row browser-row--sat">
     <input class="browser-checkbox" type="checkbox" :checked="row.checked" :aria-label="`Toggle ${row.name}`" @click.stop="emit('toggle-sat', row.name)" />
     <span class="browser-label browser-label--sat" @click="emit('toggle-sat', row.name)">{{ row.name }}</span>

@@ -37,10 +37,6 @@ export interface FieldSpec {
   kind: FieldKind<unknown>;
 }
 
-// ---------------------------------------------------------------------------
-// Scalar kinds
-// ---------------------------------------------------------------------------
-
 /** Any string, unvalidated. For open vocabularies with no delimiter (`track`). */
 export function plainString(): FieldKind<string> {
   return {
@@ -65,10 +61,6 @@ export function boolean(): FieldKind<boolean> {
     format: (value) => (typeof value === "boolean" ? ok(String(value)) : FAIL),
   };
 }
-
-// ---------------------------------------------------------------------------
-// String lists
-// ---------------------------------------------------------------------------
 
 const LIST_SEPARATOR = ",";
 
@@ -184,10 +176,6 @@ export function layerList(providers: () => readonly string[]): FieldKind<string[
   };
 }
 
-// ---------------------------------------------------------------------------
-// Ground stations
-// ---------------------------------------------------------------------------
-
 const STATION_SEPARATOR = "_";
 const COORDINATE_PRECISION = 4;
 
@@ -240,10 +228,6 @@ export function groundStationList(): FieldKind<SerializedGroundStation[]> {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Time
-// ---------------------------------------------------------------------------
-
 const MINUTE_ISO = "YYYY-MM-DDTHH:mm[Z]";
 
 /**
@@ -282,10 +266,6 @@ export function timestamp(): FieldKind<string | null> {
     },
   };
 }
-
-// ---------------------------------------------------------------------------
-// Codec
-// ---------------------------------------------------------------------------
 
 export type Query = Readonly<Record<string, string | undefined>>;
 

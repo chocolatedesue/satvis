@@ -145,14 +145,12 @@ export class CesiumController {
     this.camera = new Suppressible<string>("Fixed", (mode) => this.#applyCameraMode(mode));
     this.terrain = new Suppressible<string>("None", (name, isCurrent) => this.#applyTerrain(name, isCurrent));
 
-    // CesiumController config
     this.sceneModes = [...SCENE_MODES];
     this.cameraModes = [...CAMERA_MODES];
 
     this.createInputHandler();
     this.addErrorHandler();
 
-    // Create Satellite Manager
     this.sats = new SatelliteManager(this.viewer);
 
     this.skyView = new SkyView(this.viewer.scene);
@@ -192,13 +190,11 @@ export class CesiumController {
 
     this.pm = new PushManager();
 
-    // Add privacy policy to credits when not running in iframe
     if (!DeviceDetect.inIframe()) {
       this.viewer.creditDisplay.addStaticCredit(new Credit(`<a href="/privacy.html" target="_blank"><u>Privacy</u></a>`, true));
     }
     this.viewer.creditDisplay.addStaticCredit(new Credit(`Satellite TLE data provided by <a href="https://celestrak.org/NORAD/elements/" target="_blank"><u>Celestrak</u></a>`));
 
-    // Fix Cesium logo in minimal ui mode
     if (this.minimalUI) {
       setTimeout(() => {
         this.fixLogo();
@@ -244,7 +240,6 @@ export class CesiumController {
   }
 
   preloadReferenceFrameData(): void {
-    // Preload reference frame data for a timeframe of 180 days
     const timeInterval = new TimeInterval({
       start: JulianDate.addDays(JulianDate.now(), -60, new JulianDate()),
       stop: JulianDate.addDays(JulianDate.now(), 120, new JulianDate()),
@@ -835,14 +830,14 @@ export class CesiumController {
   }
 
   addErrorHandler(): void {
-    // Rethrow scene render errors
     this.viewer.scene.rethrowRenderErrors = true;
     this.viewer.scene.renderError.addEventListener((scene: Scene, error: Error) => {
       console.error(scene, error);
       usePostHog().posthog.captureException(error);
     });
 
-    // Proxy and log CesiumWidget render loop errors that only display a UI error message
+    // Cesium answers a render-loop error by drawing its own panel and going no
+    // further, so the only way these reach PostHog is to wrap the panel itself.
     const widget = this.viewer.cesiumWidget;
     const proxied = widget.showErrorPanel;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

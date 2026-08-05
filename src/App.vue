@@ -17,7 +17,6 @@ import { initToastProxy } from "./composables/useToastProxy";
 const toast = useToast();
 
 onMounted(() => {
-  // Initialize toast utility for non-Vue contexts
   initToastProxy(toast);
 });
 </script>

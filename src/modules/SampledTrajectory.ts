@@ -300,7 +300,8 @@ export class SampledTrajectory {
     }
     if (positions.length === 0) return [];
     if (loop) {
-      // Readd the first position to the end of the array to close the loop
+      // Repeating the first sample is what closes the orbit, rather than leaving
+      // a gap at the seam.
       return [...positions, positions[0]];
     }
     return positions;

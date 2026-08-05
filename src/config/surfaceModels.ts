@@ -19,7 +19,6 @@ export const SURFACE_MODELS = ["None", "OsmBuildings", "GooglePhotorealistic"] a
 // kind is enough (see the note on SceneMode in src/config/viewModes.ts).
 export type SurfaceModelName = (typeof SURFACE_MODELS)[number];
 
-/** Everything but the absence of one — the names that name a tileset. */
 export type SurfaceTileset = Exclude<SurfaceModelName, "None">;
 
 /** The Map menu groups whose selection a surface model can render meaningless. */

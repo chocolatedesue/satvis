@@ -7,8 +7,8 @@ type CesiumEvent = any;
 
 export class CesiumCallbackHelper {
   /**
-   * Register an event listener that will execute a callback every refreshRate ticks of clock time.
-   * @returns function to remove the event listener
+   * Fire every `refreshRate` ticks of the clock.
+   * @returns the unsubscribe
    */
   static createPeriodicTickCallback(viewer: Viewer, refreshRate: number, callback: (time: JulianDate) => void, event: CesiumEvent = viewer.clock.onTick): () => void {
     let ticks = 0;
@@ -23,8 +23,9 @@ export class CesiumCallbackHelper {
   }
 
   /**
-   * Register an event listener that will execute a callback every refreshRate seconds of clock time.
-   * @returns function to remove the event listener
+   * Fire every `refreshRate` seconds of *simulation* time, so a faster clock
+   * fires it more often in real time.
+   * @returns the unsubscribe
    */
   static createPeriodicTimeCallback(viewer: Viewer, refreshRate: number, callback: (time: JulianDate) => void, event: CesiumEvent = viewer.clock.onTick): () => void {
     let lastUpdated = viewer.clock.currentTime;

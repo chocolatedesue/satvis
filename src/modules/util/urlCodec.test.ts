@@ -259,8 +259,6 @@ describe("timestamp", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-
 const SCHEMA: FieldSpec[] = [
   { name: "enabledComponents", url: "elements", kind: closedStringList(components) },
   { name: "enabledTags", url: "tags", kind: stringList() },

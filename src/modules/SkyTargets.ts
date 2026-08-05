@@ -57,7 +57,6 @@ export function lookAngles(frame: ObserverFrame, target: Cartesian3): LookAngles
   return { azimuth, elevation, rangeKm: range / 1000 };
 }
 
-/** The world position a direction from the observer points at. */
 export function directionToWorld(frame: ObserverFrame, azimuth: number, elevation: number, distance = DIRECTION_DISTANCE): Cartesian3 {
   const local = enuDirection(azimuth, elevation, distance);
   const enuToFixed = Matrix3.transpose(frame.fixedToEnu, new Matrix3());

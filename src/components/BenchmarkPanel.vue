@@ -455,7 +455,6 @@ const estimateText = computed(() => {
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 });
 
-/** What the folded settings say, so collapsing them is not the same as losing them. */
 /**
  * Point the controls at what a run is actually doing.
  *
@@ -481,6 +480,7 @@ function adoptRunSettings(): void {
   withGroundStation.value = bench.target.options.groundStation !== undefined;
 }
 
+/** What the folded settings say, so collapsing them is not the same as losing them. */
 const settingsSummary = computed(() => {
   const parts = [`${counts.value.length} counts`, mode.value];
   if (clocks.value.length > 1 || (clocks.value[0] ?? 1) !== 1) {
@@ -560,7 +560,6 @@ const footprintColumn = computed(() => {
   return current !== undefined && hasFootprints(current);
 });
 
-// --- live readout ----------------------------------------------------------
 interface Live {
   fps: number;
   frameMs: number;
@@ -684,7 +683,6 @@ onUnmounted(() => {
   }
 });
 
-// --- the sweep -------------------------------------------------------------
 // Whether this panel is the one driving, which is the difference between a
 // step-by-step status line and merely saying that something is under way.
 let startedHere = false;

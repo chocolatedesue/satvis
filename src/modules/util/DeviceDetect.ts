@@ -48,8 +48,8 @@ export class DeviceDetect {
   }
 
   static getiPhoneModel(): string {
-    // Detect iPhone model
-    // Based on: https://51degrees.com/blog/website-optimisation-for-apple-devices-ipad-and-iphone
+    // Screen geometry and pixel ratio per model, from
+    // https://51degrees.com/blog/website-optimisation-for-apple-devices-ipad-and-iphone
     const ratio = window.devicePixelRatio;
     if (window.screen.height / window.screen.width === 896 / 414) {
       switch (ratio) {

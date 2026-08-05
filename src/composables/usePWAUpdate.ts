@@ -15,7 +15,6 @@ interface UsePWAUpdateOptions {
   updateInterval?: number;
 }
 
-// Singleton state — shared across all callers
 const needRefresh = ref(false);
 const offlineReady = ref(false);
 let updateSW: ((reloadPage?: boolean) => Promise<void>) | undefined;
@@ -25,10 +24,8 @@ let intervalId: ReturnType<typeof setInterval> | undefined;
 /**
  * Composable for managing PWA service worker updates.
  *
- * State is shared (singleton) across all callers. The service worker is registered immediately on the first call.
- *
- * @param options - Configuration options
- * @returns Object containing PWA update state and methods
+ * State is shared across all callers, and the service worker is registered on
+ * the first call.
  *
  * @example
  * // Automatic updates
@@ -59,7 +56,6 @@ export function usePWAUpdate(options: UsePWAUpdateOptions = {}) {
     }
   };
 
-  // Register the service worker exactly once
   if (!registered) {
     registered = true;
 
@@ -81,7 +77,6 @@ export function usePWAUpdate(options: UsePWAUpdateOptions = {}) {
       onRegistered(registration: ServiceWorkerRegistration | undefined) {
         console.log("PWA: Service worker registered successfully");
 
-        // Set up periodic update checks (only once)
         if (registration && updateInterval > 0 && !intervalId) {
           intervalId = setInterval(() => {
             console.log("PWA: Checking for updates...");
