@@ -1,6 +1,6 @@
 // Looking around the sky view, and identifying what the crosshair is on.
 //
-// Listeners go on the Cesium canvas rather than on a full-screen overlay. That
+// Pointer listeners go on the Cesium canvas rather than on a full-screen overlay. That
 // is load-bearing: `#cesiumContainer` is a sibling *before* `#app`, and `#app`
 // isolates its stacking context, so nothing rendered inside the app can be
 // raised above Cesium's clock, timeline and credits — a full-screen surface
@@ -8,13 +8,18 @@
 // it. Those widgets are siblings of the canvas, not children, so listening here
 // leaves them alone by construction and the HUD can stay `pointer-events: none`
 // throughout.
+//
+// Walking the observer is the exception, and lives in ./SkyMovement: a keyboard
+// has nothing to do with the canvas, and where its keys are read from — and what
+// a walk costs when it ends — is a whole argument of its own.
 
 import { Cartesian2, type JulianDate, type Scene } from "@cesium/engine";
 
 import { aimFromDeviceOrientation, CompassCalibration, hasHeadingSource } from "./DeviceAim";
 import type { SatelliteManager } from "./SatelliteManager";
+import { SkyMovement } from "./SkyMovement";
 import { nearestTarget, type SkyTarget, skyTargets } from "./SkyTargets";
-import type { SkyView } from "./SkyView";
+import type { Observer, SkyView } from "./SkyView";
 
 // iOS gates the sensor behind a call made from a user gesture, and only over
 // https. Typed here because it is not in lib.dom.
@@ -108,6 +113,10 @@ export class SkyInteraction {
 
   readonly compass = new CompassCalibration();
 
+  readonly movement: SkyMovement;
+
+  #observerMoved: ((observer: Observer) => void) | undefined;
+
   #orientationActive = false;
 
   #sawOrientation = false;
@@ -116,6 +125,23 @@ export class SkyInteraction {
 
   constructor(options: SkyInteractionOptions) {
     this.#options = options;
+    this.movement = new SkyMovement({
+      skyView: options.skyView,
+      onMove: (observer) => this.#observerMoved?.(observer),
+    });
+  }
+
+  /**
+   * Called when a walk has come to rest somewhere new.
+   *
+   * A registration rather than a constructor option, unlike the callbacks above:
+   * the observer is the first ground station, so what has to hear this is the
+   * store — and the store is sceneSync's to write, while the interaction is the
+   * controller's to construct. Same shape, and for the same reason, as
+   * `sats.onTrackedChange`.
+   */
+  onObserverMove(callback: (observer: Observer) => void): void {
+    this.#observerMoved = callback;
   }
 
   /** Whether the aim is following the device rather than the pointer. */
@@ -228,7 +254,11 @@ export class SkyInteraction {
     this.#canvas.addEventListener("pointercancel", this.#onPointerUp);
     // Not passive: the wheel is the zoom, so the page must not also scroll.
     this.#canvas.addEventListener("wheel", this.#onWheel, { passive: false });
-    this.#removePreRender = scene.preRender.addEventListener((_scene: Scene, time: JulianDate) => this.#refresh(time));
+    this.movement.start();
+    this.#removePreRender = scene.preRender.addEventListener((_scene: Scene, time: JulianDate) => {
+      this.movement.step(performance.now());
+      this.#refresh(time);
+    });
   }
 
   stop(): void {
@@ -241,6 +271,7 @@ export class SkyInteraction {
     this.#canvas.removeEventListener("pointercancel", this.#onPointerUp);
     this.#canvas.removeEventListener("wheel", this.#onWheel);
     this.#canvas = undefined;
+    this.movement.stop();
     this.disableDeviceOrientation();
     this.#removePreRender?.();
     this.#removePreRender = undefined;

@@ -54,6 +54,46 @@ if that is refused. Opening at a fallback location would be worse than not openi
 because a sky full of satellites at coordinates the user never chose looks like a
 working feature.
 
+### Walking moves the ground station, once the keys stop
+
+`WASD` walks the observer across the ground, `E` and `Q` raise and lower the eye,
+and shift multiplies the speed. Forward is the aim's azimuth with its pitch
+discarded: the sky view spends its time looking up, so moving along the view axis
+would fly the observer into the sky rather than across the ground, which is what
+the two height keys are for.
+
+Because the observer _is_ the first ground station, a walk has to end up there —
+the map pin, the next-pass figures and `?gs=` all follow the same point, and a
+private "where the camera is standing" would be the second location concept this
+ADR rejected above. But a station move recomputes every active satellite's passes
+and pushes a url entry, which is not something to do sixty times a second. So the
+two halves run at different rates: `SkyView.moveObserver` moves the view every
+frame, and `SkyMovement` reports the observer to the store once the keys have been
+still for 350 ms. One walk is one station move, one recomputation and one history
+entry, whatever it was made of.
+
+The ground under a walk is measured on a throttle — every 250 ms, five metres of
+walking or forty of sprinting — with one unthrottled measurement when the keys
+stop. `enter` can afford to measure outright because it is one move; a walk cannot
+afford a request per frame, and measuring nothing at all leaves the eye at the
+height it set off from, which is underground the moment the walk heads uphill.
+
+What a walk must **not** do is fall back to `globe.getHeight`. That is free and
+follows the terrain per frame, which is why it is the fallback of last resort when
+nothing has measured yet — but it answers about the globe, and under a surface
+model the globe is not what is being stood on. Under the photorealistic mesh it is
+not drawn at all, and its ellipsoid answers 0 plausibly enough to pass the
+plausibility guard, which puts the eye hundreds of metres inside the mesh. That is
+the failure `docs/manual-verification.md` records as the world turning inside out,
+and it was reached from a single keypress.
+
+Height above the ground is deliberately **not** in the url. The wire format's
+ground station is a point on the ground that passes are computed against, and
+passes are computed there whether the eye is at 2 m or 500; adding a third
+coordinate would put a number into the pass predictor's input that the pass
+predictor has no use for. The eye height is the view's, and it resets on entry
+along with the aim and the zoom.
+
 ### Inertial is suppressed; tracking is cleared
 
 Three things want to write the camera every frame, and the sky view cannot share it

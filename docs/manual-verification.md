@@ -92,6 +92,47 @@ its marks pointing at the zenith. Before the change, 15° of azimuth spanned 147
 eye level and 1691 px at 85° of pitch, and the visible window collapsed from ±15° to
 nothing.
 
+## Sky view: the movement keys walk the observer and the station follows
+
+**Why it cannot be a unit test.** The arithmetic of a walk is unit-tested
+(`SkyMovement.test.ts`), and so is what sceneSync does with the observer it is
+handed. What is not is the chain between them: a key pressed on `window` reaching
+the handler, `preRender` driving the step, and the settle writing through the store
+to the url.
+
+**Procedure.** Open `?scene=Sky&gs=48.1372,11.5756,Munich`, wait for the descent to
+land, then dispatch `KeyboardEvent`s on `window` with the `code` under test,
+reading `cc.skyView.observer`, `cc.skyView.eyeHeight` and the `gs` parameter
+between them. A hidden tab pauses `requestAnimationFrame` and clamps timers to a
+second, so hold the key and hand `cc.skyInteraction.movement.step` its own
+timestamps for the walk itself — with `cc.viewer.render()` on an interval to prove
+the `preRender` path separately.
+
+**Result, 2026-08-05, Chrome.** A held `KeyW` through real frames moved the
+observer south — the default aim at a northern latitude faces the equator — at
+2 m per capped step, which is the frame clamp doing its job on a tab rendering once
+a second. Driving the clock instead: one second of shift-held `KeyW` moved 176 m
+(160 m of sprint plus one clamped 100 ms first step), the url stayed put while the
+keys were down, and 350 ms after the keyup `gs` became `48.1340,11.5756,Munich` —
+name kept, rounded to the store's precision, and the observer snapped to that
+rounded point. `KeyE` for three seconds took the eye to 498 m and the horizon rose
+to the 0° tick on the elevation tape. Q past the ground stops at 2 m and E past the
+ceiling stops at 5000 m. Leaving for 3D with `KeyW` still down landed the exit
+flight normally and wrote nothing: an unsettled walk is dropped rather than moving
+a station on the way out, which is what would otherwise turn the exit around. No
+console errors throughout.
+
+**Re-checked after the ground-measurement fix, 2026-08-06, Chrome.** Same walk, now
+measuring on the 250 ms throttle rather than falling back to `globe.getHeight`: the
+eye height held steady at 2 m across the whole sprint and the settle still wrote
+`gs`. **Still unverified:** the case the fix exists for — walking under
+`surface=GooglePhotorealistic`, where the old fallback could read the hidden globe's
+ellipsoid as a plausible 0 and drop the eye through the mesh. That needs an
+unrestricted `VITE_CESIUM_ION_TOKEN`, which this run did not have. Check it the way
+the surface-model entries below are checked, recording `camera.positionCartographic.height`
+every `preRender` while holding `W` in Munich; it must stay near the mesh top (~570 m)
+rather than falling to 2 m.
+
 ## Worker: missing files 404, and none of it is billed
 
 **Why it matters.** `not_found_handling: "single-page-application"` answered every

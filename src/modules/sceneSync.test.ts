@@ -27,6 +27,8 @@ function fakeTarget() {
     exits: 0,
     interactionStarts: 0,
     interactionStops: 0,
+    /** Set by the fake, called by the test: a walk arriving from the keyboard. */
+    observerMoved: undefined as ((observer: Observer) => void) | undefined,
     suppressCamera: 0,
     releaseCamera: 0,
     reconciled: [] as DesiredScene[],
@@ -68,6 +70,9 @@ function fakeTarget() {
       },
       stop: () => {
         calls.interactionStops += 1;
+      },
+      onObserverMove: (callback) => {
+        calls.observerMoved = callback;
       },
     },
     sats: {
@@ -221,6 +226,37 @@ describe("startSceneSync", () => {
     expect(calls.entered).toEqual([]);
     expect(store.sceneMode).toBe("3D");
     vi.unstubAllGlobals();
+  });
+
+  test("walking in the sky view moves the first ground station, and nothing else", async () => {
+    const { target, calls } = fakeTarget();
+    startSceneSync(target);
+    const satStore = useSatStore();
+    satStore.setGroundStations([
+      { lat: 48.1, lon: 11.6, name: "Munich" },
+      { lat: 0, lon: 0, name: "Null Island" },
+    ]);
+
+    calls.observerMoved?.({ lat: 48.10123456, lon: 11.60987654 });
+    await settle();
+
+    // Rounded by the store, which is the one place coordinate precision is
+    // decided — and still called Munich, because that is who walked.
+    expect(satStore.groundStations).toEqual([
+      { lat: 48.1012, lon: 11.6099, name: "Munich" },
+      { lat: 0, lon: 0, name: "Null Island" },
+    ]);
+  });
+
+  test("a walk with no ground station to move is dropped rather than inventing one", async () => {
+    const { target, calls } = fakeTarget();
+    startSceneSync(target);
+    const satStore = useSatStore();
+
+    calls.observerMoved?.({ lat: 48.1, lon: 11.6 });
+    await settle();
+
+    expect(satStore.groundStations).toEqual([]);
   });
 
   test("nothing stays tracked while the sky view is up", async () => {

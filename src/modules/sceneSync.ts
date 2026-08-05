@@ -6,9 +6,10 @@
 // useSelectedEntity depended on being registered after Satvis's overpassMode
 // watcher. Started from app.ts instead, none of that matters.
 //
-// The direction is one-way. The store decides, Cesium follows. The only value
-// that also travels the other way is tracking, because the user can start it by
-// clicking a satellite on the globe, and that arrives as a callback.
+// The direction is one-way. The store decides, Cesium follows. Two values also
+// travel the other way, both because the user moves them on the globe itself and
+// both arriving as callbacks: the tracked satellite, which is started by clicking
+// one, and the observer, which the sky view's movement keys walk.
 
 import { JulianDate } from "@cesium/engine";
 import { nextTick, watch } from "vue";
@@ -57,6 +58,7 @@ export interface SceneTarget {
   readonly skyInteraction: {
     start(): void;
     stop(): void;
+    onObserverMove(callback: (observer: Observer) => void): void;
   };
   readonly sats: {
     reconcile(desired: DesiredScene): void;
@@ -408,6 +410,21 @@ export function startSceneSync(cc: SceneTarget): void {
 
   cc.sats.onTrackedChange((name) => {
     satStore.trackedSatellite = name;
+  });
+
+  // Walking in the sky view moves the observer, and the observer is the first
+  // ground station — so a walk lands here rather than in a private position of
+  // its own, and the pin, the pass predictions and `?gs=` all follow it
+  // (docs/adr/0003-sky-view.md).
+  //
+  // The station keeps its name. Whoever the observer was — "Home", or the
+  // geolocation fix that opened the view — is who they still are, somewhere else.
+  cc.skyInteraction.onObserverMove((observer) => {
+    const [first, ...rest] = satStore.groundStations;
+    if (!first) {
+      return;
+    }
+    satStore.setGroundStations([{ ...first, lat: observer.lat, lon: observer.lon }, ...rest]);
   });
 
   // The catalog is deliberately non-reactive — ~10k entries do not belong in

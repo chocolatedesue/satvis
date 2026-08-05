@@ -37,8 +37,24 @@ export interface Basis {
   right: Cartesian3;
 }
 
-/** Eye height above the ground under the observer. */
-const EYE_HEIGHT = 2;
+/**
+ * How far the eye may be above the ground under the observer.
+ *
+ * The floor is standing height, so the view cannot be walked under the surface
+ * it is standing on. The ceiling is where "looking up from a point on the
+ * ground" stops being a fair description of what is on screen: 5 km clears every
+ * building and most of the relief anyone stands on — the ground height carries
+ * the mountain itself — while still leaving the observer inside the weather.
+ */
+export const MIN_EYE_HEIGHT = 2;
+export const MAX_EYE_HEIGHT = 5000;
+
+/**
+ * How often the ground under a walking observer is measured. Five metres of
+ * base-speed walking, forty at a sprint — closer than terrain relief changes
+ * over, and far cheaper than the per-frame request the honest answer would be.
+ */
+const WALK_MEASURE_MS = 250;
 
 /**
  * The range a ground elevation can credibly fall in — roughly the Dead Sea shore
@@ -245,7 +261,12 @@ export class SkyView {
   /** Which observer the outstanding measurement is about. */
   #groundGeneration = 0;
 
+  /** When the ground was last asked about, for the walk's throttle. */
+  #measuredAt = Number.NEGATIVE_INFINITY;
+
   #aim: Aim = { azimuth: 0, pitch: DEFAULT_PITCH, roll: 0 };
+
+  #eyeHeight: number = MIN_EYE_HEIGHT;
 
   #fovy: number = DEFAULT_FOVY;
 
@@ -296,9 +317,62 @@ export class SkyView {
     this.#apply();
   }
 
+  /** How far the eye is above the ground under the observer, in metres. */
+  get eyeHeight(): number {
+    return this.#eyeHeight;
+  }
+
+  /**
+   * Lift the eye off the ground, or set it back down. Clamped here rather than
+   * at the caller, for the same reason `fovy` is: it is a property of the view.
+   */
+  set eyeHeight(metres: number) {
+    const height = CesiumMath.clamp(metres, MIN_EYE_HEIGHT, MAX_EYE_HEIGHT);
+    if (height === this.#eyeHeight) {
+      return;
+    }
+    this.#eyeHeight = height;
+    // The frame is built at eye level, and every angle the HUD and the crosshair
+    // measure is taken against it, so rising is a new frame rather than the same
+    // one moved.
+    this.#frame = undefined;
+    this.#apply();
+  }
+
   /** Point somewhere else. Omitted angles keep their current value. */
   look(aim: Partial<Aim>): void {
     this.#aim = { ...this.#aim, ...aim };
+    this.#apply();
+  }
+
+  /**
+   * Walk the observer to a nearby point, measuring the ground as it goes.
+   *
+   * Distinct from `enter`, which is what a station drag or an arriving fix goes
+   * through: those are one move each and can afford a measurement outright. This
+   * one runs every frame for as long as a key is held, so the measurement is
+   * throttled — and throttled is the whole design, because neither alternative
+   * works. Per frame is a request per frame. Not at all leaves the eye at the
+   * height of wherever the walk began, which is underground the moment it heads
+   * uphill.
+   *
+   * What it must not do is fall back to `globe.getHeight` for the walk. That is
+   * free and follows the terrain, which is why it is the fallback of last resort
+   * in `#skyPose` — but it answers about the globe, and under a surface model the
+   * globe is not what is being stood on. With the photorealistic mesh it is not
+   * even drawn, and its ellipsoid answers 0 plausibly enough to pass the guard,
+   * which drops the eye through the mesh (docs/manual-verification.md).
+   */
+  moveObserver(observer: Observer): void {
+    if (!this.#observer) {
+      return;
+    }
+    this.#observer = observer;
+    Cartographic.fromDegrees(observer.lon, observer.lat, 0, this.#observerCartographic);
+    this.#frame = undefined;
+    if (performance.now() - this.#measuredAt >= WALK_MEASURE_MS) {
+      this.#measureGround();
+    }
     this.#apply();
   }
 
@@ -316,8 +390,12 @@ export class SkyView {
   }
 
   /**
-   * Ask again what the observer is standing on, because it changed under them — a
-   * terrain swapped, a surface model arriving or going away.
+   * Ask again what the observer is standing on.
+   *
+   * Either because it changed under them — a terrain swapped, a surface model
+   * arriving or going away — or because they walked off it: `moveObserver`
+   * measures on a throttle, and the walk ends with the one measurement that is
+   * not on it.
    */
   remeasureGround(): void {
     this.#measureGround();
@@ -440,6 +518,7 @@ export class SkyView {
   #reset(observer: Observer): void {
     this.#setObserver(observer);
     this.#aim = { azimuth: defaultAzimuth(observer), pitch: DEFAULT_PITCH, roll: 0 };
+    this.#eyeHeight = MIN_EYE_HEIGHT;
     this.#fovy = DEFAULT_FOVY;
   }
 
@@ -466,6 +545,9 @@ export class SkyView {
    */
   #measureGround(): void {
     const generation = ++this.#groundGeneration;
+    // Stamped here rather than at the walk's own call, so every measurement — the
+    // walk's, the settle's, a terrain swap — counts against the walk's throttle.
+    this.#measuredAt = performance.now();
     // `#groundMeasured` deliberately survives this. A height measured a moment ago,
     // even somewhere slightly else, beats what the globe can offer while tiles are
     // still arriving — which is a coarse approximation, then a better one, then a
@@ -613,7 +695,7 @@ export class SkyView {
         this.#frame = undefined;
       }
     }
-    Cartesian3.fromDegrees(observer.lon, observer.lat, this.#groundHeight + EYE_HEIGHT, undefined, pose.position);
+    Cartesian3.fromDegrees(observer.lon, observer.lat, this.#groundHeight + this.#eyeHeight, undefined, pose.position);
     // Built from where the observer stands, never from `camera.position`, which
     // during a flight is somewhere over the ocean on the way here.
     this.#frame ??= observerFrame(pose.position);

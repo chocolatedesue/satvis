@@ -165,6 +165,12 @@
           <span class="slider"></span>
           {{ name }}
         </label>
+        <!-- Under the mode it belongs to, the same way the map panel's notes sit
+             under the selection they explain: the keys work whether or not this
+             says so, but nothing else in the app would say it. Hidden in
+             minimalUI — the iOS and iframe case — where there is no keyboard to
+             press and the panel is the smaller for it. -->
+        <div v-if="inSkyView && !cc.minimalUI" class="toolbarNote">WASD walks the observer, Q and E change height, shift is faster.</div>
         <div class="toolbarTitle">Camera</div>
         <label v-for="name in cc.cameraModes" :key="name" class="toolbarSwitch">
           <input v-model="cameraMode" type="radio" :value="name" />

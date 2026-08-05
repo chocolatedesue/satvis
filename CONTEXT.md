@@ -56,7 +56,15 @@ discussion; sharpen them here when they drift.
   ground station. Not a separate location: whoever the observer is, passes are
   already computed against them. It must be resolved before the sky view can
   open; where there is no ground station yet, the device's own location becomes
-  one, and the sky view does not open if that is refused.
+  one, and the sky view does not open if that is refused. Movable while the view
+  is up — the movement keys walk it, and the ground station follows once they
+  stop (`SkyMovement`).
+- **Eye height**: how far the sky view's camera is above the ground under the
+  observer. Standing height by default and raised by the movement keys, up to a
+  ceiling that keeps "looking up from a point on the ground" a fair description.
+  The view's, not the observer's: it is absent from the ground station and from
+  the url, because a pass is computed against a point on the ground however high
+  the eye is held above it.
 - **Pass**: a time range in which a satellite serves a ground station — by
   line-of-sight elevation ("elevation" mode) or sensor footprint overlap
   ("swath" mode). In swath mode which side of the ground track the station lies on
