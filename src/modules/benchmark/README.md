@@ -62,30 +62,63 @@ A step is one point in a three-axis sweep: **satellite count × component set ×
 clock rate**. The clock axis is one value (×1) unless asked for, so it costs
 nothing when the question is only about drawing.
 
-| Column             | Meaning                                                                             |
-| ------------------ | ----------------------------------------------------------------------------------- |
-| `fps`, `frameMs`   | Between presented frames. What the user feels; flattens against vsync at 60/120 fps |
-| `cpuMs`            | `preUpdate` → `postRender`. Main-thread work only — see the GPU caveat below        |
-| `gpuMs`            | GPU time per frame, where the driver's clock can be believed. Blank otherwise       |
-| `p95`, `worst`     | Percentiles, not just a max — one 400 ms frame should not define a row              |
-| `frames`           | The sample size. A handful means the row is noise; read this one first              |
-| `jankPct`          | Share of frames slower than 33 ms                                                   |
-| `clock`            | The clock rate the step ran at, as a multiple of real time                          |
-| `buildMs`          | The synchronous cost of building the scene: instantiation plus component creation   |
-| `clearMs`          | Tearing the previous scene down                                                     |
-| `visible`          | Satellites actually drawn, which is **not** always the count requested              |
-| `drawn`            | Components actually drawn, when they differ from the ones requested                 |
-| `heapMb`           | Heap low-water mark. **Not printed** — an input to the memory fit. csv/json only    |
-| `heapPeakMb`       | High-water mark. `heapPeakMb - heapMb` is the window's allocation rate. csv/json    |
-| `footprintMb`      | Absolute JS footprint, garbage excluded. Only with the footprint switch on          |
-| `footprintTotalMb` | The whole agent — JS plus DOM and workers. Broader, and csv/json only               |
+| Column             | Meaning                                                                                      |
+| ------------------ | -------------------------------------------------------------------------------------------- |
+| `fps`, `frameMs`   | Between presented frames. What the user feels; flattens against vsync at 60/120 fps          |
+| `cpuMs`            | `preUpdate` → `postRender`. The render only — position updates are in `tickMs`               |
+| `tickMs`           | `clock.tick()`, every `onTick` listener included. Where propagation shows up                 |
+| `gpuMs`            | GPU time per frame, where the driver's clock can be believed. Blank otherwise                |
+| `p95`, `worst`     | Percentiles, not just a max — one 400 ms frame should not define a row                       |
+| `frames`           | The sample size. A handful means the row is noise; read this one first                       |
+| `jankPct`          | Share of frames slower than 33 ms                                                            |
+| `clock`            | The clock rate the step ran at, as a multiple of real time                                   |
+| `buildMs`          | Wall time to a **complete** scene: instantiation plus component creation, spread over frames |
+| `clearMs`          | Tearing the previous scene down                                                              |
+| `visible`          | Satellites actually drawn, which is **not** always the count requested                       |
+| `drawn`            | Components actually drawn, when they differ from the ones requested                          |
+| `heapMb`           | Heap low-water mark. **Not printed** — an input to the memory fit. csv/json only             |
+| `heapPeakMb`       | High-water mark. `heapPeakMb - heapMb` is the window's allocation rate. csv/json             |
+| `footprintMb`      | Absolute JS footprint, garbage excluded. Only with the footprint switch on                   |
+| `footprintTotalMb` | The whole agent — JS plus DOM and workers. Broader, and csv/json only                        |
 
 And derived, across steps:
 
-- **scaling** — a least-squares fit of `cpuMs` against the satellites drawn, per
-  _series_ (component set **and** clock rate, so a fit is never averaged across
-  clocks): ms per 1,000 satellites, the fixed cost at zero, r² (well under 1.0
-  means the cost is _not_ linear in the count), and where 60 fps runs out.
+- **scaling** — a least-squares fit of main-thread frame time, meaning
+  `cpuMs + tickMs`, against the satellites drawn, per _series_ (component set
+  **and** clock rate, so a fit is never averaged across clocks): ms per 1,000
+  satellites, the fixed cost at zero, r² (well under 1.0 means the cost is _not_
+  linear in the count), the frame-time **floor**, and where 60 fps runs out.
+
+  Read `floor` before `sats@60`. The floor is everything outside the main thread —
+  GPU work and the wait for vsync, which `frameMs` cannot separate — and it is the
+  term that decides whether the slope matters at all. A floor already past 16.7 ms
+  means 60 fps was gone before the first satellite, and `sats@60` goes blank
+  rather than extrapolating a count that was never the problem.
+
+  Neither obvious candidate works as the fit basis, which is why it is the sum:
+
+  - `cpuMs` alone misses most of the per-satellite cost. Cesium's `Viewer` runs
+    `dataSourceDisplay.update` — every entity's position evaluation — inside an
+    `onTick` listener, before `preUpdate`. Fitting it had the Point series holding
+    60 fps to **1.66 million** satellites while the measured frame at five
+    thousand was already 14.9 ms.
+  - `frameMs` cannot be fitted at all, because vsync quantises it. Measured on a
+    120 Hz display with points only: from 0 to 1,000 satellites main-thread work
+    went 0.64 → 1.21 ms and `frameMs` sat at exactly 8.33 ms the whole way, the
+    extra work absorbed by idle already being spent waiting for the next tick — a
+    fit through it reads a slope of **zero**. Past the interval it stops being
+    continuous rather than becoming useful: at 5,000 satellites with 11.5 ms of
+    main-thread work, the _median_ frame still presented at 8.72 ms and the mean
+    of 11.72 ms really meant "15.5% of frames missed a tick". Its intercept is the
+    refresh interval, a property of the display rather than of the app.
+
+  `sats@60` is therefore a **main-thread** ceiling, and it assumes the GPU is not
+  the binding constraint. That is what the measurements show once a scene is large
+  enough to matter — at 5,000 points, main-thread work was 11.52 ms and the frame
+  11.72, so the frame _was_ the main thread and the GPU overlapped it — but a
+  bigger canvas or MSAA and HDR at full device pixels raises the floor, and the
+  floor column is how you notice.
+
 - **memory** — a least-squares fit of the heap floor against the satellites drawn,
   per series: MB per 1,000 satellites, KB per satellite, and r². Chrome only, and
   a slope rather than a footprint — **read r² first**, because the whole method
@@ -118,17 +151,28 @@ And derived, across steps:
   those same two rows read 35.0 and 103.3 — a 195% swing against a real 7%.
 
 - **marginal cost** — each set differenced against the largest set measured under
-  the same conditions that is a strict subset of it. In a cumulative sweep that is
-  the cost of the component just added; in an isolated sweep it is that component's
-  cost over a bare point. One function serves both.
+  the same conditions that is a strict subset of it, on main-thread frame time. In
+  a cumulative sweep that is the cost of the component just added; in an isolated
+  sweep it is that component's cost over a bare point. One function serves both.
 - **propagation** — each clock rate differenced against ×1 for the same satellites
-  and components. Only present when the clock was actually swept, because an empty
-  table would read as "propagation is free" rather than "nobody asked".
+  and components, on `tickMs`. Only present when the clock was actually swept,
+  because an empty table would read as "propagation is free" rather than "nobody
+  asked".
+
+  It differenced `cpuMs` until it was pointed at a real question and got it
+  wrong. Measured at 5,000 satellites drawing points at ×10000 — a step running
+  at 2.2 fps with 462 ms frames — it reported a delta of **−0.08 ms and 0 µs per
+  satellite**, because all of the cost was in the clock tick that `cpuMs` starts
+  after. Direct instrumentation put 95% of wall time inside
+  `SampledTrajectory.update`. The one table named after propagation could not see
+  propagation; it now differences `tickMs` and prints `cpuMs` beside it for
+  contrast.
+
 - **drift** — the first step, re-run as the last step, against its original.
   A sweep is minutes long and the app it measures does not hold still: shader
   caches fill, the JIT settles, the heap grows. This is the only figure in the run
   that can tell a rising line that is the scene from a rising line that is the
-  clock, so a small `cpuDriftPct` is what licenses reading the other tables at
+  clock, so a small `mainDriftPct` is what licenses reading the other tables at
   all — over 10% and both the panel and `logRun` say so. The repeat step is
   excluded from every other table: it is a second sample of a scene already in the
   set, and averaging it in would weight one point twice and hide the drift it was
@@ -215,13 +259,29 @@ with `cacheId`. Both would have to change in one release. PostHog under
   is open puts a warning across the top of the panel, beside the readout it
   invalidates. The clock is likewise forced to run for the duration of a sweep: a
   stopped clock means no position updates, and position updates are most of the cost.
+- **`buildMs` is wall time, not blocking time, and it is not the freeze.**
+  Satellites are instantiated to a per-frame budget (`SatelliteManager.#build`),
+  so `reconcile` returns with the queue still draining and the step waits on
+  `buildSettled()` before measuring — without that wait every row would report
+  whatever fraction of the population existed when the first frame ended. The
+  consequence is that `buildMs` went **up** when the freeze went away: at 5,000
+  satellites a points-only build blocked for 908 ms as one frame and now
+  completes in about 1,450 ms with no frame over 100 ms. If what you want is the
+  freeze, measure the gaps in the rAF stream; this column cannot see them.
 - **`buildMs` is always measured at ×1**, whatever the step's clock rate. A step at
   ×1000 would otherwise sweep the sample window forward mid-build, so the build would
   carry propagation belonging to the measurement after it. The rate is applied once
   the scene is up, so the warmup absorbs the first refreshes at the new rate.
-- **`cpuMs` excludes the clock tick.** Cesium runs `clock.onTick` — where sampled
-  positions update — before `scene.preUpdate`, so per-satellite position work lands
-  in `frameMs` but not in `cpuMs`. The gap between the two is the interesting part.
+- **`cpuMs` excludes the clock tick; `tickMs` is that tick.** Cesium runs
+  `clock.onTick` — where sampled positions update — before `scene.preUpdate`, so
+  per-satellite position work lands in `frameMs` but not in `cpuMs`. It is
+  measured separately by wrapping `clock.tick` itself rather than by adding an
+  `onTick` listener: listeners are raised in registration order and two that
+  matter (the manager's derived-geometry refresh, the orbit batch's
+  re-orientation) are registered with the viewer, long before the panel, so a
+  marker of our own would sit behind them and miss the work it was there to find.
+  Read the pair together — `cpuMs` well under `tickMs` is a propagation-bound
+  scene, and the reverse is a draw-bound one.
 - **The derived tables fit against `cpuMs`, which is main-thread time only, and
   this app is usually GPU-bound.** Measured on an M4 Pro at 2560×1440 with zero
   satellites: `frameMs` 14.3, `cpuMs` 0.74 — the CPU is 5% of the frame, and the
@@ -235,6 +295,20 @@ with `cacheId`. Both would have to change in one release. PostHog under
   the marginal-cost table and still cost frames. Read `gpuMs` beside `cpuMs`, and
   where `gpuMs` is blank read `frameMs`: if it sits well above the display's
   fastest observed interval, the scene is GPU-bound whatever `cpuMs` says.
+
+  **That is the empty scene, and it stops being true once satellites are drawn.**
+  What changes it is `tickMs`: Cesium's `Viewer` runs `dataSourceDisplay.update` —
+  every entity visualizer, and so every satellite's position evaluation — inside
+  its own `onTick` listener, which is before `preUpdate` and therefore outside
+  `cpuMs`. Measured with points and nothing else, `cpuMs + tickMs` against
+  `frameMs`: at zero satellites 1.06 of 8.66 ms, at 5,000 satellites **14.65 of
+  14.90 ms**. The fixed floor is GPU work; the part that grows with the count is
+  main-thread work, and almost all of it is the tick.
+
+  `scalingFits` and `marginalCosts` fit `cpuMs + tickMs` for exactly this reason,
+  and report the frame-time floor beside the slope so a GPU-bound configuration is
+  visible rather than implied. See **scaling** above.
+
 - **`gpuMs` is withheld rather than guessed when the driver lies.** A frame that
   presented every 14 ms cannot have cost the GPU 49 ms, but that is exactly what
   `EXT_disjoint_timer_query_webgl2` reported on ANGLE/Metal. Every row's figure is

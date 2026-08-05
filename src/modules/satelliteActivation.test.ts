@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { activeTargetEntries, isEnabledByTag } from "./satelliteActivation";
+import { activeTargetEntries, buildOrder, isEnabledByTag } from "./satelliteActivation";
 import { CatalogEntry } from "./SatelliteCatalog";
 import type { GpRecord } from "./util/gp";
 
@@ -96,5 +96,33 @@ describe("isEnabledByTag", () => {
 
   test("never matches an entry without tags", () => {
     expect(isEnabledByTag(DELTA, new Set(["Weather", "Science", "New"]))).toBe(false);
+  });
+});
+
+describe("buildOrder", () => {
+  const entries = (): [string, CatalogEntry][] => [
+    ["a", ALPHA],
+    ["b", BETA],
+    ["g", GAMMA],
+    ["d", DELTA],
+  ];
+
+  test("moves the tracked satellite to the front", () => {
+    expect(buildOrder(entries(), GAMMA.name).map(([key]) => key)).toEqual(["g", "a", "b", "d"]);
+  });
+
+  test("keeps the order when the tracked satellite is already first", () => {
+    expect(buildOrder(entries(), ALPHA.name).map(([key]) => key)).toEqual(["a", "b", "g", "d"]);
+  });
+
+  test("keeps the order when nothing is tracked or the name is not in the target", () => {
+    expect(buildOrder(entries()).map(([key]) => key)).toEqual(["a", "b", "g", "d"]);
+    expect(buildOrder(entries(), "NOT IN THE CATALOG").map(([key]) => key)).toEqual(["a", "b", "g", "d"]);
+  });
+
+  test("loses nothing and duplicates nothing", () => {
+    const ordered = buildOrder(entries(), DELTA.name);
+    expect(ordered).toHaveLength(4);
+    expect(new Set(ordered.map(([key]) => key))).toEqual(new Set(["a", "b", "g", "d"]));
   });
 });

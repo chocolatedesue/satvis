@@ -104,7 +104,11 @@ export class CesiumCleanupHelper {
   static drain(viewer: Viewer): number {
     const collections = collectLabelCollections(viewer.scene.primitives);
     if (collections.length === 0) {
-      CesiumCleanupHelper.#report("no LabelCollection found under scene.primitives");
+      // Not a problem, and not evidence of a rename: `EntityCluster` creates its
+      // label collection on the first label, so a scene that has only ever drawn
+      // points legitimately has none. Reporting it here cried wolf on the
+      // commonest scene there is. A collection that exists but cannot be read is
+      // the case worth shouting about, and both this and `#trim` still do that.
       return 0;
     }
 

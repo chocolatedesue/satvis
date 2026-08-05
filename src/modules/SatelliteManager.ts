@@ -1,17 +1,59 @@
-import { Cartesian3 } from "@cesium/engine";
+import { Cartesian3, JulianDate } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 
 import { SATELLITE_COMPONENTS } from "../config/components";
 import type { SerializedGroundStation } from "../stores/sat";
 import { GroundStationEntity, type GroundStationPositionData } from "./GroundStationEntity";
-import { activeTargetEntries } from "./satelliteActivation";
+import { activeTargetEntries, buildOrder } from "./satelliteActivation";
 import { type CatalogEntry, SatelliteCatalog } from "./SatelliteCatalog";
 import { SatelliteComponentCollection } from "./SatelliteComponentCollection";
+import { GEOMETRY_REFRESH_MIN_SECONDS, geometryRefreshSeconds } from "./satelliteGraphics";
+import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
 import { sameValue } from "./util/equality";
-import type { GpRecord } from "./util/gp";
-import { OrbitBatch } from "./util/OrbitBatch";
+import { approximatePeriodMinutes, type GpRecord } from "./util/gp";
+import { type PassSource, WorkerPassSource } from "./util/passSource";
+import { PolylineBatch } from "./util/PolylineBatch";
+import { type SampleChunk, type SampleSource, type SampleSourceStats, WorkerSampleSource } from "./util/sampleSource";
 import { SuppressibleSet } from "./util/Suppressible";
+import { WINDOW_ORBITS_BACK, WINDOW_ORBITS_FORWARD } from "./util/trajectoryWindow";
+
+/**
+ * How often the geometry refresh is *considered*, in simulation seconds. Whether
+ * it actually runs is `geometryRefreshSeconds`, which scales the real interval
+ * with the satellite count; this is just the finest grain that decision can have.
+ */
+const GEOMETRY_REFRESH_TICK_SECONDS = GEOMETRY_REFRESH_MIN_SECONDS;
+
+/**
+ * How long one frame may spend instantiating satellites. See #build.
+ *
+ * This trades the length of the worst frame against how long the scene takes to
+ * finish arriving, and 16 ms is where that stopped being a good deal. Measured
+ * at 5,000 satellites, worst frame gap and total build time:
+ *
+ *      budget   Point        + Label      + Orbit       + Orbit track
+ *      none     908 / 982    950 / 1216   1617 / 1678   951 / 1013
+ *       8 ms     58 / 1998    92 / 4656     82 / 4067    83 / 2567
+ *      16 ms     41 / 1477    91 / 2956     82 / 2822    73 / 1711
+ *      32 ms     50 / 1241   100 / 2094    125 / 2421    51 / 1313
+ *
+ * At 32 ms a frame goes back over 100 ms, which is a hitch someone can feel; at
+ * 8 ms the scene takes four and a half seconds to fill in. Note that the worst
+ * frame is not the budget plus a little — it is the budget plus the render, and
+ * rendering five thousand labelled satellites is itself 40 ms, which is why the
+ * gaps sit where they do and why a bigger budget buys less than it looks like.
+ */
+const BUILD_BUDGET_MS = 16;
+
+/**
+ * Below this a build runs to completion synchronously.
+ *
+ * Deferring is only worth its latency when the alternative is a visible freeze.
+ * The default scene is 74 satellites and fits inside one budget regardless, so
+ * spreading it would add a frame of delay to the common case and save nothing.
+ */
+const BUILD_SYNCHRONOUS_LIMIT = 250;
 
 /**
  * Everything the globe should be showing. The manager holds no opinion of its
@@ -65,7 +107,14 @@ export class SatelliteManager {
    * this is what owns the collections that feed it; it used to be four statics on
    * their base class.
    */
-  readonly orbits: OrbitBatch;
+  readonly orbits: PolylineBatch;
+
+  /**
+   * The same, for the Orbit track. A second batch rather than a second colour in
+   * the first one: the orbit is inertial and the track is Earth-relative, so they
+   * need different model matrices and cannot share a primitive.
+   */
+  readonly tracks: PolylineBatch;
 
   // Live collections keyed by catalog entry key. Satellites are instantiated
   // lazily: only entries in the current activation target (see #reconcileActive)
@@ -76,9 +125,50 @@ export class SatelliteManager {
 
   pendingTrackedSatellite: string | undefined;
 
+  /** Simulation time the stale-able geometry was last re-cut at. See #refreshDerivedGeometry. */
+  #geometryRefreshedAt: JulianDate;
+
+  /**
+   * Where every satellite's samples come from. Owned here because this is what
+   * knows which satellites exist; handed to each one as a bound sampler.
+   */
+  readonly #samples: SampleSource = new WorkerSampleSource();
+
+  /**
+   * Where pass prediction happens. Its own worker, not the sampling one — see
+   * passWorker for why a slow batch job must not queue behind the samples that
+   * keep satellites moving.
+   */
+  readonly #passes: PassSource = new WorkerPassSource();
+
+  /**
+   * Satellites whose opening window has arrived, waiting to be instantiated.
+   *
+   * The build drains this rather than the queue directly: a satellite is only
+   * created once it has a position, so there is no moment at which one exists
+   * without one and no main-thread propagation to cover the gap.
+   */
+  #ready: Array<{ key: string; entry: CatalogEntry; chunk: SampleChunk }> = [];
+
+  /** Opening windows still in flight. Counted so the build knows to keep waiting. */
+  #opening = 0;
+
+  /** Catalog entries waiting to be instantiated, in the order they will be. See #build. */
+  #queue: [string, CatalogEntry][] = [];
+
+  /** Whether this activation is small enough to skip the per-frame budget. See #build. */
+  #unbudgetedBuild = true;
+
+  #buildHandle: number | undefined;
+
+  #buildWaiters: Array<() => void> = [];
+
   constructor(viewer: Viewer) {
     this.viewer = viewer;
-    this.orbits = new OrbitBatch(viewer);
+    this.orbits = new PolylineBatch(viewer, "inertial");
+    this.tracks = new PolylineBatch(viewer, "fixed");
+    this.#geometryRefreshedAt = viewer.clock.currentTime;
+    CesiumCallbackHelper.createPeriodicTimeCallback(viewer, GEOMETRY_REFRESH_TICK_SECONDS, (time) => this.#refreshDerivedGeometry(time));
 
     // Tracking is the one genuinely two-way value: the user can also start it
     // by clicking a satellite on the globe. Report it rather than reaching for
@@ -247,6 +337,50 @@ export class SatelliteManager {
     });
   }
 
+  /**
+   * Advance the geometry that goes stale as the clock runs: the batched orbit
+   * tracks and the ground-track corridors. Both are rebuilt rather than
+   * re-oriented, and neither is cheap enough to do per frame — see
+   * `geometryRefreshSeconds` for the budget this spends.
+   *
+   * On a simulation-time callback, because what makes them stale is simulated
+   * time passing rather than wall time: at ×1000 the satellites move a thousand
+   * times faster and the geometry has to keep up. The orbit batch's coalescing
+   * window turns however many satellites there are into a single primitive
+   * rebuild, and a rebuild already in flight holds the window open, so a clock
+   * fast enough to outrun the rebuild degrades into "as often as it can" rather
+   * than into a queue.
+   *
+   * The interval runs from when the last rebuild *finished*, not from when it
+   * was asked for, which is what the pending guard buys: at five thousand tracks
+   * a rebuild can take longer than the interval, and measuring from the request
+   * meant the next refresh was already overdue the moment the previous one
+   * landed. That is a treadmill, and it measured 8.2% janked frames against 0.5%
+   * for a rebuild that simply waits its turn.
+   *
+   * The cadence is scaled by the number of active satellites rather than by a
+   * count of each kind of geometry: it is an upper bound on both, it is free to
+   * read, and the interval only has to be roughly right.
+   */
+  #refreshDerivedGeometry(time: JulianDate): void {
+    if (this.#active.size === 0) {
+      return;
+    }
+    if (this.tracks.pending) {
+      this.#geometryRefreshedAt = time;
+      return;
+    }
+    const due = geometryRefreshSeconds(this.#active.size);
+    if (Math.abs(JulianDate.secondsDifference(time, this.#geometryRefreshedAt)) < due) {
+      return;
+    }
+    this.#geometryRefreshedAt = time;
+    for (const sat of this.#active.values()) {
+      sat.refreshOrbitTrack(time);
+      sat.refreshGroundTrack(time);
+    }
+  }
+
   // Reconcile the live #active map against the activation target: dispose
   // collections that are no longer targeted, instantiate the ones that are
   // newly targeted, and resolve a pending track once its satellite exists.
@@ -269,29 +403,18 @@ export class SatelliteManager {
       disposed = true;
     }
 
-    // Instantiate collections newly in the target.
-    for (const [key, entry] of target) {
-      if (this.#active.has(key)) {
-        continue;
-      }
-      const sat = new SatelliteComponentCollection(this.viewer, entry, this.orbits);
-      if (this.groundStationAvailable) {
-        sat.groundStations = this.#stations;
-      }
-      sat.props.passPredictor.mode = this.#desired.overpassMode;
-      sat.show(this.#effectiveComponents());
-      this.#active.set(key, sat);
-    }
-
-    // Resolve a pending track now that the satellite is guaranteed active
-    // (whether it was just created above or was already live).
-    if (this.pendingTrackedSatellite) {
-      const sat = this.getSatellite(this.pendingTrackedSatellite);
-      if (sat) {
-        sat.track();
-        this.pendingTrackedSatellite = undefined;
-      }
-    }
+    // Instantiate collections newly in the target — over as many frames as it
+    // takes, tracked satellite first. See #build.
+    this.#queue = buildOrder(
+      [...target].filter(([key]) => !this.#active.has(key)),
+      this.pendingTrackedSatellite || this.trackedSatellite || undefined,
+    );
+    // Small enough to build in one go, judged once. See #build.
+    this.#unbudgetedBuild = this.#queue.length <= BUILD_SYNCHRONOUS_LIMIT;
+    // Anything still waiting belonged to a scene that has been replaced.
+    this.#ready = [];
+    this.#requestOpeningWindows();
+    this.#build();
 
     // Any shrink, not only a shrink to nothing: the glyph billboards Cesium
     // leaves behind are proportional to the labels that went away, and going
@@ -301,6 +424,182 @@ export class SatelliteManager {
     if (disposed) {
       CesiumCleanupHelper.cleanup(this.viewer);
     }
+  }
+
+  /**
+   * Instantiate queued satellites, a frame's worth at a time.
+   *
+   * Building one satellite is dominated by propagating its opening sample
+   * window — measured at 2,000 satellites, `SampledTrajectory.update` was 89% of
+   * the whole reconcile against 3% for making the graphics. Times five thousand
+   * that is most of a second in which the page presents no frames at all, and
+   * before this it was exactly one frame long: measured 908 ms for points and
+   * 1,617 ms with orbits, as a single gap in the rAF stream.
+   *
+   * So it is spent to a budget instead. The work is identical and the total wall
+   * time barely moves; what changes is that the globe keeps drawing, and the
+   * satellites arrive over a few frames rather than all at once behind a freeze.
+   *
+   * Small activations stay synchronous. Deferring the default 74 satellites
+   * would put a frame's latency between clicking a group and seeing it for no
+   * benefit — the whole batch fits inside one budget anyway.
+   */
+  #build(): void {
+    // A reconcile that lands mid-build replaces the queue and calls straight in,
+    // so the frame already booked would otherwise spend a second budget on the
+    // new queue in the same turn.
+    if (this.#buildHandle !== undefined) {
+      cancelAnimationFrame(this.#buildHandle);
+      this.#buildHandle = undefined;
+    }
+
+    // `#unbudgetedBuild` was decided from the queue as it stood when the activation
+    // started, not from the queue as it drains. Re-deciding on every call meant the
+    // last BUILD_SYNCHRONOUS_LIMIT satellites of every large build ran unbudgeted —
+    // a frame of tens of milliseconds at the tail of exactly the builds the budget
+    // exists to smooth.
+    //
+    // Without a frame callback there is nothing to spread the work over, and a
+    // queue left half-drained would never be picked up again. That is the unit
+    // test environment rather than any browser, and there the freeze this avoids
+    // is not a freeze anyone is looking at.
+    const unbudgeted = this.#unbudgetedBuild || typeof requestAnimationFrame !== "function";
+    const deadline = performance.now() + BUILD_BUDGET_MS;
+    // Drains the satellites whose samples have arrived, not the queue itself. A
+    // satellite still waiting for its opening window is simply not here yet.
+    while (this.#ready.length > 0) {
+      const next = this.#ready.shift();
+      if (!next) break;
+      this.#queue = this.#queue.filter(([queued]) => queued !== next.key);
+      this.#instantiate(next.key, next.entry, next.chunk);
+      // Checked after at least one satellite, so a budget smaller than a single
+      // satellite still makes progress rather than spinning on the same entry.
+      if (!unbudgeted && performance.now() >= deadline) break;
+    }
+
+    // Resolve a pending track as soon as its satellite exists, which the queue
+    // ordering above tries to make the first thing that happens.
+    if (this.pendingTrackedSatellite) {
+      const sat = this.getSatellite(this.pendingTrackedSatellite);
+      if (sat) {
+        sat.track();
+        this.pendingTrackedSatellite = undefined;
+      }
+    }
+
+    if (this.#ready.length > 0 || this.#opening > 0) {
+      // requestAnimationFrame rather than clock.onTick: under requestRenderMode
+      // a tick only happens if something asked for a frame, and a half-built
+      // scene asking for nothing would stall the rest of itself forever.
+      this.#buildHandle = requestAnimationFrame(() => this.#build());
+      this.viewer.scene.requestRender();
+      return;
+    }
+
+    this.#buildHandle = undefined;
+    this.viewer.scene.requestRender();
+    this.#resolveSettledIfDone();
+  }
+
+  #resolveSettledIfDone(): void {
+    if (this.#ready.length > 0 || this.#opening > 0) {
+      return;
+    }
+    const waiters = this.#buildWaiters;
+    this.#buildWaiters = [];
+    waiters.forEach((resolve) => resolve());
+  }
+
+  /**
+   * Ask for every queued satellite's opening window, in queue order.
+   *
+   * All at once rather than in waves: the source coalesces a synchronous burst
+   * onto one message per turn, and the replies come back in the order they were
+   * asked for, so the build starts consuming the front of the queue while the tail
+   * is still being propagated.
+   */
+  #requestOpeningWindows(): void {
+    const nowMs = JulianDate.toDate(this.viewer.clock.currentTime).getTime();
+    for (const [key, entry] of this.#queue) {
+      // Bounds from the element set, not from a satrec: this loop runs once per
+      // satellite in the activation and `sgp4init` in it would be the freeze the
+      // build budget exists to prevent. Approximate is all a bound needs to be —
+      // the sampler answers on its own exact grid. See approximatePeriodMinutes.
+      const periodMs = approximatePeriodMinutes(entry.record) * 60_000;
+      if (periodMs <= 0) {
+        continue;
+      }
+      this.#opening += 1;
+      void this.#samples
+        .samplerFor(entry.satnum, entry.record)
+        .samples(nowMs - periodMs * WINDOW_ORBITS_BACK, nowMs + periodMs * WINDOW_ORBITS_FORWARD)
+        .then((chunk) => {
+          // The scene may have been replaced while this was in flight; the queue
+          // is the authority on whether this satellite is still wanted.
+          if (chunk && chunk.teme.length > 0 && this.#queue.some(([queued]) => queued === key)) {
+            this.#ready.push({ key, entry, chunk });
+          }
+        })
+        .finally(() => {
+          this.#opening -= 1;
+          this.#resolveSettledIfDone();
+        });
+    }
+  }
+
+  #instantiate(key: string, entry: CatalogEntry, chunk: SampleChunk): void {
+    // Already built. Reachable whenever a reconcile lands while opening windows are
+    // in flight — a group's records arriving, a component toggled, a ground station
+    // edited — because that re-requests every queued satellite without cancelling
+    // the requests already out, and both replies find their key still queued. Two
+    // instantiations put two of everything on the globe and left the first
+    // collection unreachable in `#active`, so its entities, its batch geometry and
+    // its per-satellite tick listeners were never torn down.
+    if (this.#active.has(key)) {
+      return;
+    }
+    const sat = new SatelliteComponentCollection(
+      this.viewer,
+      entry,
+      { orbits: this.orbits, tracks: this.tracks },
+      this.#samples.samplerFor(entry.satnum, entry.record),
+      this.#passes.predictorFor(entry.satnum, entry.record),
+    );
+    // Before show(), which is what reads the trajectory.
+    sat.props.trajectory.adopt(chunk);
+    if (this.groundStationAvailable) {
+      sat.groundStations = this.#stations;
+    }
+    sat.props.passPredictor.mode = this.#desired.overpassMode;
+    sat.show(this.#effectiveComponents());
+    this.#active.set(key, sat);
+  }
+
+  /**
+   * Resolves once no satellites are waiting to be built.
+   *
+   * The caller that needs this is anything reading the finished scene rather
+   * than watching it appear — the benchmark, whose row would otherwise report
+   * whatever fraction of the satellites had been created by the time the
+   * synchronous part of `reconcile` returned.
+   */
+  buildSettled(): Promise<void> {
+    if (this.#ready.length === 0 && this.#opening === 0) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.#buildWaiters.push(resolve);
+    });
+  }
+
+  /** Whether satellites are still being instantiated or still waiting for samples. */
+  get building(): boolean {
+    return this.#ready.length > 0 || this.#opening > 0;
+  }
+
+  /** Sampling counters, so a benchmark can tell where the propagation happened. */
+  get sampleStats(): SampleSourceStats {
+    return this.#samples.stats;
   }
 
   get selectedSatellite(): string {

@@ -178,7 +178,7 @@
       </div>
 
       <div v-if="fits.length > 0" class="bench__block bench__block--table">
-        <div class="bench__caption">scaling (cpu ms per 1,000 satellites, and where 60 fps runs out)</div>
+        <div class="bench__caption">scaling (main-thread ms per 1,000 satellites; floor is GPU plus vsync)</div>
         <table class="bench__table">
           <thead>
             <tr>
@@ -186,15 +186,17 @@
               <th class="bench__num">ms/1k</th>
               <th class="bench__num">base</th>
               <th class="bench__num">r²</th>
+              <th class="bench__num">floor</th>
               <th class="bench__num">sats@60</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="fit in fits" :key="fit.series">
               <td>{{ fit.series }}</td>
-              <td class="bench__num">{{ fit.cpuMsPer1000.toFixed(2) }}</td>
-              <td class="bench__num">{{ fit.baseCpuMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ fit.mainMsPer1000.toFixed(2) }}</td>
+              <td class="bench__num">{{ fit.baseMainMs.toFixed(2) }}</td>
               <td :class="['bench__num', fit.r2 < 0.9 ? 'bench__warn' : '']">{{ fit.r2.toFixed(3) }}</td>
+              <td class="bench__num">{{ fit.floorMs.toFixed(2) }}</td>
               <td class="bench__num">{{ fit.satsAt60fps === "" ? "—" : fit.satsAt60fps }}</td>
             </tr>
           </tbody>
@@ -249,15 +251,16 @@
       <!-- Only when the clock was swept: an empty table here would read as
          "propagation is free" rather than "nobody asked". -->
       <div v-if="propagation.length > 0" class="bench__block bench__block--table">
-        <div class="bench__caption">propagation (cpu ms over the same scene at ×1)</div>
+        <div class="bench__caption">propagation (clock-tick ms over the same scene at ×1)</div>
         <table class="bench__table">
           <thead>
             <tr>
               <th class="bench__num">sats</th>
               <th class="bench__num">clock</th>
-              <th class="bench__num">cpu</th>
+              <th class="bench__num">tick</th>
               <th class="bench__num">Δ</th>
               <th class="bench__num">µs/sat</th>
+              <th class="bench__num">cpu</th>
               <th>components</th>
             </tr>
           </thead>
@@ -265,9 +268,10 @@
             <tr v-for="(cost, index) in propagation" :key="index">
               <td class="bench__num">{{ cost.sats }}</td>
               <td class="bench__num">×{{ cost.clock }}</td>
-              <td class="bench__num">{{ cost.cpuMs.toFixed(2) }}</td>
-              <td class="bench__num">{{ cost.deltaCpuMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ cost.tickMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ cost.deltaTickMs.toFixed(2) }}</td>
               <td class="bench__num">{{ cost.usPerSatellite.toFixed(1) }}</td>
+              <td class="bench__num">{{ cost.cpuMs.toFixed(2) }}</td>
               <td>{{ cost.components }}</td>
             </tr>
           </tbody>
@@ -284,8 +288,8 @@
           <thead>
             <tr>
               <th class="bench__num">sats</th>
-              <th class="bench__num">cpu 1st</th>
-              <th class="bench__num">cpu again</th>
+              <th class="bench__num">main 1st</th>
+              <th class="bench__num">main again</th>
               <th class="bench__num">drift</th>
               <th class="bench__num">build 1st</th>
               <th class="bench__num">build again</th>
@@ -295,9 +299,9 @@
           <tbody>
             <tr v-for="(check, index) in repeats" :key="index">
               <td class="bench__num">{{ check.sats }}</td>
-              <td class="bench__num">{{ check.firstCpuMs.toFixed(2) }}</td>
-              <td class="bench__num">{{ check.repeatCpuMs.toFixed(2) }}</td>
-              <td :class="['bench__num', Math.abs(check.cpuDriftPct) > MAX_TRUSTWORTHY_DRIFT_PCT ? 'bench__bad' : 'bench__good']">{{ signed(check.cpuDriftPct) }}</td>
+              <td class="bench__num">{{ check.firstMainMs.toFixed(2) }}</td>
+              <td class="bench__num">{{ check.repeatMainMs.toFixed(2) }}</td>
+              <td :class="['bench__num', isDrifted(check) ? 'bench__bad' : 'bench__good']">{{ signed(check.mainDriftPct) }}</td>
               <td class="bench__num">{{ check.firstBuildMs.toFixed(0) }}</td>
               <td class="bench__num">{{ check.repeatBuildMs.toFixed(0) }}</td>
               <td class="bench__num">{{ signed(check.buildDriftPct) }}</td>
@@ -344,7 +348,6 @@ import {
   toJson,
   formatTable,
   GPU_TIMER_TRUST_FACTOR,
-  MAX_TRUSTWORTHY_DRIFT_PCT,
   MIN_MEMORY_FIT_POINTS,
   MIN_TRUSTWORTHY_FRAMES,
   MIN_TRUSTWORTHY_MEMORY_R2,
@@ -354,6 +357,7 @@ import {
   type BenchmarkRun,
   type MemoryFit,
   type PropagationCost,
+  isDrifted,
   type RepeatCheck,
   type ReportRow,
   type ScalingFit,

@@ -42,6 +42,7 @@ import {
   terrainProviders,
   terrainProviderNames as visibleTerrainProviderNames,
 } from "./CesiumLayerProviders";
+import { cesiumSceneMode } from "./satelliteGraphics";
 import { SatelliteManager } from "./SatelliteManager";
 import { SkyInteraction } from "./SkyInteraction";
 import { type Observer, SkyView } from "./SkyView";
@@ -52,6 +53,12 @@ import { PushManager } from "./util/PushManager";
 import { Suppressible } from "./util/Suppressible";
 
 dayjs.extend(utc);
+
+/**
+ * The components drawn into a shared polyline primitive rather than per entity,
+ * and so the ones a scene morph has to suppress and wait out. See `sceneMode`.
+ */
+const BATCHED_COMPONENTS = ["Orbit", "Orbit track"] as const;
 
 /**
  * Where the globe opens: Europe's meridian, a little north of the equator.
@@ -454,38 +461,67 @@ export class CesiumController {
    * only the store can supply.
    */
   morphTo(sceneMode: string): void {
-    if (sceneMode === "3D") {
-      this.viewer.scene.morphTo3D();
+    const target = cesiumSceneMode(sceneMode);
+    if (target === undefined) {
+      console.error(`Unknown scene mode ${sceneMode}`);
+      return;
+    }
+
+    // Already there, so there is nothing to morph and — the part that matters —
+    // Cesium will not raise `morphComplete`. Returning here rather than below the
+    // suppression is what keeps 3D → Sky → 3D working: the sky view renders in 3D,
+    // so leaving it asks for a projection the scene is already in, and suppressing
+    // against a completion that never comes would hide both batched components for
+    // the life of the page.
+    if (this.viewer.scene.mode === target) {
       return;
     }
 
     const morph = (): void => {
-      if (sceneMode === "2D") {
+      if (target === SceneMode.SCENE3D) {
+        this.viewer.scene.morphTo3D();
+      } else if (target === SceneMode.SCENE2D) {
         this.viewer.scene.morphTo2D();
-        return;
-      }
-      if (sceneMode === "Columbus") {
+      } else {
         this.viewer.scene.morphToColumbusView();
       }
     };
 
-    // Suppressed rather than disabled: the user still has Orbit switched on and
+    // Suppressed rather than disabled: the user still has these switched on and
     // the toolbar has to keep saying so through the morph. Asking the manager
     // whether it actually suppressed anything avoids reading back a value that
     // this call has already changed.
-    if (this.sats.suppressComponent("Orbit")) {
-      const enableOrbits = (): void => {
-        this.sats.releaseComponent("Orbit");
-        this.viewer.scene.morphComplete.removeEventListener(enableOrbits);
+    //
+    // Both batched components, not just Orbit: outside 3D each of them falls
+    // back to a per-entity path graphic, and the only thing that re-asks the
+    // question is a component being created again on release.
+    //
+    // This runs for every direction, including back to 3D. It used to return
+    // before getting here, which left a round trip through 2D or Columbus drawing
+    // every orbit as a per-entity path graphic once back in 3D — correct, and
+    // measured at 342 ms a frame against 1.24 ms batched, because nothing re-asked
+    // the question after the morph.
+    const suppressed = BATCHED_COMPONENTS.filter((name) => this.sats.suppressComponent(name));
+    if (suppressed.length > 0) {
+      const release = (): void => {
+        suppressed.forEach((name) => this.sats.releaseComponent(name));
+        this.viewer.scene.morphComplete.removeEventListener(release);
       };
-      this.viewer.scene.morphComplete.addEventListener(enableOrbits);
+      this.viewer.scene.morphComplete.addEventListener(release);
 
-      // Suppressing Orbit drops every geometry from the shared batch, and the
-      // batch rebuilds asynchronously — morphing before it has caught up would
-      // rebuild it into the projection being left behind. One await, where this
-      // used to poll a static flag re-exported from the collections' base class
-      // through a requestAnimationFrame loop.
-      void this.sats.orbits.settled().then(morph);
+      // Suppressing them drops every geometry from the shared batches, and a
+      // batch rebuilds asynchronously — morphing before they have caught up
+      // would rebuild them into the projection being left behind.
+      void Promise.all([this.sats.orbits.settled(), this.sats.tracks.settled()]).then(() => {
+        morph();
+        // A morph that did not start raises no completion. The guard above catches
+        // the reachable case, but Cesium refuses in others too — mid-morph, most
+        // notably — and a suppression with no completion to release it is an empty
+        // globe, so release now instead of trusting an event that may not come.
+        if (this.viewer.scene.mode !== SceneMode.MORPHING) {
+          release();
+        }
+      });
     } else {
       morph();
     }

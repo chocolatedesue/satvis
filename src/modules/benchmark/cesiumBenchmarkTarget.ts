@@ -1,6 +1,8 @@
 // The one Cesium-bound piece: it turns "draw N satellites with these
 // components" into a reconcile, and the render loop into frame samples.
 
+import type { JulianDate } from "@cesium/engine";
+
 import { useCesiumStore } from "../../stores/cesium";
 import { useSatStore } from "../../stores/sat";
 import type { CesiumController } from "../CesiumController";
@@ -63,6 +65,16 @@ export interface TargetOptions {
   groundStation?: { lat: number; lon: number };
 }
 
+/**
+ * How long to let the app go quiet before reading the footprint.
+ *
+ * Long enough for the sample-window top-ups already in flight to land and their
+ * buffers to become collectable. Six seconds was where the reading stopped moving:
+ * the same scene read 550 MB at +6 s and 544 MB at +16 s, against 1044 and 1295 MB
+ * with the clock running.
+ */
+const FOOTPRINT_QUIESCE_MS = 6000;
+
 const wait = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     if (signal.aborted || ms <= 0) {
@@ -113,6 +125,15 @@ const nextFrames = (count: number, timeoutMs = 1000): Promise<void> =>
   });
 
 /**
+ * Where one GPU reading belongs: the sampler that was collecting when the query
+ * was started, and the epoch it was then on. See `#endGpuQuery`.
+ */
+interface GpuTarget {
+  sampler: FrameSampler;
+  epoch: number;
+}
+
+/**
  * Whether this page can measure an absolute footprint at all.
  *
  * Two conditions, and the isolation one is the interesting half: the API is only
@@ -144,6 +165,9 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
 
   #preUpdateAt = 0;
 
+  /** Duration of the clock tick that preceded the frame being rendered. See #instrumentClockTick. */
+  #tickMs = 0;
+
   /** `EXT_disjoint_timer_query_webgl2`, or undefined where the browser has no such thing. */
   #timerExt: { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | undefined;
 
@@ -154,7 +178,7 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
    * query objects and force a flush on each; one at a time samples a subset of
    * frames, which is all a median needs.
    */
-  #queryInFlight: WebGLQuery | undefined;
+  #queryInFlight: { query: WebGLQuery; targets: GpuTarget[] } | undefined;
 
   options: TargetOptions = {};
 
@@ -173,6 +197,7 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     // most position updates in clock onTick, before preUpdate, so measuring
     // from preUpdate deliberately excludes them — see README.
     this.#initGpuTimer(scene);
+    this.#instrumentClockTick();
     scene.preUpdate.addEventListener(() => {
       this.#preUpdateAt = performance.now();
       this.#beginGpuQuery();
@@ -180,8 +205,8 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     scene.postRender.addEventListener(() => {
       const now = performance.now();
       const cpuMs = now - this.#preUpdateAt;
-      this.#live.push(now, cpuMs);
-      this.#sweep?.push(now, cpuMs);
+      this.#live.push(now, cpuMs, this.#tickMs);
+      this.#sweep?.push(now, cpuMs, this.#tickMs);
       // After the timing marks, so the read is never inside what it would
       // otherwise inflate. Per frame rather than once per step because a single
       // reading measures when the last GC happened, not what the scene costs.
@@ -228,7 +253,11 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
         return;
       }
       gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
-      this.#queryInFlight = query;
+      const targets: GpuTarget[] = [{ sampler: this.#live, epoch: this.#live.epoch }];
+      if (this.#sweep) {
+        targets.push({ sampler: this.#sweep, epoch: this.#sweep.epoch });
+      }
+      this.#queryInFlight = { query, targets };
     } catch {
       this.#timerExt = undefined;
     }
@@ -237,10 +266,11 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
   #endGpuQuery(): void {
     const gl = this.#gl;
     const ext = this.#timerExt;
-    const query = this.#queryInFlight;
-    if (!gl || !ext || !query) {
+    const pending = this.#queryInFlight;
+    if (!gl || !ext || !pending) {
       return;
     }
+    const { query, targets } = pending;
     this.#queryInFlight = undefined;
     try {
       gl.endQuery(ext.TIME_ELAPSED_EXT);
@@ -249,9 +279,13 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       this.#timerExt = undefined;
       return;
     }
-    // The result lands some frames later, so poll rather than block. A frame
-    // whose timing arrives after its sample window closed simply joins the next
-    // one — the population is a median, not a per-frame pairing.
+    // The result lands some frames later, so poll rather than block — and it is
+    // delivered to the samplers this query was *started* for, at the epoch they
+    // were then on. Delivering it to whatever was open on arrival is what made this
+    // column untrustworthy: a query from the tail of a heavy step landed in the
+    // next step's window, and a query from a warmup frame landed in the sample the
+    // warmup exists to protect. A 5,000-satellite step reported 34.5 ms and the
+    // 0-satellite step after it reported 24.
     let attempts = 0;
     const poll = (): void => {
       attempts += 1;
@@ -260,8 +294,11 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
           // A disjoint means the GPU was interrupted and the timing is garbage.
           if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) {
             const ns = gl.getQueryParameter(query, gl.QUERY_RESULT) as number;
-            this.#live.pushGpu(ns / 1e6);
-            this.#sweep?.pushGpu(ns / 1e6);
+            for (const target of targets) {
+              if (target.sampler.epoch === target.epoch) {
+                target.sampler.pushGpu(ns / 1e6);
+              }
+            }
           }
           gl.deleteQuery(query);
           return;
@@ -314,6 +351,42 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     };
   }
 
+  /**
+   * Time the whole clock tick, by wrapping `clock.tick` rather than by adding a
+   * listener to `clock.onTick`.
+   *
+   * Position updates happen in `onTick` listeners, and an `onTick` listener of
+   * our own could only mark the point it is *itself* reached. Cesium raises
+   * listeners in registration order, and two of the ones that matter — the
+   * manager's derived-geometry refresh and the orbit batch's re-orientation —
+   * are registered when the viewer is built, long before the panel that
+   * constructs this target. A marker would sit behind them and quietly miss
+   * exactly the work it was added to find.
+   *
+   * `clock.tick()` raises the event, so wrapping it captures every listener
+   * whatever the order, which is the only version of this that cannot be wrong.
+   * The cost is two `performance.now()` calls a frame, and it is only ever
+   * installed in a session that has opened the benchmark panel.
+   */
+  #instrumentClockTick(): void {
+    const { clock } = this.#cc.viewer;
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const original = clock.tick;
+    if ((original as { __benchmarkWrapped?: boolean }).__benchmarkWrapped) {
+      return;
+    }
+    const wrapped = (): JulianDate => {
+      const started = performance.now();
+      try {
+        return original.call(clock);
+      } finally {
+        this.#tickMs = performance.now() - started;
+      }
+    };
+    (wrapped as { __benchmarkWrapped?: boolean }).__benchmarkWrapped = true;
+    clock.tick = wrapped;
+  }
+
   async prepare(): Promise<void> {
     const { clock } = this.#cc.viewer;
     const cesiumStore = useCesiumStore();
@@ -354,8 +427,14 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
     const clearMs = performance.now() - clearStart;
     await nextFrames(2);
 
+    // `buildMs` is the wall time to a complete scene, not the synchronous part
+    // of the call. Satellites are instantiated to a per-frame budget now (see
+    // SatelliteManager.#build), so reconcile returns with the queue still
+    // draining — without the await, every row would report whatever fraction of
+    // the population happened to exist when the first frame ended.
     const buildStart = performance.now();
     this.#cc.sats.reconcile(this.#scene(names, request.components));
+    await this.#cc.sats.buildSettled();
     const buildMs = performance.now() - buildStart;
     await nextFrames(2);
 
@@ -415,12 +494,32 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       return undefined;
     }
     const startedAt = performance.now();
+    // Stop the clock and let the app go quiet first, which is the difference
+    // between measuring a scene and measuring the garbage it happens to be
+    // producing. At 5,000 satellites with orbits the app propagates and
+    // re-transforms sample windows continuously, and the reading lands wherever
+    // that churn is at the time — measured on one scene, seconds apart:
+    //
+    //     clock running   1044 MB total (worker 557)   then 1295 MB (window 1106)
+    //     clock stopped    550 MB total (worker  51)   then  544 MB (window  357)
+    //
+    // so the running figures were a factor of two and a half apart on a scene that
+    // had not changed. Safe to do here and nowhere else: the footprint is captured
+    // after the sample window has closed, so no frame timing can see it.
+    const clock = this.#cc.viewer.clock;
+    const wasAnimating = clock.shouldAnimate;
+    clock.shouldAnimate = false;
     try {
+      await new Promise((resolve) => setTimeout(resolve, FOOTPRINT_QUIESCE_MS));
       const result = await measure.call(performance);
       const js = result.breakdown.find((entry) => entry.types.includes("JavaScript") && entry.attribution.some((item) => item.scope === "Window"));
+      // Separated out because `totalMb` counts them and nothing else does — see
+      // FootprintSample.workerMb.
+      const workerBytes = result.breakdown.filter((entry) => entry.attribution.some((item) => (item.scope ?? "").includes("Worker"))).reduce((sum, entry) => sum + entry.bytes, 0);
       return {
         totalMb: result.bytes / BYTES_PER_MB,
         jsMb: (js?.bytes ?? result.bytes) / BYTES_PER_MB,
+        workerMb: workerBytes / BYTES_PER_MB,
         elapsedMs: performance.now() - startedAt,
       };
     } catch {
@@ -428,6 +527,8 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       // refuse (a detached frame, a browser that changed its mind) and the run
       // still has every frame timing it came for.
       return undefined;
+    } finally {
+      clock.shouldAnimate = wasAnimating;
     }
   }
 

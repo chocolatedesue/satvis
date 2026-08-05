@@ -17,6 +17,50 @@ const blankOr = (value: number | undefined, digits = 2): number | "" => (value =
 const cpuMs = (result: BenchmarkResult): number => result.frames.cpu?.mean ?? 0;
 
 /**
+ * Time in `clock.tick` — where propagation happens, and which `cpuMs` excludes
+ * by construction. See FrameSample.tick.
+ */
+const tickMs = (result: BenchmarkResult): number => result.frames.tick?.mean ?? 0;
+
+/**
+ * Main-thread work for one frame: the render plus the clock tick.
+ *
+ * What every derived fit is built on, and the reason is that the two candidates
+ * either side of it are both unusable.
+ *
+ * `cpuMs` alone misses most of the per-satellite cost, because Cesium's Viewer
+ * runs `dataSourceDisplay.update` — every entity's position evaluation — inside
+ * an `onTick` listener, before `preUpdate`. Fitting it had the Point series
+ * holding 60 fps to 1.66 million satellites.
+ *
+ * `frameMs` cannot be fitted at all, because it is quantised by vsync. Measured
+ * on a 120 Hz display with points only: from 0 to 1,000 satellites main-thread
+ * work went 0.64 → 1.21 ms while `frameMs` sat at exactly 8.33 ms throughout —
+ * the extra work was absorbed by idle time already being spent waiting for the
+ * next tick, so a fit through it reads a slope of zero. Past the interval it
+ * stops being continuous rather than becoming useful: at 5,000 satellites, with
+ * 11.5 ms of main-thread work, the *median* frame still presented at 8.72 ms and
+ * the mean of 11.72 was really "15.5% of frames missed a tick". Its intercept is
+ * the refresh interval, which is a property of the display and not of the app.
+ *
+ * This sum is continuous, monotonic and has no floor: 0.64, 0.96, 1.21, 6.25,
+ * 8.95, 11.52 over 0 → 5,000 satellites.
+ */
+const mainThreadMs = (result: BenchmarkResult): number => cpuMs(result) + tickMs(result);
+
+/**
+ * The frame time this series could not go below, whatever the satellite count.
+ *
+ * Everything outside the main thread — GPU work, and the wait for vsync — lumped
+ * together, because `frameMs` cannot separate them: a vsync-clamped frame hides
+ * how much of its interval the GPU actually used. Reported rather than folded
+ * into the fit, because it is the term that decides whether the fit matters. A
+ * floor already past the frame budget means 60 fps is gone before the first
+ * satellite, and no per-satellite slope will bring it back.
+ */
+const floorMs = (results: readonly BenchmarkResult[]): number => Math.min(...results.map((result) => result.frames.wall?.mean ?? Infinity));
+
+/**
  * The heap figure every memory table is built from: the window's low-water mark.
  *
  * Undefined outside Chrome. Not a footprint on its own — see `FrameSample.heap`
@@ -94,6 +138,12 @@ export interface ReportRow {
   cpuMs: number;
   cpuP95Ms: number;
   /**
+   * Time in the clock tick, which is the per-satellite position work `cpuMs`
+   * cannot see. Read the two together: a row where `tickMs` dwarfs `cpuMs` is
+   * propagation-bound rather than draw-bound.
+   */
+  tickMs: number;
+  /**
    * GPU time for one frame. Blank where the browser has no timer extension, and
    * blank where it has one that cannot be believed — see `gpuTimerTrustworthy`.
    */
@@ -120,6 +170,8 @@ export interface ReportRow {
    * run asked for it. Unlike `heapMb` this *is* a total and can be read as one.
    */
   footprintMb: number | "";
+  /** Worker heaps, kept apart from the total. See FootprintSample.workerMb. */
+  footprintWorkerMb: number | "";
   /** The whole agent including DOM and worker memory, which is a broader figure. */
   footprintTotalMb: number | "";
 }
@@ -147,6 +199,7 @@ export function reportRows(run: BenchmarkRun): ReportRow[] {
       worstMs: round(result.frames.wall?.max ?? 0),
       cpuMs: round(cpuMs(result)),
       cpuP95Ms: round(result.frames.cpu?.p95 ?? 0),
+      tickMs: round(tickMs(result)),
       gpuMs: gpu === undefined ? "" : round(gpu),
       jankPct: round(result.frames.jankRatio * 100, 1),
       buildMs: round(result.applied.buildMs),
@@ -157,6 +210,7 @@ export function reportRows(run: BenchmarkRun): ReportRow[] {
       heapPeakMb: blankOr(heapPeakMb(result), 1),
       footprintMb: blankOr(footprintJsMb(result), 1),
       footprintTotalMb: blankOr(result.footprint?.totalMb, 1),
+      footprintWorkerMb: blankOr(result.footprint?.workerMb, 1),
     };
   });
 }
@@ -165,13 +219,28 @@ export interface ScalingFit {
   /** The component set and, where it is not real time, the clock rate. */
   series: string;
   points: number;
-  /** Least-squares slope, restated per 1,000 satellites to be readable. */
-  cpuMsPer1000: number;
-  /** The intercept: what this component set costs before any satellite exists. */
-  baseCpuMs: number;
+  /** Least-squares slope of main-thread work, restated per 1,000 satellites. */
+  mainMsPer1000: number;
+  /** The intercept: the main-thread cost of this set before any satellite exists. */
+  baseMainMs: number;
   /** 1.0 means the cost is linear in the count; well under it means it is not. */
   r2: number;
-  /** Where the mean frame time crosses 16.7 ms, extrapolated from the fit. */
+  /**
+   * The frame time nothing in this series went below — GPU work and the vsync
+   * wait together. Read it against the 16.7 ms budget before reading
+   * `satsAt60fps`: if the floor is already there, the count never mattered.
+   */
+  floorMs: number;
+  /**
+   * Where main-thread work crosses 16.7 ms, extrapolated from the fit.
+   *
+   * A main-thread ceiling, and it assumes the GPU is not the binding constraint —
+   * which is what the measurements show once a scene is big enough to matter: at
+   * 5,000 points, main-thread work was 11.52 ms and the frame 11.72, so the frame
+   * *was* the main thread and the GPU overlapped it. Blank when the floor has
+   * already eaten the budget, because then the answer is "none" rather than a
+   * number.
+   */
   satsAt60fps: number | "";
 }
 
@@ -223,18 +292,23 @@ export function scalingFits(run: BenchmarkRun): ScalingFit[] {
   for (const [series, results] of bySeries(run)) {
     // Against the satellites actually drawn, not the ones asked for — the two
     // part company as soon as a component does not apply to every satellite.
-    const fit = leastSquares(results.map((result) => ({ x: result.applied.satellitesVisible, y: cpuMs(result) })));
+    const fit = leastSquares(results.map((result) => ({ x: result.applied.satellitesVisible, y: mainThreadMs(result) })));
     if (!fit) {
       continue;
     }
+    const floor = floorMs(results);
     const headroom = FRAME_BUDGET_60FPS_MS - fit.intercept;
+    // A floor at or past the budget makes the extrapolation meaningless: no
+    // satellite count is the reason 60 fps is unavailable.
+    const reachable = Number.isFinite(floor) && floor < FRAME_BUDGET_60FPS_MS;
     fits.push({
       series,
       points: results.length,
-      cpuMsPer1000: round(fit.slope * 1000, 3),
-      baseCpuMs: round(fit.intercept),
+      mainMsPer1000: round(fit.slope * 1000, 3),
+      baseMainMs: round(fit.intercept),
       r2: round(fit.r2, 3),
-      satsAt60fps: fit.slope > 0 && headroom > 0 ? Math.round(headroom / fit.slope) : "",
+      floorMs: Number.isFinite(floor) ? round(floor) : 0,
+      satsAt60fps: reachable && fit.slope > 0 && headroom > 0 ? Math.round(headroom / fit.slope) : "",
     });
   }
   return fits;
@@ -353,7 +427,8 @@ export interface MarginalCost {
   /** The components this row adds over the set it is compared against. */
   added: string;
   over: string;
-  deltaCpuMs: number;
+  /** Main-thread cost of the added components — see `mainThreadMs`. */
+  deltaMainMs: number;
   usPerSatellite: number;
 }
 
@@ -396,14 +471,14 @@ export function marginalCosts(run: BenchmarkRun): MarginalCost[] {
         continue;
       }
       const base = new Set(baseline.applied.componentsRequested);
-      const delta = cpuMs(result) - cpuMs(baseline);
+      const delta = mainThreadMs(result) - mainThreadMs(baseline);
       const drawn = result.applied.satellitesVisible;
       costs.push({
         sats: result.applied.satellitesRequested,
         clock: result.applied.clockMultiplier,
         added: formatComponents(result.applied.componentsRequested.filter((component) => !base.has(component))),
         over: formatComponents(baseline.applied.componentsRequested),
-        deltaCpuMs: round(delta),
+        deltaMainMs: round(delta),
         usPerSatellite: drawn > 0 ? round((delta * 1000) / drawn, 1) : 0,
       });
     }
@@ -415,11 +490,18 @@ export interface PropagationCost {
   sats: number;
   components: string;
   clock: number;
-  cpuMs: number;
+  /** Time in the clock tick, which is where propagation happens. */
+  tickMs: number;
   /** Cost over the same scene at real time. */
-  deltaCpuMs: number;
+  deltaTickMs: number;
   /** That delta shared out per satellite, which is what should scale with the count. */
   usPerSatellite: number;
+  /**
+   * The render, for contrast. Propagation does not touch it, so a large
+   * `deltaTickMs` beside a flat `cpuMs` is the expected shape rather than a
+   * contradiction.
+   */
+  cpuMs: number;
 }
 
 /**
@@ -431,6 +513,15 @@ export interface PropagationCost {
  * a faster clock re-propagates the same satellites more often per wall second.
  * A `usPerSatellite` that holds steady across counts at one clock rate says the
  * cost is per-satellite propagation and nothing else.
+ *
+ * Differenced on `tickMs`, not `cpuMs`. This table used to use `cpuMs` and so
+ * could not see the thing it is named after: Cesium runs every `onTick` listener
+ * — position updates included — before `preUpdate`, which is where `cpuMs`
+ * starts. Measured at 5,000 satellites drawing points at ×10000, the old table
+ * reported `deltaCpuMs` of −0.08 and 0 µs per satellite for a step running at
+ * 2.2 fps with 462 ms frames, of which direct instrumentation put 95% inside
+ * `SampledTrajectory.update`. It said propagation was free at the one point it
+ * cost everything.
  */
 export function propagationCosts(run: BenchmarkRun): PropagationCost[] {
   const byScene = new Map<string, BenchmarkResult[]>();
@@ -450,15 +541,16 @@ export function propagationCosts(run: BenchmarkRun): PropagationCost[] {
       if (result === baseline) {
         continue;
       }
-      const delta = cpuMs(result) - cpuMs(baseline);
+      const delta = tickMs(result) - tickMs(baseline);
       const drawn = result.applied.satellitesVisible;
       costs.push({
         sats: result.applied.satellitesRequested,
         components: formatComponents(result.applied.componentsRequested),
         clock: result.applied.clockMultiplier,
-        cpuMs: round(cpuMs(result)),
-        deltaCpuMs: round(delta),
+        tickMs: round(tickMs(result)),
+        deltaTickMs: round(delta),
         usPerSatellite: drawn > 0 ? round((delta * 1000) / drawn, 1) : 0,
+        cpuMs: round(cpuMs(result)),
       });
     }
   }
@@ -470,10 +562,10 @@ export interface RepeatCheck {
   sats: number;
   components: string;
   clock: number;
-  firstCpuMs: number;
-  repeatCpuMs: number;
+  firstMainMs: number;
+  repeatMainMs: number;
   /** Positive means the app got slower over the course of the run. */
-  cpuDriftPct: number;
+  mainDriftPct: number;
   firstBuildMs: number;
   repeatBuildMs: number;
   /** Usually strongly negative: the first build pays for warming the app up. */
@@ -491,6 +583,22 @@ export interface RepeatCheck {
 
 /** Above this the run measured a moving target, not a scene. */
 export const MAX_TRUSTWORTHY_DRIFT_PCT = 10;
+
+/**
+ * How much absolute drift is worth mentioning, whatever the percentage.
+ *
+ * A percentage on its own cries wolf at the bottom of the range: with a control
+ * step of no satellites, `mainThreadMs` is under two milliseconds, so a fifth of a
+ * millisecond of ordinary noise is a 10% drift and the check fires on runs that are
+ * perfectly clean. Requiring both means the warning keeps its meaning at 5,000
+ * satellites — where 10% is milliseconds and worth knowing — without firing on
+ * every sweep that happens to start at zero.
+ */
+export const MIN_MEANINGFUL_DRIFT_MS = 1;
+
+/** Whether a repeat check says the run measured a moving target rather than a scene. */
+export const isDrifted = (check: RepeatCheck): boolean =>
+  Math.abs(check.mainDriftPct) > MAX_TRUSTWORTHY_DRIFT_PCT && Math.abs(check.repeatMainMs - check.firstMainMs) >= MIN_MEANINGFUL_DRIFT_MS;
 
 /**
  * Below this a memory fit is noise rather than a slope.
@@ -539,11 +647,18 @@ const driftPct = (first: number, repeat: number): number => (first === 0 ? 0 : r
  * caches fill, the JIT settles, the heap grows. Measuring one scene at the start
  * and again at the finish is the only thing in the run that can tell a rising
  * line that is the scene from a rising line that is the clock — so a small
- * `cpuDriftPct` is what licenses reading the rest of the tables at all.
+ * `mainDriftPct` is what licenses reading the rest of the tables at all.
  *
  * `buildDriftPct` is usually the louder of the two and is expected to be
  * negative: the first build of a population pays for warming it up, which is why
  * `buildMs` is not comparable across component sets.
+ *
+ * Measured on `mainThreadMs`, not on `cpuMs`. Once propagation moved off the main
+ * thread `cpuMs` at a small satellite count fell under two milliseconds, where a
+ * quarter of a millisecond of ordinary noise reads as a 25% drift — so the check
+ * fired on essentially every run and stopped distinguishing a drifted one from a
+ * clean one. `mainThreadMs` is the same quantity every other fit here is built on,
+ * and it is large enough for the percentage to mean something.
  */
 export function repeatChecks(run: BenchmarkRun): RepeatCheck[] {
   const checks: RepeatCheck[] = [];
@@ -561,9 +676,9 @@ export function repeatChecks(run: BenchmarkRun): RepeatCheck[] {
       sats: repeat.applied.satellitesRequested,
       components: formatComponents(repeat.applied.componentsRequested),
       clock: repeat.applied.clockMultiplier,
-      firstCpuMs: round(cpuMs(first)),
-      repeatCpuMs: round(cpuMs(repeat)),
-      cpuDriftPct: driftPct(cpuMs(first), cpuMs(repeat)),
+      firstMainMs: round(mainThreadMs(first)),
+      repeatMainMs: round(mainThreadMs(repeat)),
+      mainDriftPct: driftPct(mainThreadMs(first), mainThreadMs(repeat)),
       firstBuildMs: round(first.applied.buildMs),
       repeatBuildMs: round(repeat.applied.buildMs),
       buildDriftPct: driftPct(first.applied.buildMs, repeat.applied.buildMs),
@@ -592,6 +707,7 @@ export function formatTable(run: BenchmarkRun): string {
     "worst",
     "cpuMs",
     "cpuP95",
+    "tickMs",
     "gpuMs",
     "jank%",
     "build",
@@ -599,7 +715,7 @@ export function formatTable(run: BenchmarkRun): string {
     "components",
   ];
   // 10 for footprint: the name is 9 characters, and a width of 8 ran it into `build`.
-  const widths = [6, 8, 7, 7, 7, 8, 7, 8, 7, 7, 7, 6, 8, ...(showFootprint ? [10] : [])];
+  const widths = [6, 8, 7, 7, 7, 8, 7, 8, 7, 7, 8, 7, 6, 8, ...(showFootprint ? [10] : [])];
   const lines = [header.map((name, index) => (index < widths.length ? pad(name, widths[index] as number) : ` ${name}`)).join("")];
   for (const row of rows) {
     const values = [
@@ -613,6 +729,7 @@ export function formatTable(run: BenchmarkRun): string {
       row.worstMs,
       row.cpuMs,
       row.cpuP95Ms,
+      row.tickMs,
       row.gpuMs === "" ? "—" : row.gpuMs,
       row.jankPct,
       row.buildMs,
@@ -699,7 +816,7 @@ export function logRun(run: BenchmarkRun): void {
   }
   console.log("%cper step", "font-weight:bold");
   console.table(reportRows(run));
-  console.log("%cscaling with satellite count (cpu frame time)", "font-weight:bold");
+  console.log("%cscaling with satellite count (main-thread frame time: render + clock tick)", "font-weight:bold");
   console.table(scalingFits(run));
   // Absent rather than zeroed where the browser has no reading, and said out
   // loud, so an empty memory table is a known absence like the gpu column.
@@ -770,6 +887,7 @@ export function logRun(run: BenchmarkRun): void {
         components: formatComponents(result.applied.componentsRequested),
         jsMb: round(result.footprint?.jsMb ?? 0, 1),
         totalMb: round(result.footprint?.totalMb ?? 0, 1),
+        workerMb: round(result.footprint?.workerMb ?? 0, 1),
       })),
     );
     console.log(`${captured.length} captures cost ${Math.round(waitedMs / 1000)} s of waiting — the call resolves only when a collection happens.`);
@@ -780,7 +898,7 @@ export function logRun(run: BenchmarkRun): void {
       "footprint: unavailable — the page is not cross-origin isolated, so measureUserAgentSpecificMemory is not exposed. Needs COOP: same-origin and COEP: credentialless.",
     );
   }
-  console.log("%cmarginal cost per component", "font-weight:bold");
+  console.log("%cmarginal cost per component (main-thread frame time)", "font-weight:bold");
   console.table(marginalCosts(run));
   // Only when the clock was actually swept — an empty table would read as
   // "propagation costs nothing" rather than "nobody asked".
@@ -796,11 +914,11 @@ export function logRun(run: BenchmarkRun): void {
     // Said out loud rather than left to be spotted in a column: this is the one
     // number that says whether the rest of the run measured a scene or a
     // moving target.
-    const drifted = repeats.filter((check) => Math.abs(check.cpuDriftPct) > MAX_TRUSTWORTHY_DRIFT_PCT);
+    const drifted = repeats.filter(isDrifted);
     if (drifted.length > 0) {
       console.warn(
-        `The first step measured ${drifted.map((check) => `${check.cpuDriftPct > 0 ? "+" : ""}${check.cpuDriftPct}%`).join(", ")} differently when re-run at the end — ` +
-          `over ${MAX_TRUSTWORTHY_DRIFT_PCT}%, so the app moved under the sweep and the trends above are that as much as the scenes.`,
+        `The first step measured ${drifted.map((check) => `${check.mainDriftPct > 0 ? "+" : ""}${check.mainDriftPct}% (${round(check.repeatMainMs - check.firstMainMs)} ms)`).join(", ")} differently when re-run at the end — ` +
+          `over ${MAX_TRUSTWORTHY_DRIFT_PCT}% and ${MIN_MEANINGFUL_DRIFT_MS} ms, so the app moved under the sweep and the trends above are that as much as the scenes.`,
       );
     }
   }

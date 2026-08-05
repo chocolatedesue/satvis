@@ -1,4 +1,4 @@
-import { Math as CesiumMath } from "@cesium/engine";
+import { Math as CesiumMath, SceneMode } from "@cesium/engine";
 
 import type { OrbitClass } from "../config/orbitClass";
 
@@ -77,4 +77,57 @@ export function modelUri(name: string, modelUrl?: string): string {
  */
 export function orbitUsesPathGraphic(isTracked: boolean, sceneModeSupportsPrimitive: boolean): boolean {
   return isTracked || !sceneModeSupportsPrimitive;
+}
+
+/**
+ * The Cesium projection a view-mode name asks for, or undefined for one that is
+ * not a projection at all.
+ *
+ * Here rather than in config/viewModes so that file stays Cesium-free, and here
+ * rather than inline in CesiumController so the mapping is testable without a
+ * viewer. "Sky" is deliberately absent: it renders in 3D but is a camera
+ * placement, and morphing on its behalf is what SkyView does for itself.
+ */
+export function cesiumSceneMode(viewMode: string): SceneMode | undefined {
+  switch (viewMode) {
+    case "3D":
+      return SceneMode.SCENE3D;
+    case "2D":
+      return SceneMode.SCENE2D;
+    case "Columbus":
+      return SceneMode.COLUMBUS_VIEW;
+    default:
+      return undefined;
+  }
+}
+
+/** Bounds on how often time-dependent geometry is re-cut, in simulation seconds. */
+export const GEOMETRY_REFRESH_MIN_SECONDS = 1;
+export const GEOMETRY_REFRESH_MAX_SECONDS = 10;
+
+/**
+ * How often to re-cut the geometry that goes stale as the clock runs, given how
+ * many satellites are drawing it. Shared by the batched orbit tracks and the
+ * ground-track corridors, which have the same shape of problem.
+ *
+ * Neither is a rigid transform of itself as time passes — a fixed-frame track
+ * and an Earth-relative swath both have to be rebuilt rather than re-oriented —
+ * so the satellite runs on past the head of its own geometry until the next
+ * rebuild, at roughly 7.5 km a second in LEO. The interval is therefore an error
+ * budget, and the reason it is not simply "every frame" is that rebuilding is
+ * what used to cost 342 ms and 414 ms of main thread respectively at five
+ * thousand satellites.
+ *
+ * It scales with the count because both the error and the cost do, in opposite
+ * directions. A handful is a scene someone is looking closely at, and a second
+ * of lag there is under 10 km — sub-pixel on a globe. Thousands is a scene where
+ * any one of them is a few pixels in a thicket, and ten seconds of lag buys back
+ * the frame: measured at five thousand orbit tracks, going from ten seconds to
+ * three took the worst frame from 43 ms to 250 ms to close an error nobody was
+ * in a position to see. The satellite the camera is actually tracking sidesteps
+ * the question entirely — it gets an exact per-frame PathGraphic (see
+ * `orbitUsesPathGraphic`).
+ */
+export function geometryRefreshSeconds(count: number): number {
+  return Math.min(GEOMETRY_REFRESH_MAX_SECONDS, Math.max(GEOMETRY_REFRESH_MIN_SECONDS, count / 100));
 }

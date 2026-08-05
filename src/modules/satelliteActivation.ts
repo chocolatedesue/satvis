@@ -61,3 +61,26 @@ export function activeTargetEntries(state: ActivationState): Map<string, Catalog
 
   return target;
 }
+
+/**
+ * The order satellites should be instantiated in, tracked one first.
+ *
+ * Building a large activation is spread over frames (see SatelliteManager's
+ * build queue), so position in this list is how long something waits. The
+ * tracked satellite is the one with the camera and a `pendingTrackedSatellite`
+ * resolution waiting on it, and at five thousand entries the difference between
+ * first and last is seconds.
+ */
+export function buildOrder(entries: Iterable<[string, CatalogEntry]>, trackedName?: string): [string, CatalogEntry][] {
+  const ordered = [...entries];
+  if (!trackedName) {
+    return ordered;
+  }
+  const index = ordered.findIndex(([, entry]) => entry.name === trackedName);
+  if (index <= 0) {
+    // Absent, or already first — either way there is nothing to move.
+    return ordered;
+  }
+  const [tracked] = ordered.splice(index, 1);
+  return tracked ? [tracked, ...ordered] : ordered;
+}

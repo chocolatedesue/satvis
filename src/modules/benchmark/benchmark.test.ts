@@ -8,12 +8,14 @@ import {
   formatTable,
   gpuTimerTrustworthy,
   hasFootprints,
+  isDrifted,
   marginalCosts,
   memoryFits,
   memoryFitTrustworthy,
   propagationCosts,
   repeatChecks,
   reportRows,
+  type RepeatCheck,
   scalingFits,
   thinRows,
   toCsv,
@@ -28,6 +30,7 @@ function result(options: {
   cpuMs: number;
   gpuMs?: number;
   wallMs?: number;
+  tickMs?: number;
   repeat?: boolean;
   buildMs?: number;
   visible?: number;
@@ -68,12 +71,13 @@ function result(options: {
       fps: 100,
       wall: seriesStats([options.wallMs ?? 10]),
       cpu: seriesStats([options.cpuMs]),
+      tick: seriesStats([options.tickMs ?? 0]),
       gpu: options.gpuMs === undefined ? undefined : seriesStats([options.gpuMs]),
       heap: options.heapMb === undefined ? undefined : seriesStats(options.heapMb),
       jankFrames: 0,
       jankRatio: 0,
     },
-    footprint: options.footprintMb === undefined ? undefined : { totalMb: options.footprintMb * 1.4, jsMb: options.footprintMb, elapsedMs: 17_000 },
+    footprint: options.footprintMb === undefined ? undefined : { totalMb: options.footprintMb * 1.4, jsMb: options.footprintMb, workerMb: 0, elapsedMs: 17_000 },
   };
 }
 
@@ -122,6 +126,28 @@ describe("FrameSampler", () => {
     expect(snapshot.elapsedMs).toBe(30);
     expect(snapshot.fps).toBeCloseTo(100);
     expect(snapshot.wall?.mean).toBe(10);
+  });
+
+  test("reset bumps the epoch, so a reading in flight can tell it is stale", () => {
+    // The GPU clock's only defence against attributing a warmup frame to the
+    // sample, or the tail of one step to the next: a query records the epoch it
+    // started in and the delivery is dropped when the sampler has moved on.
+    const sampler = new FrameSampler();
+    const issued = sampler.epoch;
+    sampler.pushGpu(5);
+    expect(sampler.snapshot().gpu?.mean).toBe(5);
+
+    sampler.reset();
+    expect(sampler.epoch).not.toBe(issued);
+    // What the collector does with a stale reading: nothing.
+    if (sampler.epoch === issued) {
+      sampler.pushGpu(250);
+    }
+    expect(sampler.snapshot().gpu).toBeUndefined();
+
+    // A reading issued after the reset still lands.
+    sampler.pushGpu(7);
+    expect(sampler.snapshot().gpu?.mean).toBe(7);
   });
 
   test("frames slower than 30 fps count as jank", () => {
@@ -217,7 +243,7 @@ describe("scalingFits", () => {
       ]),
     );
     expect(fits).toHaveLength(1);
-    expect(fits[0]).toMatchObject({ series: "Point", cpuMsPer1000: 10, baseCpuMs: 5, r2: 1 });
+    expect(fits[0]).toMatchObject({ series: "Point", mainMsPer1000: 10, baseMainMs: 5, r2: 1 });
   });
 
   test("clock rates are separate series, never one averaged fit", () => {
@@ -230,7 +256,7 @@ describe("scalingFits", () => {
       ]),
     );
     expect(fits.map((fit) => fit.series)).toEqual(["Point", "Point @ ×100"]);
-    expect(fits[1]?.cpuMsPer1000).toBe(40);
+    expect(fits[1]?.mainMsPer1000).toBe(40);
   });
 
   test("the repeat step is left out, so it cannot weight one point twice", () => {
@@ -241,7 +267,28 @@ describe("scalingFits", () => {
         result({ sats: 0, components: ["Point"], cpuMs: 500, repeat: true }),
       ]),
     );
-    expect(fits[0]).toMatchObject({ points: 2, cpuMsPer1000: 10, baseCpuMs: 5 });
+    expect(fits[0]).toMatchObject({ points: 2, mainMsPer1000: 10, baseMainMs: 5 });
+  });
+
+  // The defect: cpuMs excludes the clock tick, where most per-satellite work
+  // happens, so fitting it alone had the Point series holding 60 fps into the
+  // millions. The fit is over cpuMs + tickMs.
+  test("the fit counts the clock tick, not just the render", () => {
+    const fits = scalingFits(run([result({ sats: 0, components: ["Point"], cpuMs: 1, tickMs: 0 }), result({ sats: 1000, components: ["Point"], cpuMs: 1, tickMs: 10 })]));
+
+    // cpuMs is flat across these two rows; all the growth is in the tick.
+    expect(fits[0]?.mainMsPer1000).toBe(10);
+    expect(fits[0]?.baseMainMs).toBe(1);
+  });
+
+  test("satsAt60fps is blank when the floor alone has eaten the budget", () => {
+    const fits = scalingFits(run([result({ sats: 0, components: ["Point"], cpuMs: 1, wallMs: 40 }), result({ sats: 1000, components: ["Point"], cpuMs: 2, wallMs: 42 })]));
+
+    // Main-thread work is trivial and its slope would extrapolate to a huge
+    // count, but every frame took 40 ms regardless — GPU or vsync bound. No
+    // satellite count is the reason 60 fps is unavailable.
+    expect(fits[0]?.floorMs).toBe(40);
+    expect(fits[0]?.satsAt60fps).toBe("");
   });
 
   test("satsAt60fps is blank when the fixed cost already blows the budget", () => {
@@ -260,8 +307,8 @@ describe("marginalCosts", () => {
       ]),
     );
     expect(costs).toEqual([
-      { sats: 100, clock: 1, added: "Label", over: "Point", deltaCpuMs: 4, usPerSatellite: 40 },
-      { sats: 100, clock: 1, added: "Orbit", over: "Point + Label", deltaCpuMs: 6, usPerSatellite: 60 },
+      { sats: 100, clock: 1, added: "Label", over: "Point", deltaMainMs: 4, usPerSatellite: 40 },
+      { sats: 100, clock: 1, added: "Orbit", over: "Point + Label", deltaMainMs: 6, usPerSatellite: 60 },
     ]);
   });
 
@@ -280,20 +327,35 @@ describe("propagationCosts", () => {
   test("each rate is differenced against x1 for the same scene", () => {
     const costs = propagationCosts(
       run([
-        result({ sats: 200, components: ["Point"], cpuMs: 10 }),
-        result({ sats: 200, components: ["Point"], clock: 100, cpuMs: 30 }),
-        result({ sats: 200, components: ["Point"], clock: 1000, cpuMs: 110 }),
+        result({ sats: 200, components: ["Point"], cpuMs: 1, tickMs: 10 }),
+        result({ sats: 200, components: ["Point"], clock: 100, cpuMs: 1, tickMs: 30 }),
+        result({ sats: 200, components: ["Point"], clock: 1000, cpuMs: 1, tickMs: 110 }),
       ]),
     );
-    expect(costs.map((cost) => [cost.clock, cost.deltaCpuMs, cost.usPerSatellite])).toEqual([
+    expect(costs.map((cost) => [cost.clock, cost.deltaTickMs, cost.usPerSatellite])).toEqual([
       [100, 20, 100],
       [1000, 100, 500],
     ]);
   });
 
+  // The defect this table was rewritten for: propagation happens in clock.onTick,
+  // which runs before preUpdate and so is outside cpuMs entirely. Differencing
+  // cpuMs reported nothing for a step that had ground to a halt propagating.
+  test("sees a cost that cpuMs cannot", () => {
+    const costs = propagationCosts(
+      run([result({ sats: 5000, components: ["Point"], cpuMs: 1.28, tickMs: 0.2 }), result({ sats: 5000, components: ["Point"], clock: 10000, cpuMs: 1.2, tickMs: 460 })]),
+    );
+
+    // cpuMs went *down* between these two rows; the tick went up by 460 ms.
+    expect(costs).toHaveLength(1);
+    expect(costs[0]?.deltaTickMs).toBeCloseTo(459.8, 1);
+    expect(costs[0]?.usPerSatellite).toBeGreaterThan(90);
+    expect(costs[0]?.cpuMs).toBeLessThan(costs[0]?.tickMs ?? 0);
+  });
+
   test("without a x1 row there is nothing to difference against", () => {
     const costs = propagationCosts(
-      run([result({ sats: 200, components: ["Point"], clock: 100, cpuMs: 30 }), result({ sats: 200, components: ["Point"], clock: 1000, cpuMs: 110 })]),
+      run([result({ sats: 200, components: ["Point"], clock: 100, cpuMs: 1, tickMs: 30 }), result({ sats: 200, components: ["Point"], clock: 1000, cpuMs: 1, tickMs: 110 })]),
     );
     expect(costs).toEqual([]);
   });
@@ -313,7 +375,29 @@ describe("repeatChecks", () => {
       ]),
     );
     expect(checks).toHaveLength(1);
-    expect(checks[0]).toMatchObject({ sats: 100, firstCpuMs: 10, repeatCpuMs: 11, cpuDriftPct: 10, firstBuildMs: 800, repeatBuildMs: 200, buildDriftPct: -75 });
+    expect(checks[0]).toMatchObject({ sats: 100, firstMainMs: 10, repeatMainMs: 11, mainDriftPct: 10, firstBuildMs: 800, repeatBuildMs: 200, buildDriftPct: -75 });
+  });
+
+  test("drift is only untrustworthy when it is both proportional and material", () => {
+    const check = (firstMainMs: number, repeatMainMs: number): RepeatCheck => ({
+      sats: 0,
+      components: "Point",
+      clock: 1,
+      firstMainMs,
+      repeatMainMs,
+      mainDriftPct: ((repeatMainMs - firstMainMs) / firstMainMs) * 100,
+      firstBuildMs: 0,
+      repeatBuildMs: 0,
+      buildDriftPct: 0,
+    });
+
+    // A fifth of a millisecond on a two-millisecond control step. This is what a
+    // clean run looks like at the bottom of the range, and it used to warn.
+    expect(isDrifted(check(2.2, 1.79))).toBe(false);
+    // The same proportion where it is worth milliseconds.
+    expect(isDrifted(check(11, 18))).toBe(true);
+    // Material but proportionally small: a big scene that moved a little.
+    expect(isDrifted(check(200, 202))).toBe(false);
   });
 
   test("a run without a repeat step reports nothing", () => {

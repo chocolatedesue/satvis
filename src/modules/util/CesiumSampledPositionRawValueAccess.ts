@@ -5,6 +5,7 @@ declare module "@cesium/engine" {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface SampledPositionProperty {
     getRawValues(start: JulianDate, end: JulianDate): unknown[];
+    getRawSamples(): { times: JulianDate[]; values: unknown[] };
     length(): number;
   }
 }
@@ -34,6 +35,26 @@ declare module "@cesium/engine" {
     result.push(innerType.unpack(values, i * innerType.packedLength));
   }
   return result;
+};
+
+/**
+ * Every stored sample, times alongside values.
+ *
+ * The whole window rather than a range, and both halves together, because the
+ * one caller derives a second reference frame from what is already stored (see
+ * SampledTrajectory's inertial backfill) and needs each value's own time to pick
+ * the right transform for it.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(SampledPositionProperty.prototype as any).getRawSamples = function (this: any): { times: JulianDate[]; values: unknown[] } {
+  const times: JulianDate[] = this._property._times;
+  const innerType = this._property._innerType;
+  const packed = this._property._values;
+  const values: unknown[] = [];
+  for (let i = 0; i < times.length; i += 1) {
+    values.push(innerType.unpack(packed, i * innerType.packedLength));
+  }
+  return { times: [...times], values };
 };
 
 /**

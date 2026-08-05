@@ -114,14 +114,27 @@ describe("CesiumCleanupHelper.drain", () => {
     expect(error.mock.calls[0]?.[0]).toContain("_glyphBillboardCollection");
   });
 
-  test("reports a primitive tree with no label collection", () => {
+  test("a primitive tree with no label collection is silent, not reported", () => {
+    // A points-only scene has no label collection at all, and used to log an
+    // internals-have-moved error on every teardown for it. See CesiumCleanupHelper.drain.
+    // The test above pins the case that must still report: a collection that
+    // exists but cannot be read.
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
     expect(drain({ scene: { primitives: { _primitives: [] }, requestRender: vi.fn() } })).toBe(0);
-    expect(error).toHaveBeenCalledTimes(1);
 
-    // Once, not once per reconcile.
-    drain({ scene: { primitives: { _primitives: [] }, requestRender: vi.fn() } });
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  test("a broken assumption is reported once, not once per reconcile", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { viewer, labelCollection } = sceneWith(200);
+    delete (labelCollection as { _spareBillboards?: unknown })._spareBillboards;
+
+    drain(viewer);
+    drain(viewer);
+    drain(viewer);
+
     expect(error).toHaveBeenCalledTimes(1);
   });
 });
