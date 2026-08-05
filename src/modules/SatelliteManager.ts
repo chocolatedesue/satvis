@@ -194,7 +194,6 @@ export class SatelliteManager {
     this.#onCatalogChange = callback;
   }
 
-  /** Called when the globe starts or stops tracking a satellite. */
   onTrackedChange(callback: (name: string) => void): void {
     this.#onTrackedChange = callback;
   }

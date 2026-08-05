@@ -86,8 +86,6 @@ export function startSceneSync(cc: SceneTarget): void {
   const cesiumStore = useCesiumStore();
   const satStore = useSatStore();
 
-  // --- globe settings -------------------------------------------------------
-
   // Immediate, because the store is the only owner of the layer stack: the viewer is
   // constructed with no base layer at all and the first stack arrives here.
   //
@@ -315,8 +313,6 @@ export function startSceneSync(cc: SceneTarget): void {
     },
   );
 
-  // --- the scene ------------------------------------------------------------
-
   // How many satellites the current activation implies, asked of the catalog
   // rather than of the globe so the answer is available before anything is
   // built. Touches catalogRevision so a lazily-loaded group re-runs it as its
@@ -367,7 +363,6 @@ export function startSceneSync(cc: SceneTarget): void {
 
   watch(desired, (next) => cc.sats.reconcile(next), { deep: true, immediate: true });
 
-  // --- the clock ------------------------------------------------------------
   // Live by default: `time` is null and absent from the url, so a shared link
   // opens at the recipient's present. It pins on a deliberate act — a time in
   // the url, or the user dragging the timeline — and then follows the clock at
@@ -401,18 +396,16 @@ export function startSceneSync(cc: SceneTarget): void {
     cesiumStore.setTime(minute ?? null);
   });
 
-  // Dragging the timeline is the other way in. Cesium's Timeline dispatches
-  // this on its own element; it is absent in minimal ui, where there is no
-  // timeline to drag.
-  // Cesium dispatches this from Timeline.prototype._setTimeBarTime but does not
-  // declare addEventListener on the widget, so the cast covers a typing gap
-  // rather than an assumption.
+  // Dragging the timeline is the other way in. Cesium raises `settime` on the
+  // widget's own element from `Timeline.prototype._setTimeBarTime` but does not
+  // declare `addEventListener` on it, so the cast covers a typing gap rather
+  // than an assumption — and the widget is absent in minimal ui, where there
+  // is no timeline to drag.
   const timeline = cc.viewer.timeline as unknown as { addEventListener?: (type: string, listener: () => void) => void } | undefined;
   timeline?.addEventListener?.("settime", () => {
     cesiumStore.setTime(clockMinute() ?? null);
   });
 
-  // --- back from the globe --------------------------------------------------
   cc.sats.onTrackedChange((name) => {
     satStore.trackedSatellite = name;
   });

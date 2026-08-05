@@ -6,11 +6,10 @@ import { parseGpPayload, type GpRecord } from "./util/gp";
 
 const TLE = "ISS (ZARYA)\n1 25544U 98067A   18342.69352573  .00002284  00000-0  41838-4 0  9992\n2 25544  51.6407 229.0798 0005166 124.8351 329.3296 15.54069892145658";
 
-// Note: the original ava test pinned exact 2018 ECI/geodetic values and a pass
-// count. Those numbers were tied to a much older satellite.js and no longer
-// hold under 7.0.1's SGP4/coordinate implementation, so we assert physically
-// meaningful invariants (orbital radius, altitude band, non-empty pass list)
-// instead of brittle version-specific decimals.
+// Physical invariants — orbital radius, altitude band, a non-empty pass list —
+// rather than exact decimals: the values SGP4 produces for a given element set
+// shift between satellite.js releases, so pinned decimals fail on upgrade
+// without anything being wrong.
 describe("Orbit (TLE record)", () => {
   const orbit = new Orbit("ISS", parseGpPayload(TLE)[0] as GpRecord);
 

@@ -11,7 +11,7 @@ export interface CesiumPerformanceStatsResult {
   worstFrameTime: number;
 }
 
-// A Cesium Performance Monitor that logs avarage and worst performance over a sample period
+// Mean and worst frame time over a sample period.
 export class CesiumPerformanceStats {
   scene: Scene;
 
@@ -32,8 +32,9 @@ export class CesiumPerformanceStats {
   constructor(scene: Scene, logContinuously = false) {
     this.scene = scene;
 
-    // Disable requestRenderMode to caclulate time betweeen consecutive postRender events
-    // This is required as many updates happen during clock onTick events before scene.preUpdate is called
+    // Render-on-demand skips frames when nothing moved, which would make the gap
+    // between postRender events a measure of how idle the loop is rather than of
+    // what a frame costs.
     this.scene.requestRenderMode = false;
 
     this.scene.preUpdate.addEventListener(() => {

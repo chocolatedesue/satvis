@@ -266,7 +266,6 @@ export class SatelliteComponentCollection {
 
   disableComponent(name: SatelliteComponentName): void {
     if (name === "3D model") {
-      // Restore old label offset
       this.#setLabelOffset(10);
     }
 
@@ -286,7 +285,6 @@ export class SatelliteComponentCollection {
     }
 
     if (this.componentNames.length === 0) {
-      // Remove event listeners when no components are enabled
       this.deinit();
     }
   }
@@ -313,7 +311,6 @@ export class SatelliteComponentCollection {
       }
     });
 
-    // Set up event listeners
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.eventListeners.selectedEntity = this.viewer.selectedEntityChanged.addEventListener((entity: any) => {
       if (!entity || entity?.name === "Ground station") {
@@ -330,7 +327,8 @@ export class SatelliteComponentCollection {
         this.artificiallyTrack();
       }
       if ("Orbit" in this.components && !this.isCorrectOrbitComponent()) {
-        // Recreate Orbit to change visualisation type
+        // Rebuilt rather than adjusted: a geometry cannot change visualisation
+        // type in place.
         this.disableComponent("Orbit");
         this.enableComponent("Orbit");
       }
@@ -662,7 +660,6 @@ export class SatelliteComponentCollection {
   createGroundTrack(): void {
     const description = groundTrackDescription(this.props.orbitClass, this.props.swath);
     if (!description) {
-      // Ground track unavailable for non-LEO satellites
       return;
     }
     const corridor = new CorridorGraphics({
@@ -703,7 +700,6 @@ export class SatelliteComponentCollection {
   createCone(fov = this.props.coneFovDeg): void {
     const description = coneDescription(this.props.orbitClass, fov);
     if (!description) {
-      // Cone graphic unavailable for non-LEO satellites
       return;
     }
     const entity = new Entity();

@@ -96,7 +96,6 @@ export class GroundStationEntity {
   }
 
   passes(time: JulianDate, deltaHours = 48): Pass[] {
-    // Aggregate passes over this station from all visible satellites
     return stationPasses(
       this.sats.visibleSatellites.map((sat) => sat.props.passPredictor),
       time,

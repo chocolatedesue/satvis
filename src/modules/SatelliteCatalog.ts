@@ -1,6 +1,6 @@
 // SatelliteCatalog — the frontend's plain, non-reactive registry of known
 // satellites, decoupled from instantiated Cesium objects. It owns O(n) dedup
-// and tag merging (previously O(n²) Array.find in SatelliteManager.#add).
+// and tag merging.
 //
 // This module must stay Cesium-free (node-env vitest exercises it).
 
@@ -12,7 +12,7 @@ import { fetchGpGroup, fetchGpIndex } from "./util/gpSource";
 // A single known satellite. Created by SatelliteCatalog.addRecords, which owns
 // the identity/tag indices.
 export class CatalogEntry {
-  // Dedup identity, matching today's SatelliteManager.#add: satnum + "|" + name.
+  // Dedup identity: satnum + "|" + name.
   readonly key: string;
 
   readonly name: string;
@@ -164,7 +164,6 @@ export class SatelliteCatalog {
       this.#notifyChange(changed);
     } catch (error) {
       console.log(error);
-      // Clear the memoized load so a later ensure call retries.
       group.load = undefined;
     }
   }
@@ -196,7 +195,7 @@ export class SatelliteCatalog {
         record,
       });
       this.#byKey.set(key, entry);
-      // First-wins by name (matches today's getSatellite lookup).
+      // First-wins by name.
       if (!this.#byName.has(name)) {
         this.#byName.set(name, entry);
       }

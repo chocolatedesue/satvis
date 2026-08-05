@@ -58,7 +58,7 @@ const EARTH_RADIUS_KM = 6371;
 // are ~75 km apart in LEO and the bearing is not dominated by rounding.
 const BEARING_SAMPLE_MS = 10_000;
 
-/** Initial bearing (radians) from one geodetic point to another, all in radians. */
+/** Initial bearing from one geodetic point to another, all in radians. */
 function bearingRad(fromLat: number, fromLon: number, toLat: number, toLon: number): number {
   const deltaLon = toLon - fromLon;
   const y = Math.sin(deltaLon) * Math.cos(toLat);
@@ -170,7 +170,6 @@ export default class Orbit {
 
       if (elevation > minElevation) {
         if (!ongoingPass) {
-          // Start of new pass
           pass = {
             name: this.name,
             start: date.getTime(),
@@ -180,14 +179,12 @@ export default class Orbit {
           };
           ongoingPass = true;
         } else if (pass && elevation > (pass.maxElevation ?? -Infinity)) {
-          // Ongoing pass
           pass.maxElevation = elevation;
           pass.apex = date.getTime();
           pass.azimuthApex = lookAngles.azimuth;
         }
         date.setSeconds(date.getSeconds() + 5);
       } else if (ongoingPass && pass) {
-        // End of pass
         pass.end = date.getTime();
         pass.duration = (pass.end as number) - (pass.start as number);
         pass.azimuthEnd = lookAngles.azimuth;
@@ -299,7 +296,6 @@ export default class Orbit {
 
       if (distanceKm <= extentKm) {
         if (!ongoingPass) {
-          // Start of new pass
           pass = {
             name: this.name,
             start: date.getTime(),
@@ -309,13 +305,11 @@ export default class Orbit {
           };
           ongoingPass = true;
         } else if (pass && distanceKm < (pass.minDistance ?? Infinity)) {
-          // Update minimum distance (closest approach)
           pass.minDistance = distanceKm;
           pass.minDistanceTime = date.getTime();
         }
         date.setSeconds(date.getSeconds() + 30); // 30 second steps during pass
       } else if (ongoingPass && pass) {
-        // End of pass
         pass.end = date.getTime();
         pass.duration = (pass.end as number) - (pass.start as number);
         passes.push(pass as SwathPass);
@@ -327,18 +321,17 @@ export default class Orbit {
         // Skip ahead to avoid immediate re-entry
         date.setMinutes(date.getMinutes() + Math.max(5, this.orbitalPeriod * 0.1));
       } else {
-        // Not in pass, adjust time step based on distance and previous distance
+        // A ladder rather than one step size: coarse while the station is far
+        // and receding, fine as it closes. A step small enough never to miss a
+        // pass would otherwise walk the whole window at that resolution.
         const deltaDistance = distanceKm - lastDistance;
         lastDistance = distanceKm;
 
         if (deltaDistance > 0 && distanceKm > maxExtent * 3) {
-          // Moving away and far from swath, skip ahead more
           date.setMinutes(date.getMinutes() + Math.max(10, this.orbitalPeriod * 0.2));
         } else if (distanceKm > maxExtent * 2) {
-          // Moderately far from swath
           date.setMinutes(date.getMinutes() + 5);
         } else {
-          // Getting closer to swath, use smaller time steps
           date.setMinutes(date.getMinutes() + 1);
         }
       }

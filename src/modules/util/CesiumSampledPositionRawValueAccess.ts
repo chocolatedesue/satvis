@@ -10,9 +10,6 @@ declare module "@cesium/engine" {
   }
 }
 
-/**
- * Gets the original values stored in the sampled property for the provided timeframe.
- */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (SampledPositionProperty.prototype as any).getRawValues = function (this: any, start: JulianDate, end: JulianDate): unknown[] {
   const times = this._property._times;
@@ -57,9 +54,6 @@ declare module "@cesium/engine" {
   return { times: [...times], values };
 };
 
-/**
- * Gets the number of samples stored in the sampled property.
- */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (SampledPositionProperty.prototype as any).length = function (this: any): number {
   return this._property._times.length;
