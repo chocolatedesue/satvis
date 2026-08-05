@@ -25,7 +25,6 @@ export function sourceKey(spec: SourceSpec): string {
   return `url:${spec.url}`;
 }
 
-// Resolve a source spec to its fetch URL.
 export function sourceUrl(spec: SourceSpec): string {
   if ("celestrak" in spec) {
     return `${CELESTRAK_BASE}gp.php?GROUP=${encodeURIComponent(spec.celestrak)}&FORMAT=JSON`;
@@ -36,7 +35,7 @@ export function sourceUrl(spec: SourceSpec): string {
   return spec.url;
 }
 
-// Collect every distinct source across all group definitions (dedup by key).
+// Deduped by sourceKey, so two groups naming one source fetch it once.
 export function collectSources(defs: GroupDefinition[]): SourceSpec[] {
   const seen = new Map<string, SourceSpec>();
   for (const def of defs) {
@@ -201,7 +200,6 @@ export interface SourceProbe {
   bodySample?: string;
 }
 
-// Project a raw SourceFetch to its serializable diagnostic form.
 export function toProbe(r: SourceFetch): SourceProbe {
   return {
     key: r.key,
@@ -366,7 +364,6 @@ function applySelectAndRename(records: OmmRecord[], def: GroupDefinition): Selec
     for (const r of indices) {
       const row = rows[r]!;
       matchedByRow[r] = true;
-      // Validate an id-matched record against its expected upstream name.
       if (row.noradId !== undefined && row.upstreamName !== undefined && recordName(record) !== row.upstreamName) {
         warnings.push(`noradId ${row.noradId}: expected OBJECT_NAME ${JSON.stringify(row.upstreamName)}, got ${JSON.stringify(recordName(record))}`);
       }
