@@ -108,7 +108,6 @@ export default defineConfig({
         test: fileURLToPath(new URL("test.html", import.meta.url)),
       },
       output: {
-        // Separate vendor chunks for better caching
         codeSplitting: {
           groups: [
             { name: "vue", test: /@vue|vue-router|pinia|@vueuse/, priority: 60 },
@@ -123,7 +122,6 @@ export default defineConfig({
     },
   },
   define: {
-    // Define relative base path in cesium for loading assets
     CESIUM_BASE_URL: JSON.stringify("./cesium"),
     __BUILD_DATE__: JSON.stringify(buildDate),
     __BUILD_SHA__: JSON.stringify(buildSha),
@@ -141,7 +139,6 @@ export default defineConfig({
     }),
     viteStaticCopy({
       targets: [
-        // Copy Cesium Assets, Widgets, and Workers to a static directory
         { src: `${cesiumEngineSource}/Build/ThirdParty`, dest: cesiumBaseUrl, rename: { stripBase: 4 } },
         { src: `${cesiumEngineSource}/Build/Workers`, dest: cesiumBaseUrl, rename: { stripBase: 4 } },
         { src: `${cesiumEngineSource}/Source/Assets`, dest: cesiumBaseUrl, rename: { stripBase: 4 } },

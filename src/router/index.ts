@@ -21,10 +21,7 @@ export const router: Router = createRouter({
   ],
 });
 
-/**
- * Router guard to handle configuration changes when navigating between routes
- * Note: Initial load is handled in src/app.ts before mounting
- */
+/** The initial load is not routed through here — see src/app.ts, before mounting. */
 export function setupRouterGuards(routerInstance: Router, cc: CesiumController): void {
   routerInstance.beforeEach((to, from) => {
     // Every url-sync write is a same-path navigation, so without this the
@@ -36,10 +33,8 @@ export function setupRouterGuards(routerInstance: Router, cc: CesiumController):
     }
     console.log(`Navigating to ${to.path} from ${from.path}`);
 
-    // Get the new configuration preset based on the target route
     const preset = getConfigPreset(to.path);
 
-    // Update document title and meta description
     updateMetadata(preset);
 
     // Register the preset's element sets with the satellite catalog; only the

@@ -1,7 +1,6 @@
 <template>
   <div class="satellite-browser">
-    <!-- (a) Quick group select: one click toggles a whole group. Bound to
-         enabledTags via the tag value-key. -->
+    <!-- Bound to enabledTags by the tag value-key, so one click takes a whole group. -->
     <div class="toolbarTitle">Satellite groups</div>
     <div class="browser-quickselect">
       <USelectMenu
@@ -17,7 +16,6 @@
       />
     </div>
 
-    <!-- (b) Search across the full catalog. -->
     <div class="browser-search">
       <UInput
         :model-value="searchQuery"
@@ -35,7 +33,7 @@
       </UInput>
     </div>
 
-    <!-- (c) Virtualized list — the only element that scrolls. -->
+    <!-- Virtualized, and the only element here that scrolls. -->
     <div v-if="isLoading" class="browser-empty">Loading satellites…</div>
     <div v-else-if="rows.length === 0" class="browser-empty">No matches</div>
     <div v-else ref="scrollEl" class="browser-list" :style="{ height: listHeight }">
@@ -46,7 +44,6 @@
       </div>
     </div>
 
-    <!-- (d) Summary bar + clear-all. -->
     <div class="browser-summary">
       <span>{{ groupCount }} group{{ groupCount === 1 ? "" : "s" }} · {{ activeSatCount }} satellite{{ activeSatCount === 1 ? "" : "s" }} active</span>
       <button v-if="hasActiveSelection" type="button" class="browser-clear" @click="clearAll">Clear all</button>
@@ -84,7 +81,6 @@ const {
   clearAll,
 } = useSatelliteBrowser(catalog);
 
-// Quick-select items: label "<tag> (<count>)", value the tag string.
 const groupItems = computed(() => availableGroups.value.toSorted((a, b) => a.tag.localeCompare(b.tag)).map((g) => ({ label: `${g.tag} (${g.count})`, value: g.tag })));
 
 // Surfaces come from Nuxt UI's dark palette (`dark` class on #app) with the

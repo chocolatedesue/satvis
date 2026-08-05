@@ -1,5 +1,5 @@
-// Toast utility for use in non-Vue contexts
-// This allows CesiumController and other plain JS classes to show toast notifications
+// Toasting from outside a Vue component, for CesiumController and the other
+// plain classes that have no `useToast` to reach for.
 
 import type { useToast } from "@nuxt/ui/composables/useToast";
 

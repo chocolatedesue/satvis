@@ -52,7 +52,6 @@ export type BrowserRow =
 
 const SEARCH_DEBOUNCE_MS = 150;
 
-// --- Module-scoped state (survives panel remounts) ---
 const searchQuery = ref("");
 const debouncedQuery = ref("");
 // Collapsed by default: an empty set means every group is collapsed.
@@ -247,7 +246,7 @@ export function useSatelliteBrowser(catalog: SatelliteCatalog) {
     return result;
   });
 
-  // --- Actions (whole-array writes to the store only) ---
+  // Every action below writes a whole array to the store, never one element.
 
   // Exclusions no longer covered by any enabled group, dropped so re-enabling a
   // group later starts from the full group instead of resurrecting stale

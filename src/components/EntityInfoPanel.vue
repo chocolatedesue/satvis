@@ -189,7 +189,7 @@ function openExternalInfo(): void {
   font-size: 14px;
 }
 
-/* Scroll long content (many passes) inside the card like the old InfoBox did. */
+/* Scroll inside the card: a station with many passes runs long. */
 .entity-info-panel :deep(.info-body) {
   max-height: 500px;
   overflow-y: auto;

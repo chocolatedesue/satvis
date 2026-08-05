@@ -1,7 +1,4 @@
-/**
- * Configuration manager for different application presets
- * Maps routes to their respective configurations and element-set sources.
- */
+// Which configuration each route opens with, and where its element sets come from.
 
 // A source is either a bare GP group name (resolved against the probed GP base,
 // worker `/api/gp/<name>.json` or the static `data/gp/<name>.json` snapshot) or
@@ -79,11 +76,7 @@ export const presets: Record<string, Preset> = {
   },
 };
 
-/**
- * Get configuration preset based on current route/path
- */
 export function getConfigPreset(path: string = window.location.pathname): Preset {
-  // Extract the last path segment, removing .html extension if present
   const routeName = (path.split("/").pop() ?? "").replace(/\.html$/, "");
 
   switch (routeName) {
@@ -94,9 +87,6 @@ export function getConfigPreset(path: string = window.location.pathname): Preset
   }
 }
 
-/**
- * Update document title and meta description based on preset
- */
 export function updateMetadata(preset: Preset): void {
   document.title = preset.title;
   const metaDescription = document.querySelector('meta[name="description"]');
