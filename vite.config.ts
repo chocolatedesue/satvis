@@ -42,7 +42,8 @@ export default defineConfig({
   base: "",
   build: {
     sourcemap: true,
-    chunkSizeWarningLimit: 1000,
+    // Cesium is 4.2 MB minified (Scene 49%, Core 19%, DataSources 9%)
+    chunkSizeWarningLimit: 4500,
     rolldownOptions: {
       input: {
         index: fileURLToPath(new URL("index.html", import.meta.url)),
