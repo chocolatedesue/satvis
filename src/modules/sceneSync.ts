@@ -15,6 +15,7 @@ import { JulianDate } from "@cesium/engine";
 import { nextTick, watch } from "vue";
 
 import { currentPosition } from "../composables/useGeolocation";
+import { useToastProxy } from "../composables/useToastProxy";
 import { BUILTIN_STAR_MAP, starMapRecovery } from "../config/starMaps";
 import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
@@ -159,6 +160,23 @@ export function startSceneSync(cc: SceneTarget): void {
   // an action with a result, and a refusal has to put the mode back.
   let viewModeGeneration = 0;
 
+  // When the sky view was last refused for want of an observer, and how long that
+  // answer stands for.
+  //
+  // It has to stand for something, because the url is a second writer of the view
+  // mode and it echoes. The refused switch reaches the query before the mode is
+  // put back — the mode is only put back once the browser has answered about the
+  // location, which is a permission prompt away — and that navigation then applies
+  // `scene=Sky` from behind, out of a url that is a step out of date. Left alone
+  // it asks the device a second time and raises a second toast, for one click.
+  //
+  // Time, rather than a flag that a genuine second attempt would have to clear:
+  // the echo is a round trip through the router and lands within a frame, while a
+  // person reaching for the radio again does not. Consumed when it answers, so
+  // the guard is never more than the one echo wide.
+  const REFUSAL_ECHO_MS = 500;
+  let refusedAt = Number.NEGATIVE_INFINITY;
+
   async function resolveObserver(): Promise<Observer | undefined> {
     // The cesium and sat stores hydrate from the url independently, so a ground
     // station in `?gs=` can land a tick after the view mode in `?scene=` does.
@@ -211,6 +229,17 @@ export function startSceneSync(cc: SceneTarget): void {
     }
     if (!observer) {
       console.warn("Sky view needs an observer: no ground station, and no location from the device");
+      // Said out loud, because the whole of what happens otherwise is a radio
+      // button moving back by itself — which reads as a broken control rather
+      // than as a refusal. The way out is named: the device is one source of an
+      // observer and the ground station menu is the other, and the second one
+      // needs no permission from anybody.
+      useToastProxy().add({
+        title: "Sky view needs a location",
+        description: "Allow Geolocation or set a location from the Ground station menu.",
+        color: "warning",
+      });
+      refusedAt = performance.now();
       cesiumStore.sceneMode = previous === SKY_MODE ? "3D" : previous;
       return;
     }
@@ -236,6 +265,14 @@ export function startSceneSync(cc: SceneTarget): void {
   watch(
     () => cesiumStore.sceneMode,
     (mode, previous) => {
+      if (mode === SKY_MODE && performance.now() - refusedAt < REFUSAL_ECHO_MS) {
+        // The echo of a refusal this recent is the url catching up, not a second
+        // ask. Put the mode back without asking the device again, and consume the
+        // refusal so a deliberate retry is answered properly.
+        refusedAt = Number.NEGATIVE_INFINITY;
+        cesiumStore.sceneMode = previous === SKY_MODE ? "3D" : previous;
+        return;
+      }
       void applyViewMode(mode, previous);
     },
   );
