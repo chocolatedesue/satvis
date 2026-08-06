@@ -1,7 +1,7 @@
 // Fetch-handler routing for the GP data API.
 
 import { coerceIndex } from "./evaluate.ts";
-import { refreshAll } from "./refresh.ts";
+import { ingestAll, type IngestSource, refreshAll } from "./refresh.ts";
 import { GP_INDEX_KEY, GP_KEY_PREFIX, type GroupWriteMetadata } from "./store.ts";
 
 const GROUP_NAME_RE = /^[a-zA-Z0-9_-]+$/;
@@ -19,6 +19,25 @@ function jsonResponse(body: unknown, init?: ResponseInit): Response {
 
 function notFound(): Response {
   return jsonResponse({ error: "Not Found" }, { status: 404 });
+}
+
+function badRequest(reason: string): Response {
+  return jsonResponse({ error: reason }, { status: 400, headers: { "Cache-Control": "no-store" } });
+}
+
+// Bearer-token gate for the two write endpoints. Returns the rejection to send,
+// or null when the caller is authorized.
+function rejectUnauthorized(request: Request, env: Env): Response | null {
+  // Secrets live outside wrangler.jsonc, so `wrangler types` cannot see this one.
+  // An unset secret disables the endpoint rather than leaving it open.
+  const expected = (env as Env & { REFRESH_TOKEN?: string }).REFRESH_TOKEN;
+  if (!expected) {
+    return jsonResponse({ error: "Refresh is not configured" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
+  if (request.headers.get("Authorization") !== `Bearer ${expected}`) {
+    return jsonResponse({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  }
+  return null;
 }
 
 // GET /api/gp/<group>.json — serve a group's records from KV with caching
@@ -77,14 +96,9 @@ async function handleRefresh(request: Request, env: Env): Promise<Response> {
     return jsonResponse({ error: "Method Not Allowed" }, { status: 405, headers: { Allow: "POST" } });
   }
 
-  // Secrets live outside wrangler.jsonc, so `wrangler types` cannot see this one.
-  // An unset secret disables the endpoint rather than leaving it open.
-  const expected = (env as Env & { REFRESH_TOKEN?: string }).REFRESH_TOKEN;
-  if (!expected) {
-    return jsonResponse({ error: "Refresh is not configured" }, { status: 503, headers: { "Cache-Control": "no-store" } });
-  }
-  if (request.headers.get("Authorization") !== `Bearer ${expected}`) {
-    return jsonResponse({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  const rejection = rejectUnauthorized(request, env);
+  if (rejection) {
+    return rejection;
   }
 
   const previous = coerceIndex(await env.GP_KV.get(GP_INDEX_KEY, "json"));
@@ -101,6 +115,96 @@ async function handleRefresh(request: Request, env: Env): Promise<Response> {
   return jsonResponse(
     {
       refreshed: true,
+      updatedAt: report.index.updated,
+      durationMs: report.durationMs,
+      written: report.written,
+      skipped: report.skipped,
+      sources: report.sources,
+      groups: report.index.groups,
+    },
+    { headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+// Shape-check a posted ingest bundle. Returns the sources, or a string naming
+// the first problem for the 400. Deliberately strict: a malformed bundle must
+// fail loudly here rather than reach the pipeline as a wave of empty sources,
+// which would read as an upstream outage.
+function parseIngestBundle(raw: unknown): IngestSource[] | string {
+  if (raw === null || typeof raw !== "object") {
+    return "body must be a JSON object";
+  }
+  const sources = (raw as { sources?: unknown }).sources;
+  if (!Array.isArray(sources)) {
+    return "body.sources must be an array";
+  }
+  if (sources.length === 0) {
+    return "body.sources is empty";
+  }
+  const parsed: IngestSource[] = [];
+  for (let i = 0; i < sources.length; i++) {
+    const entry = sources[i] as Record<string, unknown> | null;
+    if (entry === null || typeof entry !== "object") {
+      return `body.sources[${i}] must be an object`;
+    }
+    const { key, url, status, body, error } = entry;
+    if (typeof key !== "string" || typeof url !== "string") {
+      return `body.sources[${i}] needs string key and url`;
+    }
+    if (status !== undefined && typeof status !== "number") {
+      return `body.sources[${i}].status must be a number`;
+    }
+    if (body !== undefined && typeof body !== "string") {
+      return `body.sources[${i}].body must be a string`;
+    }
+    if (error !== undefined && typeof error !== "string") {
+      return `body.sources[${i}].error must be a string`;
+    }
+    if (body === undefined && error === undefined) {
+      return `body.sources[${i}] needs either body or error`;
+    }
+    parsed.push({ key, url, status, body, error });
+  }
+  return parsed;
+}
+
+// POST /api/ingest — run the normal refresh against payloads the caller already
+// downloaded, instead of fetching them here. Same bearer token as /api/refresh.
+//
+// The Worker keeps everything except the download: evaluation, enrichment,
+// last-known-good and the index are the cron's code path unchanged (see
+// bundleFetch). CelesTrak firewalls Cloudflare's shared Worker egress, so the
+// bytes have to be fetched elsewhere — worker/scripts/push-gp.mjs is the client.
+//
+// No cooldown, unlike /api/refresh: that window exists to protect CelesTrak's
+// per-IP download budget, and an ingest spends none of it. The token is the only
+// gate it needs.
+async function handleIngest(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "Method Not Allowed" }, { status: 405, headers: { Allow: "POST" } });
+  }
+
+  const rejection = rejectUnauthorized(request, env);
+  if (rejection) {
+    return rejection;
+  }
+
+  let raw: unknown;
+  try {
+    raw = await request.json();
+  } catch {
+    return badRequest("body is not valid JSON");
+  }
+  const sources = parseIngestBundle(raw);
+  if (typeof sources === "string") {
+    return badRequest(sources);
+  }
+
+  console.log(`gp ingest: ${sources.length} source(s) posted`);
+  const report = await ingestAll(env, sources);
+  return jsonResponse(
+    {
+      ingested: true,
       updatedAt: report.index.updated,
       durationMs: report.durationMs,
       written: report.written,
@@ -139,6 +243,9 @@ export async function handleApi(request: Request, env: Env): Promise<Response | 
   }
   if (path === "/api/refresh") {
     return handleRefresh(request, env);
+  }
+  if (path === "/api/ingest") {
+    return handleIngest(request, env);
   }
   return notFound();
 }

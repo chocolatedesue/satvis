@@ -104,3 +104,44 @@ export async function refreshGroups(config: GroupsConfig, store: GroupStore, fet
 export async function refreshAll(env: Env): Promise<RefreshReport> {
   return refreshGroups(groupsConfig, kvGroupStore(env.GP_KV), (url, init) => fetch(url, init));
 }
+
+// One source downloaded off-Worker and replayed into the pipeline by
+// bundleFetch. `body` carries the raw upstream payload on success; `error`
+// carries the downloader's failure message instead. Exactly one is set.
+export interface IngestSource {
+  key: string;
+  url: string;
+  status?: number;
+  body?: string;
+  error?: string;
+}
+
+// A FetchImpl serving an already-downloaded bundle instead of the network, so
+// an ingest runs byte-for-byte the same evaluate/enrich/store path as the cron
+// — including parseOmmArray's validation, which still rejects a bad payload and
+// leaves that group's last-known-good intact.
+//
+// The `url` is only ever a Map key here; nothing is dereferenced, so a posted
+// bundle cannot make the Worker fetch anything.
+export function bundleFetch(sources: IngestSource[]): FetchImpl {
+  const byUrl = new Map(sources.map((source) => [source.url, source]));
+  return async (url) => {
+    const source = byUrl.get(url);
+    if (source === undefined) {
+      throw new Error("source absent from the ingest bundle");
+    }
+    if (source.error !== undefined) {
+      throw new Error(source.error);
+    }
+    return { status: source.status ?? 0, text: async () => source.body ?? "" };
+  };
+}
+
+// Worker entrypoint for POST /api/ingest: same config and store as refreshAll,
+// but the bytes come from the caller rather than from CelesTrak. Exists because
+// CelesTrak firewalls Cloudflare's shared Worker egress (every source comes back
+// HTTP 522), so the download has to happen from an IP we are not sharing with
+// every other tenant — see worker/scripts/push-gp.mjs.
+export async function ingestAll(env: Env, sources: IngestSource[]): Promise<RefreshReport> {
+  return refreshGroups(groupsConfig, kvGroupStore(env.GP_KV), bundleFetch(sources));
+}

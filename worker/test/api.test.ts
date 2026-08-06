@@ -2,7 +2,7 @@ import { createExecutionContext, createScheduledController, env, SELF, waitOnExe
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import generatedConfig from "../src/config/satvis.generated.json" with { type: "json" };
-import { collectSources } from "../src/gp/evaluate.ts";
+import { collectSources, sourceKey, sourceUrl } from "../src/gp/evaluate.ts";
 import type { GroupsConfig, GroupsIndex, OmmRecord } from "../src/gp/types.ts";
 import worker from "../src/index.ts";
 
@@ -30,6 +30,26 @@ async function seedGroup(name: string, records: OmmRecord[], updated = UPDATED):
 
 async function idsOf(group: string): Promise<unknown[]> {
   return ((await env.GP_KV.get(`gp:${group}`, "json")) as OmmRecord[]).map((r) => r.NORAD_CAT_ID);
+}
+
+// An ingest bundle covering every source the generated config collects, built
+// the way scripts/push-gp.mjs builds it: the url is what sourceUrl() produces,
+// since that is the key bundleFetch matches on.
+function ingestBundle(reply: (source: string) => unknown, opts?: { status?: number }): string {
+  const specs = collectSources((generatedConfig as GroupsConfig).groups);
+  return JSON.stringify({
+    fetchedAt: UPDATED,
+    sources: specs.map((spec) => {
+      const url = sourceUrl(spec);
+      const params = new URL(url).searchParams;
+      const source = params.get("GROUP") ?? params.get("FILE") ?? "";
+      return { key: sourceKey(spec), url, status: opts?.status ?? 200, body: JSON.stringify(reply(source)) };
+    }),
+  });
+}
+
+function postIngest(body: string, headers: Record<string, string> = AUTH): Promise<Response> {
+  return SELF.fetch("https://satvis.space/api/ingest", { method: "POST", headers, body });
 }
 
 describe("GET /api/gp/<group>.json", () => {
@@ -309,6 +329,158 @@ describe("scheduled() refresh", () => {
     delete secretEnv.REFRESH_TOKEN;
     try {
       const res = await SELF.fetch("https://satvis.space/api/refresh", { method: "POST", headers: AUTH });
+      expect(res.status).toBe(503);
+    } finally {
+      secretEnv.REFRESH_TOKEN = configured;
+    }
+  });
+});
+
+describe("POST /api/ingest", () => {
+  // Every test here asserts the Worker made no upstream request: the whole point
+  // of ingest is that the download already happened somewhere CelesTrak answers.
+  let fetchSpy: MockInstance<typeof fetch>;
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      throw new Error(`unmocked fetch: ${new Request(input, init).url}`);
+    });
+  });
+  afterEach(() => {
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("writes evaluated groups to KV without touching the network", async () => {
+    const res = await postIngest(ingestBundle((source) => [{ OBJECT_NAME: `${source.toUpperCase()}-1`, NORAD_CAT_ID: 10000 + source.length }]));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+
+    const body = (await res.json()) as { ingested: boolean; written: number; sources: { ok: boolean; records?: number }[] };
+    expect(body.ingested).toBe(true);
+    expect(body.written).toBeGreaterThan(0);
+    expect(body.sources).toHaveLength(SOURCE_COUNT);
+    expect(body.sources.every((s) => s.ok && (s.records ?? 0) > 0)).toBe(true);
+
+    const index = (await env.GP_KV.get("gp:index", "json")) as GroupsIndex;
+    expect(index.groups.find((g) => g.name === "weather")?.lastError).toBeUndefined();
+    expect(Array.isArray(await env.GP_KV.get("gp:weather", "json"))).toBe(true);
+  });
+
+  it("carves the derived groups out of the ingested active source", async () => {
+    // The selection logic must be the cron's, not a second implementation — so
+    // the same carve-out assertions as the scheduled() test have to hold here.
+    await postIngest(
+      ingestBundle((source) =>
+        source === "active"
+          ? [
+              { OBJECT_NAME: "STARLINK-1234", NORAD_CAT_ID: 1 },
+              { OBJECT_NAME: "ONEWEB-0042", NORAD_CAT_ID: 2 },
+              { OBJECT_NAME: "LEMUR-2-CLARA", NORAD_CAT_ID: 7 },
+              { OBJECT_NAME: "OTTER SDM", NORAD_CAT_ID: 66678 },
+              { OBJECT_NAME: "NOT-STARLINK-9", NORAD_CAT_ID: 90 },
+            ]
+          : [{ OBJECT_NAME: `${source.toUpperCase()}-1`, NORAD_CAT_ID: 900 }],
+      ),
+    );
+
+    expect(await idsOf("starlink")).toEqual([1]);
+    expect(await idsOf("oneweb")).toEqual([2]);
+    expect(await idsOf("spire")).toEqual([7, 66678]);
+  });
+
+  it("preserves last-known-good for a source the downloader could not fetch", async () => {
+    await seedGroup("weather", ommArray(["GOOD SAT", 1]), "2026-01-01T00:00:00.000Z");
+    await env.GP_KV.put(
+      "gp:index",
+      JSON.stringify({ updated: "2026-01-01T00:00:00.000Z", groups: [{ name: "weather", updated: "2026-01-01T00:00:00.000Z", count: 1 }] } satisfies GroupsIndex),
+    );
+
+    // Replace the weather source with the failure shape push-gp.mjs sends.
+    const parsed = JSON.parse(ingestBundle(() => [{ OBJECT_NAME: "SAT", NORAD_CAT_ID: 5 }])) as {
+      sources: { key: string; body?: string; error?: string; status?: number }[];
+    };
+    for (const source of parsed.sources) {
+      if (source.key === "celestrak:weather") {
+        delete source.body;
+        source.error = "HTTP 522";
+      }
+    }
+
+    const res = await postIngest(JSON.stringify(parsed));
+    expect(res.status).toBe(200);
+
+    // The value survives, and the index carries the downloader's own message.
+    const weather = (await env.GP_KV.get("gp:weather", "json")) as OmmRecord[];
+    expect(weather.map((r) => r.OBJECT_NAME)).toEqual(["GOOD SAT"]);
+    const index = (await env.GP_KV.get("gp:index", "json")) as GroupsIndex;
+    const status = index.groups.find((g) => g.name === "weather");
+    expect(status?.updated).toBe("2026-01-01T00:00:00.000Z");
+    expect(status?.lastError).toContain("HTTP 522");
+  });
+
+  it("rejects a payload that is not a valid OMM array, keeping last-known-good", async () => {
+    // The Worker re-validates rather than trusting the bundle, so a mangled body
+    // fails the group instead of replacing good records with junk.
+    await seedGroup("weather", ommArray(["GOOD SAT", 1]), "2026-01-01T00:00:00.000Z");
+
+    const res = await postIngest(ingestBundle(() => ({ not: "an array" })));
+    expect(res.status).toBe(200);
+
+    const weather = (await env.GP_KV.get("gp:weather", "json")) as OmmRecord[];
+    expect(weather.map((r) => r.OBJECT_NAME)).toEqual(["GOOD SAT"]);
+    const body = (await res.json()) as { written: number; skipped: number };
+    expect(body.written).toBe(0);
+    expect(body.skipped).toBeGreaterThan(0);
+  });
+
+  it("fails a group whose source is missing from the bundle", async () => {
+    const parsed = JSON.parse(ingestBundle(() => [{ OBJECT_NAME: "SAT", NORAD_CAT_ID: 5 }])) as { sources: { key: string }[] };
+    parsed.sources = parsed.sources.filter((source) => source.key !== "celestrak:weather");
+
+    const res = await postIngest(JSON.stringify(parsed));
+    const body = (await res.json()) as { groups: { name: string; lastError?: string }[] };
+    expect(body.groups.find((g) => g.name === "weather")?.lastError).toContain("absent from the ingest bundle");
+  });
+
+  it.each([
+    ["a non-JSON body", "not json", "body is not valid JSON"],
+    ["a missing sources array", JSON.stringify({}), "body.sources must be an array"],
+    ["an empty sources array", JSON.stringify({ sources: [] }), "body.sources is empty"],
+    ["an entry without key/url", JSON.stringify({ sources: [{ body: "[]" }] }), "needs string key and url"],
+    ["an entry with neither body nor error", JSON.stringify({ sources: [{ key: "k", url: "u" }] }), "needs either body or error"],
+  ])("400s %s", async (_label, body, expected) => {
+    const res = await postIngest(body);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain(expected);
+  });
+
+  it("rejects a non-POST /api/ingest with 405", async () => {
+    const res = await SELF.fetch("https://satvis.space/api/ingest");
+    expect(res.status).toBe(405);
+    expect(res.headers.get("Allow")).toBe("POST");
+  });
+
+  // The token must gate the write before the body is even parsed — an open
+  // ingest would let anyone replace every group's records with anything.
+  it.each([
+    ["no Authorization header", {}],
+    ["a wrong token", { Authorization: "Bearer not-the-token" }],
+  ])("rejects POST /api/ingest with %s", async (_label, headers) => {
+    await seedGroup("weather", ommArray(["GOOD SAT", 1]));
+    const res = await postIngest(
+      ingestBundle(() => [{ OBJECT_NAME: "EVIL SAT", NORAD_CAT_ID: 666 }]),
+      headers as Record<string, string>,
+    );
+    expect(res.status).toBe(401);
+    expect((await idsOf("weather")).length).toBe(1);
+  });
+
+  it("fails closed with 503 when REFRESH_TOKEN is not configured", async () => {
+    const configured = secretEnv.REFRESH_TOKEN;
+    delete secretEnv.REFRESH_TOKEN;
+    try {
+      const res = await postIngest(ingestBundle(() => [{ OBJECT_NAME: "SAT", NORAD_CAT_ID: 5 }]));
       expect(res.status).toBe(503);
     } finally {
       secretEnv.REFRESH_TOKEN = configured;

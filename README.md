@@ -84,6 +84,10 @@ Locally the token comes from `worker/.dev.vars` (copy `worker/.dev.vars.example`
 deployed it is a Worker secret, set with `wrangler secret put REFRESH_TOKEN`.
 With no secret set the endpoint returns 503 rather than running unauthenticated.
 
+`POST /api/ingest` takes the same token and does the same work on payloads the
+caller already downloaded, for when CelesTrak is refusing Cloudflare's egress
+(see [Downloading off-Worker](#downloading-off-worker)).
+
 ## Satellite data
 
 Element sets come from [CelesTrak](https://celestrak.org) as OMM JSON
@@ -95,6 +99,27 @@ Element sets come from [CelesTrak](https://celestrak.org) as OMM JSON
 - `GET /api/gp/<group>.json` — one group's element sets (OMM array, with
   per-satellite metadata attached; see below).
 - `GET /api/groups.json` — the group index (also the frontend's worker probe).
+
+### Downloading off-Worker
+
+CelesTrak firewalls by IP, and Cloudflare's Worker egress addresses are shared
+across tenants — so the cron's own fetches can start coming back as `HTTP 522`
+on every source while the same URLs answer fine from anywhere else. When that
+happens, groups keep serving their last-known-good copy and go stale.
+
+`pnpm --filter satvis-worker push-gp` is the way out. It runs the worker's own
+download logic from wherever you run it (a CI runner, a VPS, a laptop) and POSTs
+the payloads to `POST /api/ingest`, which runs the unchanged evaluate/enrich/store
+pass on them. Only the download moves; the worker still owns the config, the
+evaluation and KV.
+
+```
+SATVIS_REFRESH_TOKEN=<token> pnpm --filter satvis-worker push-gp
+```
+
+`SATVIS_INGEST_URL` overrides the target (default `https://satvis.space/api/ingest`).
+Keep the cadence at or above the cron's 6 h — a run still costs ~7 MB against
+CelesTrak's 250 MB/day per-IP budget, just from a different IP.
 
 Configuration is **declarative** YAML, not shell scripts. Each config file
 contributes two independent sections: `groups` (what is served, as which unit) and
