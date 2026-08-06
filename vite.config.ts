@@ -42,7 +42,8 @@ export default defineConfig({
   base: "",
   build: {
     sourcemap: true,
-    chunkSizeWarningLimit: 1000,
+    // Cesium is 4.2 MB minified (Scene 49%, Core 19%, DataSources 9%)
+    chunkSizeWarningLimit: 4500,
     rolldownOptions: {
       input: {
         index: fileURLToPath(new URL("index.html", import.meta.url)),
@@ -215,7 +216,15 @@ export default defineConfig({
       },
     }),
   ],
-  resolve: { tsconfigPaths: true },
+  resolve: {
+    tsconfigPaths: true,
+    alias: [
+      // Cuts satellite.js's Emscripten bundles before Vite reads them: unused here,
+      // and the source of fifteen "externalized for browser compatibility" warnings.
+      { find: "#wasm-single-thread", replacement: fileURLToPath(new URL("src/modules/util/satelliteWasmRuntime.ts", import.meta.url)) },
+      { find: "#wasm-multi-thread", replacement: fileURLToPath(new URL("src/modules/util/satelliteWasmRuntime.ts", import.meta.url)) },
+    ],
+  },
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],

@@ -1,10 +1,11 @@
 import { Cartesian3, JulianDate, Matrix3, Transforms } from "@cesium/engine";
 import dayjs from "dayjs";
+import { propagate } from "satellite.js";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import Orbit from "./Orbit";
 import { SampledTrajectory } from "./SampledTrajectory";
-import { parseGpPayload, type GpRecord } from "./util/gp";
+import { createSatrec, parseGpPayload, type GpRecord } from "./util/gp";
 import { InlineSampleSource, type SampleChunk, type TrajectorySampler } from "./util/sampleSource";
 
 const TLE = "ISS (ZARYA)\n1 25544U 98067A   18342.69352573  .00002284  00000-0  41838-4 0  9992\n2 25544  51.6407 229.0798 0005166 124.8351 329.3296 15.54069892145658";
@@ -427,6 +428,49 @@ describe("SampledTrajectory", () => {
       expect(notified).toBe(1);
       expect(source.stats.requests).toBe(0);
       teardown();
+    });
+  });
+
+  describe("fixed-frame samples", () => {
+    // The rotation out of TEME is the sampler's own arithmetic rather than a Cesium
+    // call (see temeToFixed, sgp4Worker). temeToFixed.test.ts pins the angle against
+    // Cesium; this pins the whole path end to end, from a satrec this test propagates
+    // itself to what a consumer reads back — so neither a sign flip nor a chunk
+    // handled at the wrong instant can pass by agreeing with itself.
+    //
+    // Deliberately independent of where the rotation happens: it reconstructs the
+    // expected position from the element set, not from anything the chunk carries.
+    test("are Cesium's own rotation of an independently propagated TEME", async () => {
+      const { trajectory, sampler } = issTrajectory();
+      const startMs = JulianDate.toDate(T0).getTime();
+      const chunk = (await sampler.samples(startMs, startMs + 30 * 60_000)) as SampleChunk;
+      expect(chunk).toBeDefined();
+      const samples = Math.floor(chunk.positionsFixed.length / 3);
+      expect(samples).toBeGreaterThan(10);
+
+      trajectory.adopt(chunk);
+
+      const satrec = createSatrec(issRecord());
+      const { anchorEpochMs, firstIndex, startEpochMs, stepSeconds } = chunk;
+      const stepMs = stepSeconds * 1000;
+      // Truncated for the same reason the sampler truncates: this is where the grid
+      // files sample zero, whatever the anchor's fractional millisecond says.
+      const anchor = JulianDate.fromDate(new Date(anchorEpochMs));
+      let worst = 0;
+      for (let index = 0; index < samples; index += 1) {
+        const propagated = propagate(satrec, new Date(startEpochMs + index * stepMs));
+        const teme = propagated?.position;
+        expect(teme).toBeTruthy();
+        const temeMetres = new Cartesian3((teme as { x: number }).x * 1000, (teme as { y: number }).y * 1000, (teme as { z: number }).z * 1000);
+        const time = JulianDate.addSeconds(anchor, (firstIndex + index) * stepSeconds, new JulianDate());
+        const expected = Matrix3.multiplyByVector(Transforms.computeTemeToPseudoFixedMatrix(time, new Matrix3()), temeMetres, new Cartesian3());
+        const actual = trajectory.position(time);
+        expect(actual).toBeDefined();
+        worst = Math.max(worst, Cartesian3.distance(expected, actual as Cartesian3));
+      }
+      // Millimetres, against positions in the millions of metres. A wrong rotation
+      // is kilometres out, so this is a wide margin around an exact expectation.
+      expect(worst).toBeLessThan(1e-3);
     });
   });
 });
