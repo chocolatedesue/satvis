@@ -18,6 +18,7 @@ import "./util/CesiumSampledPositionRawValueAccess";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
 import { GridPositionProperty } from "./util/GridPositionProperty";
 import type { SampleChunk, TrajectorySampler } from "./util/sampleSource";
+import { fixedRotationAt, type FixedRotation } from "./util/temeToFixed";
 import { trajectoryWindow } from "./util/trajectoryWindow";
 
 // Cesium 1.143 widened the InterpolationAlgorithm interface (type/interpolate) without
@@ -461,12 +462,16 @@ export class SampledTrajectory {
   /**
    * Turn one chunk of TEME samples into sampled positions.
    *
-   * The frame transforms happen here rather than in the sampler: they are Cesium's,
-   * they need IAU data a worker has no business loading a second copy of, and they
-   * were measured at 43% of this work against 57% for the propagation that did
-   * move. Refused samples are skipped, not re-propagated — retrying would run the
-   * same propagator on the same instant and fail the same way, and a sampled
-   * position property interpolates across the gap.
+   * Only the *inertial* leg is Cesium's now. TEME to pseudo-fixed is a rotation
+   * about Z by one angle, computed here from epoch milliseconds (see temeToFixed) —
+   * so the common case allocates nothing per sample and calls into Cesium not at
+   * all, where it used to build a JulianDate, a Matrix3 and a Cartesian3 for each of
+   * 241 samples. ICRF still needs `computeFixedToIcrfMatrix` and the IAU data behind
+   * it, which is why that one is charged only to the trajectories that ask for it.
+   *
+   * Refused samples are skipped, not re-propagated — retrying would run the same
+   * propagator on the same instant and fail the same way, and a sampled position
+   * property interpolates across the gap.
    */
   #applyChunk(chunk: SampleChunk): void {
     const data = this.#data;
@@ -476,42 +481,76 @@ export class SampledTrajectory {
     const sampleCount = Math.floor(chunk.teme.length / 3);
     const refused = chunk.refusedIndices.length > 0 ? new Set(chunk.refusedIndices) : undefined;
     const inertialProperty = data.inertial;
+    // Times and Cartesian3s are built only for the sampled properties that will
+    // read them. Most satellites have neither — the grid stores three doubles a
+    // sample and derives its times from the anchor — so for those this loop
+    // allocates one buffer and nothing else. Refusals opt in as well, because the
+    // gap branch below hands this chunk to a property it has just created.
+    const wantsPairs = inertialProperty !== undefined || data.fixed !== undefined || refused !== undefined;
+    const anchor = wantsPairs ? SampledTrajectory.#chunkAnchor(chunk) : undefined;
     const times: JulianDate[] = [];
     const positionsFixed: Cartesian3[] = [];
     const positionsInertial: Cartesian3[] = [];
-    const anchor = SampledTrajectory.#chunkAnchor(chunk);
-    // One scratch for the TEME position: it is read by the transform and never
-    // kept, so allocating a Cartesian3 per sample was 1.2 million objects that
-    // existed to be thrown away.
-    const teme = new Cartesian3();
+    const rotation: FixedRotation = { cos: 1, sin: 0 };
+    const stepMs = chunk.stepSeconds * 1000;
+    // Truncated, because that is where the samples actually sit. The anchor reaches
+    // a JulianDate only through `Date`, which holds whole milliseconds, so both the
+    // grid and `#sampleTimeFrom` place sample zero at the truncated instant. Rotating
+    // at the untruncated one instead put the fixed frame up to a millisecond of Earth
+    // rotation out of step with the time the sample is filed under — measured at
+    // 4.3 cm, silent, and wrong in a way only a comparison against Cesium catches.
+    const anchorMs = Math.trunc(chunk.anchorEpochMs);
+    const fixedFlat = new Float64Array(sampleCount * 3);
+    let kept = 0;
 
     for (let index = 0; index < sampleCount; index += 1) {
       if (refused?.has(index)) {
         continue;
       }
       const offset = index * 3;
-      teme.x = chunk.teme[offset] as number;
-      teme.y = chunk.teme[offset + 1] as number;
-      teme.z = chunk.teme[offset + 2] as number;
-      const time = SampledTrajectory.#sampleTimeFrom(anchor, chunk, index);
-      const framed = this.#toFrames(time, teme, !!inertialProperty);
-      if (!framed) {
-        continue;
+      const x = chunk.teme[offset] as number;
+      const y = chunk.teme[offset + 1] as number;
+      const z = chunk.teme[offset + 2] as number;
+      fixedRotationAt(anchorMs + (chunk.firstIndex + index) * stepMs, rotation);
+      const fixedX = rotation.cos * x + rotation.sin * y;
+      const fixedY = rotation.cos * y - rotation.sin * x;
+
+      if (anchor) {
+        const time = SampledTrajectory.#sampleTimeFrom(anchor, chunk, index);
+        const positionFixed = new Cartesian3(fixedX, fixedY, z);
+        if (inertialProperty) {
+          const fixedToIcrf = Transforms.computeFixedToIcrfMatrix(time);
+          if (!defined(fixedToIcrf)) {
+            // Reported once per trajectory rather than once per sample: a window is
+            // a couple of hundred of these and the cause is the same for all of them.
+            if (data.valid) {
+              console.error("Reference frame transformation data failed to load");
+              data.valid = false;
+            }
+            continue;
+          }
+          positionsInertial.push(Matrix3.multiplyByVector(fixedToIcrf, positionFixed, new Cartesian3()));
+        }
+        times.push(time);
+        positionsFixed.push(positionFixed);
       }
-      times.push(time);
-      positionsFixed.push(framed.positionFixed);
-      if (inertialProperty) positionsInertial.push(framed.positionInertial);
+
+      const at = kept * 3;
+      fixedFlat[at] = fixedX;
+      fixedFlat[at + 1] = fixedY;
+      fixedFlat[at + 2] = z;
+      kept += 1;
     }
 
-    if (times.length === 0) {
+    if (kept === 0) {
       return;
     }
     // The grid first, and only then the sampled property: a gap here forces the
     // sampled property into being, and its backfill reads the grid as it was
     // before this chunk. Any shortfall counts as a gap, not just a refusal — a
-    // missing frame transform drops a sample the same way, and the grid's indices
+    // missing ICRF transform drops a sample the same way, and the grid's indices
     // only line up with the chunk's when nothing was dropped.
-    this.#addToGrid(chunk, positionsFixed, positionsFixed.length !== sampleCount);
+    this.#addToGrid(chunk, kept === sampleCount ? fixedFlat : fixedFlat.subarray(0, kept * 3), kept !== sampleCount);
     // Added at once: a sorted array avoids a search per sample.
     this.#data?.fixed?.addSamples(times, positionsFixed);
     inertialProperty?.addSamples(times, positionsInertial);
@@ -527,7 +566,7 @@ export class SampledTrajectory {
    * permanent, because the samples that would have filled the hole are not coming.
    * The next refresh rebinds the entities (see updatedSampledPositionForComponents).
    */
-  #addToGrid(chunk: SampleChunk, positionsFixed: Cartesian3[], hadGaps: boolean): void {
+  #addToGrid(chunk: SampleChunk, fixedFlat: Float64Array, hadGaps: boolean): void {
     if (!this.#gridUsable) {
       return;
     }
@@ -547,17 +586,11 @@ export class SampledTrajectory {
     if (!this.#gridFixed.isOnGrid(chunk.anchorEpochMs, chunk.stepSeconds)) {
       this.#gridFixed.reset(chunk.anchorEpochMs, chunk.stepSeconds);
     }
-    const flat = new Float64Array(positionsFixed.length * 3);
-    for (const [index, position] of positionsFixed.entries()) {
-      flat[index * 3] = position.x;
-      flat[index * 3 + 1] = position.y;
-      flat[index * 3 + 2] = position.z;
-    }
-    if (!this.#gridFixed.add(chunk.firstIndex, flat)) {
+    if (!this.#gridFixed.add(chunk.firstIndex, fixedFlat)) {
       // Not contiguous with what is held — a clock jump landing between windows.
       // Start the grid again from this chunk rather than leave a hole in it.
       this.#gridFixed.reset(chunk.anchorEpochMs, chunk.stepSeconds);
-      this.#gridFixed.add(chunk.firstIndex, flat);
+      this.#gridFixed.add(chunk.firstIndex, fixedFlat);
     }
   }
 
@@ -667,34 +700,5 @@ export class SampledTrajectory {
       inertial: this.#wantsInertial ? SampledTrajectory.#createProperty(ReferenceFrame.INERTIAL) : undefined,
       valid: true,
     };
-  }
-
-  /**
-   * TEME into the frames the scene draws in.
-   *
-   * Undefined when the transform data is not there, which drops the sample rather
-   * than storing a wrong one — multiplying by an undefined matrix throws a
-   * DeveloperError from inside Cesium's render loop. `withInertial` gates the ICRF
-   * half and with it the need for ICRF data at all: a scene drawing points and
-   * nothing else does not need it, so its absence is no longer a reason to
-   * invalidate a trajectory.
-   */
-  #toFrames(timestamp: JulianDate, positionInertialTEME: Cartesian3, withInertial: boolean): { positionFixed: Cartesian3; positionInertial: Cartesian3 } | undefined {
-    const temeToFixed = Transforms.computeTemeToPseudoFixedMatrix(timestamp);
-    const fixedToIcrf = withInertial ? Transforms.computeFixedToIcrfMatrix(timestamp) : undefined;
-    if (!defined(temeToFixed) || (withInertial && !defined(fixedToIcrf))) {
-      // Reported once per trajectory rather than once per sample: a window is a
-      // couple of hundred of these and the cause is the same for all of them.
-      if (this.#data?.valid) {
-        console.error("Reference frame transformation data failed to load");
-        this.#data.valid = false;
-      }
-      return undefined;
-    }
-
-    const positionFixed = Matrix3.multiplyByVector(temeToFixed, positionInertialTEME, new Cartesian3());
-    const positionInertialICRF = fixedToIcrf ? Matrix3.multiplyByVector(fixedToIcrf, positionFixed, new Cartesian3()) : Cartesian3.ZERO;
-
-    return { positionFixed, positionInertial: positionInertialICRF };
   }
 }

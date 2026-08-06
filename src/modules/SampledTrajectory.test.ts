@@ -429,4 +429,39 @@ describe("SampledTrajectory", () => {
       teardown();
     });
   });
+
+  describe("fixed-frame samples", () => {
+    // The rotation into the fixed frame is our own arithmetic rather than a Cesium
+    // call (see temeToFixed). temeToFixed.test.ts pins the angle against Cesium; this
+    // pins the whole path, so a transposed term or a sign flip in #applyChunk cannot
+    // pass by agreeing with itself.
+    test("are Cesium's own rotation of the chunk's TEME", async () => {
+      const { trajectory, sampler } = issTrajectory();
+      const startMs = JulianDate.toDate(T0).getTime();
+      const chunk = await sampler.samples(startMs, startMs + 30 * 60_000);
+      expect(chunk).toBeDefined();
+      const samples = Math.floor((chunk as SampleChunk).teme.length / 3);
+      expect(samples).toBeGreaterThan(10);
+
+      trajectory.adopt(chunk as SampleChunk);
+
+      const { anchorEpochMs, firstIndex, stepSeconds, teme } = chunk as SampleChunk;
+      const anchor = JulianDate.fromDate(new Date(anchorEpochMs));
+      let worst = 0;
+      for (let index = 0; index < samples; index += 1) {
+        const time = JulianDate.addSeconds(anchor, (firstIndex + index) * stepSeconds, new JulianDate());
+        const expected = Matrix3.multiplyByVector(
+          Transforms.computeTemeToPseudoFixedMatrix(time, new Matrix3()),
+          new Cartesian3(teme[index * 3] as number, teme[index * 3 + 1] as number, teme[index * 3 + 2] as number),
+          new Cartesian3(),
+        );
+        const actual = trajectory.position(time);
+        expect(actual).toBeDefined();
+        worst = Math.max(worst, Cartesian3.distance(expected, actual as Cartesian3));
+      }
+      // Millimetres, against positions in the millions of metres. A wrong rotation
+      // is kilometres out, so this is a wide margin around an exact expectation.
+      expect(worst).toBeLessThan(1e-3);
+    });
+  });
 });
