@@ -137,6 +137,25 @@ interface WorkerLane {
  * Bounded rather than greedy, because two things already want the cores this would
  * take: the main thread, which is building entities and rendering throughout, and
  * the pass predictor's own worker.
+ *
+ * **This stops paying somewhere between 5,000 satellites and 10,000.** `buildMs`
+ * medians against no pool: 27 → 19 at 100, 131 → 60 at 1,000, 562 → 321 at 5,000,
+ * and 1,508 → 993 at 10,000 — where the propagation phases alone reach 934. Past
+ * about five thousand the build stops waiting on SGP4 and starts waiting on entity
+ * creation against the per-frame budget, and no amount of propagation throughput
+ * moves a main-thread bound. Don't read the 5,000 figure as a slope.
+ *
+ * **It is also worth nothing without the worker-side rotation, and the reverse.**
+ * That rotation (see sgp4Worker) measured as an 11% *regression* on its own, by
+ * lengthening the worker's critical path. But with the rotation left on the main
+ * thread, a pool is worse than no pool at all at 10,000 — 1,295 ms against 988 —
+ * because four workers then feed the main thread faster than it can ingest. The
+ * pair is the unit; neither half is worth judging alone.
+ *
+ * Four rather than two, measured over two interleaved passes: 4 is better on every
+ * frame-time column at 5,000 and 10,000 and 17% better on `buildMs` at 1,000, and
+ * 2 wins only `buildMs` at 10,000 by 9%. An earlier reading that 4 hurt tail
+ * latency did not survive replication.
  */
 const MAX_WORKERS = 4;
 

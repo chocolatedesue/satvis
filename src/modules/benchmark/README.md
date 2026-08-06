@@ -168,6 +168,18 @@ And derived, across steps:
   propagation; it now differences `tickMs` and prints `cpuMs` beside it for
   contrast.
 
+  **`tickMs` has the same blind spot one step further out, and this table inherits
+  it.** Since propagation moved to a worker, the samples come back in `message`
+  events, and what the main thread does with them — resolving the request and
+  filing the chunk — runs in its own task, inside neither `clock.tick()` nor
+  `preUpdate`→`postRender`. So it lands in `frameMs` and in nothing else.
+  Measured at 5,000 satellites and ×100000: `frameMs` 106.1, of which `cpuMs` 0.86,
+  `tickMs` 3.44 and `gpuMs` 17.8 — about 85 ms attributed to nothing, at 9.4 fps,
+  where it cannot be idle waiting for vsync. Below roughly ×1000 the residue is
+  small and this table reads true; above it, treat the figure as a floor and read
+  `frameMs` beside it. Identifying the residue needs a profile rather than another
+  sweep — the reply handler is the candidate, not a confirmed cause.
+
 - **drift** — the first step, re-run as the last step, against its original.
   A sweep is minutes long and the app it measures does not hold still: shader
   caches fill, the JIT settles, the heap grows. This is the only figure in the run
@@ -282,6 +294,12 @@ with `cacheId`. Both would have to change in one release. PostHog under
   marker of our own would sit behind them and miss the work it was there to find.
   Read the pair together — `cpuMs` well under `tickMs` is a propagation-bound
   scene, and the reverse is a draw-bound one.
+
+  Neither covers the whole main thread. Worker replies are handled in their own
+  task, outside both regions, so `cpuMs + tickMs` can sit far below `frameMs` on a
+  scene that is nonetheless main-thread bound — see the propagation table above for
+  the measurement and the bound on when it matters.
+
 - **The derived tables fit against `cpuMs`, which is main-thread time only, and
   this app is usually GPU-bound.** Measured on an M4 Pro at 2560×1440 with zero
   satellites: `frameMs` 14.3, `cpuMs` 0.74 — the CPU is 5% of the frame, and the
