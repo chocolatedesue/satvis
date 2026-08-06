@@ -215,7 +215,15 @@ export default defineConfig({
       },
     }),
   ],
-  resolve: { tsconfigPaths: true },
+  resolve: {
+    tsconfigPaths: true,
+    alias: [
+      // Cuts satellite.js's Emscripten bundles before Vite reads them: unused here,
+      // and the source of fifteen "externalized for browser compatibility" warnings.
+      { find: "#wasm-single-thread", replacement: fileURLToPath(new URL("src/modules/util/satelliteWasmRuntime.ts", import.meta.url)) },
+      { find: "#wasm-multi-thread", replacement: fileURLToPath(new URL("src/modules/util/satelliteWasmRuntime.ts", import.meta.url)) },
+    ],
+  },
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
