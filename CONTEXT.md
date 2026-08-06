@@ -46,7 +46,10 @@ discussion; sharpen them here when they drift.
   meaningful together: none of them can be validated without the other two
   (`src/modules/satelliteActivation.ts`).
 - **Ground station**: a named position on the ground that passes are computed
-  against.
+  against. They are ordered, and the order is load-bearing in one place: the
+  first is the observer. That is a fact about the list rather than about any
+  station, which is why the ground station panel is a list in order, editable in
+  place, with the first one marked.
 - **Tracked satellite**: the satellite the camera follows. At most one, and the
   only value the globe reports back rather than merely receiving. Mutually
   exclusive with the sky view, which owns the camera itself: while the sky view

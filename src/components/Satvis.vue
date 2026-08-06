@@ -65,20 +65,7 @@
       </div>
       <div v-show="menu.gs" class="toolbarSwitches">
         <div class="toolbarTitle">Ground station</div>
-        <label class="toolbarSwitch">
-          <input v-model="pickMode" type="checkbox" />
-          <span class="slider"></span>
-          Pick on globe
-        </label>
-        <label class="toolbarSwitch">
-          <input type="button" :disabled="locating" @click="void locate()" />
-          <span v-if="locating" class="toolbarSpinner"></span>
-          Set from geolocation
-        </label>
-        <label class="toolbarSwitch">
-          <input type="button" @click="cc.sats.focusGroundStation()" />
-          Focus
-        </label>
+        <ground-station-list />
         <div class="toolbarTitle">Overpass calculation</div>
         <label class="toolbarSwitch">
           <input v-model="overpassMode" type="radio" value="elevation" />
@@ -310,7 +297,6 @@ import { storeToRefs } from "pinia";
 import { computed, defineAsyncComponent, onMounted, reactive, ref } from "vue";
 
 import { useController } from "../composables/useController";
-import { useGeolocation } from "../composables/useGeolocation";
 import { compassAvailable, useSkyCompass } from "../composables/useSkyCompass";
 import { layerProvider } from "../config/layers";
 import { MSAA_RATES, pixelRatiosFor } from "../config/rendering";
@@ -322,6 +308,7 @@ import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import AboutDialog from "./AboutDialog.vue";
 import EntityInfoPanel from "./EntityInfoPanel.vue";
+import GroundStationList from "./GroundStationList.vue";
 import SatelliteBrowser from "./SatelliteBrowser.vue";
 import SkyHud from "./SkyHud.vue";
 
@@ -345,7 +332,7 @@ const menu = reactive<Record<MenuKey, boolean>>({
 const showUI = ref(true);
 
 const cesiumStore = useCesiumStore();
-const { layers, terrainProvider, surfaceModel, starMap, sceneMode, cameraMode, pixelRatio, msaa, showFps, showBenchmark, requestRenderMode, pickMode } = storeToRefs(cesiumStore);
+const { layers, terrainProvider, surfaceModel, starMap, sceneMode, cameraMode, pixelRatio, msaa, showFps, showBenchmark, requestRenderMode } = storeToRefs(cesiumStore);
 
 // Which star maps the Map menu offers. Starts at the one that cannot be missing
 // so the group is never empty, and widens once the probes answer — a one-byte
@@ -430,8 +417,6 @@ function toggleOverlay(name: string, enabled: boolean): void {
 
 const satStore = useSatStore();
 const { enabledComponents, overpassMode } = storeToRefs(satStore);
-
-const { pending: locating, locate } = useGeolocation(cc);
 
 const compassOffered = compassAvailable();
 const { active: compassActive, pending: compassPending, toggle: toggleCompass } = useSkyCompass(cc);
