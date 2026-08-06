@@ -9,6 +9,11 @@
 // The worker implementation batches: a synchronous burst of requests from the
 // build queue is coalesced onto one message by a microtask, so sixty-four
 // satellites cost one round trip rather than sixty-four, without costing a frame.
+//
+// It is also a small pool rather than one worker, because the build drains at the
+// speed of SGP4 and one thread of it is the ceiling. Which worker a satellite
+// belongs to is a pure function of its satnum and never changes — see `#laneFor`,
+// where the reasons that has to be true are the interesting part.
 
 import type { GpRecord } from "./gp";
 import { runCommand, SatrecCache, type Sgp4Chunk, type Sgp4Command, type Sgp4Request, type Sgp4Response } from "./sgp4Worker";
@@ -111,23 +116,71 @@ interface Pending {
   sendRecord: boolean;
 }
 
-export class WorkerSampleSource implements SampleSource {
-  #worker: Worker | undefined;
+/** One worker and the traffic bound for it. See `#laneFor`. */
+interface WorkerLane {
+  worker: Worker;
+  queued: Pending[];
+  /** In-flight batches, so replies can be correlated. */
+  inFlight: Map<number, Pending[]>;
+  /** Restarted by every reply from this worker. See WORKER_SILENCE_MS. */
+  silenceTimer: ReturnType<typeof setTimeout> | undefined;
+}
 
-  /** Set once the worker is given up on; every request goes inline from then on. */
+/**
+ * Ceiling on the pool.
+ *
+ * The build is worker-bound, measured rather than assumed: at 5,000 satellites a
+ * 4.8x cheaper main-thread ingest moved `buildMs` by 19%, and then moving 48 ms of
+ * rotation *into* the worker moved it back by 47. The queue drains at the speed of
+ * SGP4, which is what a pool splits.
+ *
+ * Bounded rather than greedy, because two things already want the cores this would
+ * take: the main thread, which is building entities and rendering throughout, and
+ * the pass predictor's own worker.
+ */
+const MAX_WORKERS = 4;
+
+/**
+ * Which lane a satnum belongs to. Exported for its test rather than for callers:
+ * the property worth pinning is that it is a pure function, and that is not
+ * observable from outside a pool whose workers the test environment has no way to
+ * start.
+ *
+ * FNV-1a rather than `Number(satnum) % laneCount`: satnums are usually numeric but
+ * nothing guarantees it, and a hash that only works on digits would quietly pile
+ * every non-numeric satellite onto one worker.
+ */
+export function laneIndexFor(satnum: string, laneCount: number): number {
+  if (laneCount <= 1) {
+    return 0;
+  }
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < satnum.length; index += 1) {
+    hash ^= satnum.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0) % laneCount;
+}
+
+function poolSize(): number {
+  const cores = typeof navigator === "object" && navigator ? (navigator.hardwareConcurrency ?? 0) : 0;
+  if (!Number.isFinite(cores) || cores <= 0) {
+    // Unknown concurrency is answered with the old behaviour rather than a guess.
+    return 1;
+  }
+  return Math.max(1, Math.min(MAX_WORKERS, cores - 2));
+}
+
+export class WorkerSampleSource implements SampleSource {
+  #lanes: WorkerLane[] = [];
+
+  /** Set once the pool is given up on; every request goes inline from then on. */
   #inline: InlineSampleSource | undefined;
 
+  /** Unique across lanes, so a reply is found in its own lane's map and nowhere else. */
   #nextBatchId = 1;
 
-  #queued: Pending[] = [];
-
   #flushScheduled = false;
-
-  /** In-flight batches, so replies can be correlated. */
-  #inFlight = new Map<number, Pending[]>();
-
-  /** One timer for the whole worker, restarted by every reply. See WORKER_SILENCE_MS. */
-  #silenceTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Satnums whose record has been sent at least once. See `record` in Sgp4SampleCommand. */
   #recordSent = new Set<string>();
@@ -140,12 +193,38 @@ export class WorkerSampleSource implements SampleSource {
       return;
     }
     try {
-      this.#worker = new Worker(new URL("./sgp4Worker.ts", import.meta.url), { type: "module" });
-      this.#worker.addEventListener("message", (event: MessageEvent<Sgp4Response>) => this.#accept(event.data));
-      this.#worker.addEventListener("error", (event) => this.#giveUp(event.message || "worker error"));
+      for (let index = 0; index < poolSize(); index += 1) {
+        const lane: WorkerLane = {
+          worker: new Worker(new URL("./sgp4Worker.ts", import.meta.url), { type: "module" }),
+          queued: [],
+          inFlight: new Map(),
+          silenceTimer: undefined,
+        };
+        lane.worker.addEventListener("message", (event: MessageEvent<Sgp4Response>) => this.#accept(lane, event.data));
+        lane.worker.addEventListener("error", (event) => this.#giveUp(event.message || "worker error"));
+        this.#lanes.push(lane);
+      }
     } catch (error) {
       this.#giveUp(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  /**
+   * Which worker owns a satellite. A pure function of the satnum, and that is
+   * load-bearing in three separate places rather than a tidiness preference:
+   *
+   * - **The satrec cache is per worker.** Scattering one satellite's requests
+   *   across the pool would build a satrec for it in every worker it touched —
+   *   `sgp4init` and its memory multiplied by the pool size, for one satellite.
+   * - **`#recordSent` is one set for the whole pool.** It records that *a* worker
+   *   has the element set, which is only the same statement as *the* worker having
+   *   it while the mapping holds. Round-robin would answer the first request to
+   *   each new worker with `unknown` and pay a round trip to learn it.
+   * - **Eviction stays meaningful.** MAX_CACHED_SATRECS bounds a worker's own
+   *   satellites rather than a shifting fraction of all of them.
+   */
+  #laneFor(satnum: string): WorkerLane | undefined {
+    return this.#lanes[laneIndexFor(satnum, this.#lanes.length)];
   }
 
   samplerFor(satnum: string, record: GpRecord): TrajectorySampler {
@@ -153,19 +232,36 @@ export class WorkerSampleSource implements SampleSource {
       samples: (fromEpochMs, toEpochMs) => {
         this.stats.requests += 1;
         if (this.#inline) {
-          this.stats.inlineFallbacks += 1;
-          return this.#inline.samplerFor(satnum, record).samples(fromEpochMs, toEpochMs);
+          return this.#inlineSamples(satnum, record, fromEpochMs, toEpochMs);
         }
-        // The record only goes on the wire when the worker cannot be assumed to
-        // hold a satrec for this satellite yet.
+        const lane = this.#laneFor(satnum);
+        if (!lane) {
+          // Not reachable while the pool is up, since every satnum maps to a lane.
+          // A pool that emptied without giving up would otherwise drop the request
+          // on the floor and leave the caller waiting on a promise nothing settles.
+          this.#giveUp("no propagation worker");
+          return this.#inlineSamples(satnum, record, fromEpochMs, toEpochMs);
+        }
+        // The record only goes on the wire when this satellite's worker cannot be
+        // assumed to hold a satrec for it yet.
         const sendRecord = !this.#recordSent.has(satnum);
         this.#recordSent.add(satnum);
         return new Promise<SampleChunk | undefined>((resolve) => {
-          this.#queued.push({ resolve, satnum, fromEpochMs, toEpochMs, record, sendRecord });
+          lane.queued.push({ resolve, satnum, fromEpochMs, toEpochMs, record, sendRecord });
           this.#schedule();
         });
       },
     };
+  }
+
+  /** Every path that has stopped using the pool funnels through here. */
+  #inlineSamples(satnum: string, record: GpRecord, fromEpochMs: number, toEpochMs: number): Promise<SampleChunk | undefined> {
+    const inline = this.#inline;
+    if (!inline) {
+      return Promise.resolve(undefined);
+    }
+    this.stats.inlineFallbacks += 1;
+    return inline.samplerFor(satnum, record).samples(fromEpochMs, toEpochMs);
   }
 
   /**
@@ -185,52 +281,60 @@ export class WorkerSampleSource implements SampleSource {
   }
 
   #flush(): void {
-    const queued = this.#queued;
-    this.#queued = [];
-    if (queued.length === 0 || !this.#worker) {
-      return;
+    for (const lane of this.#lanes) {
+      const queued = lane.queued;
+      if (queued.length === 0) {
+        continue;
+      }
+      lane.queued = [];
+      for (let offset = 0; offset < queued.length; offset += MAX_COMMANDS_PER_MESSAGE) {
+        const pending = queued.slice(offset, offset + MAX_COMMANDS_PER_MESSAGE);
+        const batchId = this.#nextBatchId++;
+        const commands: Sgp4Command[] = pending.map((item) =>
+          item.sendRecord
+            ? { kind: "sample", satnum: item.satnum, fromEpochMs: item.fromEpochMs, toEpochMs: item.toEpochMs, record: item.record }
+            : { kind: "sample", satnum: item.satnum, fromEpochMs: item.fromEpochMs, toEpochMs: item.toEpochMs },
+        );
+        const request: Sgp4Request = { batchId, commands };
+        lane.inFlight.set(batchId, pending);
+        // Not `Window.postMessage`, which is the one that takes a target origin. A
+        // worker's second parameter is a transfer list, and the fix this rule
+        // suggests throws: `postMessage(msg, self.location.origin)` fails overload
+        // resolution in Chrome. Verified rather than assumed.
+        // eslint-disable-next-line unicorn/require-post-message-target-origin
+        lane.worker.postMessage(request);
+      }
+      this.#armSilenceTimer(lane);
     }
-    for (let offset = 0; offset < queued.length; offset += MAX_COMMANDS_PER_MESSAGE) {
-      const pending = queued.slice(offset, offset + MAX_COMMANDS_PER_MESSAGE);
-      const batchId = this.#nextBatchId++;
-      const commands: Sgp4Command[] = pending.map((item) =>
-        item.sendRecord
-          ? { kind: "sample", satnum: item.satnum, fromEpochMs: item.fromEpochMs, toEpochMs: item.toEpochMs, record: item.record }
-          : { kind: "sample", satnum: item.satnum, fromEpochMs: item.fromEpochMs, toEpochMs: item.toEpochMs },
-      );
-      const request: Sgp4Request = { batchId, commands };
-      this.#inFlight.set(batchId, pending);
-      // Not `Window.postMessage`, which is the one that takes a target origin. A
-      // worker's second parameter is a transfer list, and the fix this rule
-      // suggests throws: `postMessage(msg, self.location.origin)` fails overload
-      // resolution in Chrome. Verified rather than assumed.
-      // eslint-disable-next-line unicorn/require-post-message-target-origin
-      this.#worker.postMessage(request);
-    }
-    this.#armSilenceTimer();
   }
 
-  /** Restart the silence timer while anything is outstanding, and stop it when nothing is. */
-  #armSilenceTimer(): void {
-    if (this.#silenceTimer !== undefined) {
-      clearTimeout(this.#silenceTimer);
-      this.#silenceTimer = undefined;
+  /**
+   * Restart one lane's silence timer while it has anything outstanding.
+   *
+   * Per lane, because an idle worker is legitimately silent: with one timer for the
+   * pool, a lane holding no work would be indistinguishable from a lane that had
+   * died, and the whole pool would be torn down on the first quiet stretch.
+   */
+  #armSilenceTimer(lane: WorkerLane): void {
+    if (lane.silenceTimer !== undefined) {
+      clearTimeout(lane.silenceTimer);
+      lane.silenceTimer = undefined;
     }
-    if (this.#inFlight.size === 0 || !this.#worker) {
+    if (lane.inFlight.size === 0 || this.#inline) {
       return;
     }
-    this.#silenceTimer = setTimeout(() => this.#giveUp(`worker said nothing for ${WORKER_SILENCE_MS} ms`), WORKER_SILENCE_MS);
+    lane.silenceTimer = setTimeout(() => this.#giveUp(`a worker said nothing for ${WORKER_SILENCE_MS} ms`), WORKER_SILENCE_MS);
   }
 
-  #accept(response: Sgp4Response): void {
-    const batch = this.#inFlight.get(response.batchId);
+  #accept(lane: WorkerLane, response: Sgp4Response): void {
+    const batch = lane.inFlight.get(response.batchId);
     if (!batch) {
       return;
     }
-    this.#inFlight.delete(response.batchId);
+    lane.inFlight.delete(response.batchId);
     // Proof of life, so the timer measures silence rather than the depth of the
     // queue this reply just came off.
-    this.#armSilenceTimer();
+    this.#armSilenceTimer(lane);
     response.replies.forEach((reply, index) => {
       const pending = batch[index];
       if (!pending) {
@@ -245,9 +349,10 @@ export class WorkerSampleSource implements SampleSource {
       }
       if (reply.kind === "unknown") {
         // The satrec was evicted, or a batch raced ahead of the one that would
-        // have created it. Re-queue with the record attached this time.
+        // have created it. Re-queue with the record attached this time — onto this
+        // same lane, which is where the mapping sends it anyway.
         this.#recordSent.delete(reply.satnum);
-        this.#queued.push({ ...pending, sendRecord: true });
+        lane.queued.push({ ...pending, sendRecord: true });
         this.#schedule();
         return;
       }
@@ -257,12 +362,18 @@ export class WorkerSampleSource implements SampleSource {
   }
 
   /**
-   * Stop using the worker and answer everything inline from here on.
+   * Stop using the pool and answer everything inline from here on.
    *
    * Loud, and once: a worker that fails to construct, throws on load or simply
    * stops answering would otherwise look like nothing more than a slow build, and
    * the app would keep working while quietly propagating everything on the thread
    * this exists to protect.
+   *
+   * All of them rather than the one that failed. A lane owns its satellites
+   * outright, so keeping the survivors would leave part of the catalog propagating
+   * off-thread and part of it inline, at different speeds, with the failure
+   * reported once and then invisible. One rule is easier to reason about than a
+   * pool that is partly alive, and the fallback is correct either way.
    */
   #giveUp(reason: string): void {
     if (this.#inline) {
@@ -270,22 +381,25 @@ export class WorkerSampleSource implements SampleSource {
     }
     console.error(`SGP4 worker unavailable (${reason}); propagating on the main thread instead`);
     this.#inline = new InlineSampleSource();
-    this.#worker?.terminate();
-    this.#worker = undefined;
-    if (this.#silenceTimer !== undefined) {
-      clearTimeout(this.#silenceTimer);
-      this.#silenceTimer = undefined;
-    }
-    for (const pending of this.#inFlight.values()) {
-      for (const item of pending) {
+    const lanes = this.#lanes;
+    this.#lanes = [];
+    for (const lane of lanes) {
+      lane.worker.terminate();
+      if (lane.silenceTimer !== undefined) {
+        clearTimeout(lane.silenceTimer);
+        lane.silenceTimer = undefined;
+      }
+      for (const pending of lane.inFlight.values()) {
+        for (const item of pending) {
+          this.#retryInline(item);
+        }
+      }
+      lane.inFlight.clear();
+      const queued = lane.queued;
+      lane.queued = [];
+      for (const item of queued) {
         this.#retryInline(item);
       }
-    }
-    this.#inFlight.clear();
-    const queued = this.#queued;
-    this.#queued = [];
-    for (const item of queued) {
-      this.#retryInline(item);
     }
   }
 
