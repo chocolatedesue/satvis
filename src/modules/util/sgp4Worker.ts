@@ -1,10 +1,14 @@
 // SGP4 propagation, off the main thread.
 //
-// Cesium-free on purpose: satellite.js and the GP record helpers, nothing else.
-// Cesium's frame transforms need IAU data it loads asynchronously, so a worker
-// producing fixed-frame positions would have to load and hold a second copy of
-// it. The transforms stay on the main thread and this returns raw TEME, which is
-// what satellite.js produces anyway.
+// Cesium-free on purpose: satellite.js, the GP record helpers and the fixed-frame
+// rotation, nothing else.
+//
+// Only one of the two frame transforms needs Cesium. Fixed to ICRF does — it rests
+// on IAU data loaded asynchronously — and it stays on the main thread, charged to
+// the trajectories that draw an orbit. TEME to pseudo-fixed does not: it is a
+// rotation about Z by the Greenwich hour angle, arithmetic and nothing more (see
+// temeToFixed). Doing it here means the reply carries positions the grid stores
+// as they arrive, so the main thread's share of a sample is a typed-array copy.
 //
 // Two properties are worth stating up front, because the rest of the design
 // follows from them.
@@ -26,6 +30,7 @@
 import * as satellitejs from "satellite.js";
 
 import { createSatrec, type GpRecord } from "./gp";
+import { fixedRotationAt, type FixedRotation } from "./temeToFixed";
 import { SAMPLES_PER_ORBIT } from "./trajectoryWindow";
 
 /** Julian date of the Unix epoch, for turning a satrec's epoch into milliseconds. */
@@ -79,11 +84,15 @@ export interface Sgp4Chunk {
   startEpochMs: number;
   stepSeconds: number;
   /**
-   * TEME positions in **metres**, three doubles per sample. Metres rather than
-   * the kilometres satellite.js returns, so the main thread does no per-sample
-   * arithmetic on the way in.
+   * Earth-fixed positions in **metres**, three doubles per sample.
+   *
+   * Already rotated out of TEME and already in metres rather than the kilometres
+   * satellite.js returns, so the main thread does no per-sample arithmetic on the
+   * way in — for a satellite with no sampled property this buffer goes straight
+   * into the grid. The frame is Cesium's *pseudo*-fixed: `computeTemeToPseudoFixedMatrix`
+   * reproduced exactly, not `eciToEcf`, which uses a different GMST formulation.
    */
-  teme: Float64Array;
+  positionsFixed: Float64Array;
   /**
    * Sample indices in this chunk that have no position, because the propagator
    * refused them — a decayed orbit, a deep-space case that diverges, a time far
@@ -149,10 +158,18 @@ export function sampleInterval(satrec: satellitejs.SatRec, satnum: string, fromE
   if (sampleCount <= 0) {
     // An interval narrower than one step falls between grid points. Legitimate,
     // and answered with nothing rather than with an off-grid sample.
-    return { satnum, anchorEpochMs: anchor, firstIndex, startEpochMs, stepSeconds, teme: new Float64Array(0), refusedIndices: [] };
+    return { satnum, anchorEpochMs: anchor, firstIndex, startEpochMs, stepSeconds, positionsFixed: new Float64Array(0), refusedIndices: [] };
   }
 
-  const teme = new Float64Array(sampleCount * 3);
+  // Truncated, because that is where the consumer files these samples. The anchor
+  // reaches a Cesium JulianDate only through `Date`, which holds whole
+  // milliseconds, so sample i sits at `trunc(anchor) + i·step` however precise the
+  // anchor itself is. Rotating at the untruncated instant instead leaves the frame
+  // up to a millisecond of Earth rotation out of step with the time the sample is
+  // filed under — 4.3 cm, and silent.
+  const rotationAnchorMs = Math.trunc(anchor);
+  const rotation: FixedRotation = { cos: 1, sin: 0 };
+  const positionsFixed = new Float64Array(sampleCount * 3);
   const refusedIndices: number[] = [];
   for (let index = 0; index < sampleCount; index += 1) {
     const propagated = satellitejs.propagate(satrec, new Date(startEpochMs + index * stepMs));
@@ -161,11 +178,14 @@ export function sampleInterval(satrec: satellitejs.SatRec, satnum: string, fromE
       refusedIndices.push(index);
       continue;
     }
-    teme[index * 3] = position.x * 1000;
-    teme[index * 3 + 1] = position.y * 1000;
-    teme[index * 3 + 2] = position.z * 1000;
+    const x = position.x * 1000;
+    const y = position.y * 1000;
+    fixedRotationAt(rotationAnchorMs + (firstIndex + index) * stepMs, rotation);
+    positionsFixed[index * 3] = rotation.cos * x + rotation.sin * y;
+    positionsFixed[index * 3 + 1] = rotation.cos * y - rotation.sin * x;
+    positionsFixed[index * 3 + 2] = position.z * 1000;
   }
-  return { satnum, anchorEpochMs: anchor, firstIndex, startEpochMs, stepSeconds, teme, refusedIndices };
+  return { satnum, anchorEpochMs: anchor, firstIndex, startEpochMs, stepSeconds, positionsFixed, refusedIndices };
 }
 
 /**
@@ -241,7 +261,7 @@ if (inWorkerScope) {
     const replies = commands.map((command) => runCommand(cache, command));
     const response: Sgp4Response = { batchId, replies };
     // Transferred, not copied.
-    const buffers = replies.filter((reply): reply is { kind: "chunk"; chunk: Sgp4Chunk } => reply.kind === "chunk").map((reply) => reply.chunk.teme.buffer);
+    const buffers = replies.filter((reply): reply is { kind: "chunk"; chunk: Sgp4Chunk } => reply.kind === "chunk").map((reply) => reply.chunk.positionsFixed.buffer);
     (self as unknown as { postMessage(message: Sgp4Response, transfer: Transferable[]): void }).postMessage(response, buffers);
   });
 }

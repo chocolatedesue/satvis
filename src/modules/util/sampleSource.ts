@@ -90,7 +90,7 @@ export class InlineSampleSource implements SampleSource {
           return Promise.resolve(undefined);
         }
         this.stats.chunks += 1;
-        this.stats.samples += reply.chunk.teme.length / 3;
+        this.stats.samples += reply.chunk.positionsFixed.length / 3;
         this.stats.refused += reply.chunk.refusedIndices.length;
         return Promise.resolve(reply.chunk);
       },
@@ -238,7 +238,7 @@ export class WorkerSampleSource implements SampleSource {
       }
       if (reply.kind === "chunk") {
         this.stats.chunks += 1;
-        this.stats.samples += reply.chunk.teme.length / 3;
+        this.stats.samples += reply.chunk.positionsFixed.length / 3;
         this.stats.refused += reply.chunk.refusedIndices.length;
         pending.resolve(reply.chunk);
         return;

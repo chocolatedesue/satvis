@@ -535,7 +535,7 @@ export class SatelliteManager {
         .then((chunk) => {
           // The scene may have been replaced while this was in flight; the queue
           // is the authority on whether this satellite is still wanted.
-          if (chunk && chunk.teme.length > 0 && this.#queue.some(([queued]) => queued === key)) {
+          if (chunk && chunk.positionsFixed.length > 0 && this.#queue.some(([queued]) => queued === key)) {
             this.#ready.push({ key, entry, chunk });
           }
         })
