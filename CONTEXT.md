@@ -113,7 +113,21 @@ discussion; sharpen them here when they drift.
   and stays pinned for the session, still advancing from that moment.
 - **Sampled trajectory**: the sliding sample window of a satellite's position
   (half an orbit back, 1.5 forward) in both the fixed and inertial frames,
-  kept fresh as time advances (`SampledTrajectory`).
+  kept fresh as time advances (`SampledTrajectory`). The two frames are not
+  produced alike: samples arrive already in the fixed frame, and the inertial
+  one is derived from them on demand — see **Pseudo-fixed**.
+- **Lane**: one propagation worker together with the traffic bound for it. A
+  satellite belongs to exactly one lane for the life of the session, decided by
+  a pure function of its satnum (`laneIndexFor`). That is what lets the pool
+  keep one satrec per satellite rather than one per satellite per worker, and
+  what makes a single record-sent set true for the whole pool
+  (`src/modules/util/sampleSource.ts`).
+- **Pseudo-fixed**: the Earth-fixed frame the samples are stored in — TEME
+  rotated about Z by the Greenwich hour angle, treating UTC as UT1. It needs no
+  loaded data, so the propagation worker produces it and the main thread stores
+  what it is sent. The true inertial frame (ICRF) does need Cesium's IAU data,
+  so it stays on the main thread and is charged only to the trajectories that
+  draw an orbit (`src/modules/util/temeToFixed.ts`).
 - **Group store**: the persistence seam of the GP refresh pipeline —
   readIndex/writeGroup/writeIndex — with a Workers KV adapter (cron/API) and
   a disk adapter (static `data/gp/` snapshot) (`worker/src/gp/store.ts`).

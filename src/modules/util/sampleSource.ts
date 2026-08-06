@@ -184,7 +184,8 @@ export function laneIndexFor(satnum: string, laneCount: number): number {
 function poolSize(): number {
   const cores = typeof navigator === "object" && navigator ? (navigator.hardwareConcurrency ?? 0) : 0;
   if (!Number.isFinite(cores) || cores <= 0) {
-    // Unknown concurrency is answered with the old behaviour rather than a guess.
+    // A single worker rather than a guess, which is also what every environment
+    // without `navigator` gets — the tests, and any worker-less host.
     return 1;
   }
   return Math.max(1, Math.min(MAX_WORKERS, cores - 2));
@@ -422,13 +423,8 @@ export class WorkerSampleSource implements SampleSource {
     }
   }
 
+  /** The same, for a request that was already promised an answer. */
   #retryInline(item: Pending): void {
-    const inline = this.#inline;
-    if (!inline) {
-      item.resolve(undefined);
-      return;
-    }
-    this.stats.inlineFallbacks += 1;
-    void inline.samplerFor(item.satnum, item.record).samples(item.fromEpochMs, item.toEpochMs).then(item.resolve);
+    void this.#inlineSamples(item.satnum, item.record, item.fromEpochMs, item.toEpochMs).then(item.resolve);
   }
 }

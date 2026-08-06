@@ -480,8 +480,8 @@ export class SampledTrajectory {
     if (!data) {
       return;
     }
-    const samples = chunk.positionsFixed;
-    const sampleCount = Math.floor(samples.length / 3);
+    const arrived = chunk.positionsFixed;
+    const sampleCount = Math.floor(arrived.length / 3);
     const refused = chunk.refusedIndices.length > 0 ? new Set(chunk.refusedIndices) : undefined;
     const inertialProperty = data.inertial;
 
@@ -489,16 +489,16 @@ export class SampledTrajectory {
     // chunk to a sampled property it has just created, which needs the pairs.
     if (inertialProperty === undefined && data.fixed === undefined && refused === undefined) {
       if (sampleCount > 0) {
-        this.#addToGrid(chunk, samples, false);
+        this.#addToGrid(chunk, arrived, false);
       }
       return;
     }
 
     const anchor = SampledTrajectory.#chunkAnchor(chunk);
-    const times: JulianDate[] = [];
-    const positionsFixed: Cartesian3[] = [];
-    const positionsInertial: Cartesian3[] = [];
-    const fixedFlat = new Float64Array(sampleCount * 3);
+    const sampledTimes: JulianDate[] = [];
+    const sampledPositions: Cartesian3[] = [];
+    const sampledInertial: Cartesian3[] = [];
+    const keptPositions = new Float64Array(sampleCount * 3);
     let kept = 0;
 
     for (let index = 0; index < sampleCount; index += 1) {
@@ -507,7 +507,7 @@ export class SampledTrajectory {
       }
       const offset = index * 3;
       const time = SampledTrajectory.#sampleTimeFrom(anchor, chunk, index);
-      const positionFixed = new Cartesian3(samples[offset] as number, samples[offset + 1] as number, samples[offset + 2] as number);
+      const position = new Cartesian3(arrived[offset] as number, arrived[offset + 1] as number, arrived[offset + 2] as number);
       if (inertialProperty) {
         const fixedToIcrf = Transforms.computeFixedToIcrfMatrix(time);
         if (!defined(fixedToIcrf)) {
@@ -519,15 +519,15 @@ export class SampledTrajectory {
           }
           continue;
         }
-        positionsInertial.push(Matrix3.multiplyByVector(fixedToIcrf, positionFixed, new Cartesian3()));
+        sampledInertial.push(Matrix3.multiplyByVector(fixedToIcrf, position, new Cartesian3()));
       }
-      times.push(time);
-      positionsFixed.push(positionFixed);
+      sampledTimes.push(time);
+      sampledPositions.push(position);
 
       const at = kept * 3;
-      fixedFlat[at] = positionFixed.x;
-      fixedFlat[at + 1] = positionFixed.y;
-      fixedFlat[at + 2] = positionFixed.z;
+      keptPositions[at] = position.x;
+      keptPositions[at + 1] = position.y;
+      keptPositions[at + 2] = position.z;
       kept += 1;
     }
 
@@ -539,10 +539,15 @@ export class SampledTrajectory {
     // before this chunk. Any shortfall counts as a gap, not just a refusal — a
     // missing ICRF transform drops a sample the same way, and the grid's indices
     // only line up with the chunk's when nothing was dropped.
-    this.#addToGrid(chunk, kept === sampleCount ? fixedFlat : fixedFlat.subarray(0, kept * 3), kept !== sampleCount);
+    //
+    // `keptPositions` is handed over whole rather than sliced to `kept`: a
+    // shortfall is a gap, and the gap branch abandons the grid without reading the
+    // buffer at all, so the only call that reads it is the one where the two are
+    // the same length.
+    this.#addToGrid(chunk, keptPositions, kept !== sampleCount);
     // Added at once: a sorted array avoids a search per sample.
-    this.#data?.fixed?.addSamples(times, positionsFixed);
-    inertialProperty?.addSamples(times, positionsInertial);
+    this.#data?.fixed?.addSamples(sampledTimes, sampledPositions);
+    inertialProperty?.addSamples(sampledTimes, sampledInertial);
   }
 
   /**

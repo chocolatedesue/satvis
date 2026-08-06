@@ -192,6 +192,12 @@ export function sampleInterval(satrec: satellitejs.SatRec, satnum: string, fromE
  * How many satrecs to memoise. A cache, not a registry: an eviction is a miss and
  * a miss is one `sgp4init`, so nothing has to tell the worker when a satellite
  * goes away and there is no lifecycle here to leak.
+ *
+ * Per worker, so a pool of four raises the nominal ceiling to eighty thousand.
+ * That is looser than it looks: a satellite belongs to exactly one worker for the
+ * session (see `#laneFor` in sampleSource), so what is actually resident across
+ * the pool is bounded by the catalog — some sixteen thousand — not by this times
+ * the pool size.
  */
 const MAX_CACHED_SATRECS = 20_000;
 

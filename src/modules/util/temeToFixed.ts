@@ -35,14 +35,20 @@ const RATE_COEF = 1.1772758384668e-19;
 const WGS84_WR_PRECESSING = 7.2921158553e-5;
 
 const TWO_PI = Math.PI * 2;
-const TWO_PI_OVER_SECONDS_IN_DAY = TWO_PI / 86400;
 const SECONDS_PER_DAY = 86400;
+const TWO_PI_PER_SECONDS_PER_DAY = TWO_PI / SECONDS_PER_DAY;
 const MS_PER_DAY = 86_400_000;
 const J2000_DAY_NUMBER = 2451545;
 
-/** Cesium splits a Julian date this way, and the Unix epoch lands mid-day in it. */
+/** J2000 proper is noon, so the rate term is referred to the midnight before it. */
+const J2000_MIDNIGHT = J2000_DAY_NUMBER - 0.5;
+
+/**
+ * Cesium splits a Julian date this way, and the Unix epoch lands mid-day in it —
+ * a Julian day starts at noon, so 00:00 UTC is half a day in.
+ */
 const UNIX_EPOCH_DAY_NUMBER = 2440587;
-const UNIX_EPOCH_SECONDS_OF_DAY = 43200;
+const HALF_DAY_SECONDS = 43200;
 
 /**
  * Greenwich hour angle for a UTC instant, in radians.
@@ -62,7 +68,7 @@ export function greenwichHourAngle(epochMs: number): number {
   const days = Math.floor(epochMs / MS_PER_DAY);
   const msIntoDay = epochMs - days * MS_PER_DAY;
   let dayNumber = UNIX_EPOCH_DAY_NUMBER + days;
-  let secondsOfDay = UNIX_EPOCH_SECONDS_OF_DAY + msIntoDay / 1000;
+  let secondsOfDay = HALF_DAY_SECONDS + msIntoDay / 1000;
   if (secondsOfDay >= SECONDS_PER_DAY) {
     secondsOfDay -= SECONDS_PER_DAY;
     dayNumber += 1;
@@ -70,11 +76,11 @@ export function greenwichHourAngle(epochMs: number): number {
 
   // GMST is tabulated at 0h, so the half-day offset picks the tabulation this
   // instant belongs to.
-  const centuries = (dayNumber - J2000_DAY_NUMBER + (secondsOfDay >= 43200 ? 0.5 : -0.5)) / 36525;
+  const centuries = (dayNumber - J2000_DAY_NUMBER + (secondsOfDay >= HALF_DAY_SECONDS ? 0.5 : -0.5)) / 36525;
   const gmstSeconds = GMST_C0 + centuries * (GMST_C1 + centuries * (GMST_C2 + centuries * GMST_C3));
-  const angleAt0h = (gmstSeconds * TWO_PI_OVER_SECONDS_IN_DAY) % TWO_PI;
-  const rotationRate = WGS84_WR_PRECESSING + RATE_COEF * (dayNumber - 2451545.5);
-  const secondsSinceMidnight = (secondsOfDay + 43200) % SECONDS_PER_DAY;
+  const angleAt0h = (gmstSeconds * TWO_PI_PER_SECONDS_PER_DAY) % TWO_PI;
+  const rotationRate = WGS84_WR_PRECESSING + RATE_COEF * (dayNumber - J2000_MIDNIGHT);
+  const secondsSinceMidnight = (secondsOfDay + HALF_DAY_SECONDS) % SECONDS_PER_DAY;
   return angleAt0h + rotationRate * secondsSinceMidnight;
 }
 
