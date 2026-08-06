@@ -46,7 +46,10 @@ discussion; sharpen them here when they drift.
   meaningful together: none of them can be validated without the other two
   (`src/modules/satelliteActivation.ts`).
 - **Ground station**: a named position on the ground that passes are computed
-  against.
+  against. They are ordered, and the order is load-bearing in one place: the
+  first is the observer. That is a fact about the list rather than about any
+  station, which is why the ground station panel is a list in order, editable in
+  place, with the first one marked.
 - **Tracked satellite**: the satellite the camera follows. At most one, and the
   only value the globe reports back rather than merely receiving. Mutually
   exclusive with the sky view, which owns the camera itself: while the sky view
@@ -56,7 +59,15 @@ discussion; sharpen them here when they drift.
   ground station. Not a separate location: whoever the observer is, passes are
   already computed against them. It must be resolved before the sky view can
   open; where there is no ground station yet, the device's own location becomes
-  one, and the sky view does not open if that is refused.
+  one, and the sky view does not open if that is refused. Movable while the view
+  is up — the movement keys walk it, and the ground station follows once they
+  stop (`SkyMovement`).
+- **Eye height**: how far the sky view's camera is above the ground under the
+  observer. Standing height by default and raised by the movement keys, up to a
+  ceiling that keeps "looking up from a point on the ground" a fair description.
+  The view's, not the observer's: it is absent from the ground station and from
+  the url, because a pass is computed against a point on the ground however high
+  the eye is held above it.
 - **Pass**: a time range in which a satellite serves a ground station — by
   line-of-sight elevation ("elevation" mode) or sensor footprint overlap
   ("swath" mode). In swath mode which side of the ground track the station lies on
@@ -81,14 +92,18 @@ discussion; sharpen them here when they drift.
   horizontal, and roll about the view axis. Pitch, not elevation: the two are
   equal whenever the camera is looking at something, but a camera has an
   attitude where a satellite has a position. Roll is only ever driven by the
-  device's own orientation; nothing the user does with a pointer rolls the view.
+  device's own orientation; nothing the user does with a pointer rolls the view,
+  and taking the aim back by hand levels it rather than leaving a roll no pointer
+  can straighten.
 - **Field of view**: how much sky the view shows, held as the vertical angle
   because that is the one a phone's two orientations agree on. Zoom is a change
   to it and to nothing else: the aim does not move when the view zooms.
 - **Heading reference**: where the device's idea of north comes from when the
   sky view aims by compass. Without one an orientation sensor gives a yaw from an
   arbitrary zero, so the sky view declines to aim by compass rather than aim at a
-  bearing nobody measured (`docs/adr/0004-compass-aiming.md`).
+  bearing nobody measured (`docs/adr/0004-compass-aiming.md`). Compass aiming ends
+  when the control says so or when a drag takes the aim back — the sensor rewrites
+  the aim every reading, so the two cannot share it.
 - **Lock**: the satellite the crosshair currently holds — the nearest one above
   the horizon within the crosshair's reach. What a tap acts on, and what the
   detail card and the on-sky track describe.

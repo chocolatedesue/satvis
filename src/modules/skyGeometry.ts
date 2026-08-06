@@ -6,7 +6,7 @@
 // position to project. A second copy of the level basis is a sign error waiting
 // to happen — composing and decomposing must be each other's inverse.
 
-import { Cartesian3, Math as CesiumMath, Matrix3, Matrix4, Transforms } from "@cesium/engine";
+import { Cartesian3, Cartographic, Math as CesiumMath, Matrix3, Matrix4, Transforms } from "@cesium/engine";
 
 /** Where the sky view looks up from — see CONTEXT.md, observer. */
 export interface Observer {
@@ -48,6 +48,26 @@ export function observerFrame(position: Cartesian3): ObserverFrame {
     // Orthonormal, so the transpose is the inverse and no solve is needed.
     fixedToEnu: Matrix3.transpose(enuToFixed, new Matrix3()),
   };
+}
+
+/**
+ * The observer a local east/north offset away, in metres.
+ *
+ * Through the ellipsoid rather than by degrees per metre: the offset is applied
+ * in the tangent plane at the observer and the result read back as coordinates,
+ * which needs no wrapping at the antimeridian and does not stretch towards the
+ * poles, where a fixed metres-per-degree of longitude is wrong by any factor you
+ * like. The tangent plane's own error is the sagitta, d²/2R — 8 cm at a
+ * kilometre, and a step is metres.
+ */
+export function offsetObserver(observer: Observer, east: number, north: number): Observer {
+  const origin = Cartesian3.fromDegrees(observer.lon, observer.lat);
+  const enuToFixed = Transforms.eastNorthUpToFixedFrame(origin, undefined, new Matrix4());
+  const moved = Matrix4.multiplyByPoint(enuToFixed, new Cartesian3(east, north, 0), new Cartesian3());
+  const carto = Cartographic.fromCartesian(moved);
+  // Only the Earth's centre has no coordinates, which no offset from a point on
+  // the surface reaches — but the observer standing still is the honest answer.
+  return carto ? { lat: CesiumMath.toDegrees(carto.latitude), lon: CesiumMath.toDegrees(carto.longitude) } : observer;
 }
 
 /** Wrap an azimuth to [0, 360). */

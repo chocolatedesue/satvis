@@ -92,6 +92,89 @@ its marks pointing at the zenith. Before the change, 15° of azimuth spanned 147
 eye level and 1691 px at 85° of pitch, and the visible window collapsed from ±15° to
 nothing.
 
+## Sky view: a drag takes the aim back from the compass
+
+**Why it cannot be a unit test.** The handover spans the pointer handlers, the sensor
+subscription and the View menu's control, and reaching it needs pointer events against
+a live canvas and orientation events the sensor would send — the same reason the zoom
+gestures are checked here.
+
+**Procedure.** Open `?scene=Sky&gs=48.1372,11.5756,Munich`. Stand in for a phone by
+dispatching a `deviceorientationabsolute` event every 100 ms with `absolute: true` and
+a fixed `alpha`/`beta`/`gamma`, then switch the control on in the View menu. Drag on
+`cc.viewer.scene.canvas` with `PointerEvent`s, reading `cc.skyInteraction.orientationActive`,
+`cc.skyView.aim` and the control's `checked` property between them.
+
+Two harness notes, both of which cost an hour before they were understood.
+`setPointerCapture` throws `NotFoundError` for a pointer id the browser has not
+physically seen, and it throws from inside `#onPointerDown` — so the rest of that
+handler never runs and a synthetic two-finger gesture silently degrades into a
+one-finger drag, which looks exactly like the bug you are testing for. Stub
+`canvas.setPointerCapture`/`releasePointerCapture` to no-ops for the duration. And
+take a screenshot before measuring anything angular: a hidden pane reports a canvas
+of 0×0, and the drag's degrees-per-pixel comes off the canvas height.
+
+**Result, 2026-08-05, Chrome.** Aiming from the fake sensor at azimuth 258.49°, pitch
+−29.50°, roll −5.73°. A 5 px nudge inside the tap slop changed nothing — still aiming,
+control still on, so selecting a satellite does not cost the compass. A 40×40 px drag
+turned the sensor off, levelled the roll to 0 and moved the aim to 254.64° / −25.54°,
+which is the drag's own 4.2° at that canvas height; 300 ms of further sensor readings
+did not pull it back, and the control had unticked itself. Dragging during the 1200 ms
+probe returned `taken-back` with the sensor off, the roll level, the control unticked
+and no toast raised. Note a hidden tab throttles that probe's timer to minutes, so
+collect the outcome in a later call rather than awaiting it.
+
+**A pinch must not cost the compass either, 2026-08-06, Chrome.** Two fingers 100 px
+apart spread to 200 px halved the field of view, 75° → 37.5°, with the sensor still
+aiming; lifting the second finger and twitching the survivor 3 px left it aiming; and
+the gesture selected nothing, so a pinch is still not a tap. The survivor then
+dragging 100 px did hand the aim over, so the handover itself is intact. This is what
+the review caught: the pinch's re-seed used to set `#dragged = TAP_SLOP + 1` to mean
+"not a tap", and the handover read that same counter, so the first pixel after a
+pinch ended compass aiming. Two fingers never leave the glass simultaneously, so on
+touch it was close to unconditional.
+
+## Sky view: the movement keys walk the observer and the station follows
+
+**Why it cannot be a unit test.** The arithmetic of a walk is unit-tested
+(`SkyMovement.test.ts`), and so is what sceneSync does with the observer it is
+handed. What is not is the chain between them: a key pressed on `window` reaching
+the handler, `preRender` driving the step, and the settle writing through the store
+to the url.
+
+**Procedure.** Open `?scene=Sky&gs=48.1372,11.5756,Munich`, wait for the descent to
+land, then dispatch `KeyboardEvent`s on `window` with the `code` under test,
+reading `cc.skyView.observer`, `cc.skyView.eyeHeight` and the `gs` parameter
+between them. A hidden tab pauses `requestAnimationFrame` and clamps timers to a
+second, so hold the key and hand `cc.skyInteraction.movement.step` its own
+timestamps for the walk itself — with `cc.viewer.render()` on an interval to prove
+the `preRender` path separately.
+
+**Result, 2026-08-05, Chrome.** A held `KeyW` through real frames moved the
+observer south — the default aim at a northern latitude faces the equator — at
+2 m per capped step, which is the frame clamp doing its job on a tab rendering once
+a second. Driving the clock instead: one second of shift-held `KeyW` moved 176 m
+(160 m of sprint plus one clamped 100 ms first step), the url stayed put while the
+keys were down, and 350 ms after the keyup `gs` became `48.1340,11.5756,Munich` —
+name kept, rounded to the store's precision, and the observer snapped to that
+rounded point. `KeyE` for three seconds took the eye to 498 m and the horizon rose
+to the 0° tick on the elevation tape. Q past the ground stops at 2 m and E past the
+ceiling stops at 5000 m. Leaving for 3D with `KeyW` still down landed the exit
+flight normally and wrote nothing: an unsettled walk is dropped rather than moving
+a station on the way out, which is what would otherwise turn the exit around. No
+console errors throughout.
+
+**Re-checked after the ground-measurement fix, 2026-08-06, Chrome.** Same walk, now
+measuring on the 250 ms throttle rather than falling back to `globe.getHeight`: the
+eye height held steady at 2 m across the whole sprint and the settle still wrote
+`gs`. **Still unverified:** the case the fix exists for — walking under
+`surface=GooglePhotorealistic`, where the old fallback could read the hidden globe's
+ellipsoid as a plausible 0 and drop the eye through the mesh. That needs an
+unrestricted `VITE_CESIUM_ION_TOKEN`, which this run did not have. Check it the way
+the surface-model entries below are checked, recording `camera.positionCartographic.height`
+every `preRender` while holding `W` in Munich; it must stay near the mesh top (~570 m)
+rather than falling to 2 m.
+
 ## Worker: missing files 404, and none of it is billed
 
 **Why it matters.** `not_found_handling: "single-page-application"` answered every

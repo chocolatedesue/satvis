@@ -27,6 +27,8 @@ function fakeTarget() {
     exits: 0,
     interactionStarts: 0,
     interactionStops: 0,
+    /** Set by the fake, called by the test: a walk arriving from the keyboard. */
+    observerMoved: undefined as ((observer: Observer) => void) | undefined,
     suppressCamera: 0,
     releaseCamera: 0,
     reconciled: [] as DesiredScene[],
@@ -68,6 +70,9 @@ function fakeTarget() {
       },
       stop: () => {
         calls.interactionStops += 1;
+      },
+      onObserverMove: (callback) => {
+        calls.observerMoved = callback;
       },
     },
     sats: {
@@ -221,6 +226,103 @@ describe("startSceneSync", () => {
     expect(calls.entered).toEqual([]);
     expect(store.sceneMode).toBe("3D");
     vi.unstubAllGlobals();
+  });
+
+  test("a refusal answers the url's echo of it, rather than asking the device twice", async () => {
+    // The url is a second writer of the view mode: the refused switch is pushed
+    // to the query before the mode is put back, and that navigation applies
+    // `scene=Sky` again from a url one step out of date. Standing in for it here
+    // by writing the store, which is what the query watcher does.
+    let asked = 0;
+    vi.stubGlobal("navigator", {
+      geolocation: {
+        getCurrentPosition: (_ok: unknown, fail: (e: unknown) => void) => {
+          asked += 1;
+          fail(new Error("denied"));
+        },
+      },
+    });
+    const { target, calls } = fakeTarget();
+    startSceneSync(target);
+    const store = useCesiumStore();
+
+    store.sceneMode = "Sky";
+    await settle();
+    expect(asked).toBe(1);
+    expect(store.sceneMode).toBe("3D");
+
+    store.sceneMode = "Sky";
+    await settle();
+
+    expect(asked).toBe(1);
+    expect(store.sceneMode).toBe("3D");
+    expect(calls.entered).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  test("a deliberate retry is asked again, however the refusal was answered", async () => {
+    // The guard is time, so it has to expire — otherwise granting the permission
+    // in the browser's own settings and trying again would be swallowed by a
+    // refusal from minutes ago.
+    let asked = 0;
+    vi.stubGlobal("navigator", {
+      geolocation: {
+        getCurrentPosition: (_ok: unknown, fail: (e: unknown) => void) => {
+          asked += 1;
+          fail(new Error("denied"));
+        },
+      },
+    });
+    let clock = 0;
+    const now = vi.spyOn(performance, "now").mockImplementation(() => clock);
+    const { target } = fakeTarget();
+    startSceneSync(target);
+    const store = useCesiumStore();
+
+    store.sceneMode = "Sky";
+    await settle();
+    expect(asked).toBe(1);
+
+    // Long enough after that nothing machine-driven is still in flight.
+    clock = 5000;
+    store.sceneMode = "Sky";
+    await settle();
+
+    expect(asked).toBe(2);
+    expect(store.sceneMode).toBe("3D");
+    now.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  test("walking in the sky view moves the first ground station, and nothing else", async () => {
+    const { target, calls } = fakeTarget();
+    startSceneSync(target);
+    const satStore = useSatStore();
+    satStore.setGroundStations([
+      { lat: 48.1, lon: 11.6, name: "Munich" },
+      { lat: 0, lon: 0, name: "Null Island" },
+    ]);
+
+    calls.observerMoved?.({ lat: 48.10123456, lon: 11.60987654 });
+    await settle();
+
+    // Rounded by the store, which is the one place coordinate precision is
+    // decided — and still called Munich, because that is who walked.
+    expect(satStore.groundStations).toEqual([
+      { lat: 48.1012, lon: 11.6099, name: "Munich" },
+      { lat: 0, lon: 0, name: "Null Island" },
+    ]);
+  });
+
+  test("a walk with no ground station to move is dropped rather than inventing one", async () => {
+    const { target, calls } = fakeTarget();
+    startSceneSync(target);
+    const satStore = useSatStore();
+
+    calls.observerMoved?.({ lat: 48.1, lon: 11.6 });
+    await settle();
+
+    expect(satStore.groundStations).toEqual([]);
   });
 
   test("nothing stays tracked while the sky view is up", async () => {

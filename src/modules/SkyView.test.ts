@@ -1,7 +1,21 @@
 import { Cartesian3, Math as CesiumMath, type Scene } from "@cesium/engine";
 import { describe, expect, test } from "vitest";
 
-import { type Aim, defaultAzimuth, DEFAULT_FOVY, DEFAULT_PITCH, fovFromFovy, fovyFromFov, isPlausibleGroundHeight, MAX_FOVY, MIN_FOVY, skyBasis, SkyView } from "./SkyView";
+import {
+  type Aim,
+  defaultAzimuth,
+  DEFAULT_FOVY,
+  DEFAULT_PITCH,
+  fovFromFovy,
+  fovyFromFov,
+  isPlausibleGroundHeight,
+  MAX_EYE_HEIGHT,
+  MAX_FOVY,
+  MIN_EYE_HEIGHT,
+  MIN_FOVY,
+  skyBasis,
+  SkyView,
+} from "./SkyView";
 
 const aim = (azimuth: number, pitch: number, roll = 0): Aim => ({ azimuth, pitch, roll });
 
@@ -157,6 +171,38 @@ describe("defaultAzimuth", () => {
     expect(defaultAzimuth({ lat: 48.14, lon: 11.58 })).toBe(180);
     expect(defaultAzimuth({ lat: 0, lon: 0 })).toBe(180);
     expect(defaultAzimuth({ lat: -33.9, lon: 151.2 })).toBe(0);
+  });
+});
+
+describe("eyeHeight", () => {
+  // Same bare scene as the fovy clamp below, and for the same reason: with no
+  // observer the camera work short-circuits and what is left is the clamp.
+  const view = (): SkyView => new SkyView({} as Scene);
+
+  test("starts standing on the ground", () => {
+    expect(view().eyeHeight).toBe(MIN_EYE_HEIGHT);
+  });
+
+  test("cannot be walked under the surface it is standing on", () => {
+    const sunk = view();
+    sunk.eyeHeight = -100;
+    expect(sunk.eyeHeight).toBe(MIN_EYE_HEIGHT);
+  });
+
+  test("stops where looking up from the ground stops describing the picture", () => {
+    const risen = view();
+    risen.eyeHeight = 1e6;
+    expect(risen.eyeHeight).toBe(MAX_EYE_HEIGHT);
+  });
+
+  test("holds a height inside the range, which is what the keys move", () => {
+    const lifted = view();
+    lifted.eyeHeight = 500;
+    expect(lifted.eyeHeight).toBe(500);
+    // The keys move it by adding to it, so a rise from a rise has to accumulate
+    // rather than reset.
+    lifted.eyeHeight += 250;
+    expect(lifted.eyeHeight).toBe(750);
   });
 });
 
