@@ -62,24 +62,35 @@ export function useSkyCompass(cc: CesiumController): { active: Readonly<Ref<bool
     } finally {
       pending.value = false;
     }
-    active.value = outcome === "aiming" || outcome === "aiming-uncalibrated";
+    const aiming = outcome === "aiming" || outcome === "aiming-uncalibrated";
+    active.value = aiming;
 
-    if (outcome === "aiming-uncalibrated") {
-      // iOS only reports a heading worth believing while the screen is near
-      // horizontal, so north is not known until the phone has been flat once.
-      // Until then the aim follows the device against an arbitrary zero, which
-      // the HUD also says for as long as it lasts.
+    if (aiming) {
+      // Said on every successful enable, not only on the uncalibrated one, and
+      // the reason is the way out rather than the calibration: this is the one
+      // moment the app has the user's attention on compass aiming, a drag turns
+      // it off, and that is the gesture somebody who dislikes the compass will
+      // try anyway. "Drag", not "take the aim back" — what they do is drag, and
+      // what they want to know is that it is allowed. A device that already knows
+      // north — Android's absolute reading — needs that sentence just as much,
+      // and used to get no toast at all.
+      //
+      // The calibration half only applies to the other outcome: iOS reports a
+      // heading worth believing only while the screen is near horizontal, so
+      // north is not known until the phone has been flat once. The HUD says so
+      // too, for as long as it lasts.
+      const calibration = outcome === "aiming-uncalibrated" ? "Hold the phone flat for a moment to set north. " : "";
       useToastProxy().add({
         title: "Aiming by compass",
-        description: "Hold the phone flat for a moment to set north.",
+        description: `${calibration}Drag at any time to turn the compass off.`,
         color: "info",
       });
       return;
     }
-    if (outcome === "aiming" || outcome === "taken-back") {
-      // Nothing failed in either case, and in the second the user is the one who
-      // ended it — by dragging while the sensor was still proving itself — so a
-      // warning about it would be telling them what they just did.
+    if (outcome === "taken-back") {
+      // Nothing failed, and the user is the one who ended it — by dragging while
+      // the sensor was still proving itself — so a warning would be telling them
+      // what they just did.
       return;
     }
     useToastProxy().add({
