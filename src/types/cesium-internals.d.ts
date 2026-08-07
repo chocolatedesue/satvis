@@ -27,8 +27,6 @@ declare module "@cesium/widgets" {
     _timeline: { container: HTMLElement };
     /** Fullscreen toggle button widget. */
     _fullscreenButton: { _container: HTMLElement };
-    /** VR toggle button widget. */
-    _vrButton: { _container: HTMLElement };
     /** Container holding the Cesium credit and bottom UI. */
     _bottomContainer: HTMLElement;
   }

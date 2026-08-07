@@ -694,14 +694,12 @@ export class CesiumController {
       this.viewer._animation.container.style.visibility = "";
       this.viewer._timeline.container.style.visibility = "";
       this.viewer._fullscreenButton._container.style.visibility = "";
-      this.viewer._vrButton._container.style.visibility = "";
       this.viewer._bottomContainer.style.left = this.oldBottomContainerStyleLeft;
       this.viewer._bottomContainer.style.bottom = "30px";
     } else {
       this.viewer._animation.container.style.visibility = "hidden";
       this.viewer._timeline.container.style.visibility = "hidden";
       this.viewer._fullscreenButton._container.style.visibility = "hidden";
-      this.viewer._vrButton._container.style.visibility = "hidden";
       this.oldBottomContainerStyleLeft = this.viewer._bottomContainer.style.left;
       this.viewer._bottomContainer.style.left = "5px";
       this.viewer._bottomContainer.style.bottom = "0px";
