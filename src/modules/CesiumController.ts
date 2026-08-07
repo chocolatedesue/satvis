@@ -1,6 +1,7 @@
 import {
   Cartesian3,
   Cartographic,
+  type CesiumWidget,
   Color,
   Credit,
   ImageryLayer,
@@ -79,6 +80,30 @@ const DEFAULT_VIEW_LAT = 25;
  */
 const DEFAULT_VIEW_FILL = 0.82;
 
+/**
+ * Skip the frames that have no drawing buffer.
+ *
+ * The `_canRender` gate of Cesium reads the CSS box of the canvas, so it catches a
+ * container that collapses. It does not catch a buffer that the browser withdraws
+ * on a loss of context. The client size does not change then, so `resize` leaves
+ * `_canRender` true. `Scene.render` takes a viewport of zero, `GlobeDepth` asks for
+ * a texture of zero width, and the error panel stops the app until a reload.
+ *
+ * A skipped frame still ticks the clock, as Cesium does when `_canRender` is false.
+ * `_renderRequested` holds any request until a frame draws.
+ */
+export function skipUnsizedFrames(widget: CesiumWidget): void {
+  const { scene, clock } = widget;
+  const proxied = widget.render;
+  widget.render = function guardedRender(this: unknown) {
+    if (scene.drawingBufferWidth === 0 || scene.drawingBufferHeight === 0) {
+      clock.tick();
+      return;
+    }
+    proxied.apply(this, []);
+  };
+}
+
 export class CesiumController {
   viewer: Viewer;
 
@@ -150,6 +175,7 @@ export class CesiumController {
 
     this.createInputHandler();
     this.addErrorHandler();
+    skipUnsizedFrames(this.viewer.cesiumWidget);
 
     this.sats = new SatelliteManager(this.viewer);
 
