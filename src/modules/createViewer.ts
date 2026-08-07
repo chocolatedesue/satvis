@@ -35,7 +35,6 @@ export function createViewer(container: string | Element, options: { minimalUI: 
     sceneModePicker: false,
     selectionIndicator: false,
     timeline: !minimalUI,
-    vrButton: !minimalUI,
     contextOptions: {
       webgl: {
         alpha: true,

@@ -1,6 +1,7 @@
 import {
   Cartesian3,
   Cartographic,
+  type CesiumWidget,
   Color,
   Credit,
   ImageryLayer,
@@ -79,6 +80,47 @@ const DEFAULT_VIEW_LAT = 25;
  */
 const DEFAULT_VIEW_FILL = 0.82;
 
+/**
+ * The value the error panel received, as an error worth a report.
+ *
+ * A provider that cannot get a tile gives a `RequestErrorEvent`, not an `Error`. It
+ * has no message and no stack, so error tracking files it under the minified name of
+ * the constructor. Each release then opens a new copy of the same unreadable issue.
+ * The title and message from Cesium describe the error instead, and the original
+ * value stays readable on the `cause`.
+ */
+export function reportableError(error: unknown, title: string, message?: string): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+  const detail = [title, message].filter(Boolean).join(" — ");
+  return new Error(`Cesium: ${detail || "render error"}`, { cause: error });
+}
+
+/**
+ * Skip the frames that have no drawing buffer.
+ *
+ * The `_canRender` gate of Cesium reads the CSS box of the canvas, so it catches a
+ * container that collapses. It does not catch a buffer that the browser withdraws
+ * on a loss of context. The client size does not change then, so `resize` leaves
+ * `_canRender` true. `Scene.render` takes a viewport of zero, `GlobeDepth` asks for
+ * a texture of zero width, and the error panel stops the app until a reload.
+ *
+ * A skipped frame still ticks the clock, as Cesium does when `_canRender` is false.
+ * `_renderRequested` holds any request until a frame draws.
+ */
+export function skipUnsizedFrames(widget: CesiumWidget): void {
+  const { scene, clock } = widget;
+  const proxied = widget.render;
+  widget.render = function guardedRender(this: unknown) {
+    if (scene.drawingBufferWidth === 0 || scene.drawingBufferHeight === 0) {
+      clock.tick();
+      return;
+    }
+    proxied.apply(this, []);
+  };
+}
+
 export class CesiumController {
   viewer: Viewer;
 
@@ -150,6 +192,7 @@ export class CesiumController {
 
     this.createInputHandler();
     this.addErrorHandler();
+    skipUnsizedFrames(this.viewer.cesiumWidget);
 
     this.sats = new SatelliteManager(this.viewer);
 
@@ -651,14 +694,12 @@ export class CesiumController {
       this.viewer._animation.container.style.visibility = "";
       this.viewer._timeline.container.style.visibility = "";
       this.viewer._fullscreenButton._container.style.visibility = "";
-      this.viewer._vrButton._container.style.visibility = "";
       this.viewer._bottomContainer.style.left = this.oldBottomContainerStyleLeft;
       this.viewer._bottomContainer.style.bottom = "30px";
     } else {
       this.viewer._animation.container.style.visibility = "hidden";
       this.viewer._timeline.container.style.visibility = "hidden";
       this.viewer._fullscreenButton._container.style.visibility = "hidden";
-      this.viewer._vrButton._container.style.visibility = "hidden";
       this.oldBottomContainerStyleLeft = this.viewer._bottomContainer.style.left;
       this.viewer._bottomContainer.style.left = "5px";
       this.viewer._bottomContainer.style.bottom = "0px";
@@ -843,7 +884,7 @@ export class CesiumController {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     widget.showErrorPanel = function widgetError(this: unknown, title: string, message: string, error: any) {
       proxied.apply(this, [title, message, error]);
-      usePostHog().posthog.captureException(error);
+      usePostHog().posthog.captureException(reportableError(error, title, message));
     };
   }
 }
