@@ -81,6 +81,23 @@ const DEFAULT_VIEW_LAT = 25;
 const DEFAULT_VIEW_FILL = 0.82;
 
 /**
+ * The value the error panel received, as an error worth a report.
+ *
+ * A provider that cannot get a tile gives a `RequestErrorEvent`, not an `Error`. It
+ * has no message and no stack, so error tracking files it under the minified name of
+ * the constructor. Each release then opens a new copy of the same unreadable issue.
+ * The title and message from Cesium describe the error instead, and the original
+ * value stays readable on the `cause`.
+ */
+export function reportableError(error: unknown, title: string, message?: string): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+  const detail = [title, message].filter(Boolean).join(" — ");
+  return new Error(`Cesium: ${detail || "render error"}`, { cause: error });
+}
+
+/**
  * Skip the frames that have no drawing buffer.
  *
  * The `_canRender` gate of Cesium reads the CSS box of the canvas, so it catches a
@@ -869,7 +886,7 @@ export class CesiumController {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     widget.showErrorPanel = function widgetError(this: unknown, title: string, message: string, error: any) {
       proxied.apply(this, [title, message, error]);
-      usePostHog().posthog.captureException(error);
+      usePostHog().posthog.captureException(reportableError(error, title, message));
     };
   }
 }
