@@ -18,19 +18,12 @@
       content="How Satvis tracks satellites: CelesTrak element sets propagated with SGP4, pass prediction for a ground station you set, and a compass-aimed sky view."
     />
     <meta name="twitter:card" content="summary" />
-    <!-- No module script and no viewport lock: this page is text, so it should
-         cost one request to render, and it should zoom. Anything interactive added
-         later belongs on top of the markup below rather than in place of it — the
-         content has to survive a reader that runs no javascript, which is most of
-         what quotes a page like this. -->
     <link rel="stylesheet" href="/src/css/about.css" />
     <style>
       body {
         margin: 0;
         background: #0b222d;
       }
-      /* The same column the content uses, so the link lines up with the heading
-         rather than with the window. */
       .about-back {
         max-width: 46rem;
         margin: 2rem auto 0;
@@ -44,10 +37,7 @@
   </head>
   <body>
     <div class="about-back"><a href="/">← Open the globe</a></div>
-    <!-- Everything inside #about-content is what the in-app dialog shows, which is
-         why the link above sits outside it. src/components/AboutDialog.vue fetches
-         this file and lifts this element's innerHTML — so this is the one copy, and
-         the dialog cannot fall behind it. -->
+    <!-- src/components/AboutDialog.vue lifts this element's innerHTML into the in-app dialog, which is why the back link above sits outside it. -->
     <main id="about-content" class="about">
       <h1>Satvis: 3D satellite tracker and pass predictor</h1>
       <p class="about-lede">

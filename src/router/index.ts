@@ -12,7 +12,7 @@ export const router: Router = createRouter({
   routes: [
     { path: "/", component: Satvis, name: "default" },
     { path: "/ot", component: Satvis, name: "ot" },
-    // Legacy routes for backward compatibility
+    // Legacy paths.
     { path: "/index.html", redirect: "/" },
     { path: "/ot.html", redirect: "/ot" },
     // Unknown paths (e.g. the retired /move route) render the default preset

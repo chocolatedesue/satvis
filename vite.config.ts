@@ -31,8 +31,7 @@ const CROSS_ORIGIN_ISOLATION_HEADERS = {
   "Cross-Origin-Embedder-Policy": "credentialless",
 };
 
-// Check for existance of generated basemap tiles
-// The repo ships with level 1-2, run `pnpm update-imagery` to generate levels 0-5.
+// The repo ships with levels 0-2, run `pnpm update-imagery` to generate levels 0-5.
 // Levels 0-3 are precached by the service worker (if available), levels 4-5 are runtime cached.
 const generatedImagery = existsSync(fileURLToPath(new URL("data/imagery/NaturalEarthII/3/0/0.webp", import.meta.url)));
 const COMMITTED_MAX_LEVEL = 2;

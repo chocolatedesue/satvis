@@ -386,7 +386,6 @@ export class SatelliteManager {
   #reconcileActive(): void {
     const target = this.#activeTargetEntries();
 
-    // Dispose collections no longer in the target.
     let disposed = false;
     for (const [key, sat] of this.#active) {
       if (target.has(key)) {

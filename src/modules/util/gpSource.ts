@@ -130,7 +130,7 @@ export async function fetchGpGroup(source: string): Promise<string> {
   }
 }
 
-// For tests: reset the memoized probe.
+// Test seam: the probe is otherwise memoized for the life of the module.
 export function resetGpSource(): void {
   infoPromise = undefined;
 }

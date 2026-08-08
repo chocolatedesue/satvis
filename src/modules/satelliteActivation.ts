@@ -41,7 +41,6 @@ export function isEnabledByTag(entry: CatalogEntry, tagSet: ReadonlySet<string>)
   return entry.tags.some((tag) => tagSet.has(tag));
 }
 
-// Returns the map of catalog entry keys to entries that should be active.
 // Deduplicates by key: a satellite enabled by both tag and name (or tracked)
 // appears once.
 export function activeTargetEntries(state: ActivationState): Map<string, CatalogEntry> {
