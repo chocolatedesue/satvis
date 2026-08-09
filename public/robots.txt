@@ -1,0 +1,24 @@
+# Cloudflare's managed robots.txt answers without this file, and it is 24 lines of
+# Content Signals preamble with no directive among them: no Allow, no Disallow, and
+# no Sitemap. Allowing everything is the intent, so that part was already right by
+# accident — but the sitemap had no discovery path outside Search Console, and the
+# file was Cloudflare's to change rather than ours.
+
+User-agent: *
+Allow: /
+
+# /test and /embedded are deliberately not disallowed. Both carry `X-Robots-Tag:
+# noindex` (public/_headers), and a Disallow would stop a crawler ever fetching the
+# header that says so: a url blocked from crawling can still be indexed from the
+# links pointing at it, with nothing to show but the url. Noindex needs the crawl.
+#
+# Nothing else is disallowed either. /api/* costs a Worker invocation per request,
+# but no page links to a gp payload, so nothing walks into one; and /data/ and
+# /cesium/ are what the globe renders from, which is a fetch a crawler that renders
+# should be allowed to make.
+#
+# No Content-Signal line: reserving or granting ai-train is a licensing decision,
+# and saying nothing leaves it where the MIT licence and copyright already put it.
+# State one here if that position should stop being implicit.
+
+Sitemap: https://satvis.space/sitemap.xml
