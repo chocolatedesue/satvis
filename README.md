@@ -1,22 +1,27 @@
 # [satvis.space](https://satvis.space) [![CI](https://github.com/Flowm/satvis/actions/workflows/ci.yml/badge.svg)](https://github.com/Flowm/satvis/actions/workflows/ci.yml)
 
-Satellite orbit visualization and pass prediction.
+3D satellite tracker and pass predictor.
 
-> [!NOTE]
-> The `next` branch contains many improvements from a bigger refactoring and is the recommended branch currently.
-> This version is currently deployed to [satvis.space](https://satvis.space).
-> Planning to merge this back to the ~~master~~ main in the next few months.
+Satvis is a free, open-source satellite tracker that runs in the browser.
+It draws more than 12,000 satellites on a 3D globe in real time and works out when each one passes over a ground station you set.
+The sky view trades the globe for a ground-level camera aimed by your phone's compass and gyroscope, so you look for the satellite in the sky rather than on a map of it.
 
 ![Screenshot](https://user-images.githubusercontent.com/1117666/47623704-f0c3e900-db14-11e8-9cf9-7bf13acb267c.png)
 
 ## Features
 
-- Calculate position and orbit of satellites from CelesTrak GP element sets (OMM/TLE)
-- Set groundstation through geolocation or pick on map
-- Calculate passes for a set groundstation
-- Local browser notifications for passes
-- Serverless architecture
-- Works offline as Progressive Web App (PWA)
+- Visualize more than 12,000 satellites on a 3D globe in real time, propagated in the browser with SGP4 from CelesTrak GP element sets (OMM/TLE)
+- Draw points, labels, orbits, orbit tracks, ground tracks, sensor cones and 3D models per satellite, coloured by orbit class (LEO, MEO, GEO, HEO)
+- Switch any of the 14 catalog groups on and off (Starlink, GNSS, weather, Earth observation, crewed stations), or search out a single satellite
+- Set ground stations from geolocation or a point you pick on the map, then list their upcoming passes and get a local browser notification before one starts
+- Show the globe in 3D, flattened to 2D or in Columbus view, over a base map, star field and terrain you choose
+- Find a satellite in the sky overhead rather than on a map, in a ground-level sky view aimed by your phone's compass and gyroscope and walked with the movement keys
+- Add OpenStreetMap buildings to the globe, or Google's photorealistic tiles under the sky view
+- Share the exact view you are looking at as a link: the url carries the satellites, the components, the ground station and the map layers
+- Install it as a Progressive Web App and keep using it offline, from a cached element-set snapshot and base map
+- Deploy it serverless: static files on a CDN, with an optional Cloudflare Worker serving fresh satellite data
+
+Every parameter in that url is specified in `docs/adr/0001-url-parameter-specification.md`.
 
 ## Built With
 
