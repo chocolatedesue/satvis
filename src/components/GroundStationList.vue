@@ -148,8 +148,7 @@ function removeAt(index: number): void {
   satStore.setGroundStations(without(stations.value, index));
 }
 
-// --- reordering ------------------------------------------------------------
-// Pointer events rather than HTML5 drag-and-drop, which does not exist on touch
+// Reordering by pointer events rather than HTML5 drag-and-drop, which does not exist on touch
 // at all — and the sky view this order decides is the phone feature. The row
 // height is measured at the start of each drag rather than pinned to a constant,
 // so the arithmetic cannot drift from the stylesheet.

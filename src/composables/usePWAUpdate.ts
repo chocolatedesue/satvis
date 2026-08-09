@@ -22,10 +22,8 @@ let registered = false;
 let intervalId: ReturnType<typeof setInterval> | undefined;
 
 /**
- * Composable for managing PWA service worker updates.
- *
- * State is shared across all callers, and the service worker is registered on
- * the first call.
+ * Registers the service worker on the first call. State is shared across all
+ * callers.
  *
  * @example
  * // Automatic updates
@@ -34,11 +32,9 @@ let intervalId: ReturnType<typeof setInterval> | undefined;
  * @example
  * // Manual updates with UI notification
  * const { needRefresh, updateApp } = usePWAUpdate();
- * // In your component, watch needRefresh and show update prompt
  * watch(needRefresh, (value) => {
  *   if (value) {
- *     // Show toast/dialog asking user to update
- *     updateApp(); // Call this when user confirms
+ *     updateApp(); // once the user confirms the prompt
  *   }
  * });
  */

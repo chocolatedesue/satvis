@@ -42,7 +42,6 @@ export function createViewer(container: string | Element, options: { minimalUI: 
     },
   });
 
-  // Cesium default settings
   viewer.clock.shouldAnimate = true;
   viewer.scene.globe.enableLighting = true;
   viewer.scene.highDynamicRange = true;

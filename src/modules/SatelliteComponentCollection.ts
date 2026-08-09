@@ -259,7 +259,7 @@ export class SatelliteComponentCollection {
     }
 
     if (name === "3D model") {
-      // Adjust label offset to avoid overlap with model
+      // So the model does not cover the label.
       this.#setLabelOffset(20);
     }
   }

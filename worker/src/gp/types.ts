@@ -71,6 +71,10 @@ export interface GroupDefinition {
   // Per-satellite rows, unioned with `select`. A row matches by noradId when
   // present, else by exact upstreamName. A row's `name` renames the records it
   // matched (taking precedence over the group-level `rename` map).
+  //
+  // A group with neither `satellites` nor `select` passes every record through,
+  // so adding the first row to one filters it down to just that row. Use the
+  // top-level satellite table for a fact about a satellite in a pass-all group.
   satellites?: SatelliteSpec[];
   // OBJECT_NAME -> new name, applied post-select.
   rename?: Record<string, string>;
