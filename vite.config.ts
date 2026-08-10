@@ -103,7 +103,7 @@ export default defineConfig({
         orientation: "natural",
         display: "standalone",
         background_color: "#000000",
-        theme_color: "#0B222D",
+        theme_color: "#000000",
       },
       workbox: {
         maximumFileSizeToCacheInBytes: 5000000,
