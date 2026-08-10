@@ -360,6 +360,70 @@ what reads as a plan view of the city, a horizon-like edge where the mesh ends, 
 below. It was reported as the world flipping. Reproduce it deliberately with
 `cc.skyView.setGroundHeight(0)` over any city.
 
+## Sky view: the terrain hides the satellites behind it
+
+**Why it cannot be a unit test.** The question is which pixels ended up in the frame
+buffer, so it needs a GPU: the satellites are drawn where they are, and whether the
+mountain in front of them wins is decided by the depth test rather than by any value
+this code holds.
+
+**Procedure.** Enter the sky view over a place with relief —
+`?terrain=ReEarth&scene=Sky&elements=Point&tags=Starlink,Weather,Stations&gs=47.3879,12.3077`,
+the Kitzbühel Alps — then, for every satellite whose position projects inside the
+viewport, compare the brightest pixel within 4 px of that projection between a frame
+rendered with `scene.globe.depthTestAgainstTerrain` on and one with it off. A satellite
+point reads 173 against terrain's 45-70, so "drawn" is unambiguous. The observer's local
+elevation for each comes from the same positions, against the geodetic normal at the eye.
+
+**Result, 2026-08-10, Chrome.** 133 satellites on screen. With the depth test off — what
+shipped — 94 were drawn, from 0.96° _below_ the horizon to 67° above it. With it on, 48
+were drawn and the lowest was at 9.28°, which is the ridge line in that direction. The 46
+that went away spanned -0.96° to 14.26°, and nothing appeared that had not been drawn
+before, which is the property that matters: the fix only ever takes away.
+
+Two things worth knowing about the frame this replaces, both established by disabling
+`Scene`'s depth plane (`scene._depthPlane.execute = () => {}`) and re-rendering:
+
+- The sub-horizon sky was already being hidden, by the depth plane rather than by the
+  ground: with the plane suppressed, satellites at -7° drew at full brightness too.
+- The plane's cutoff is about a degree short of the horizon — satellites from -0.96° up
+  came through. That follows from its geometry: it is a quad of the limb's radius, ~101 km
+  from an eye 800 m up, and a ray a degree below the horizontal clears its edge.
+
+So the missing occlusion was relief specifically, which is why the report named terrain.
+
+## Sky view: the crosshair agrees with the picture
+
+**Why it cannot be a unit test.** `groundHides` casts a ray at the tiles the globe
+rendered this frame, so what it answers depends on a live globe with terrain streaming
+into it. The predicate's ordering and its effect on the lock _are_ unit-tested
+(`SkyTargets.test.ts`); what needs a browser is whether its answer matches the frame.
+
+**Procedure, two parts.** Same place and terrain as the entry above.
+
+1. For every satellite above the horizon that projects inside the viewport, compare
+   `groundHides` against whether the render drew it (brightest pixel within 4 px).
+2. Aim the view at each of 25 satellites in turn so the crosshair sits on it, render,
+   and compare `cc.skyInteraction.locked` against the pixel at screen centre.
+
+**Result, 2026-08-10, Chrome, 11,011 satellites.** Part 1: 87 of 88 agreed. The one
+exception sat at 9.7° on a ridge silhouette, where the ray meets a tile the drawn mesh
+dips below — it declines to lock something at the very edge of a ridge. Part 2: 25 of
+25 agreed — 8 drawn satellites locked, 17 terrain-hidden ones did not.
+
+Part 2 needs **two renders per aim**, and the reason is a real one-frame lag rather than
+a quirk of the harness: the lock is computed in `preRender`, so the tiles it rays against
+are the ones the _previous_ frame drew. A synthetic jump to a new azimuth therefore asks
+about the old view and answers wrong for exactly one frame; a drag, which moves the aim
+by a few degrees a frame, never notices.
+
+Cost, measured warm: about 10 µs a ray. The crosshair had four candidates inside its
+reach and needs at most one ray each; the trace's 25 samples came to 0.23-0.31 ms for the
+whole batch, on the 500 ms sampling interval rather than per frame. Frame time at 11,011
+satellites stayed at 11.5-14.4 ms throughout, with no visible spike on a sampling frame.
+Cold, the first rays of a session measured up to 2 ms — worth knowing before reading a
+single timing as the steady state.
+
 ## Surface models: the matrix, the eye height, and what drapes on a mesh
 
 The pure part is unit-tested (`src/config/surfaceModels.test.ts`); what needs a browser

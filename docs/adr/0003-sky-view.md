@@ -240,8 +240,12 @@ reading of that request rather than a brisker version of the same movement.
   tapes regardless, and assigns that entity to `viewer.selectedEntity` directly. The
   pick rectangle is in drawing-buffer pixels while the capture radius is in CSS
   pixels, so a pick-based crosshair would silently change reach by 3× with the
-  quality preset. Occlusion becomes an explicit horizon test, shared with the orbit
-  trace, which needs it anyway.
+  quality preset. Occlusion becomes an explicit horizon test plus a terrain ray
+  (`groundHides`), shared with the orbit trace, which needs both anyway. The ray is
+  what keeps the crosshair agreeing with the picture, which is depth-tested against
+  the terrain (`SkyView#enter`): without it a satellite behind a ridge is hidden and
+  still lockable. It is asked nearest-candidate-first and only until one is visible,
+  so the ordinary frame spends one ray rather than one per satellite in the sky.
 - **The capture radius stays in CSS pixels**, so its angular reach falls out of the
   zoom: ±5.3° at the default on an 844px-tall phone, ±0.71° at maximum zoom. That
   is deliberate — zooming in _is_ the mechanism for choosing between two satellites

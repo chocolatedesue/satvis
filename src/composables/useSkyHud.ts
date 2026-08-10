@@ -17,7 +17,7 @@ import { shallowRef, type ShallowRef } from "vue";
 
 import type { CesiumController } from "../modules/CesiumController";
 import { normalizeAzimuth } from "../modules/skyGeometry";
-import { compassPoint, directionToWindow, lookAngles, type ObserverFrame, type SkyTarget } from "../modules/SkyTargets";
+import { compassPoint, directionToWindow, groundHides, lookAngles, type ObserverFrame, type SkyTarget } from "../modules/SkyTargets";
 import { fovxFromFovy } from "../modules/SkyView";
 
 /** A mark on one of the tapes, already placed in CSS pixels. */
@@ -145,7 +145,9 @@ export function useSkyHud(cc: CesiumController): SkyHudState & { start: () => vo
   // World positions, not window coordinates. Only the propagation is worth
   // caching: where a position lands on screen depends on the camera, so a cached
   // path would visibly detach from its satellite the moment the view moved.
-  let samples: Cartesian3[] = [];
+  // The ground being in the way is cached with each: that depends on the terrain
+  // rather than the camera, and a ray per sample belongs on this interval.
+  let samples: { position: Cartesian3; hidden: boolean }[] = [];
 
   function refresh(time: JulianDate): void {
     const { viewer, skyView, skyInteraction } = cc;
@@ -229,12 +231,12 @@ export function useSkyHud(cc: CesiumController): SkyHudState & { start: () => vo
 
     locked.value = skyInteraction.locked;
     calibrated.value = skyInteraction.compass.calibrated;
-    sampleTrace(time);
-    trace.value = projectTrace(scene, frame);
+    sampleTrace(time, scene, frame);
+    trace.value = projectTrace(scene);
   }
 
   /** Re-propagate the locked satellite's track, at most every TRACE_INTERVAL_MS. */
-  function sampleTrace(time: JulianDate): void {
+  function sampleTrace(time: JulianDate, scene: Scene, frame: ObserverFrame): void {
     const target = locked.value;
     if (!target) {
       samples = [];
@@ -254,20 +256,20 @@ export function useSkyHud(cc: CesiumController): SkyHudState & { start: () => vo
       JulianDate.addSeconds(time, offset, at);
       const position = target.sat.props.trajectory.position(at);
       if (position) {
-        samples.push(position);
+        samples.push({ position, hidden: lookAngles(frame, position).elevation <= 0 || groundHides(scene, frame, position) });
       }
     }
   }
 
   /** Project the cached track for this frame's camera. */
-  function projectTrace(scene: Scene, frame: ObserverFrame): string {
-    // Broken into runs rather than one polyline: a track that dips below the
-    // horizon and comes back must not be joined straight through the Earth.
+  function projectTrace(scene: Scene): string {
+    // Broken into runs rather than one polyline: a track that goes behind the
+    // ground and comes back must not be joined straight through it.
     const runs: string[] = [];
     let current: string[] = [];
-    for (const position of samples) {
+    for (const { position, hidden } of samples) {
       // Dropped rather than clipped, for the same reason.
-      const window = lookAngles(frame, position).elevation > 0 ? SceneTransforms.worldToWindowCoordinates(scene, position) : undefined;
+      const window = hidden ? undefined : SceneTransforms.worldToWindowCoordinates(scene, position);
       if (!window) {
         if (current.length > 1) {
           runs.push(current.join(" "));

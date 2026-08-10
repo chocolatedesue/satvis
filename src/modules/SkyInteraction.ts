@@ -18,7 +18,7 @@ import { Cartesian2, type JulianDate, type Scene } from "@cesium/engine";
 import { aimFromDeviceOrientation, CompassCalibration, hasHeadingSource } from "./DeviceAim";
 import type { SatelliteManager } from "./SatelliteManager";
 import { SkyMovement } from "./SkyMovement";
-import { nearestTarget, type SkyTarget, skyTargets } from "./SkyTargets";
+import { groundHides, nearestTarget, type SkyTarget, skyTargets } from "./SkyTargets";
 import type { Observer, SkyView } from "./SkyView";
 
 // iOS gates the sensor behind a call made from a user gesture, and only over
@@ -338,7 +338,9 @@ export class SkyInteraction {
       return;
     }
     this.#targets = skyTargets(scene, frame, sats.activeSatellites, time);
-    this.#setLocked(nearestTarget(this.#targets, this.#center(), CAPTURE_RADIUS));
+    // A crosshair points at what you can see, and the picture already hides what
+    // the ground hides.
+    this.#setLocked(nearestTarget(this.#targets, this.#center(), CAPTURE_RADIUS, (target) => groundHides(scene, frame, target.position)));
   }
 
   #setLocked(target: SkyTarget | undefined): void {

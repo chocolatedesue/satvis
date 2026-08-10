@@ -104,9 +104,10 @@ discussion; sharpen them here when they drift.
   bearing nobody measured (`docs/adr/0004-compass-aiming.md`). Compass aiming ends
   when the control says so or when a drag takes the aim back — the sensor rewrites
   the aim every reading, so the two cannot share it.
-- **Lock**: the satellite the crosshair currently holds — the nearest one above
-  the horizon within the crosshair's reach. What a tap acts on, and what the
-  detail card and the on-sky track describe.
+- **Lock**: the satellite the crosshair currently holds — the nearest one within
+  the crosshair's reach that the observer can actually see, which is above the
+  horizon and not behind the ground. What a tap acts on, and what the detail card
+  and the on-sky track describe.
 - **Live vs pinned time**: whether the viewer's clock follows the present or a
   moment the user chose. Live is the default. The clock becomes pinned only by
   a deliberate act — a time supplied in the URL, or scrubbing the timeline —

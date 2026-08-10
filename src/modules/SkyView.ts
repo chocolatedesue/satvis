@@ -179,6 +179,7 @@ interface SavedState {
   requestRenderMode: boolean;
   enableInputs: boolean;
   enableCollisionDetection: boolean;
+  depthTestAgainstTerrain: boolean;
 }
 
 /**
@@ -462,13 +463,14 @@ export class SkyView {
       this.#scene.morphTo3D(0);
     }
 
-    const { camera, screenSpaceCameraController: controller } = this.#scene;
+    const { camera, globe, screenSpaceCameraController: controller } = this.#scene;
     this.#saved = {
       pose: this.#cameraPose(),
       fov: (camera.frustum instanceof PerspectiveFrustum ? camera.frustum.fov : undefined) ?? Number.NaN,
       requestRenderMode: this.#scene.requestRenderMode,
       enableInputs: controller.enableInputs,
       enableCollisionDetection: controller.enableCollisionDetection,
+      depthTestAgainstTerrain: globe.depthTestAgainstTerrain,
     };
 
     this.#reset(observer);
@@ -483,6 +485,9 @@ export class SkyView {
     // The camera is driven from outside Cesium's own input handling, so there
     // is nothing for request-render mode to notice.
     this.#scene.requestRenderMode = false;
+    // Let the ground hide what is behind it. Cesium's default clears the globe's
+    // depth and occludes against an ellipsoid quad, which carries no relief.
+    globe.depthTestAgainstTerrain = true;
 
     const arrival = this.#fly("entering");
     // Re-asserted every frame rather than set once: the ground height under the
@@ -651,6 +656,7 @@ export class SkyView {
     controller.enableInputs = saved.enableInputs;
     controller.enableCollisionDetection = saved.enableCollisionDetection;
     this.#scene.requestRenderMode = saved.requestRenderMode;
+    this.#scene.globe.depthTestAgainstTerrain = saved.depthTestAgainstTerrain;
   }
 
   #aspectRatio(): number {
