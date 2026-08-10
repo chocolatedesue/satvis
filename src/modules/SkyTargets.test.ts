@@ -100,6 +100,39 @@ describe("nearestTarget", () => {
   test("finds nothing in an empty sky", () => {
     expect(nearestTarget([], center, 60)).toBeUndefined();
   });
+
+  test("passes over what the ground hides and takes the next one", () => {
+    const targets = [target("behind the ridge", 645, 360), target("in the clear", 640, 380)];
+    expect(nearestTarget(targets, center, 60, (t) => t.name === "behind the ridge")?.name).toBe("in the clear");
+  });
+
+  test("locks nothing when the ground hides every candidate", () => {
+    const targets = [target("one", 645, 360), target("two", 640, 380)];
+    expect(nearestTarget(targets, center, 60, () => true)).toBeUndefined();
+  });
+
+  test("asks about the nearest first, and stops as soon as one is visible", () => {
+    // The predicate is a terrain ray, so the order and the count are the point.
+    const asked: string[] = [];
+    const targets = [target("third", 640, 390), target("first", 641, 360), target("second", 640, 370)];
+    expect(
+      nearestTarget(targets, center, 60, (t) => {
+        asked.push(t.name);
+        return t.name === "first";
+      })?.name,
+    ).toBe("second");
+    expect(asked).toEqual(["first", "second"]);
+  });
+
+  test("does not ask about anything the horizon already ruled out", () => {
+    const asked: string[] = [];
+    const targets = [target("underfoot", 641, 360, -5), target("up there", 640, 380)];
+    nearestTarget(targets, center, 60, (t) => {
+      asked.push(t.name);
+      return false;
+    });
+    expect(asked).toEqual(["up there"]);
+  });
 });
 
 describe("compassPoint", () => {

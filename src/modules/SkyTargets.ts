@@ -13,7 +13,7 @@
 // projected form also picks up roll for free, which the linear one cannot
 // express at all.
 
-import { Cartesian2, Cartesian3, Cartographic, Math as CesiumMath, type JulianDate, Matrix3, type Scene, SceneTransforms } from "@cesium/engine";
+import { Cartesian2, Cartesian3, Cartographic, Math as CesiumMath, type JulianDate, Matrix3, Ray, type Scene, SceneTransforms } from "@cesium/engine";
 
 import type { SatelliteComponentCollection } from "./SatelliteComponentCollection";
 import { enuDirection, normalizeAzimuth, type ObserverFrame } from "./skyGeometry";
@@ -34,6 +34,8 @@ export interface SkyTarget extends LookAngles {
   sat: SatelliteComponentCollection;
   name: string;
   altitudeKm: number;
+  /** Fixed-frame position, which every angle here is derived from. */
+  position: Cartesian3;
   /** Window coordinates in CSS pixels, or undefined when behind the camera. */
   window: Cartesian2 | undefined;
 }
@@ -88,6 +90,7 @@ export function skyTargets(scene: Scene, frame: ObserverFrame, satellites: reado
       ...angles,
       sat,
       name: sat.props.name,
+      position,
       // Height above the ellipsoid, not the difference of two geocentric radii:
       // the observer's own radius varies 6357-6378 km with latitude, which would
       // put a ~12 km latitude-dependent bias on every altitude reported.
@@ -98,8 +101,33 @@ export function skyTargets(scene: Scene, frame: ObserverFrame, satellites: reado
   return targets;
 }
 
+// Reused across calls: the ray is cast per candidate per frame.
+const occlusionRay = new Ray();
+const occlusionHit = new Cartesian3();
+
 /**
- * The target nearest the crosshair, or undefined if none is within reach.
+ * Whether the ground stands between the observer and a position — what keeps the
+ * crosshair and the on-sky track agreeing with a picture that is itself
+ * depth-tested against the terrain (`SkyView#enter`).
+ *
+ * A ray against the tiles the globe rendered last frame, so it is as coarse as the
+ * terrain drawn, and false where a surface model stands in and there are none.
+ */
+export function groundHides(scene: Scene, frame: ObserverFrame, position: Cartesian3): boolean {
+  const direction = Cartesian3.subtract(position, frame.position, occlusionRay.direction);
+  const range = Cartesian3.magnitude(direction);
+  if (range === 0) {
+    return false;
+  }
+  Cartesian3.divideByScalar(direction, range, direction);
+  Cartesian3.clone(frame.position, occlusionRay.origin);
+  const hit = scene.globe.pick(occlusionRay, scene, occlusionHit);
+  return hit !== undefined && Cartesian3.distance(frame.position, hit) < range;
+}
+
+/**
+ * The target nearest the crosshair that the observer can actually see, or
+ * undefined if there is none within reach.
  *
  * Targets below the horizon are dropped rather than depth-tested. This replaces
  * what `scene.pick` would have given for free, and is the reason it is not used:
@@ -108,21 +136,22 @@ export function skyTargets(scene: Scene, frame: ObserverFrame, satellites: reado
  * at `?quality=high` — a crosshair whose reach depends on the quality toggle.
  * Comparing screen distances directly also gives the genuinely nearest target,
  * where the pick walks outward in square rings.
+ *
+ * `hidden` is asked nearest first and only until one candidate passes, because it
+ * is a terrain ray: the ordinary frame spends one, not one per satellite in the sky.
  */
-export function nearestTarget(targets: readonly SkyTarget[], center: Cartesian2, radiusPx: number): SkyTarget | undefined {
-  let best: SkyTarget | undefined;
-  let bestDistance = radiusPx;
+export function nearestTarget(targets: readonly SkyTarget[], center: Cartesian2, radiusPx: number, hidden: (target: SkyTarget) => boolean = () => false): SkyTarget | undefined {
+  const inReach: { target: SkyTarget; distance: number }[] = [];
   for (const target of targets) {
     if (!target.window || target.elevation <= 0) {
       continue;
     }
     const distance = Cartesian2.distance(target.window, center);
-    if (distance <= bestDistance) {
-      best = target;
-      bestDistance = distance;
+    if (distance <= radiusPx) {
+      inReach.push({ target, distance });
     }
   }
-  return best;
+  return inReach.toSorted((a, b) => a.distance - b.distance).find(({ target }) => !hidden(target))?.target;
 }
 
 /** The compass letter for an azimuth, for the detail card. */
