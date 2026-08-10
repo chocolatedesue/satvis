@@ -241,7 +241,11 @@ reading of that request rather than a brisker version of the same movement.
   pick rectangle is in drawing-buffer pixels while the capture radius is in CSS
   pixels, so a pick-based crosshair would silently change reach by 3× with the
   quality preset. Occlusion becomes an explicit horizon test, shared with the orbit
-  trace, which needs it anyway.
+  trace, which needs it anyway — and a horizon test is coarser than the picture, which
+  is depth-tested against the terrain (`SkyView#enter`), so a satellite behind a ridge
+  is hidden but still lockable. Bringing the two into line costs a terrain ray per
+  candidate, and the trace would want one per sample — worth doing if a lock on
+  something invisible reads as a bug rather than as a satellite you know is up there.
 - **The capture radius stays in CSS pixels**, so its angular reach falls out of the
   zoom: ±5.3° at the default on an 844px-tall phone, ±0.71° at maximum zoom. That
   is deliberate — zooming in _is_ the mechanism for choosing between two satellites

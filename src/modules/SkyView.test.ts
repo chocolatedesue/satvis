@@ -1,5 +1,5 @@
-import { Cartesian3, Math as CesiumMath, type Scene } from "@cesium/engine";
-import { describe, expect, test } from "vitest";
+import { Cartesian3, Math as CesiumMath, PerspectiveFrustum, type Scene, SceneMode } from "@cesium/engine";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   type Aim,
@@ -236,5 +236,63 @@ describe("fovy", () => {
     // Deliberate: at maximum zoom the invariant above cannot hold at any useful
     // pitch, and clamping pitch to preserve it would silently tilt the view down.
     expect(DEFAULT_PITCH).toBeGreaterThan(MIN_FOVY / 2);
+  });
+});
+
+describe("the scene state the view borrows", () => {
+  // Enough scene for `enter` and `exit` to run. Real Cartesian3s and a real
+  // PerspectiveFrustum, because the poses are cloned into them and the `fov` is
+  // only saved when the frustum is one.
+  const stubScene = (depthTestAgainstTerrain: boolean) => ({
+    mode: SceneMode.SCENE3D,
+    requestRenderMode: true,
+    globe: { depthTestAgainstTerrain, getHeight: () => 800 },
+    canvas: { clientWidth: 1280, clientHeight: 720 },
+    camera: {
+      position: Cartesian3.fromDegrees(11.58, 48.14, 1e7),
+      direction: new Cartesian3(0, 0, -1),
+      up: new Cartesian3(0, 1, 0),
+      right: new Cartesian3(1, 0, 0),
+      frustum: new PerspectiveFrustum({ fov: CesiumMath.toRadians(60), aspectRatio: 16 / 9, near: 1, far: 1e9 }),
+      lookAtTransform: () => {},
+    },
+    screenSpaceCameraController: { enableInputs: true, enableCollisionDetection: true },
+    preRender: { addEventListener: () => () => {} },
+    requestRender: () => {},
+  });
+
+  // Reduced motion, so both flights are cuts and the borrow-and-return happens in
+  // the two calls rather than over 1.5 s of frames.
+  const cut = (): void => void vi.stubGlobal("matchMedia", () => ({ matches: true }));
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("lets the ground occlude while the view is up", async () => {
+    cut();
+    const scene = stubScene(false);
+    await new SkyView(scene as unknown as Scene).enter({ lat: 47.3879, lon: 12.3077 });
+    expect(scene.globe.depthTestAgainstTerrain).toBe(true);
+  });
+
+  // Run for both starting states: "put back" and "clear" only differ on one.
+  const roundTrip = async (found: boolean): Promise<void> => {
+    const scene = stubScene(found);
+    const view = new SkyView(scene as unknown as Scene);
+    await view.enter({ lat: 47.3879, lon: 12.3077 });
+    await view.exit();
+
+    expect(scene.globe.depthTestAgainstTerrain, `found ${found}`).toBe(found);
+    expect(scene.requestRenderMode).toBe(true);
+    expect(scene.screenSpaceCameraController.enableInputs).toBe(true);
+    expect(scene.screenSpaceCameraController.enableCollisionDetection).toBe(true);
+    expect(CesiumMath.toDegrees(scene.camera.frustum.fov ?? Number.NaN)).toBeCloseTo(60, 9);
+  };
+
+  test("hands the globe back exactly as it was found", async () => {
+    cut();
+    await roundTrip(false);
+    await roundTrip(true);
   });
 });
