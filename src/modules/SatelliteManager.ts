@@ -26,6 +26,33 @@ import { WINDOW_ORBITS_BACK, WINDOW_ORBITS_FORWARD } from "./util/trajectoryWind
 const GEOMETRY_REFRESH_TICK_SECONDS = GEOMETRY_REFRESH_MIN_SECONDS;
 
 /**
+ * Frames to leave between two re-cuts of the ground-track corridors.
+ *
+ * Cesium owns the corridor batch and rebuilds it asynchronously: assigning
+ * `corridor.positions` discards the batch's primitive and starts a new one, six
+ * frames from the assignment to the finished corridor being drawn. Until it
+ * lands the batch goes on showing the one it replaced, so a re-cut arriving too
+ * early discards the rebuild in flight rather than overtaking it, and the
+ * corridor keeps whatever shape last made it through. Re-cut faster than the
+ * rebuild lands and the ground track stops dead while the rest of the scene
+ * keeps moving — which is what a schedule in *simulation* seconds did from about
+ * ×64 up. At 62 fps with one satellite: a new corridor about once a second at
+ * ×1, and not once in five seconds at ×100 or ×1000.
+ *
+ * Frames rather than milliseconds because frames are what the rebuild costs, so
+ * a slower machine gets proportionally more real time out of the same budget.
+ * Thirty is five times the measured cost, headroom for a geometry worker with
+ * thousands of corridors to combine rather than one, and it is not felt at ×1:
+ * half a second against a simulation-time budget of one.
+ *
+ * In ticks of the clock, not rendered frames. The two differ only where
+ * `requestRenderMode` skips a frame nothing asked for, and a rebuild in flight
+ * asks for every one — so an idle scene at ×1 (60 ticks a second, 22 of them
+ * drawn) is not held to the rate at which it happens to repaint.
+ */
+const GROUND_TRACK_REFRESH_FRAMES = 30;
+
+/**
  * How long one frame may spend instantiating satellites. See #build.
  *
  * This trades the length of the worst frame against how long the scene takes to
@@ -125,8 +152,17 @@ export class SatelliteManager {
 
   pendingTrackedSatellite: string | undefined;
 
-  /** Simulation time the stale-able geometry was last re-cut at. See #refreshDerivedGeometry. */
-  #geometryRefreshedAt: JulianDate;
+  /** Simulation time the batched orbit tracks were last re-cut at. See #refreshDerivedGeometry. */
+  #tracksRefreshedAt: JulianDate;
+
+  /** Simulation time the ground-track corridors were last re-cut at. */
+  #groundTracksRefreshedAt: JulianDate;
+
+  /** Frames since this manager existed. See GROUND_TRACK_REFRESH_FRAMES. */
+  #frames = 0;
+
+  /** The frame the ground-track corridors were last re-cut on. */
+  #groundTracksRefreshedOnFrame = 0;
 
   /**
    * Where every satellite's samples come from. Owned here because this is what
@@ -167,8 +203,12 @@ export class SatelliteManager {
     this.viewer = viewer;
     this.orbits = new PolylineBatch(viewer, "inertial");
     this.tracks = new PolylineBatch(viewer, "fixed");
-    this.#geometryRefreshedAt = viewer.clock.currentTime;
+    this.#tracksRefreshedAt = viewer.clock.currentTime;
+    this.#groundTracksRefreshedAt = viewer.clock.currentTime;
     CesiumCallbackHelper.createPeriodicTimeCallback(viewer, GEOMETRY_REFRESH_TICK_SECONDS, (time) => this.#refreshDerivedGeometry(time));
+    viewer.clock.onTick.addEventListener(() => {
+      this.#frames += 1;
+    });
 
     // Tracking is the one genuinely two-way value: the user can also start it
     // by clicking a satellite on the globe. Report it rather than reaching for
@@ -360,23 +400,50 @@ export class SatelliteManager {
    * The cadence is scaled by the number of active satellites rather than by a
    * count of each kind of geometry: it is an upper bound on both, it is free to
    * read, and the interval only has to be roughly right.
+   *
+   * The two halves share that budget but not the leash, because different things
+   * hold them back. The orbit batch is ours and says when it is busy, so it waits
+   * on `pending`; the corridors are Cesium's and say nothing, so they wait out a
+   * floor in frames — see GROUND_TRACK_REFRESH_FRAMES for what happens without one.
+   *
+   * They used to share `pending`, which starved the corridors: a track rebuild is
+   * coalescing or in flight for most of its cycle, and none of those frames re-cut
+   * the corridors either, for no reason. With both components on one satellite the
+   * corridor advanced once in 7.5 s at ×1 and once in 13 s at ×1000, against once
+   * and twice a second with the guards separated.
    */
   #refreshDerivedGeometry(time: JulianDate): void {
     if (this.#active.size === 0) {
       return;
     }
-    if (this.tracks.pending) {
-      this.#geometryRefreshedAt = time;
-      return;
-    }
     const due = geometryRefreshSeconds(this.#active.size);
-    if (Math.abs(JulianDate.secondsDifference(time, this.#geometryRefreshedAt)) < due) {
+    const stale = (since: JulianDate): boolean => Math.abs(JulianDate.secondsDifference(time, since)) >= due;
+
+    // A rebuild in flight holds the window open rather than queueing behind it,
+    // and the interval then runs from when that rebuild finished rather than from
+    // when it was asked for.
+    if (this.tracks.pending) {
+      this.#tracksRefreshedAt = time;
+    }
+    const tracksDue = !this.tracks.pending && stale(this.#tracksRefreshedAt);
+    const groundTracksDue = stale(this.#groundTracksRefreshedAt) && this.#frames - this.#groundTracksRefreshedOnFrame >= GROUND_TRACK_REFRESH_FRAMES;
+    if (!tracksDue && !groundTracksDue) {
       return;
     }
-    this.#geometryRefreshedAt = time;
+    if (tracksDue) {
+      this.#tracksRefreshedAt = time;
+    }
+    if (groundTracksDue) {
+      this.#groundTracksRefreshedAt = time;
+      this.#groundTracksRefreshedOnFrame = this.#frames;
+    }
     for (const sat of this.#active.values()) {
-      sat.refreshOrbitTrack(time);
-      sat.refreshGroundTrack(time);
+      if (tracksDue) {
+        sat.refreshOrbitTrack(time);
+      }
+      if (groundTracksDue) {
+        sat.refreshGroundTrack(time);
+      }
     }
   }
 
