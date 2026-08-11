@@ -101,6 +101,34 @@ export interface SatelliteEntry {
   decayed?: boolean;
 }
 
+// The CelesTrak SATCAT as we keep it: the second contributor to the satellite
+// table (see satcat.ts), stored rather than re-fetched every refresh.
+//
+// `rows` is satnum -> the same opaque bag a curated entry carries, already
+// projected down to the fields we serve (owner, launchDate, launchSite,
+// opsStatus, orbitType, orbitCenter, decayDate — SATCAT's own column names are
+// not the frontend's vocabulary, so the rename happens at parse time).
+//
+// `validator` is the ETag of the body these rows came from, replayed as
+// If-None-Match on the next fetch. Absent when upstream sent no ETag, which
+// simply costs a full download next time.
+export interface SatcatSnapshot {
+  validator?: string;
+  updated: string;
+  rows: Record<string, Record<string, string>>;
+}
+
+// SATCAT status for the KV index, so GET /api/groups.json can report what the
+// stored catalog holds — and so push-gp can read the validator it needs to make
+// its own download conditional (it fetches off-Worker; see push-gp.mjs).
+export interface SatcatStatus {
+  updated: string;
+  count: number;
+  validator?: string;
+  lastError?: string;
+  lastErrorAt?: string;
+}
+
 export interface GroupsConfig {
   groups: GroupDefinition[];
   satellites?: SatelliteEntry[];
@@ -122,4 +150,7 @@ export interface GroupStatus {
 export interface GroupsIndex {
   updated: string;
   groups: GroupStatus[];
+  // Absent until the first successful SATCAT fetch, and left in place (with
+  // lastError set) when a later one fails.
+  satcat?: SatcatStatus;
 }

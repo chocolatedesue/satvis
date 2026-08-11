@@ -59,6 +59,10 @@ export type FetchImpl = (
   init?: { headers?: Record<string, string>; signal?: AbortSignal },
 ) => Promise<{
   status: number;
+  // Optional so a replayed bundle (bundleFetch) need only supply what it kept.
+  // Read by the SATCAT fetch for the ETag it stores as its next conditional-request
+  // validator; the GP sources ignore it.
+  headers?: { get: (name: string) => string | null };
   text: () => Promise<string>;
 }>;
 
@@ -517,6 +521,13 @@ function enrichmentSatnum(record: GpRecord): string {
   // signature admits the key, so the check leaves the value `unknown`.
   const line1 = (record as { TLE_LINE1?: unknown }).TLE_LINE1;
   const raw = typeof line1 === "string" ? line1.substring(2, 7) : String((record as OmmRecord).NORAD_CAT_ID ?? "");
+  return normalizeSatnumKey(raw);
+}
+
+// The normalization every satellite-table key goes through, on both sides of the
+// join. Exported so the SATCAT parser keys its rows exactly as enrichmentSatnum
+// looks them up — the two cannot drift into a silently empty join.
+export function normalizeSatnumKey(raw: string): string {
   const trimmed = raw.trim();
   return /^\d+$/.test(trimmed) ? String(parseInt(trimmed, 10)) : trimmed;
 }
@@ -528,6 +539,14 @@ export function indexSatellitesByNoradId(entries: SatelliteEntry[]): Map<string,
   return new Map(entries.map((entry) => [String(entry.noradId), entry]));
 }
 
+// All enrichment needs of a satellite-table row. Narrower than SatelliteEntry on
+// purpose: the merged table refreshGroups builds also holds rows that came from
+// SATCAT alone, which have a satnum (the map key) but no curated `noradId`/`name`
+// to report. Asking for only the bag keeps those rows from having to invent one.
+export interface SatelliteFacts {
+  metadata: Record<string, unknown>;
+}
+
 // Attach each matching table entry's metadata to a copy of the record, under the
 // lowercase `metadata` key (lowercase to stand apart from the SCREAMING_SNAKE
 // CCSDS fields, and because CelesTrak emits no lowercase keys — so it cannot
@@ -537,7 +556,7 @@ export function indexSatellitesByNoradId(entries: SatelliteEntry[]): Map<string,
 // at all: the frontend applies its own defaults, so enriching all ~10,000 records
 // with a default bag would inflate every payload to say nothing. The returned
 // satnum set lets the caller report entries that matched nothing anywhere.
-export function enrichRecords(records: GpRecord[], table: Map<string, SatelliteEntry>): { records: GpRecord[]; matched: Set<string> } {
+export function enrichRecords(records: GpRecord[], table: Map<string, SatelliteFacts>): { records: GpRecord[]; matched: Set<string> } {
   const matched = new Set<string>();
   if (table.size === 0) {
     return { records, matched };

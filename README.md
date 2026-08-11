@@ -123,8 +123,12 @@ SATVIS_REFRESH_TOKEN=<token> pnpm --filter satvis-worker push-gp
 ```
 
 `SATVIS_INGEST_URL` overrides the target (default `https://satvis.space/api/ingest`).
-Keep the cadence at or above the cron's 6 h — a run still costs ~7 MB against
-CelesTrak's 250 MB/day per-IP budget, just from a different IP.
+Keep the cadence at or above the cron's 6 h — a run still costs ~7 MB of element
+sets, just from a different IP, and CelesTrak asks for one download per update.
+
+The same run also refreshes the SATCAT, reading the worker's stored `ETag` from
+`/api/groups.json` first so its own download is conditional; the catalog's 6.7 MB
+only travels when it actually changed.
 
 Configuration is **declarative** YAML, not shell scripts. Each config file
 contributes two independent sections: `groups` (what is served, as which unit) and
@@ -187,13 +191,32 @@ you have not been shows level 3 magnified rather than nothing at all.
 
 ### Satellite metadata
 
-Static per-satellite facts — per-side swath extents, sensor cone FOV, model URL,
-operator — live in the `satellites` table of `satvis.core.yaml` (and of any plugin
-config), keyed by NORAD id. The refresh attaches each matching satellite's facts to
-its served record under a lowercase `metadata` key, so metadata travels with the
-element set instead of being matched against a separate rule list in the browser.
-Satellites absent from the table carry no metadata and fall back to the defaults in
+Static per-satellite facts are keyed by NORAD id in one satellite table with two
+contributors:
+
+- **Curated** — per-side swath extents, sensor cone FOV, model URL, operator —
+  hand-written in the `satellites` table of `satvis.core.yaml` (and of any plugin
+  config), for the couple of dozen satellites worth saying something specific about.
+- **Upstream** — owner, launch date, launch site, operational status, orbit type
+  and centre — from the CelesTrak [SATCAT](https://celestrak.org/satcat/), which
+  covers every satellite served. Raw SATCAT codes travel on the wire and are
+  resolved to labels in `src/config/satcatCodes.ts`.
+
+A curated value wins field by field, so a hand-written row extends its upstream
+row rather than replacing it. The refresh attaches the merged facts to each served
+record under a lowercase `metadata` key, so metadata travels with the element set
+instead of being matched against a separate rule list in the browser. Satellites
+in neither table carry no metadata and fall back to the defaults in
 `src/config/satelliteMetadata.ts`.
+
+The SATCAT fetch is **conditional**: the stored snapshot keeps the `ETag` it came
+with and the next fetch sends it as `If-None-Match`, so the usual refresh costs a
+304 with no body. CelesTrak asks for one download per update and the catalog only
+changes once or twice a day, against a 6 h cron. `pnpm update-gp` caches its copy
+in `worker/.cache/satcat.json` — outside `data/`, because everything there is
+copied into the build and this is never served. Deleting it costs one full 6.7 MB
+download. A SATCAT failure leaves every group untouched; it only costs enrichment
+freshness. See `docs/adr/0006-satcat-enrichment.md`.
 
 Swath extents are **per-side** cross-track distances from the ground track,
 relative to flight direction — not halves of a total width, because a tilted sensor

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 
 import generatedConfig from "../src/config/satvis.generated.json" with { type: "json" };
 import { collectSources, sourceKey, sourceUrl } from "../src/gp/evaluate.ts";
+import { SATCAT_URL } from "../src/gp/satcat.ts";
 import type { GroupsConfig, GroupsIndex, OmmRecord } from "../src/gp/types.ts";
 import worker from "../src/index.ts";
 
@@ -154,11 +155,20 @@ describe("scheduled() refresh", () => {
   // Reply to every celestrak request (regular gp.php GROUP=<g> and supplemental
   // sup-gp.php FILE=<f>) — one per distinct source — with a synthetic response,
   // so the refresh never hits the network. Anything else stays rejected.
+  //
+  // The SATCAT is one more request on top of the sources (see satcat.ts), and it
+  // answers 304: that is the steady state in production, where the stored ETag
+  // makes the fetch conditional. These tests are about the groups, and a 304
+  // leaves enrichment exactly as it was before SATCAT existed — curated table
+  // entries still apply, because they are merged in regardless.
   function interceptCelestrak(reply: (group: string) => unknown, opts?: { status?: number }): void {
-    expectedFetches = SOURCE_COUNT;
+    expectedFetches = SOURCE_COUNT + 1;
     fetchSpy.mockImplementation(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
+      if (request.method === "GET" && request.url === SATCAT_URL) {
+        return new Response(null, { status: 304 });
+      }
       const isGp = url.pathname === "/NORAD/elements/gp.php" || url.pathname === "/NORAD/elements/supplemental/sup-gp.php";
       if (request.method !== "GET" || url.origin !== "https://celestrak.org" || !isGp) {
         throw new Error(`unmocked fetch: ${request.method} ${request.url}`);
@@ -443,12 +453,48 @@ describe("POST /api/ingest", () => {
     expect(body.groups.find((g) => g.name === "weather")?.lastError).toContain("absent from the ingest bundle");
   });
 
+  // The SATCAT travels in the same bundle as the sources, because the Worker
+  // cannot reach CelesTrak at all — so the downloader owns the conditional
+  // request and the Worker only replays its outcome.
+  it("stores a posted SATCAT with the downloader's ETag, and enriches from it", async () => {
+    const satcat = ["OBJECT_NAME,NORAD_CAT_ID,OWNER,LAUNCH_DATE,ORBIT_TYPE", "WEATHER-1,10007,US,2019-11-11,ORB"].join("\r\n");
+    const bundle = JSON.parse(ingestBundle((source) => [{ OBJECT_NAME: `${source.toUpperCase()}-1`, NORAD_CAT_ID: 10000 + source.length }]));
+    bundle.sources.push({ key: "satcat", url: SATCAT_URL, status: 200, body: satcat, validator: '"abc123"' });
+
+    const res = await postIngest(JSON.stringify(bundle));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { satcat: { count: number; validator: string } }).satcat).toMatchObject({ count: 1, validator: '"abc123"' });
+
+    const stored = (await env.GP_KV.get("gp:satcat", "json")) as { validator: string; rows: Record<string, unknown> };
+    expect(stored.validator).toBe('"abc123"');
+    expect(stored.rows["10007"]).toEqual({ owner: "US", launchDate: "2019-11-11", orbitType: "ORB" });
+
+    const weather = (await env.GP_KV.get("gp:weather", "json")) as OmmRecord[];
+    expect(weather.find((r) => r.NORAD_CAT_ID === 10007)?.metadata).toMatchObject({ owner: "US" });
+  });
+
+  it("keeps the stored SATCAT when the downloader posts a 304", async () => {
+    await env.GP_KV.put("gp:satcat", JSON.stringify({ validator: '"abc123"', updated: UPDATED, rows: { "10007": { owner: "CIS" } } }));
+    const bundle = JSON.parse(ingestBundle((source) => [{ OBJECT_NAME: `${source.toUpperCase()}-1`, NORAD_CAT_ID: 10000 + source.length }]));
+    bundle.sources.push({ key: "satcat", url: SATCAT_URL, status: 304 });
+
+    const res = await postIngest(JSON.stringify(bundle));
+    expect(res.status).toBe(200);
+    // Still enriched, and still dated from when the rows were actually fetched.
+    expect(((await res.json()) as { satcat: { count: number; updated: string } }).satcat).toMatchObject({ count: 1, updated: UPDATED });
+
+    const weather = (await env.GP_KV.get("gp:weather", "json")) as OmmRecord[];
+    expect(weather.find((r) => r.NORAD_CAT_ID === 10007)?.metadata).toMatchObject({ owner: "CIS" });
+  });
+
   it.each([
     ["a non-JSON body", "not json", "body is not valid JSON"],
     ["a missing sources array", JSON.stringify({}), "body.sources must be an array"],
     ["an empty sources array", JSON.stringify({ sources: [] }), "body.sources is empty"],
     ["an entry without key/url", JSON.stringify({ sources: [{ body: "[]" }] }), "needs string key and url"],
     ["an entry with neither body nor error", JSON.stringify({ sources: [{ key: "k", url: "u" }] }), "needs either body or error"],
+    // ...unless it is a 304, which says the stored value already is the payload.
+    ["a bad validator type", JSON.stringify({ sources: [{ key: "k", url: "u", status: 304, validator: 7 }] }), "validator must be a string"],
   ])("400s %s", async (_label, body, expected) => {
     const res = await postIngest(body);
     expect(res.status).toBe(400);

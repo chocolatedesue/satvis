@@ -12,12 +12,14 @@ import {
   evaluateGroups,
   fetchSources,
   type FetchImpl,
+  type SatelliteFacts,
   type SourceProbe,
   toProbe,
   toRecordsBySource,
 } from "./evaluate.ts";
+import { fetchSatcat } from "./satcat.ts";
 import { kvGroupStore, type GroupStore } from "./store.ts";
-import type { GroupsConfig, GroupsIndex } from "./types.ts";
+import type { GroupsConfig, GroupsIndex, SatcatSnapshot, SatcatStatus, SatelliteEntry } from "./types.ts";
 
 const groupsConfig = generatedConfig as GroupsConfig;
 
@@ -30,6 +32,67 @@ export interface RefreshReport {
   written: number;
   skipped: number;
   durationMs: number;
+}
+
+/**
+ * Merge the two contributors to the satellite table into the one map enrichment
+ * reads: the whole CelesTrak SATCAT, with the curated rows laid over it.
+ *
+ * Curated wins field by field, not row by row — a YAML row that supplies only a
+ * swath keeps SATCAT's owner and launch date rather than erasing them. That is
+ * the point of the curated table: it corrects and extends upstream, and the
+ * things worth hand-writing (swath extents, sensor cones, models) are things
+ * SATCAT does not carry at all.
+ */
+export function mergeSatelliteTables(satcat: SatcatSnapshot | undefined, entries: SatelliteEntry[]): Map<string, SatelliteFacts> {
+  const merged = new Map<string, SatelliteFacts>();
+  for (const [satnum, bag] of Object.entries(satcat?.rows ?? {})) {
+    merged.set(satnum, { metadata: bag });
+  }
+  for (const [satnum, curated] of indexSatellitesByNoradId(entries)) {
+    const upstream = merged.get(satnum);
+    merged.set(satnum, { metadata: upstream === undefined ? curated.metadata : { ...upstream.metadata, ...curated.metadata } });
+  }
+  return merged;
+}
+
+// Resolve the SATCAT to enrich with, and the status to publish alongside it.
+//
+// A conditional fetch means the stored snapshot is the normal input: a 304 has
+// no body, so "unchanged" and "we already have it" are the same state. A failure
+// lands in the same place by design — SATCAT going down must cost enrichment
+// freshness and nothing else, because the groups themselves are fetched,
+// evaluated and stored entirely independently of it.
+async function resolveSatcat(
+  store: GroupStore,
+  fetchImpl: FetchImpl,
+  previous: GroupsIndex,
+  now: string,
+): Promise<{ snapshot: SatcatSnapshot | undefined; status: SatcatStatus | undefined }> {
+  const stored = await store.readSatcat();
+  const result = await fetchSatcat(fetchImpl, stored?.validator);
+
+  if (result.rows !== undefined) {
+    const snapshot: SatcatSnapshot = { validator: result.validator, updated: now, rows: result.rows };
+    await store.writeSatcat(snapshot);
+    const count = Object.keys(result.rows).length;
+    console.log(`gp refresh: satcat HTTP 200 — ${count} rows, ${result.bytes} bytes, ${result.ms}ms`);
+    return { snapshot, status: { updated: now, count, validator: result.validator } };
+  }
+
+  const count = stored === undefined ? 0 : Object.keys(stored.rows).length;
+  if (result.notModified) {
+    console.log(`gp refresh: satcat HTTP 304 — reusing ${count} stored rows (${result.ms}ms)`);
+    return { snapshot: stored, status: { updated: stored?.updated ?? now, count, validator: stored?.validator } };
+  }
+
+  // Failed. Keep serving what we have, and carry the previous status forward so
+  // `updated` keeps saying when the rows were actually fetched.
+  console.warn(`gp refresh: satcat FAILED after ${result.ms}ms — ${result.error} (keeping ${count} stored rows)`);
+  return {
+    snapshot: stored,
+    status: { updated: previous.satcat?.updated ?? stored?.updated ?? "", count, validator: stored?.validator, lastError: result.error, lastErrorAt: now },
+  };
 }
 
 // Fetch upstream, evaluate, enrich, and write results to the store. Failed
@@ -46,11 +109,12 @@ export async function refreshGroups(config: GroupsConfig, store: GroupStore, fet
   const evaluated = evaluateGroups(defs, toRecordsBySource(fetched));
   const previous = await store.readIndex();
   const statuses = buildStatuses(defs, evaluated, previous, now);
+  const satcat = await resolveSatcat(store, fetchImpl, previous, now);
 
   // Enrichment runs here rather than inside evaluateGroups so it sits on the far
   // side of `include` and `extraRecords` — every record actually served gets
   // exactly one pass, including pseudo TLE extras.
-  const table = indexSatellitesByNoradId(config.satellites ?? []);
+  const table = mergeSatelliteTables(satcat.snapshot, config.satellites ?? []);
   const matchedSatnums = new Set<string>();
 
   // Persist successful groups in parallel (independent keys). Failed groups
@@ -94,9 +158,12 @@ export async function refreshGroups(config: GroupsConfig, store: GroupStore, fet
   }
 
   const index: GroupsIndex = { updated: now, groups: statuses };
+  if (satcat.status !== undefined) {
+    index.satcat = satcat.status;
+  }
   await store.writeIndex(index);
   const durationMs = Date.now() - startedMs;
-  console.log(`gp refresh: done in ${durationMs}ms — ${written} groups written, ${skipped} skipped/failed`);
+  console.log(`gp refresh: done in ${durationMs}ms — ${written} groups written, ${skipped} skipped/failed, ${satcat.status?.count ?? 0} satcat rows`);
   return { index, sources: fetched.map(toProbe), written, skipped, durationMs };
 }
 
@@ -114,6 +181,10 @@ export interface IngestSource {
   status?: number;
   body?: string;
   error?: string;
+  // The ETag the downloader observed, replayed as a response header so the
+  // SATCAT fetch can store it as its next conditional-request validator. Only
+  // the SATCAT entry uses it; GP sources leave it unset.
+  validator?: string;
 }
 
 // A FetchImpl serving an already-downloaded bundle instead of the network, so
@@ -128,12 +199,21 @@ export function bundleFetch(sources: IngestSource[]): FetchImpl {
   return async (url) => {
     const source = byUrl.get(url);
     if (source === undefined) {
+      // Reached only for a source the downloader did not post — an older
+      // push-gp against a newer Worker, say. Fatal for a group (it keeps its
+      // last-known-good), survivable for SATCAT (fetchSatcat catches it and the
+      // stored snapshot stands).
       throw new Error("source absent from the ingest bundle");
     }
     if (source.error !== undefined) {
       throw new Error(source.error);
     }
-    return { status: source.status ?? 0, text: async () => source.body ?? "" };
+    const validator = source.validator;
+    return {
+      status: source.status ?? 0,
+      headers: { get: (name: string) => (name.toLowerCase() === "etag" ? (validator ?? null) : null) },
+      text: async () => source.body ?? "",
+    };
   };
 }
 

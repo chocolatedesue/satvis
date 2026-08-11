@@ -14,16 +14,30 @@ discussion; sharpen them here when they drift.
   facts live in the satellite table, which is independent of any group.
 - **Satellite table**: the registry of static per-satellite facts, identified by
   NORAD id and independent of the groups that serve those satellites. One table,
-  merged from every config that contributes to it, so a fact is stated once no
-  matter how many groups carry the satellite
-  (`worker/src/config/satvis.core.yaml`).
+  two contributors — the curated rows hand-written across every config that
+  feeds it (`worker/src/config/satvis.core.yaml`), and the whole CelesTrak
+  **SATCAT** fetched at refresh time (`worker/src/gp/satcat.ts`). Curated wins
+  field by field, so a hand-written row extends its upstream row rather than
+  replacing it. Either way a fact is stated once, no matter how many groups
+  carry the satellite (`mergeSatelliteTables`).
+- **SATCAT**: CelesTrak's satellite catalog, and the upstream half of the
+  satellite table — owner, launch date and site, operational status, orbit type.
+  Not a group source: it selects nothing and serves no records, it only says what
+  is true of a satellite some group already carries, which is why it is fetched
+  on its own and why losing it costs enrichment freshness and no group. Kept as
+  a stored snapshot rather than re-downloaded, because the fetch is conditional
+  and the usual answer is 304 (`docs/adr/0006-satcat-enrichment.md`).
 - **Satellite metadata**: the bag of static facts a GP record carries beside its
   element set, interpreted by the frontend (`src/config/satelliteMetadata.ts`).
-  Most are attached by the worker at refresh time from the satellite table and
-  are opaque to it; the orbit class is instead derived by the frontend as it
-  parses, because it follows from the element set every satellite already has.
-  Provenance is per field, not per bag: a satellite absent from the table still
-  carries its orbit class, and falls back to app defaults for the rest.
+  Three provenances, and a reader has to know which one a field came from to
+  know what its absence means: **curated** facts are
+  hand-written for the couple of dozen satellites worth it, **upstream** facts
+  come from SATCAT for every satellite there is, and both are attached by the
+  worker at refresh time and opaque to it; the **derived** orbit class is instead
+  computed by the frontend as it parses, because it follows from the element set
+  every satellite already has. Provenance is per field, not per bag: a satellite
+  absent from both tables still carries its orbit class, and falls back to app
+  defaults for the rest.
 - **Swath extent**: the cross-track distance from the ground track to the edge of
   a sensor's footprint, held per side (starboard = velocity bearing + 90°). Not
   half a width: the sides differ when a sensor is tilted, so a swath is a pair of
