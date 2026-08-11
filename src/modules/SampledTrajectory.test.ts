@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import Orbit from "./Orbit";
 import { SampledTrajectory } from "./SampledTrajectory";
+import { drawablePositions } from "./util/drawablePositions";
 import { createSatrec, parseGpPayload, type GpRecord } from "./util/gp";
 import { InlineSampleSource, type SampleChunk, type TrajectorySampler } from "./util/sampleSource";
 
@@ -97,6 +98,20 @@ describe("SampledTrajectory", () => {
     const track = trajectory.groundTrack(T0, 2, 1);
     expect(track).toHaveLength(4);
     expect(track.every((position) => position !== undefined)).toBe(true);
+  });
+
+  // Outside the sampled window there is no track, and the callers have to see that
+  // from the position count alone. A degenerate pair instead is what stopped
+  // Cesium's render loop — see `drawablePositions` for the chain.
+  test("a clock far outside the window yields no drawable track", async () => {
+    const { trajectory, periodSeconds } = issTrajectory();
+    await trajectory.ensure(T0);
+
+    const far = JulianDate.addSeconds(T0, periodSeconds * 100, new JulianDate());
+
+    expect(trajectory.positionsForTrack(far).length).toBeLessThan(2);
+    // What the ground track's corridor is built from, via #groundTrackPositions.
+    expect(drawablePositions(trajectory.groundTrack(far)).length).toBeLessThan(2);
   });
 
   test("the inertial frame is not sampled until something asks for it", async () => {

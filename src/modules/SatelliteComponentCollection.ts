@@ -42,6 +42,7 @@ import type { CatalogEntry } from "./SatelliteCatalog";
 import { coneDescription, groundTrackDescription, modelUri, orbitPathTimes, orbitTrackTimes, orbitUsesPathGraphic } from "./satelliteGraphics";
 import { SatelliteProperties } from "./SatelliteProperties";
 import { CesiumTimelineHelper } from "./util/CesiumTimelineHelper";
+import { drawablePositions } from "./util/drawablePositions";
 import type { PassPredictorSource } from "./util/passSource";
 import type { PolylineBatch } from "./util/PolylineBatch";
 import type { TrajectorySampler } from "./util/sampleSource";
@@ -684,25 +685,41 @@ export class SatelliteComponentCollection {
     if (!description) {
       return;
     }
+    const positions = this.#groundTrackPositions(this.viewer.clock.currentTime);
+    // The same check `refreshGroundTrack` makes, and for the same reason: a
+    // corridor Cesium cannot build geometry from takes the render loop down with
+    // it.
+    if (positions.length < 2) {
+      return;
+    }
     const corridor = new CorridorGraphics({
       cornerType: CornerType.MITERED,
       height: 1000,
       heightReference: HeightReference.CLAMP_TO_GROUND,
       material: Color.DARKRED.withAlpha(0.25),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      positions: this.#groundTrackPositions(this.viewer.clock.currentTime) as any,
+      positions: positions as any,
       width: description.widthMeters,
     });
     this.createCesiumSatelliteEntity("Ground track", "corridor", corridor);
   }
 
   /**
-   * Undefined entries are dropped rather than passed on: the sampled position
-   * has no value outside its window, and a corridor handed a hole in its
-   * positions throws from inside Cesium's geometry worker.
+   * The ground track as positions a corridor can be built from.
+   *
+   * Holes are dropped because the sampled position has no value outside its
+   * window and a corridor handed one throws from inside Cesium's geometry worker.
+   * Duplicates are dropped because the corridor collapses them itself and then
+   * declines to build anything, which costs more — see `drawablePositions`.
+   *
+   * Duplicates are the case that arrives. Outside the sample window
+   * `GridPositionProperty` clamps its stencil to the window's edge by design, so
+   * every time beyond it reads back the same edge sample: two instants 300 s apart
+   * answer with one point. Not `ExtrapolationType` — that governs the sampled
+   * property, which most satellites never build.
    */
   #groundTrackPositions(time: JulianDate): Cartesian3[] {
-    return this.props.trajectory.groundTrack(time).filter((position): position is Cartesian3 => position !== undefined);
+    return drawablePositions(this.props.trajectory.groundTrack(time));
   }
 
   /** See createGroundTrack. */
