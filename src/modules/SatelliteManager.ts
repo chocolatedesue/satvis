@@ -7,8 +7,7 @@ import { GroundStationEntity, type GroundStationPositionData } from "./GroundSta
 import { activeTargetEntries, buildOrder } from "./satelliteActivation";
 import { type CatalogEntry, SatelliteCatalog } from "./SatelliteCatalog";
 import { SatelliteComponentCollection } from "./SatelliteComponentCollection";
-import { GEOMETRY_REFRESH_MIN_SECONDS, geometryRefreshSeconds } from "./satelliteGraphics";
-import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
+import { geometryRefreshSeconds } from "./satelliteGraphics";
 import { CesiumCleanupHelper } from "./util/CesiumCleanupHelper";
 import { sameValue } from "./util/equality";
 import { approximatePeriodMinutes, type GpRecord } from "./util/gp";
@@ -19,31 +18,19 @@ import { SuppressibleSet } from "./util/Suppressible";
 import { WINDOW_ORBITS_BACK, WINDOW_ORBITS_FORWARD } from "./util/trajectoryWindow";
 
 /**
- * How often the geometry refresh is *considered*, in simulation seconds. Whether
- * it actually runs is `geometryRefreshSeconds`, which scales the real interval
- * with the satellite count; this is just the finest grain that decision can have.
- */
-const GEOMETRY_REFRESH_TICK_SECONDS = GEOMETRY_REFRESH_MIN_SECONDS;
-
-/**
- * Frames to leave between two re-cuts of the ground-track corridors.
+ * Frames between corridor re-cuts when nothing can say whether the last one has
+ * landed. See #groundTracksSettled for what normally answers that.
  *
- * Cesium owns the corridor batch and rebuilds it asynchronously: assigning
- * `corridor.positions` discards the batch's primitive and starts a new one, six
- * frames from the assignment to the finished corridor being drawn. Until it
- * lands the batch goes on showing the one it replaced, so a re-cut arriving too
- * early discards the rebuild in flight rather than overtaking it, and the
- * corridor keeps whatever shape last made it through. Re-cut faster than the
- * rebuild lands and the ground track stops dead while the rest of the scene
- * keeps moving — which is what a schedule in *simulation* seconds did from about
- * ×64 up. At 62 fps with one satellite: a new corridor about once a second at
- * ×1, and not once in five seconds at ×100 or ×1000.
+ * Cesium owns the corridor batch and rebuilds it asynchronously, so a re-cut
+ * arriving before the last one lands discards it rather than overtaking it, and
+ * the corridor on screen keeps whatever shape last made it through. Re-cut
+ * faster than the rebuild lands and the ground track stops dead while the rest
+ * of the scene keeps moving — which is what a schedule in *simulation* seconds
+ * did from about ×64 up.
  *
- * Frames rather than milliseconds because frames are what the rebuild costs, so
- * a slower machine gets proportionally more real time out of the same budget.
- * Thirty is five times the measured cost, headroom for a geometry worker with
- * thousands of corridors to combine rather than one, and it is not felt at ×1:
- * half a second against a simulation-time budget of one.
+ * Thirty is safe rather than smooth: the rebuild measured 4 frames at fifty
+ * corridors and 25 at fifteen hundred, and only the top of that range needs a
+ * number this large.
  *
  * In ticks of the clock, not rendered frames. The two differ only where
  * `requestRenderMode` skips a frame nothing asked for, and a rebuild in flight
@@ -165,6 +152,16 @@ export class SatelliteManager {
   #groundTracksRefreshedOnFrame = 0;
 
   /**
+   * The frame that re-cut landed on, or undefined while it is still in flight.
+   * Starts landed, so the first corridors of a scene are not made to wait out a
+   * rebuild that never happened.
+   */
+  #groundTracksLandedOnFrame: number | undefined = 0;
+
+  /** Key of the satellite whose corridor is asked whether the batch has caught up. */
+  #groundTrackProbe: string | undefined;
+
+  /**
    * Where every satellite's samples come from. Owned here because this is what
    * knows which satellites exist; handed to each one as a bound sampler.
    */
@@ -205,9 +202,13 @@ export class SatelliteManager {
     this.tracks = new PolylineBatch(viewer, "fixed");
     this.#tracksRefreshedAt = viewer.clock.currentTime;
     this.#groundTracksRefreshedAt = viewer.clock.currentTime;
-    CesiumCallbackHelper.createPeriodicTimeCallback(viewer, GEOMETRY_REFRESH_TICK_SECONDS, (time) => this.#refreshDerivedGeometry(time));
+    // Considered every frame rather than on a grid of its own: the decision is a
+    // few comparisons, and a grid quantises — a re-cut declined because the last
+    // one is still landing waits out the whole next square, which at ×1 turned a
+    // re-cut a second into one every two.
     viewer.clock.onTick.addEventListener(() => {
       this.#frames += 1;
+      this.#refreshDerivedGeometry(viewer.clock.currentTime);
     });
 
     // Tracking is the one genuinely two-way value: the user can also start it
@@ -403,8 +404,8 @@ export class SatelliteManager {
    *
    * The two halves share that budget but not the leash, because different things
    * hold them back. The orbit batch is ours and says when it is busy, so it waits
-   * on `pending`; the corridors are Cesium's and say nothing, so they wait out a
-   * floor in frames — see GROUND_TRACK_REFRESH_FRAMES for what happens without one.
+   * on `pending`; the corridors are Cesium's, so they wait on
+   * `groundTrackSettled` — the same question, put to whoever owns the rebuild.
    *
    * They used to share `pending`, which starved the corridors: a track rebuild is
    * coalescing or in flight for most of its cycle, and none of those frames re-cut
@@ -426,7 +427,11 @@ export class SatelliteManager {
       this.#tracksRefreshedAt = time;
     }
     const tracksDue = !this.tracks.pending && stale(this.#tracksRefreshedAt);
-    const groundTracksDue = stale(this.#groundTracksRefreshedAt) && this.#frames - this.#groundTracksRefreshedOnFrame >= GROUND_TRACK_REFRESH_FRAMES;
+    // Asked ahead of the budget, not behind it: the rebuild is timed by when it
+    // was seen to land, so behind the budget the first look comes a whole budget
+    // late and doubles the interval it was meant to shorten.
+    const groundTracksRested = this.#groundTracksRested();
+    const groundTracksDue = groundTracksRested && stale(this.#groundTracksRefreshedAt);
     if (!tracksDue && !groundTracksDue) {
       return;
     }
@@ -436,6 +441,7 @@ export class SatelliteManager {
     if (groundTracksDue) {
       this.#groundTracksRefreshedAt = time;
       this.#groundTracksRefreshedOnFrame = this.#frames;
+      this.#groundTracksLandedOnFrame = undefined;
     }
     for (const sat of this.#active.values()) {
       if (tracksDue) {
@@ -445,6 +451,70 @@ export class SatelliteManager {
         sat.refreshGroundTrack(time);
       }
     }
+  }
+
+  /**
+   * Whether the last re-cut has landed *and* left the machine to itself for as
+   * long again since.
+   *
+   * Waiting for the rebuild keeps the ground track moving; the idle spell after
+   * it keeps the rest of the scene moving. Re-cutting the instant one lands
+   * leaves Cesium no frame without corridor geometry in flight, which at 1,542
+   * corridors and ×1000 measured 6 fps and bought no smoothness at all — at that
+   * size the rebuild sets the pace regardless.
+   *
+   * The rebuild times itself, so one rule covers both ends: four frames to land
+   * means some eight re-cuts a second, thirty means room to breathe in between.
+   * In frames rather than milliseconds because that stays stable under load — the
+   * interval stretches as the frame rate falls, where a wall-clock ration keeps
+   * asking for a rate that is already too fast. At 1,542 corridors and ×1000 it
+   * settles at 46 fps and 2.9 re-cuts a second, against 27 fps and 0.95 for the
+   * fixed schedule it replaces.
+   */
+  #groundTracksRested(): boolean {
+    if (this.#groundTracksLandedOnFrame === undefined) {
+      if (!this.#groundTracksSettled()) {
+        return false;
+      }
+      this.#groundTracksLandedOnFrame = this.#frames;
+    }
+    const rebuild = this.#groundTracksLandedOnFrame - this.#groundTracksRefreshedOnFrame;
+    return this.#frames - this.#groundTracksRefreshedOnFrame >= 2 * rebuild;
+  }
+
+  /**
+   * Whether the corridors have caught up with the positions they were last given.
+   *
+   * One satellite answers for all of them: every corridor is an instance in the
+   * same batch primitive, so Cesium finishes them together or not at all. Which
+   * one answered is remembered, because finding another means walking the
+   * activation — at ten thousand satellites, most without a ground track, not a
+   * walk to repeat per frame.
+   *
+   * Falls back to GROUND_TRACK_REFRESH_FRAMES when nothing can answer: either no
+   * ground tracks exist, where the answer does not matter, or Cesium no longer
+   * offers the question, where a conservative schedule beats never waiting.
+   */
+  #groundTracksSettled(): boolean {
+    const remembered = this.#groundTrackProbe === undefined ? undefined : this.#active.get(this.#groundTrackProbe)?.groundTrackSettled();
+    if (remembered !== undefined) {
+      return remembered;
+    }
+    // Checked before the walk rather than discovered by it: with the component
+    // switched off no satellite can answer, and learning that the long way is a
+    // walk per frame that finds nothing.
+    if (!this.#effectiveComponents().includes("Ground track")) {
+      return true;
+    }
+    for (const [key, sat] of this.#active) {
+      const settled = sat.groundTrackSettled();
+      if (settled !== undefined) {
+        this.#groundTrackProbe = key;
+        return settled;
+      }
+    }
+    this.#groundTrackProbe = undefined;
+    return this.#frames - this.#groundTracksRefreshedOnFrame >= GROUND_TRACK_REFRESH_FRAMES;
   }
 
   // Reconcile the live #active map against the activation target: dispose

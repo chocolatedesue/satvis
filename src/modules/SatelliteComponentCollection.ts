@@ -1,5 +1,6 @@
 import {
   ArcType,
+  BoundingSphere,
   CallbackProperty,
   Cartesian2,
   Cartesian3,
@@ -67,6 +68,13 @@ const GROUND_STATION_LINK = "Ground station link";
 const POINT_COLOR = Object.fromEntries(Object.entries(ORBIT_CLASS_COLOR).map(([orbitClass, hex]) => [orbitClass, Color.fromCssColorString(hex)])) as Record<OrbitClass, Color>;
 
 /**
+ * `BoundingSphereState.PENDING`. Written out rather than imported: the enum is
+ * exported from the engine's JavaScript but not from its type declarations. See
+ * groundTrackSettled.
+ */
+const BOUNDING_SPHERE_PENDING = 1;
+
+/**
  * How each component is made. Keyed against the config list rather than written
  * out as a switch, so adding a component there without a creator here is a
  * compile error instead of a "Unknown component" at runtime.
@@ -99,6 +107,20 @@ type Component = Entity | GeometryInstance;
 
 /** One satellite's Cesium objects, created on demand and dropped on disable. */
 export class SatelliteComponentCollection {
+  /** Written into by `getBoundingSphere` and never read. See groundTrackSettled. */
+  static readonly #sphereScratch = new BoundingSphere();
+
+  /** So a broken assumption is reported once rather than on every tick. */
+  static #reportedMissingBoundingSphere = false;
+
+  static #reportMissingBoundingSphere(): void {
+    if (SatelliteComponentCollection.#reportedMissingBoundingSphere) {
+      return;
+    }
+    SatelliteComponentCollection.#reportedMissingBoundingSphere = true;
+    console.error("Cesium DataSourceDisplay has no getBoundingSphere; pacing ground tracks on a fixed schedule instead. Cesium internals have moved — see groundTrackSettled.");
+  }
+
   readonly viewer: Viewer;
 
   readonly props: SatelliteProperties;
@@ -695,6 +717,38 @@ export class SatelliteComponentCollection {
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     entity.corridor.positions = positions as any;
+  }
+
+  /**
+   * Whether the corridor Cesium is drawing has caught up with the positions it
+   * was last handed, or undefined when there is nothing to ask — no ground track
+   * on this satellite, or no way to ask about one.
+   *
+   * Worth asking because the rebuild takes a number of frames that varies with
+   * the size of the batch, so any fixed schedule is either slower than it needs
+   * to be or fast enough to discard an unfinished rebuild. See SatelliteManager's
+   * GROUND_TRACK_REFRESH_FRAMES for what the second of those does.
+   *
+   * `getBoundingSphere` is what Cesium itself calls once a frame to decide
+   * whether the tracked entity can be followed yet, and it reports PENDING for
+   * as long as the batch primitive behind the entity is unfinished — measured as
+   * landing one frame before the new corridor is drawn. Cesium marks it private
+   * and leaves it out of its type declarations, hence the cast and the check: if
+   * it goes away the caller falls back to a fixed schedule rather than silently
+   * never waiting again.
+   */
+  groundTrackSettled(): boolean | undefined {
+    const entity = this.#components["Ground track"];
+    if (!(entity instanceof Entity) || !entity.corridor) {
+      return undefined;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const display = this.viewer.dataSourceDisplay as any;
+    if (typeof display?.getBoundingSphere !== "function") {
+      SatelliteComponentCollection.#reportMissingBoundingSphere();
+      return undefined;
+    }
+    return display.getBoundingSphere(entity, false, SatelliteComponentCollection.#sphereScratch) !== BOUNDING_SPHERE_PENDING;
   }
 
   createCone(fov = this.props.coneFovDeg): void {
