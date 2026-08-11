@@ -1,4 +1,5 @@
-import { Math as CesiumMath, SceneMode } from "@cesium/engine";
+import { HeadingPitchRoll, Math as CesiumMath, SceneMode, Transforms } from "@cesium/engine";
+import type { Cartesian3, Quaternion } from "@cesium/engine";
 
 import type { OrbitClass } from "../config/orbitClass";
 
@@ -62,6 +63,32 @@ export function coneDescription(orbitClass: OrbitClass, fovDeg: number): ConeDes
     innerHalfAngleRad: CesiumMath.toRadians(0),
     outerHalfAngleRad: CesiumMath.toRadians(fovDeg),
   };
+}
+
+/**
+ * Straight down. Hoisted out of the callback below, which runs per satellite per
+ * frame; `headingPitchRollQuaternion` only reads it.
+ */
+const CONE_HEADING_PITCH_ROLL = new HeadingPitchRoll(0, CesiumMath.toRadians(180), 0);
+
+/**
+ * The sensor cone's orientation, pointing at the ground beneath the satellite.
+ *
+ * Undefined when the position is. A sampled position has no value while its window
+ * is empty — during a rebuild, or before the first fill lands — and
+ * `Transforms.headingPitchRollQuaternion` throws `DeveloperError: origin is
+ * required.` from inside `DataSourceDisplay.update`, which is Cesium's render
+ * loop: it stops for the rest of the session.
+ *
+ * Declining costs nothing. cesium-sensor-volumes reads the position and the
+ * orientation through `Property.getValueOrUndefined` and hides the cone unless it
+ * has both, so it would reach the same conclusion from the absent position.
+ */
+export function coneOrientation(position: Cartesian3 | undefined): Quaternion | undefined {
+  if (!position) {
+    return undefined;
+  }
+  return Transforms.headingPitchRollQuaternion(position, CONE_HEADING_PITCH_ROLL);
 }
 
 /** Explicit model URL from catalog metadata wins; otherwise the name-convention path. */

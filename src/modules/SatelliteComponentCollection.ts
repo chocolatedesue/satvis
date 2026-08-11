@@ -13,7 +13,6 @@ import {
   EntityView,
   GeometryInstance,
   HeadingPitchRange,
-  HeadingPitchRoll,
   HeightReference,
   HorizontalOrigin,
   JulianDate,
@@ -29,7 +28,6 @@ import {
   PolylineGlowMaterialProperty,
   PolylineGraphics,
   SceneMode,
-  Transforms,
   VelocityOrientationProperty,
 } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
@@ -39,7 +37,7 @@ import { SATELLITE_COMPONENTS } from "../config/components";
 import { ORBIT_CLASS_COLOR, type OrbitClass } from "../config/orbitClass";
 import type { GroundStation } from "./PassPredictor";
 import type { CatalogEntry } from "./SatelliteCatalog";
-import { coneDescription, groundTrackDescription, modelUri, orbitPathTimes, orbitTrackTimes, orbitUsesPathGraphic } from "./satelliteGraphics";
+import { coneDescription, coneOrientation, groundTrackDescription, modelUri, orbitPathTimes, orbitTrackTimes, orbitUsesPathGraphic } from "./satelliteGraphics";
 import { SatelliteProperties } from "./SatelliteProperties";
 import { CesiumTimelineHelper } from "./util/CesiumTimelineHelper";
 import { drawablePositions } from "./util/drawablePositions";
@@ -418,11 +416,7 @@ export class SatelliteComponentCollection {
       } else if (component instanceof Entity) {
         if (type === "Sensor cone") {
           component.position = entityPosition;
-          component.orientation = new CallbackProperty((time?: JulianDate) => {
-            const position = this.props.trajectory.position(time as JulianDate);
-            const hpr = new HeadingPitchRoll(0, CesiumMath.toRadians(180), 0);
-            return Transforms.headingPitchRollQuaternion(position as Cartesian3, hpr);
-          }, false);
+          component.orientation = new CallbackProperty((time?: JulianDate) => coneOrientation(this.props.trajectory.position(time as JulianDate)), false);
         } else {
           component.position = entityPosition;
           component.orientation = new VelocityOrientationProperty(entityPosition);
