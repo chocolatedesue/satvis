@@ -8,6 +8,10 @@ node_modules/
 # Generated GP element-set snapshot (pnpm update-gp)
 /data/gp/
 
+# Conditional-fetch cache for the SATCAT snapshot (pnpm update-gp). Outside
+# data/ because everything there is copied into the build; this is never served.
+/worker/.cache/
+
 # Nuxt UI (Vue mode) generated type declarations
 /auto-imports.d.ts
 /components.d.ts

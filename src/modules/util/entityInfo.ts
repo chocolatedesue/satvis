@@ -3,6 +3,7 @@ import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
 import type { OrbitClass } from "../../config/orbitClass";
+import { satcatLabel, SATCAT_LAUNCH_SITE, SATCAT_OPS_STATUS, SATCAT_ORBIT_TYPE, SATCAT_OWNER } from "../../config/satcatCodes";
 import { swathExtentsOf, type SatelliteMetadata } from "../../config/satelliteMetadata";
 import type Orbit from "../Orbit";
 import { recordTleLines } from "./gp";
@@ -29,7 +30,7 @@ export type ElementsInfo = { kind: "tle"; epoch: string; lines: string } | { kin
 export function getSatelliteInfo(orbitClass: OrbitClass, metadata: SatelliteMetadata): [string, string][] {
   const rows: [string, string][] = [["Orbit", orbitClass]];
 
-  const { coneFovDeg, operator, missionType } = metadata;
+  const { coneFovDeg, operator, missionType, owner, launchDate, launchSite, opsStatus, orbitType, decayDate } = metadata;
   const extents = swathExtentsOf(metadata);
   if (extents !== undefined) {
     const { starboardKm, portKm } = extents;
@@ -45,6 +46,26 @@ export function getSatelliteInfo(orbitClass: OrbitClass, metadata: SatelliteMeta
   }
   if (missionType !== undefined) {
     rows.push(["Mission", missionType]);
+  }
+  if (owner !== undefined) {
+    rows.push(["Owner", satcatLabel(SATCAT_OWNER, owner)]);
+  }
+  if (launchDate !== undefined) {
+    // One row, not two: the site alone reads as a fact about a place rather than
+    // about this satellite, and the pair is how anyone actually reads it.
+    rows.push(["Launched", launchSite === undefined ? launchDate : `${launchDate} · ${satcatLabel(SATCAT_LAUNCH_SITE, launchSite)}`]);
+  }
+  if (opsStatus !== undefined) {
+    rows.push(["Status", satcatLabel(SATCAT_OPS_STATUS, opsStatus)]);
+  }
+  // "Orbiting" is true of all but a handful of the satellites served, so stating
+  // it would cost a row on every panel to say nothing. Docked, impacted and
+  // landed are the cases worth a line.
+  if (orbitType !== undefined && orbitType !== "ORB") {
+    rows.push(["Orbit type", satcatLabel(SATCAT_ORBIT_TYPE, orbitType)]);
+  }
+  if (decayDate !== undefined) {
+    rows.push(["Decayed", decayDate]);
   }
   return rows;
 }

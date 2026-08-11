@@ -121,6 +121,7 @@ async function handleRefresh(request: Request, env: Env): Promise<Response> {
       skipped: report.skipped,
       sources: report.sources,
       groups: report.index.groups,
+      satcat: report.index.satcat,
     },
     { headers: { "Cache-Control": "no-store" } },
   );
@@ -147,7 +148,7 @@ function parseIngestBundle(raw: unknown): IngestSource[] | string {
     if (entry === null || typeof entry !== "object") {
       return `body.sources[${i}] must be an object`;
     }
-    const { key, url, status, body, error } = entry;
+    const { key, url, status, body, error, validator } = entry;
     if (typeof key !== "string" || typeof url !== "string") {
       return `body.sources[${i}] needs string key and url`;
     }
@@ -160,10 +161,15 @@ function parseIngestBundle(raw: unknown): IngestSource[] | string {
     if (error !== undefined && typeof error !== "string") {
       return `body.sources[${i}].error must be a string`;
     }
-    if (body === undefined && error === undefined) {
+    if (validator !== undefined && typeof validator !== "string") {
+      return `body.sources[${i}].validator must be a string`;
+    }
+    // A 304 legitimately carries neither: it says the caller's conditional
+    // request matched, so the stored value already is the payload.
+    if (body === undefined && error === undefined && status !== 304) {
       return `body.sources[${i}] needs either body or error`;
     }
-    parsed.push({ key, url, status, body, error });
+    parsed.push({ key, url, status, body, error, validator });
   }
   return parsed;
 }
@@ -211,6 +217,7 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
       skipped: report.skipped,
       sources: report.sources,
       groups: report.index.groups,
+      satcat: report.index.satcat,
     },
     { headers: { "Cache-Control": "no-store" } },
   );
