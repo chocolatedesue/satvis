@@ -16,6 +16,7 @@ import type { Viewer } from "@cesium/widgets";
 import type Orbit from "./Orbit";
 import "./util/CesiumSampledPositionRawValueAccess";
 import { CesiumCallbackHelper } from "./util/CesiumCallbackHelper";
+import { drawablePositions } from "./util/drawablePositions";
 import { GridPositionProperty } from "./util/GridPositionProperty";
 import type { SampleChunk, TrajectorySampler } from "./util/sampleSource";
 import { trajectoryWindow } from "./util/trajectoryWindow";
@@ -323,20 +324,14 @@ export class SampledTrajectory {
     const end = JulianDate.addSeconds(start, this.#orbit.orbitalPeriod * 60, new JulianDate());
     const head = this.position(start);
     const samples = this.#positionsBetween(start, end);
-    if (!head) {
-      return samples;
-    }
-    if (samples.length === 0) {
-      // The window holds nothing for this range — a clock jump, or the moment
-      // after a gap abandoned the grid — but a position is still known. Two points
-      // rather than one, because `PolylineGeometry`'s constructor throws below two
-      // and that throw escapes into Cesium's render loop, which stops it for the
-      // rest of the session. A zero-length segment is not drawn: `createGeometry`
-      // collapses the duplicate and returns undefined, which the pipeline skips.
-      // The next re-cut, once the refill lands, replaces it with the real track.
-      return [head, head];
-    }
-    return [head, ...samples];
+    // A head with nothing behind it — a clock jump, or the moment after a gap
+    // abandoned the grid — is one point, not a track, so the caller's below-two
+    // check skips the component until the next re-cut, once the refill lands.
+    //
+    // Not `[head, head]` to get past `PolylineGeometry`'s below-two-positions
+    // throw: the duplicate collapses to `undefined` geometry, which costs more
+    // than the missing component. See `drawablePositions`.
+    return drawablePositions(head ? [head, ...samples] : samples);
   }
 
   groundTrack(julianDate: JulianDate, samplesFwd = 1, samplesBwd = 0, interval = 300): (Cartesian3 | undefined)[] {

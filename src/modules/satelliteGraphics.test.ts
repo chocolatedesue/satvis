@@ -1,10 +1,11 @@
-import { SceneMode } from "@cesium/engine";
+import { Cartesian3, HeadingPitchRoll, Quaternion, SceneMode, Transforms } from "@cesium/engine";
 import { describe, expect, test } from "vitest";
 
 import { SCENE_MODES, SKY_MODE } from "../config/viewModes";
 import {
   cesiumSceneMode,
   coneDescription,
+  coneOrientation,
   groundTrackDescription,
   isLeo,
   modelUri,
@@ -62,6 +63,35 @@ describe("coneDescription", () => {
 
   test("is unavailable for non-LEO satellites", () => {
     expect(coneDescription("GEO", 45)).toBeUndefined();
+  });
+});
+
+describe("coneOrientation", () => {
+  // Somewhere over Europe at ISS altitude, so the quaternion comes from a position
+  // a satellite could hold.
+  const overhead = Cartesian3.fromDegrees(11.5, 48.1, 420000);
+
+  test("orients the cone from a known position", () => {
+    const orientation = coneOrientation(overhead);
+    expect(orientation).toBeDefined();
+    // A rotation, not a degenerate quaternion — the visualizer would draw a cone
+    // pointing anywhere if this came back unnormalized.
+    expect(Quaternion.magnitude(orientation!)).toBeCloseTo(1);
+  });
+
+  // See `coneOrientation`: the throw runs inside `DataSourceDisplay.update`, so it
+  // stops Cesium's render loop for the session rather than skipping one cone.
+  test("declines rather than throwing when there is no position", () => {
+    expect(() => coneOrientation(undefined)).not.toThrow();
+    expect(coneOrientation(undefined)).toBeUndefined();
+  });
+
+  // Checked against Cesium, so the guard above rests on a measured throw rather
+  // than a remembered one. If an upgrade ever makes this tolerate a missing origin,
+  // this fails and the guard can be reconsidered.
+  test("Cesium really does throw on the position the guard withholds", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => Transforms.headingPitchRollQuaternion(undefined as any, new HeadingPitchRoll(0, Math.PI, 0))).toThrow(/origin is required/);
   });
 });
 

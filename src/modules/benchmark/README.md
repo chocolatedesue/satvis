@@ -258,6 +258,26 @@ with `cacheId`. Both would have to change in one release. PostHog under
   the sample size, rows under 20 frames are struck through in the panel,
   `logRun` warns before the tables, and the run's environment records
   `visibility`. Read `frames` before believing anything else on a row.
+- **`?framepump=1` is for a tab that cannot be made visible**, which in practice
+  means an automated browser pane. It replaces `requestAnimationFrame` with a
+  MessageChannel — the one scheduler a hidden page does not throttle, where
+  `setTimeout` is clamped to a second — and drives `resize`/`render` in place of
+  the viewer's own loop, which cannot be restarted once its callback has been
+  suspended. Add `?framems=` to pace it something other than 60 Hz.
+
+  Pair it with `?bench=true`: this module is loaded by the panel, so without the
+  panel there is nothing to install it. The pane also has to have laid the tab
+  out, or Cesium's canvas is 0 px wide and draws nothing however many frames it
+  is given — the pump says so once when it sees that, rather than letting a sweep
+  return zeros that look like measurements.
+
+  It buys a scene that builds and renders; it does **not** buy a frame rate.
+  Frames arrive on a fixed interval of the pump's choosing, so `fps` and
+  `frameMs` measure the pump and flatten against its rate exactly as they would
+  against vsync. `cpuMs` and `tickMs` are spans inside a frame and do not care
+  what scheduled it, so those stay readable. Treat such a run as a comparison
+  between two builds, both pumped, and say so wherever the numbers are quoted.
+
 - **The sweep drives `SatelliteManager.reconcile` directly, not the store.** It has
   to: `sceneSync` switches Label off above 200 active satellites, so a
   store-driven sweep could not measure labels at 1,000. The cost is that a store
@@ -449,6 +469,8 @@ browser in the loop:
   propagation and drift differencing, csv/json.
 - `benchmarkRunner.ts` — the loop, over a `BenchmarkTarget` interface.
 - `cesiumBenchmarkTarget.ts` — the only file that knows what a viewer is.
+- `framePump.ts` — frames for a page the browser stopped presenting. Off unless
+  `?framepump` asks; the queue in it is pure and tested.
 - `index.ts` — the console handle, `window.bench`.
 - `../../components/BenchmarkPanel.vue` — the in-browser half.
 
