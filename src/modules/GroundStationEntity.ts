@@ -84,6 +84,18 @@ export class GroundStationEntity {
     this.#viewer.trackedEntity = this.#entity;
   }
 
+  /**
+   * Select this station, as clicking its pin would.
+   *
+   * Its counterpart to `track()`, and needed for the same reason the entity is
+   * private. Editing a station rebuilds every station entity. A caller that wants
+   * the panel to stay open on the one it just edited has to re-select the
+   * replacement, and has no other way to reach it.
+   */
+  select(): void {
+    this.#viewer.selectedEntity = this.#entity;
+  }
+
   get hasName(): boolean {
     return this.givenName !== "";
   }

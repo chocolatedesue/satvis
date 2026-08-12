@@ -165,6 +165,31 @@ flight normally and wrote nothing: an unsettled walk is dropped rather than movi
 a station on the way out, which is what would otherwise turn the exit around. No
 console errors throughout.
 
+## Entity info panel: the tab set, the timeline and the pass link
+
+**Why it cannot be a unit test.** The layout arithmetic is unit-tested
+(`passTimeline.test.ts`), the derived facts are (`orbitFacts.test.ts`), and so is
+the formatting (`PassPredictor.test.ts`). What is not is the wiring: which tab
+survives a change of selection, whether picking a block on the strip scrolls its
+row into view, and whether entering the sky view from a station leaves the panel
+open.
+
+**Procedure.** Open `?sats=ISS%20(ZARYA)&gs=48.13,11.58,Munich_47.27,11.39,Innsbruck`.
+On the satellite: click a block on the strip and read which row carries the
+highlight; switch to `Details`; then select a ground station and read which tab is
+active. On the station: press the telescope button and read `gs`,
+`cc.skyView.observer` and whether the panel is still up.
+
+**Result, 2026-08-12, Chrome (in-app browser pane, with a temporary rAF pump — the
+globe needs frames).** Clicking the fourth block highlighted the `Munich 8 h 19 m
+07:41:48` row and left the clock running, which is the point of picking rather
+than time-travelling. Switching to `Details` and then selecting Innsbruck clamped
+the active tab back to `Passes` rather than rendering an empty body — the bug this
+clamp exists for — with the tab list hidden, since a station has only one tab, and
+no timeline, since 511 passes across every satellite is a forest. The telescope
+button stood the sky view at `{lat: 47.27, lon: 11.39}` with `gs` unchanged in
+order and the panel still open on Innsbruck. No console errors throughout.
+
 ## Sky view: the observer is a designation, not the first station
 
 **Why it cannot be a unit test.** Which station the sky view stands at is
