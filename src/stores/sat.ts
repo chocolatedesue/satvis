@@ -98,6 +98,23 @@ export const useSatStore = defineStore(
       observer.value = index;
     }
 
+    /**
+     * A name the `gs` wire format can carry back.
+     *
+     * Stations are `_`-joined and their fields `,`-separated (ADR 0001), so either
+     * character in a name breaks the round trip — and breaks it destructively: the
+     * parser drops an entry with more than three fields, so "Munich, DE" does not come
+     * back mis-parsed, it does not come back at all. Replaced rather than rejected,
+     * because losing a comma is a smaller surprise than losing the station.
+     */
+    function wireSafeName(name: string | undefined): string | undefined {
+      if (name === undefined) {
+        return undefined;
+      }
+      const safe = name.replace(/[,_]/g, " ").replace(/\s+/g, " ").trim();
+      return safe === "" ? undefined : safe;
+    }
+
     /** Drop unusable coordinates and duplicates before anything renders them. */
     function setGroundStations(next: readonly SerializedGroundStation[]): void {
       const seen = new Set<string>();
@@ -108,12 +125,13 @@ export const useSatStore = defineStore(
         }
         const lat = roundCoordinate(station.lat);
         const lon = roundCoordinate(station.lon);
-        const key = `${lat}|${lon}|${station.name ?? ""}`;
+        const name = wireSafeName(station.name);
+        const key = `${lat}|${lon}|${name ?? ""}`;
         if (seen.has(key)) {
           continue;
         }
         seen.add(key);
-        valid.push(station.name === undefined ? { lat, lon } : { lat, lon, name: station.name });
+        valid.push(name === undefined ? { lat, lon } : { lat, lon, name });
       }
       if (!sameValue(valid, stations.value)) {
         stations.value = valid;
