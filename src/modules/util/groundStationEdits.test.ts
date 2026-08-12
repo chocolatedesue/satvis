@@ -1,7 +1,20 @@
 import { describe, expect, test } from "vitest";
 
 import type { SerializedGroundStation } from "../../stores/sat";
-import { dragShift, dropIndex, MAX_LATITUDE, MAX_LONGITUDE, moved, parseCoordinate, relocated, renamed, without } from "./groundStationEdits";
+import {
+  dragShift,
+  dropIndex,
+  MAX_LATITUDE,
+  MAX_LONGITUDE,
+  moved,
+  observerAfterMove,
+  observerAfterRemoval,
+  parseCoordinate,
+  relocated,
+  renamed,
+  repositioned,
+  without,
+} from "./groundStationEdits";
 
 const list = (): SerializedGroundStation[] => [
   { lat: 48.1372, lon: 11.5756, name: "Munich" },
@@ -159,5 +172,70 @@ describe("relocated", () => {
 
   test("leaves every other station alone", () => {
     expect(relocated(list(), 0, "lat", 49).slice(1)).toEqual(list().slice(1));
+  });
+});
+
+describe("repositioned", () => {
+  test("replaces both coordinates in one step and keeps the name", () => {
+    expect(repositioned(list(), 0, 49, 12)[0]).toEqual({ lat: 49, lon: 12, name: "Munich" });
+  });
+
+  test("leaves every other station alone, and an index off the end changes nothing", () => {
+    expect(repositioned(list(), 0, 49, 12).slice(1)).toEqual(list().slice(1));
+    expect(repositioned(list(), 9, 49, 12)).toEqual(list());
+  });
+});
+
+// Every list edit has to carry the observer designation to wherever its station
+// ended up — see `observerAfterMove`.
+describe("observerAfterMove", () => {
+  test("follows the station being dragged", () => {
+    expect(observerAfterMove(0, 0, 2, 4)).toBe(2);
+    expect(observerAfterMove(3, 3, -3, 4)).toBe(0);
+  });
+
+  test("steps aside for a station dragged past it", () => {
+    // Observer at 1; the station above it moves below it, so it shifts up.
+    expect(observerAfterMove(1, 0, 1, 3)).toBe(0);
+    // Observer at 1; the station below it moves above it, so it shifts down.
+    expect(observerAfterMove(1, 2, -2, 3)).toBe(2);
+  });
+
+  test("ignores a drag that happens entirely past it", () => {
+    expect(observerAfterMove(0, 1, 1, 4)).toBe(0);
+    expect(observerAfterMove(3, 0, 1, 4)).toBe(3);
+  });
+
+  test("refuses a drag that would leave the list, exactly as moved does", () => {
+    expect(observerAfterMove(2, 0, -1, 3)).toBe(2);
+    expect(observerAfterMove(2, 2, 1, 3)).toBe(2);
+    expect(moved(list(), 0, -1)).toEqual(list());
+  });
+});
+
+describe("observerAfterRemoval", () => {
+  test("closes the gap when a station ahead of it goes", () => {
+    expect(observerAfterRemoval(2, 0, 3)).toBe(1);
+    expect(observerAfterRemoval(2, 1, 3)).toBe(1);
+  });
+
+  test("stays put when a station behind it goes", () => {
+    expect(observerAfterRemoval(0, 1, 3)).toBe(0);
+    expect(observerAfterRemoval(1, 2, 3)).toBe(1);
+  });
+
+  test("falls back to the first station when the observer itself goes", () => {
+    // The old default, and the only choice that needs no guess.
+    expect(observerAfterRemoval(2, 2, 3)).toBe(0);
+  });
+
+  test("never returns an index the shortened list cannot hold", () => {
+    for (let count = 1; count <= 4; count += 1) {
+      for (let observer = 0; observer < count; observer += 1) {
+        for (let index = 0; index < count; index += 1) {
+          expect(observerAfterRemoval(observer, index, count)).toBeLessThan(Math.max(1, count - 1));
+        }
+      }
+    }
   });
 });

@@ -116,6 +116,54 @@ export function without(stations: readonly SerializedGroundStation[], index: num
 }
 
 /**
+ * Where the observer designation lands after `moved(stations, index, by)`.
+ *
+ * The designation names a station, not a rank, so reordering the list must not
+ * hand it to somebody else. Three cases: the observer is the station being
+ * dragged and travels with it; the observer is the station the drag displaces and
+ * shifts one step out of the way; or the drag happens entirely past the observer
+ * and nothing changes.
+ *
+ * `count` is the list length, so a drag that would leave the list is refused here
+ * exactly as `moved` refuses it.
+ */
+export function observerAfterMove(observer: number, index: number, by: number, count: number): number {
+  const to = index + by;
+  if (index < 0 || index >= count || to < 0 || to >= count) {
+    return observer;
+  }
+  if (observer === index) {
+    return to;
+  }
+  // Removing `index` shifts everything after it down; inserting at `to` shifts
+  // everything from there up. Only a station between the two feels both.
+  if (index < observer && observer <= to) {
+    return observer - 1;
+  }
+  if (to <= observer && observer < index) {
+    return observer + 1;
+  }
+  return observer;
+}
+
+/**
+ * Where the observer designation lands after `without(stations, index)`.
+ *
+ * Removing the observer itself hands the designation to the first station. That is
+ * the old default, and the only choice that needs no guess about which survivor was
+ * meant. Removing anybody ahead of it just closes the gap.
+ */
+export function observerAfterRemoval(observer: number, index: number, count: number): number {
+  if (index < 0 || index >= count) {
+    return observer;
+  }
+  if (observer === index) {
+    return 0;
+  }
+  return index < observer ? observer - 1 : observer;
+}
+
+/**
  * The list with one station renamed. An empty name removes the name rather than
  * storing one: a station with no name is identified by its coordinates, and `""`
  * would travel through the url as a trailing separator that means the same thing
@@ -142,6 +190,24 @@ export function relocated(stations: readonly SerializedGroundStation[], index: n
   const station = next[index];
   if (station) {
     station[field] = value;
+  }
+  return next;
+}
+
+/**
+ * The list with one station moved to a new position, keeping its name and its
+ * place in the list.
+ *
+ * Both coordinates at once, unlike `relocated`. A walk in the sky view arrives as
+ * a position, not as two independent edits. Applying it in two steps would put a
+ * station somewhere neither the old nor the new place for one tick.
+ */
+export function repositioned(stations: readonly SerializedGroundStation[], index: number, lat: number, lon: number): SerializedGroundStation[] {
+  const next = copies(stations);
+  const station = next[index];
+  if (station) {
+    station.lat = lat;
+    station.lon = lon;
   }
   return next;
 }

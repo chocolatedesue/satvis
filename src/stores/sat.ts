@@ -75,6 +75,29 @@ export const useSatStore = defineStore(
       }
     }
 
+    /**
+     * Which ground station the sky view stands at, by position in the list.
+     *
+     * A designation rather than a rule about the order. Entering the sky view from a
+     * particular station then does not have to rearrange the list to say so.
+     * Defaults to 0, which is what every existing link means and what the app did
+     * when the first station was the observer by definition.
+     *
+     * Not url-synced: a link carries the stations and the view mode, and the
+     * observer among them stays the first one. Adding a parameter for it would
+     * extend the contract in docs/adr/0001, which is a separate decision.
+     */
+    const observer = ref(0);
+    const observerStation = computed(() => Math.min(observer.value, Math.max(0, stations.value.length - 1)));
+
+    /** Designate a station as the observer. An index past the end is ignored. */
+    function setObserverStation(index: number): void {
+      if (!Number.isInteger(index) || index < 0 || index >= stations.value.length) {
+        return;
+      }
+      observer.value = index;
+    }
+
     /** Drop unusable coordinates and duplicates before anything renders them. */
     function setGroundStations(next: readonly SerializedGroundStation[]): void {
       const seen = new Set<string>();
@@ -106,8 +129,10 @@ export const useSatStore = defineStore(
       enabledSatellites,
       disabledSatellites,
       groundStations,
+      observerStation,
       setActivation,
       setGroundStations,
+      setObserverStation,
     };
   },
   {

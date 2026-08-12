@@ -5,10 +5,22 @@
       v-for="(station, index) in stations"
       :key="index"
       class="gsList__row"
-      :class="{ 'gsList__row--first': index === 0, 'gsList__row--dragged': drag?.from === index, 'gsList__row--settling': settling }"
+      :class="{ 'gsList__row--observer': index === observerStation, 'gsList__row--dragged': drag?.from === index, 'gsList__row--settling': settling }"
       :style="{ transform: `translateY(${offsetOf(index)}px)` }"
     >
-      <span class="gsList__rank" :title="index === 0 ? 'The sky view stands here' : undefined">{{ index === 0 ? "◉" : index + 1 }}</span>
+      <!-- The mark is also the control: it is the only thing in the row that
+           says "the sky view stands here", so it is the thing to press to say
+           it somewhere else. -->
+      <button
+        type="button"
+        class="gsList__rank"
+        :class="{ 'gsList__rank--observer': index === observerStation }"
+        :title="index === observerStation ? 'The sky view stands here' : 'Stand the sky view here'"
+        :aria-pressed="index === observerStation"
+        @click="satStore.setObserverStation(index)"
+      >
+        {{ index === observerStation ? "◉" : index + 1 }}
+      </button>
       <!-- Keyboard-operable as well as draggable: dragging is the only way to
            reorder now, and a list that can only be reordered with a pointer is
            one some people cannot reorder at all. -->
@@ -67,14 +79,12 @@
       </button>
     </div>
 
-    <!-- The rule the list is arranged around: the sky view stands at the first
-         station, so the order is not presentation, it is the setting. And the way
-         to change it, because a grip says a row can move without saying that
-         moving it decides anything. Under the list and the buttons rather than
-         over them — by the time it matters you have a list to read it against,
-         and above the rows it was the first thing in a panel whose first thing
-         should be the stations. -->
-    <div class="toolbarNote">The sky view uses the first location, drag to reorder.</div>
+    <!-- What the marked row means, because the mark is a symbol and a symbol has
+         to be told once. Under the list and the buttons rather than over them — by
+         the time it matters you have a list to read it against, and above the rows
+         it was the first thing in a panel whose first thing should be the
+         stations. -->
+    <div class="toolbarNote">The sky view stands at ◉, click a number to move it.</div>
   </div>
 </template>
 
@@ -84,13 +94,25 @@ import { nextTick, ref } from "vue";
 
 import { useController } from "../composables/useController";
 import { useGeolocation } from "../composables/useGeolocation";
-import { dragShift, dropIndex, MAX_LATITUDE, MAX_LONGITUDE, moved, parseCoordinate, relocated, renamed, without } from "../modules/util/groundStationEdits";
+import {
+  dragShift,
+  dropIndex,
+  MAX_LATITUDE,
+  MAX_LONGITUDE,
+  moved,
+  observerAfterMove,
+  observerAfterRemoval,
+  parseCoordinate,
+  relocated,
+  renamed,
+  without,
+} from "../modules/util/groundStationEdits";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 
 const cc = useController();
 const satStore = useSatStore();
-const { groundStations: stations } = storeToRefs(satStore);
+const { groundStations: stations, observerStation } = storeToRefs(satStore);
 const { pickMode } = storeToRefs(useCesiumStore());
 const { pending: locating, locate } = useGeolocation(cc);
 
@@ -145,6 +167,11 @@ function commitCoordinate(index: number, field: "lat" | "lon", event: Event): vo
 }
 
 function removeAt(index: number): void {
+  // Designation first. It is computed against the list as it stands, and the store
+  // refuses an index past the end, so it has to be said while the station is still
+  // there to be counted.
+  const next = observerAfterRemoval(observerStation.value, index, stations.value.length);
+  satStore.setObserverStation(next);
   satStore.setGroundStations(without(stations.value, index));
 }
 
@@ -192,14 +219,24 @@ function endDrag(event: PointerEvent): void {
   // would cost a url entry and every satellite's passes for nothing.
   if (current && current.to !== current.from) {
     settling.value = true;
-    satStore.setGroundStations(moved(stations.value, current.from, current.to - current.from));
+    reorder(current.from, current.to - current.from);
     void nextTick(() => requestAnimationFrame(() => (settling.value = false)));
   }
 }
 
+/**
+ * Move a station and carry the observer designation with whichever station it was
+ * on. The order is presentation now, so reordering must not silently move where the
+ * sky view stands.
+ */
+function reorder(index: number, by: number): void {
+  satStore.setObserverStation(observerAfterMove(observerStation.value, index, by, stations.value.length));
+  satStore.setGroundStations(moved(stations.value, index, by));
+}
+
 /** Arrow keys on the grip, for the reordering a pointer drag cannot do. */
 function nudge(index: number, by: number): void {
-  satStore.setGroundStations(moved(stations.value, index, by));
+  reorder(index, by);
 }
 
 /** Where a row sits while a drag is in progress: the dragged one follows the
@@ -233,7 +270,7 @@ function offsetOf(index: number): number {
 
 /* The one the sky view stands at, marked on the row as well as in the note, so
    the answer survives once the note has scrolled out of mind. */
-.gsList__row--first {
+.gsList__row--observer {
   background-color: #4a5b50;
   opacity: 1;
 }
@@ -255,13 +292,26 @@ function offsetOf(index: number): number {
 }
 
 .gsList__rank {
-  color: #4ade80;
+  color: #4ade8099;
   flex: none;
+  padding: 0;
+  cursor: pointer;
+  background: none;
   font-size: 11px;
   line-height: 24px;
   text-align: center;
   user-select: none;
   width: 12px;
+}
+
+.gsList__rank:hover {
+  color: #4ade80;
+}
+
+/* The one that is currently it, at full strength — the others are an offer. */
+.gsList__rank--observer {
+  color: #4ade80;
+  cursor: default;
 }
 
 .gsList__grip {

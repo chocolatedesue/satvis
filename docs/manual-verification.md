@@ -138,9 +138,10 @@ touch it was close to unconditional.
 
 **Why it cannot be a unit test.** The arithmetic of a walk is unit-tested
 (`SkyMovement.test.ts`), and so is what sceneSync does with the observer it is
-handed. What is not is the chain between them: a key pressed on `window` reaching
-the handler, `preRender` driving the step, and the settle writing through the store
-to the url.
+handed — including that the walk lands on the _designated_ station and leaves it
+where it is in the list (`sceneSync.test.ts`). What is not is the chain between
+them: a key pressed on `window` reaching the handler, `preRender` driving the step,
+and the settle writing through the store to the url.
 
 **Procedure.** Open `?scene=Sky&gs=48.1372,11.5756,Munich`, wait for the descent to
 land, then dispatch `KeyboardEvent`s on `window` with the `code` under test,
@@ -163,6 +164,37 @@ ceiling stops at 5000 m. Leaving for 3D with `KeyW` still down landed the exit
 flight normally and wrote nothing: an unsettled walk is dropped rather than moving
 a station on the way out, which is what would otherwise turn the exit around. No
 console errors throughout.
+
+## Sky view: the observer is a designation, not the first station
+
+**Why it cannot be a unit test.** Which station the sky view stands at is
+unit-tested at the seam (`sceneSync.test.ts`) and the index arithmetic is
+unit-tested pure (`groundStationEdits.test.ts`). What is not is that the three
+readers agree once a real list, a real Cesium scene and the ground station panel
+are all in play: entry resolves the designation, the live view follows a change of
+designation, and reordering the list does not quietly move the view.
+
+**Procedure.** Open with three stations —
+`?gs=48.13,11.58,Munich_47.27,11.39,Innsbruck_51.51,-0.13,London` — and drive the
+panel: press a station's rank to designate it, drag or arrow-key a row to reorder,
+press a row's × to remove. Read `cc.skyView.observer`, the `gs` parameter and which
+row carries the ◉ between them. Entering from a station's info panel is the fourth
+path.
+
+**Result, 2026-08-11, Chrome (in-app browser pane, with the rAF pump — the descent
+needs frames).** Entering from London's info panel stood the view at
+`{lat: 51.51, lon: -0.13}` with `gs` unchanged in order, the ◉ on row 3, and the
+info panel still open on London — no station entity was rebuilt, which is what the
+old reorder did. Pressing rank 2 moved a live view to Innsbruck
+`{lat: 47.27, lon: 11.39}`, list order untouched. Arrow-keying Munich down past
+Innsbruck carried the ◉ with Innsbruck to row 1 and left `cc.skyView.observer`
+exactly where it was — a reorder is not a move. With London designated, removing
+Munich left the ◉ on London at row 2 and the observer unmoved. The GEO arc read
+Meteosat-12 at 30.3° elevation, 180.4° azimuth from London, which is the right arc
+for that latitude. No console errors throughout.
+
+**Not re-run.** The held-key walk above, whose chain this change does not touch —
+only the store write at the end of it, which is unit-tested.
 
 **Re-checked after the ground-measurement fix, 2026-08-06, Chrome.** Same walk, now
 measuring on the 250 ms throttle rather than falling back to `globe.getHeight`: the
