@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { nextTick } from "vue";
 
 import { BUILTIN_STAR_MAP } from "../config/starMaps";
+import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import type { CatalogEntry } from "./SatelliteCatalog";
@@ -312,6 +313,75 @@ describe("startSceneSync", () => {
       { lat: 48.1012, lon: 11.6099, name: "Munich" },
       { lat: 0, lon: 0, name: "Null Island" },
     ]);
+  });
+
+  test("the sky view enters at the designated station, not the first one", async () => {
+    const { target, calls } = fakeTarget();
+    startSceneSync(target);
+    const satStore = useSatStore();
+    const store = useCesiumStore();
+    satStore.setGroundStations([
+      { lat: 48.1, lon: 11.6, name: "Munich" },
+      { lat: 47.27, lon: 11.39, name: "Innsbruck" },
+    ]);
+    satStore.setObserverStation(1);
+
+    store.sceneMode = SKY_MODE;
+    await settle();
+
+    expect(calls.entered).toEqual([{ lat: 47.27, lon: 11.39 }]);
+    // And the list is untouched: designating is not reordering.
+    expect(satStore.groundStations.map((station) => station.name)).toEqual(["Munich", "Innsbruck"]);
+  });
+
+  test("walking moves the designated station and leaves it where it is in the list", async () => {
+    const { target, calls } = fakeTarget();
+    startSceneSync(target);
+    const satStore = useSatStore();
+    satStore.setGroundStations([
+      { lat: 48.1, lon: 11.6, name: "Munich" },
+      { lat: 47.27, lon: 11.39, name: "Innsbruck" },
+    ]);
+    satStore.setObserverStation(1);
+
+    calls.observerMoved?.({ lat: 47.3, lon: 11.4 });
+    await settle();
+
+    expect(satStore.groundStations).toEqual([
+      { lat: 48.1, lon: 11.6, name: "Munich" },
+      { lat: 47.3, lon: 11.4, name: "Innsbruck" },
+    ]);
+  });
+
+  test("designating another station moves a live sky view to it", async () => {
+    const { target, calls } = fakeTarget();
+    startSceneSync(target);
+    const satStore = useSatStore();
+    const store = useCesiumStore();
+    satStore.setGroundStations([
+      { lat: 48.1, lon: 11.6, name: "Munich" },
+      { lat: 47.27, lon: 11.39, name: "Innsbruck" },
+    ]);
+
+    store.sceneMode = SKY_MODE;
+    await settle();
+    expect(calls.entered).toEqual([{ lat: 48.1, lon: 11.6 }]);
+
+    satStore.setObserverStation(1);
+    await settle();
+
+    expect(calls.entered.at(-1)).toEqual({ lat: 47.27, lon: 11.39 });
+  });
+
+  test("a station designated past the end of the list is refused", () => {
+    const { target } = fakeTarget();
+    startSceneSync(target);
+    const satStore = useSatStore();
+    satStore.setGroundStations([{ lat: 48.1, lon: 11.6, name: "Munich" }]);
+
+    satStore.setObserverStation(4);
+
+    expect(satStore.observerStation).toBe(0);
   });
 
   test("a walk with no ground station to move is dropped rather than inventing one", async () => {

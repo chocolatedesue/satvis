@@ -24,6 +24,7 @@ import { activeTargetEntries } from "./satelliteActivation";
 import type { CatalogEntry } from "./SatelliteCatalog";
 import type { DesiredScene } from "./SatelliteManager";
 import type { Observer } from "./SkyView";
+import { repositioned } from "./util/groundStationEdits";
 import { toMinuteIso } from "./util/urlCodec";
 
 // Enough to keep a fast clock multiplier from hammering the history api.
@@ -183,7 +184,7 @@ export function startSceneSync(cc: SceneTarget): void {
     // Waiting is the difference between using the observer the link supplied and
     // prompting for a location on top of it.
     await nextTick();
-    const existing = satStore.groundStations[0];
+    const existing = satStore.groundStations[satStore.observerStation];
     if (existing) {
       return { lat: existing.lat, lon: existing.lon };
     }
@@ -197,7 +198,11 @@ export function startSceneSync(cc: SceneTarget): void {
     // passes the app was already computing. Read it back rather than reusing
     // `fix`, so the observer is the rounded value the store and url agree on.
     satStore.setGroundStations([...satStore.groundStations, { ...fix, name: "Geolocation" }]);
-    const created = satStore.groundStations[0];
+    // And it becomes the observer, not merely a station. It was created to answer
+    // "where is the sky view standing". Leaving the designation on whatever was
+    // already first would open the view somewhere nobody just asked for.
+    satStore.setObserverStation(satStore.groundStations.length - 1);
+    const created = satStore.groundStations[satStore.observerStation];
     return created ? { lat: created.lat, lon: created.lon } : undefined;
   }
 
@@ -293,11 +298,13 @@ export function startSceneSync(cc: SceneTarget): void {
     },
   );
 
-  // Moving the first ground station moves the observer under a live sky view.
+  // Moving the observer's ground station moves the observer under a live sky view,
+  // and so does designating a different station. Both ask the same question — where
+  // does the sky view stand now — so one watcher answers both.
   // Removing every station does not close it: the view stays where it was
   // rather than collapsing out from under someone editing their stations.
   watch(
-    () => satStore.groundStations[0],
+    () => satStore.groundStations[satStore.observerStation],
     (station) => {
       if (station && cc.skyView.active) {
         // A move, which `enter` does without flying — the promise is only about
@@ -449,19 +456,20 @@ export function startSceneSync(cc: SceneTarget): void {
     satStore.trackedSatellite = name;
   });
 
-  // Walking in the sky view moves the observer, and the observer is the first
-  // ground station — so a walk lands here rather than in a private position of
-  // its own, and the pin, the pass predictions and `?gs=` all follow it
+  // Walking in the sky view moves the observer, and the observer is a ground
+  // station. So a walk lands here rather than in a private position of its own. The
+  // pin, the pass predictions and `?gs=` all follow it
   // (docs/adr/0003-sky-view.md).
   //
-  // The station keeps its name. Whoever the observer was — "Home", or the
-  // geolocation fix that opened the view — is who they still are, somewhere else.
+  // The station keeps its name and its place in the list. Whoever the observer was
+  // — "Home", or the geolocation fix that opened the view — is who they still are,
+  // somewhere else; and a walk is not a reason to reorder anybody's stations.
   cc.skyInteraction.onObserverMove((observer) => {
-    const [first, ...rest] = satStore.groundStations;
-    if (!first) {
+    const at = satStore.observerStation;
+    if (!satStore.groundStations[at]) {
       return;
     }
-    satStore.setGroundStations([{ ...first, lat: observer.lat, lon: observer.lon }, ...rest]);
+    satStore.setGroundStations(repositioned(satStore.groundStations, at, observer.lat, observer.lon));
   });
 
   // The catalog is deliberately non-reactive — ~10k entries do not belong in

@@ -78,6 +78,28 @@ describe("setGroundStations", () => {
     ]);
   });
 
+  // A name carrying `,` or `_` used to delete the station on the next url round
+  // trip, from any name input — see `wireSafeName`.
+  test("replaces characters a name cannot carry through the url", () => {
+    const sat = useSatStore();
+    sat.setGroundStations([
+      { lat: 48.1, lon: 11.5, name: "Munich, DE" },
+      { lat: 0, lon: 0, name: "a_b" },
+      { lat: 1, lon: 1, name: "48.13°, 11.58°" },
+    ]);
+    expect(sat.groundStations).toEqual([
+      { lat: 48.1, lon: 11.5, name: "Munich DE" },
+      { lat: 0, lon: 0, name: "a b" },
+      { lat: 1, lon: 1, name: "48.13° 11.58°" },
+    ]);
+  });
+
+  test("a name that was only separators is no name at all", () => {
+    const sat = useSatStore();
+    sat.setGroundStations([{ lat: 48.1, lon: 11.5, name: " , _ " }]);
+    expect(sat.groundStations).toEqual([{ lat: 48.1, lon: 11.5 }]);
+  });
+
   test("drops unusable coordinates", () => {
     const sat = useSatStore();
     sat.setGroundStations([

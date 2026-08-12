@@ -7,6 +7,7 @@ import { satcatLabel, SATCAT_LAUNCH_SITE, SATCAT_OPS_STATUS, SATCAT_ORBIT_TYPE, 
 import { swathExtentsOf, type SatelliteMetadata } from "../../config/satelliteMetadata";
 import type Orbit from "../Orbit";
 import { recordTleLines } from "./gp";
+import { derivedOrbitRows, orbitRegimeLabel } from "./orbitFacts";
 
 dayjs.extend(utc);
 
@@ -14,21 +15,24 @@ export type ElementsInfo = { kind: "tle"; epoch: string; lines: string } | { kin
 
 /**
  * Label/value rows describing the satellite itself, as opposed to its orbit
- * elements or current position: the derived orbit class plus whatever static
- * facts its record carries.
+ * elements or current position: what follows from the element set, plus whatever
+ * static facts its record carries.
  *
- * Only the orbit class is unconditional, because it is derived from the element
- * set every satellite has. Every other row appears only when the record actually
- * carries the field — a satellite absent from the satellite table shows nothing
- * rather than the fallback values the renderer happens to use, which would read
- * as data about the satellite when it is really a default.
+ * Two provenances, in that order. The derived rows come first: orbit regime, then
+ * the apsides and node times from ./orbitFacts.ts. They are true of every satellite,
+ * and are what the served fields are read against. Every served row
+ * appears only when the record actually carries the field: a satellite absent from
+ * the satellite table shows nothing rather than the fallback values the renderer
+ * happens to use, which would read as data about the satellite when it is really a
+ * default.
  *
  * Takes the class rather than reading it off the metadata bag, so the caller
  * resolves the one cache miss (`CatalogEntry.orbitClass`) instead of this
- * function needing a second opinion about how to derive it.
+ * function needing a second opinion about how to derive it. Takes the orbit as
+ * well, because the apsides and the node times need the satrec the class does not.
  */
-export function getSatelliteInfo(orbitClass: OrbitClass, metadata: SatelliteMetadata): [string, string][] {
-  const rows: [string, string][] = [["Orbit", orbitClass]];
+export function getSatelliteInfo(orbit: Orbit, orbitClass: OrbitClass, metadata: SatelliteMetadata): [string, string][] {
+  const rows: [string, string][] = [["Orbit", orbitRegimeLabel(orbitClass, orbit)], ...derivedOrbitRows(orbit)];
 
   const { coneFovDeg, operator, missionType, owner, launchDate, launchSite, opsStatus, orbitType, decayDate } = metadata;
   const extents = swathExtentsOf(metadata);

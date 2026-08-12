@@ -66,17 +66,6 @@
       <div v-show="menu.gs" class="toolbarSwitches">
         <div class="toolbarTitle">Ground station</div>
         <ground-station-list />
-        <div class="toolbarTitle">Overpass calculation</div>
-        <label class="toolbarSwitch">
-          <input v-model="overpassMode" type="radio" value="elevation" />
-          <span class="slider"></span>
-          Elevation
-        </label>
-        <label class="toolbarSwitch">
-          <input v-model="overpassMode" type="radio" value="swath" />
-          <span class="slider"></span>
-          Swath
-        </label>
       </div>
       <div v-show="menu.map" class="toolbarSwitches">
         <!-- The imagery is two groups rather than one list, each with the control
@@ -416,7 +405,7 @@ function toggleOverlay(name: string, enabled: boolean): void {
 }
 
 const satStore = useSatStore();
-const { enabledComponents, overpassMode } = storeToRefs(satStore);
+const { enabledComponents } = storeToRefs(satStore);
 
 const compassOffered = compassAvailable();
 const { active: compassActive, pending: compassPending, toggle: toggleCompass } = useSkyCompass(cc);

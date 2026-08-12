@@ -75,6 +75,46 @@ export const useSatStore = defineStore(
       }
     }
 
+    /**
+     * Which ground station the sky view stands at, by position in the list.
+     *
+     * A designation rather than a rule about the order. Entering the sky view from a
+     * particular station then does not have to rearrange the list to say so.
+     * Defaults to 0, which is what every existing link means and what the app did
+     * when the first station was the observer by definition.
+     *
+     * Not url-synced: a link carries the stations and the view mode, and the
+     * observer among them stays the first one. Adding a parameter for it would
+     * extend the contract in docs/adr/0001, which is a separate decision.
+     */
+    const observer = ref(0);
+    const observerStation = computed(() => Math.min(observer.value, Math.max(0, stations.value.length - 1)));
+
+    /** Designate a station as the observer. An index past the end is ignored. */
+    function setObserverStation(index: number): void {
+      if (!Number.isInteger(index) || index < 0 || index >= stations.value.length) {
+        return;
+      }
+      observer.value = index;
+    }
+
+    /**
+     * A name the `gs` wire format can carry back.
+     *
+     * Stations are `_`-joined and their fields `,`-separated (ADR 0001), so either
+     * character in a name breaks the round trip — and breaks it destructively: the
+     * parser drops an entry with more than three fields, so "Munich, DE" does not come
+     * back mis-parsed, it does not come back at all. Replaced rather than rejected,
+     * because losing a comma is a smaller surprise than losing the station.
+     */
+    function wireSafeName(name: string | undefined): string | undefined {
+      if (name === undefined) {
+        return undefined;
+      }
+      const safe = name.replace(/[,_]/g, " ").replace(/\s+/g, " ").trim();
+      return safe === "" ? undefined : safe;
+    }
+
     /** Drop unusable coordinates and duplicates before anything renders them. */
     function setGroundStations(next: readonly SerializedGroundStation[]): void {
       const seen = new Set<string>();
@@ -85,12 +125,13 @@ export const useSatStore = defineStore(
         }
         const lat = roundCoordinate(station.lat);
         const lon = roundCoordinate(station.lon);
-        const key = `${lat}|${lon}|${station.name ?? ""}`;
+        const name = wireSafeName(station.name);
+        const key = `${lat}|${lon}|${name ?? ""}`;
         if (seen.has(key)) {
           continue;
         }
         seen.add(key);
-        valid.push(station.name === undefined ? { lat, lon } : { lat, lon, name: station.name });
+        valid.push(name === undefined ? { lat, lon } : { lat, lon, name });
       }
       if (!sameValue(valid, stations.value)) {
         stations.value = valid;
@@ -106,8 +147,10 @@ export const useSatStore = defineStore(
       enabledSatellites,
       disabledSatellites,
       groundStations,
+      observerStation,
       setActivation,
       setGroundStations,
+      setObserverStation,
     };
   },
   {

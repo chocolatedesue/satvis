@@ -40,13 +40,23 @@ and none reads the store string — and it is correct, because the sky view _is_
 `src/config/viewModes.ts` is the app's own view vocabulary, three of whose members
 happen to coincide with Cesium's.
 
-### The observer is the first ground station
+### The observer is a ground station, designated
 
 The sky view looks up from a point on the ground, and the app already has a name for
 such a point. Reusing it means `?scene=Sky&gs=48.14,11.58` is a complete, shareable
 "what is over me right now", and the detail card's next-pass figures are the pass
 prediction that was already being computed — rather than a second location concept
 that would have to explain which of the two a countdown belongs to.
+
+_Which_ station was originally the first one, making the list order load-bearing.
+It is now a designation held beside the list (`sat.observerStation`, default 0), so
+that entering the sky view from a particular station — the button on its info panel
+— says so by designating it rather than by rearranging somebody's list. Three places
+read the designation and they have to agree: entry (`resolveObserver`), the watcher
+that moves a live view when the station moves, and the walk that writes back. The
+designation is deliberately not a url parameter: a link carries the stations and the
+view mode, and the observer among them is the first one, exactly as before. Adding a
+parameter would extend the contract in ADR 0001 and is a separate decision.
 
 Entry is therefore an action gated on an observer existing, not a watcher: with no
 ground station the device's own location becomes one, and the sky view does not open
@@ -62,10 +72,11 @@ discarded: the sky view spends its time looking up, so moving along the view axi
 would fly the observer into the sky rather than across the ground, which is what
 the two height keys are for.
 
-Because the observer _is_ the first ground station, a walk has to end up there —
-the map pin, the next-pass figures and `?gs=` all follow the same point, and a
-private "where the camera is standing" would be the second location concept this
-ADR rejected above. But a station move recomputes every active satellite's passes
+Because the observer _is_ a ground station, a walk has to end up there — the map
+pin, the next-pass figures and `?gs=` all follow the same point, and a private
+"where the camera is standing" would be the second location concept this ADR
+rejected above. The walked station keeps its place in the list as well as its name:
+a walk is a move, not a reordering. But a station move recomputes every active satellite's passes
 and pushes a url entry, which is not something to do sixty times a second. So the
 two halves run at different rates: `SkyView.moveObserver` moves the view every
 frame, and `SkyMovement` reports the observer to the store once the keys have been
@@ -178,8 +189,8 @@ arrival and says nothing about where it is going. So one clock drives three legs
    the position has barely moved by then so it reads as a pan rather than a lurch.
 2. **Descend** (to 55%). The observer is held at the exact centre of the screen and
    grows as the camera closes on it, coming to rest **directly overhead**, looking
-   down. Since the observer is the first ground station, its map pin is already
-   drawn there — the destination is not merely centred, it is labelled.
+   down. Since the observer is a ground station, its map pin is already drawn
+   there — the destination is not merely centred, it is labelled.
 3. **Rise** (last 45%). The camera drops the last of the way, lands at 80%, and the
    view sweeps up off the ground, past the horizon, to the aim.
 

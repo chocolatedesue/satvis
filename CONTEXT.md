@@ -60,22 +60,24 @@ discussion; sharpen them here when they drift.
   meaningful together: none of them can be validated without the other two
   (`src/modules/satelliteActivation.ts`).
 - **Ground station**: a named position on the ground that passes are computed
-  against. They are ordered, and the order is load-bearing in one place: the
-  first is the observer. That is a fact about the list rather than about any
-  station, which is why the ground station panel is a list in order, editable in
-  place, with the first one marked.
+  against. They are ordered, but the order is presentation only: which one the sky
+  view stands at is a designation carried beside the list (`sat.observerStation`),
+  not a rank within it. So the ground station panel is a list in order, editable in
+  place, with the observer marked — and the mark is the control that moves it.
 - **Tracked satellite**: the satellite the camera follows. At most one, and the
   only value the globe reports back rather than merely receiving. Mutually
   exclusive with the sky view, which owns the camera itself: while the sky view
   is the active view mode nothing is tracked, and any attempt to track is
   undone.
-- **Observer**: the point on the ground the sky view looks up from — the first
-  ground station. Not a separate location: whoever the observer is, passes are
-  already computed against them. It must be resolved before the sky view can
-  open; where there is no ground station yet, the device's own location becomes
-  one, and the sky view does not open if that is refused. Movable while the view
-  is up — the movement keys walk it, and the ground station follows once they
-  stop (`SkyMovement`).
+- **Observer**: the point on the ground the sky view looks up from — the ground
+  station designated as such, the first by default. Not a separate location:
+  whoever the observer is, passes are already computed against them. It must be
+  resolved before the sky view can open; where there is no ground station yet, the
+  device's own location becomes one and is designated, and the sky view does not
+  open if that is refused. Movable while the view is up — the movement keys walk
+  it, and the designated station follows once they stop (`SkyMovement`), keeping
+  its name and its place in the list. Designating a different station while the
+  view is up moves the view there.
 - **Eye height**: how far the sky view's camera is above the ground under the
   observer. Standing height by default and raised by the movement keys, up to a
   ceiling that keeps "looking up from a point on the ground" a fair description.

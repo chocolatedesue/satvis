@@ -151,11 +151,10 @@ export class SkyInteraction {
   /**
    * Called when a walk has come to rest somewhere new.
    *
-   * A registration rather than a constructor option, unlike the callbacks above:
-   * the observer is the first ground station, so what has to hear this is the
-   * store — and the store is sceneSync's to write, while the interaction is the
-   * controller's to construct. Same shape, and for the same reason, as
-   * `sats.onTrackedChange`.
+   * A registration rather than a constructor option, unlike the callbacks above.
+   * The observer is a ground station, so what has to hear this is the store. And the
+   * store is sceneSync's to write, while the interaction is the controller's to
+   * construct. Same shape, and for the same reason, as `sats.onTrackedChange`.
    */
   onObserverMove(callback: (observer: Observer) => void): void {
     this.#observerMoved = callback;
