@@ -2,7 +2,7 @@ import { BillboardGraphics, Cartesian3, Entity, HeightReference, HorizontalOrigi
 import type { Viewer } from "@cesium/widgets";
 
 import icon from "../images/icons/pin.svg";
-import { stationPasses, type Pass } from "./PassPredictor";
+import { stationPasses, stationPassesSettled, type Pass } from "./PassPredictor";
 import type { SatelliteManager } from "./SatelliteManager";
 
 export interface GroundStationPositionData {
@@ -101,6 +101,14 @@ export class GroundStationEntity {
       time,
       this.name,
       deltaHours,
+    );
+  }
+
+  /** Whether every satellite feeding this station's list has answered yet. */
+  passesSettled(time: JulianDate): boolean {
+    return stationPassesSettled(
+      this.sats.visibleSatellites.map((sat) => sat.props.passPredictor),
+      time,
     );
   }
 }

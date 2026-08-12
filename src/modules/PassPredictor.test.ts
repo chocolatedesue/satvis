@@ -3,7 +3,19 @@ import dayjs from "dayjs";
 import { describe, expect, test } from "vitest";
 
 import Orbit from "./Orbit";
-import { PassPredictor, filterPasses, formatCountdown, stationPasses, toPassRows, type GroundStation, type Pass } from "./PassPredictor";
+import {
+  PassPredictor,
+  compassPoint,
+  filterPasses,
+  formatCountdown,
+  passMinutes,
+  passQuality,
+  passSummary,
+  stationPasses,
+  toPassRows,
+  type GroundStation,
+  type Pass,
+} from "./PassPredictor";
 import { parseGpPayload, type GpRecord } from "./util/gp";
 import { InlinePassSource, type PassPredictorSource, type PassQuery } from "./util/passSource";
 
@@ -251,17 +263,66 @@ describe("filterPasses", () => {
 });
 
 describe("formatCountdown", () => {
-  test("ongoing pass", () => {
-    expect(formatCountdown(NOW, elevationPass(-5 * MIN, 5 * MIN))).toBe("ONGOING");
+  test("ongoing and ended passes are named rather than counted", () => {
+    expect(formatCountdown(T0, elevationPass(-5 * MIN, 5 * MIN))).toBe("ongoing");
+    expect(formatCountdown(T0, elevationPass(-2 * HOUR, -1 * HOUR))).toBe("ended");
   });
 
-  test("previous pass", () => {
-    expect(formatCountdown(NOW, elevationPass(-2 * HOUR, -1 * HOUR))).toBe("PREVIOUS");
+  test("two units at most, coarsening as the pass gets further away", () => {
+    expect(formatCountdown(T0, elevationPass(42 * 1000, 10 * MIN))).toBe("42 s");
+    expect(formatCountdown(T0, elevationPass(3 * MIN + 7 * 1000, 10 * MIN))).toBe("3 m 7 s");
+    expect(formatCountdown(T0, elevationPass(3 * HOUR + 27 * MIN, 4 * HOUR))).toBe("3 h 27 m");
+    expect(formatCountdown(T0, elevationPass(1 * DAY + 2 * HOUR + 3 * MIN, 2 * DAY))).toBe("1 d 2 h");
   });
 
-  test("future pass renders zero-padded DD:HH:MM:SS", () => {
-    const pass = elevationPass(1 * DAY + 2 * HOUR + 3 * MIN + 4 * 1000, 2 * DAY);
-    expect(formatCountdown(NOW, pass)).toBe("01:02:03:04");
+  test("seconds drop out past the first minute, so a distant countdown mostly stops ticking", () => {
+    // The point of the format: thirty rows re-rendering every second was noise. It
+    // still changes once a minute. A second either side of the minute boundary is
+    // the one case that does move, which is why the offset here sits off it.
+    const pass = elevationPass(3 * HOUR + 30 * 1000, 4 * HOUR);
+    expect(formatCountdown(T0, pass)).toBe("3 h 0 m");
+    expect(formatCountdown(T0 + 1000, pass)).toBe("3 h 0 m");
+    expect(formatCountdown(T0 + 31 * 1000, pass)).toBe("2 h 59 m");
+  });
+});
+
+describe("passMinutes and passSummary", () => {
+  test("duration is milliseconds, and reads out as whole minutes", () => {
+    expect(passMinutes(elevationPass(0, 8 * MIN + 20 * 1000))).toBe(8);
+  });
+
+  test("elevation mode quotes the window, the length and the apex as a compass point", () => {
+    // The fixture's azimuthApex is 123.456, which is ESE.
+    const summary = passSummary(elevationPass(1 * HOUR, 1 * HOUR + 10 * MIN));
+    expect(summary).toBe("13:00–13:10 UTC · 10 min · 57° max, apex ESE");
+  });
+
+  test("swath mode quotes the offset and the footprint instead", () => {
+    expect(passSummary(swathPass(1 * HOUR, 1 * HOUR + 10 * MIN))).toContain("off track");
+    expect(passSummary(swathPass(1 * HOUR, 1 * HOUR + 10 * MIN))).toContain("swath");
+  });
+});
+
+describe("passQuality", () => {
+  test("elevation mode is the max elevation over 90 degrees", () => {
+    // The fixture's maxElevation is 56.7.
+    expect(passQuality(elevationPass(0, 10 * MIN))).toBeCloseTo(56.7 / 90, 5);
+  });
+
+  test("swath mode is how close to the footprint centre the station falls", () => {
+    // Clamped either way, so a station outside the footprint cannot go negative.
+    expect(passQuality(swathPass(0, 10 * MIN))).toBeGreaterThanOrEqual(0);
+    expect(passQuality(swathPass(0, 10 * MIN))).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("compassPoint", () => {
+  test("names the sixteen points, and wraps rather than running off the end", () => {
+    expect(compassPoint(0)).toBe("N");
+    expect(compassPoint(90)).toBe("E");
+    expect(compassPoint(180)).toBe("S");
+    expect(compassPoint(359)).toBe("N");
+    expect(compassPoint(-90)).toBe("W");
   });
 });
 

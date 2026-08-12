@@ -28,7 +28,12 @@ export interface PassRow {
   primary: string;
   /** Azimuth at apex (elevation mode) or swath width (swath mode). */
   secondary: string;
-  /** Pass start in epoch milliseconds, for time jumps on click. */
+  /**
+   * Pass start in epoch milliseconds. Both a time jump on click and the row's
+   * identity. The panel highlights the next pass, and the one picked off the
+   * timeline, by start time rather than by index. So nothing has to assume this
+   * list and the `Pass[]` it came from stay aligned.
+   */
   startMs: number;
 }
 
@@ -154,6 +159,20 @@ export class PassPredictor {
     return this.#passes;
   }
 
+  /**
+   * Whether `passes(time)` is answering from a window that covers `time` rather
+   * than from a stale list while a recompute is in flight.
+   *
+   * The panel needs this to tell "nothing to show" from "nothing yet": prediction
+   * runs off-thread, so the first read after a selection returns an empty list that
+   * looks exactly like a satellite with no passes. Answering `true` with no ground
+   * station is deliberate — there is nothing to wait for, and the caller has its own
+   * word for that case.
+   */
+  settled(time: JulianDate): boolean {
+    return !this.groundStationAvailable || this.#covers(time);
+  }
+
   /** Resolves once the list covers `time`. For callers that cannot use a stale one. */
   ensurePasses(time: JulianDate): Promise<Pass[]> {
     if (!this.groundStationAvailable) {
@@ -255,16 +274,17 @@ export class PassPredictor {
  * each predictor as needed, keep passes over the named station starting within
  * `deltaHours`, sorted by start time.
  */
+/** Whether every predictor feeding a station's list has settled — see `settled`. */
+export function stationPassesSettled(predictors: readonly PassPredictor[], time: JulianDate): boolean {
+  return predictors.every((predictor) => predictor.settled(time));
+}
+
 export function stationPasses(predictors: PassPredictor[], time: JulianDate, stationName: string, deltaHours = 48): Pass[] {
   const timeDate = JulianDate.toDate(time);
   return predictors
     .flatMap((predictor) => predictor.passes(time))
     .filter((pass) => dayjs(pass.start).diff(timeDate, "hours") < deltaHours && pass.groundStationName === stationName)
     .toSorted((a, b) => a.start - b.start);
-}
-
-function pad2(num: number | string): string {
-  return String(num).padStart(2, "0");
 }
 
 /**
@@ -279,18 +299,76 @@ export function filterPasses(passes: Pass[], time: JulianDate, showPast: boolean
   return passes.filter((pass) => dayjs(pass.end).isAfter(start));
 }
 
-export function formatCountdown(time: JulianDate, pass: Pass): string {
-  const t = dayjs(JulianDate.toDate(time));
-  if (dayjs(pass.end).diff(t) < 0) {
-    return "PREVIOUS";
+/**
+ * How long until a pass, at the precision it is read at: "3 h 27 m", "42 s",
+ * "ongoing", "ended".
+ *
+ * Two units at most, and seconds only inside the last minute. A countdown hours
+ * away then stops changing every second: a column of thirty of them re-rendering
+ * every tick was mostly noise.
+ */
+export function formatCountdown(nowMs: number, pass: Pass): string {
+  if (pass.end < nowMs) {
+    return "ended";
   }
-  if (dayjs(pass.start).diff(t) > 0) {
-    return `${pad2(dayjs(pass.start).diff(t, "days"))}:${pad2(dayjs(pass.start).diff(t, "hours") % 24)}:${pad2(dayjs(pass.start).diff(t, "minutes") % 60)}:${pad2(dayjs(pass.start).diff(t, "seconds") % 60)}`;
+  if (pass.start <= nowMs) {
+    return "ongoing";
   }
-  return "ONGOING";
+  const seconds = Math.floor((pass.start - nowMs) / 1000);
+  if (seconds < 60) {
+    return `${seconds} s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes} m ${seconds % 60} s`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours} h ${minutes % 60} m`;
+  }
+  return `${Math.floor(hours / 24)} d ${hours % 24} h`;
+}
+
+/** Whole minutes of a pass. `Pass.duration` is `end - start`, so milliseconds. */
+export function passMinutes(pass: Pass): number {
+  return Math.round(pass.duration / 60_000);
+}
+
+/** `HH:mm` UTC — the precision a pass window is quoted at. */
+export function hhmmUtc(epochMs: number): string {
+  return dayjs.utc(epochMs).format("HH:mm");
+}
+
+/**
+ * How good a pass is, as 0..1, for anything that draws rather than tabulates.
+ *
+ * Max elevation over 90° in elevation mode; in swath mode how close to the centre
+ * of the footprint the station falls, which is the same question the mode asks.
+ */
+export function passQuality(pass: Pass): number {
+  if ("maxElevation" in pass) {
+    return Math.min(1, Math.max(0, pass.maxElevation / 90));
+  }
+  return Math.min(1, Math.max(0, 1 - pass.minDistance / Math.max(1, pass.swathWidth / 2)));
+}
+
+/** The pass in one line: window, length, and what the current mode measures. */
+export function passSummary(pass: Pass): string {
+  const window = `${hhmmUtc(pass.start)}–${hhmmUtc(pass.end)} UTC · ${passMinutes(pass)} min`;
+  if ("maxElevation" in pass) {
+    return `${window} · ${pass.maxElevation.toFixed(0)}° max, apex ${compassPoint(pass.azimuthApex)}`;
+  }
+  return `${window} · ${pass.minDistance.toFixed(0)} km off track, swath ${pass.swathWidth.toFixed(0)} km`;
+}
+
+/** A bearing as a 16-point compass abbreviation, which reads faster than degrees. */
+export function compassPoint(azimuthDeg: number): string {
+  const points = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+  return points[Math.round((((azimuthDeg % 360) + 360) % 360) / 22.5) % 16]!;
 }
 
 export function toPassRows(passes: Pass[], time: JulianDate, nameField: "name" | "groundStationName", mode: string): PassRow[] {
+  const nowMs = JulianDate.toDate(time).getTime();
   return passes.map((pass) => {
     let primary: string;
     let secondary: string;
@@ -308,7 +386,7 @@ export function toPassRows(passes: Pass[], time: JulianDate, nameField: "name" |
     return {
       key: `${name}-${pass.start}-${pass.end}`,
       name,
-      countdown: formatCountdown(time, pass),
+      countdown: formatCountdown(nowMs, pass),
       startLabel: dayjs.utc(pass.start).format("DD.MM HH:mm:ss"),
       endLabel: dayjs.utc(pass.end).format("HH:mm:ss"),
       primary,
