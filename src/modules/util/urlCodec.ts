@@ -108,6 +108,24 @@ export function tildeEscapedStringList(): FieldKind<string[]> {
 }
 
 /**
+ * The parse shared by the closed-vocabulary lists. An unusable member costs that
+ * element, not the whole parameter: a link written against another build should
+ * not wipe the selection. Where *every* member is unusable there is no rest to
+ * keep. The empty list it would otherwise parse to is a state of its own — no
+ * components, no imagery — and the url hands that back as deliberate, so this
+ * case costs the whole parameter and the caller's default stands. An empty value
+ * names no member and still means the empty list.
+ */
+function resolveList(raw: string, resolve: (entry: string) => string | undefined): Result<string[]> {
+  const entries = splitList(raw);
+  const resolved = entries.flatMap((entry) => {
+    const member = resolve(entry);
+    return member === undefined ? [] : [member];
+  });
+  return entries.length > 0 && resolved.length === 0 ? FAIL : ok(resolved);
+}
+
+/**
  * `elements`. A closed vocabulary, so the legacy "-" space escape can be
  * resolved by membership rather than applied blindly: try the literal first,
  * fall back to "-" → space, and drop the element only if neither names a known
@@ -124,14 +142,7 @@ export function closedStringList(members: () => readonly string[]): FieldKind<st
   return {
     parse: (raw) => {
       const known = members();
-      // An unknown member costs that element, not the whole parameter: a link
-      // written against another build should not wipe the selection.
-      return ok(
-        splitList(raw).flatMap((entry) => {
-          const resolved = resolve(entry, known);
-          return resolved === undefined ? [] : [resolved];
-        }),
-      );
+      return resolveList(raw, (entry) => resolve(entry, known));
     },
     format: (value) => {
       const known = members();
@@ -159,12 +170,7 @@ export function layerList(providers: () => readonly string[]): FieldKind<string[
   return {
     parse: (raw) => {
       const names = providers();
-      return ok(
-        splitList(raw).flatMap((entry) => {
-          const selection = usable(entry, names);
-          return selection === undefined ? [] : [selection];
-        }),
-      );
+      return resolveList(raw, (entry) => usable(entry, names));
     },
     format: (value) => {
       const names = providers();

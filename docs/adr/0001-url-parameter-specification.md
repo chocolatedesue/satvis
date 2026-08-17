@@ -169,7 +169,11 @@ how it fails:
   different build referencing a component that no longer exists should not wipe the whole
   selection. For a scalar enum there is no "rest", so this collapses to the malformed case.
   For `elements` the legacy shim runs **before** this rule: an element is dropped only if
-  neither the literal form nor the `-` → space form names a known component.
+  neither the literal form nor the `-` → space form names a known component. There is one
+  limit on the rule: if the value names members and **none** of them survives, there is no
+  rest to keep, so the whole parameter is rejected and the default stands. A misspelling
+  like `?layers=Bogus` used to open a globe with no imagery on it at all. A literally empty
+  `?layers=` or `?elements=` names no member and still means none.
 - **Malformed element of `gs`** — that station is dropped, the remaining stations are
   kept.
 - **Open vocabularies** (`tags`, `sats`, `xsats`, `track`) — **not membership-validated at

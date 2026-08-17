@@ -147,7 +147,18 @@ describe("closedStringList (elements)", () => {
   });
 
   test("refuses to format an unknown component", () => {
-    expect(kind.format(["Nope"]).ok).toBe(false);
+    expect(kind.format(["Retired thing"]).ok).toBe(false);
+  });
+
+  // Nothing left to keep, so the element rule gives way and the default selection
+  // stands. A stale link should leave a satellite drawn as something.
+  test("rejects the parameter when no member is known", () => {
+    expect(kind.parse("Retired thing").ok).toBe(false);
+    expect(kind.parse("Retired thing,Another one").ok).toBe(false);
+  });
+
+  test("an empty value still means no components", () => {
+    expect(kind.parse("")).toEqual({ ok: true, value: [] });
   });
 });
 
@@ -180,6 +191,17 @@ describe("layerList", () => {
 
   test("drops an unknown provider and keeps the rest", () => {
     expect(kind.parse("ArcGis,Bogus,Nextrad")).toEqual({ ok: true, value: ["ArcGis", "Nextrad"] });
+  });
+
+  // Reproduced from `?layers=Bogus`, which dropped the one member it had and
+  // opened a blue globe with no imagery on it.
+  test("rejects the parameter when nothing it names is usable", () => {
+    expect(kind.parse("Bogus").ok).toBe(false);
+    expect(kind.parse("Bogus,OSM_abc").ok).toBe(false);
+  });
+
+  test("an empty value still means no layers", () => {
+    expect(kind.parse("")).toEqual({ ok: true, value: [] });
   });
 });
 
@@ -290,6 +312,20 @@ describe("decode", () => {
     const { patch, invalid } = decode({ fps: "yes" }, SCHEMA, DEFAULTS);
     expect(patch.showFps).toBe(false);
     expect(invalid).toEqual(["fps"]);
+  });
+
+  // The default here is the preset's basemap, which is what a misspelled
+  // provider has to leave standing.
+  test("an unusable layers value keeps the default stack", () => {
+    const { patch, invalid } = decode({ layers: "Bogus" }, SCHEMA, DEFAULTS);
+    expect(patch.layers).toEqual(["NaturalEarth"]);
+    expect(invalid).toEqual(["layers"]);
+  });
+
+  test("an unusable elements value keeps the default components", () => {
+    const { patch, invalid } = decode({ elements: "Retired thing" }, SCHEMA, DEFAULTS);
+    expect(patch.enabledComponents).toEqual(["Point", "Label"]);
+    expect(invalid).toEqual(["elements"]);
   });
 
   test("one invalid parameter does not disturb the others", () => {
