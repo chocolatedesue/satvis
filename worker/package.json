@@ -17,12 +17,12 @@
     "type-check": "tsc"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "0.20.1",
+    "@cloudflare/vitest-pool-workers": "0.21.3",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:",
     "vitest": "^4.1.10",
-    "wrangler": "^4.118.0",
+    "wrangler": "^4.123.0",
     "yaml": "^2.9.0"
   }
 }
