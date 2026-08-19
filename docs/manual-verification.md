@@ -192,6 +192,19 @@ no timeline, since 511 passes across every satellite is a forest. The telescope
 button stood the sky view at `{lat: 47.27, lon: 11.39}` with `gs` unchanged in
 order and the panel still open on Innsbruck. No console errors throughout.
 
+**The fold, added 2026-08-20.** Pressing the tab you are already on folds the body
+away, so on a phone the panel stops covering the globe and the passes the clock deck
+marks on its ruler. Reka's tab trigger sets the model on every press including an
+unchanged one, so the fold lives in `activeTab`'s setter; there is no click handler
+to keep in step with it.
+
+**Result, 2026-08-20, Chrome, 390x844.** Panel 491 px open and 145 px folded, which
+is the header, the position strip and the tab row. Pressing the active tab folds and
+unfolds it repeatedly; pressing the other tab while folded switches and expands in
+one press, from either tab. Folded, 556 px of globe stand between the panel and the
+deck, and a pass ten minutes ahead of the clock draws 29 px wide at 220 px along a
+390 px ruler.
+
 ## Sky view: the observer is a designation, not the first station
 
 **Why it cannot be a unit test.** Which station the sky view stands at is

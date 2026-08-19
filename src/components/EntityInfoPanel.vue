@@ -89,7 +89,7 @@
           root: 'gap-0',
           list: tabs.length > 1 ? 'px-2 border-y border-neutral-600' : 'hidden',
           trigger: 'min-h-8',
-          content: 'px-3 pb-3 info-body',
+          content: collapsed ? 'hidden' : 'px-3 pb-3 info-body',
         }"
       >
         <template #passes>
@@ -313,9 +313,24 @@ const tabs = computed(() => {
  * change. So an uncontrolled UTabs kept pointing at a tab that had gone, and
  * rendered an empty body. What is remembered, and why, is `preferredTab`.
  */
+const resolvedTab = computed(() => (tabs.value.some((item) => item.value === preferredTab.value) ? preferredTab.value : (tabs.value[0]?.value ?? "passes")));
+
+// Tapping the tab you are already on folds the body away. On a phone the panel is
+// most of the screen, and what it covers — the globe, and the passes the clock deck
+// marks on its ruler — is often what you opened it to look at. The selection stays,
+// so the marks stay with it.
+const collapsed = ref(false);
+
 const activeTab = computed({
-  get: () => (tabs.value.some((item) => item.value === preferredTab.value) ? preferredTab.value : (tabs.value[0]?.value ?? "passes")),
+  get: () => resolvedTab.value,
   set: (value: string) => {
+    // Reka's trigger sets the model on every press, unchanged value included, so the
+    // second press on the tab you are on arrives here as the value it already had.
+    if (value === resolvedTab.value) {
+      collapsed.value = !collapsed.value;
+      return;
+    }
+    collapsed.value = false;
     preferredTab.value = value;
   },
 });
