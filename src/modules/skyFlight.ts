@@ -33,6 +33,8 @@
 
 import { Cartesian3, EasingFunction, Math as CesiumMath, Matrix3, Quaternion } from "@cesium/engine";
 
+import { DeviceDetect } from "./util/DeviceDetect";
+
 /** A camera pose in world coordinates, with the vertical angle it is seen through. */
 export interface Pose {
   position: Cartesian3;
@@ -115,7 +117,7 @@ export const easeFlight = (t: number): number => EASING(CesiumMath.clamp(t, 0, 1
  * Zero for anyone who has asked for less motion, which restores the cut this
  * replaced — the honest reading of that request, and not a shorter flight.
  */
-export const flightDuration = (): number => (globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : FLIGHT_MS);
+export const flightDuration = (): number => (DeviceDetect.prefersReducedMotion() ? 0 : FLIGHT_MS);
 
 /** Closer than this to the destination and there is no line of sight left to aim along. */
 const ARRIVED_METRES = 1;

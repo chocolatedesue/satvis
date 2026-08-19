@@ -16,6 +16,15 @@ export class DeviceDetect {
   }
 
   /**
+   * Whether the visitor has asked for less motion. Guarded, unlike its neighbours,
+   * because a caller runs under jsdom where `matchMedia` is undefined until a test
+   * stubs it.
+   */
+  static prefersReducedMotion(): boolean {
+    return globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  }
+
+  /**
    * Whether to build the app with the reduced chrome. One definition, because
    * two consumers act on it — createViewer decides which widgets exist, and
    * CesiumController decides what the UI toggle is allowed to hide.
