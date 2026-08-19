@@ -411,8 +411,9 @@ export function startSceneSync(cc: SceneTarget): void {
 
   // Live by default: `time` is null and absent from the url, so a shared link
   // opens at the recipient's present. It pins on a deliberate act — a time in
-  // the url, or the user dragging the timeline — and then follows the clock at
-  // minute granularity so the link reproduces the moment being looked at.
+  // the url, or the user scrubbing the clock deck's ruler, which writes the
+  // store itself — and then follows the clock at minute granularity so the link
+  // reproduces the moment being looked at.
   const clockMinute = (): string | undefined => toMinuteIso(JulianDate.toDate(cc.viewer.clock.currentTime));
 
   watch(
@@ -440,16 +441,6 @@ export function startSceneSync(cc: SceneTarget): void {
     }
     lastClockWrite = now;
     cesiumStore.setTime(minute ?? null);
-  });
-
-  // Dragging the timeline is the other way in. Cesium raises `settime` on the
-  // widget's own element from `Timeline.prototype._setTimeBarTime` but does not
-  // declare `addEventListener` on it, so the cast covers a typing gap rather
-  // than an assumption — and the widget is absent in minimal ui, where there
-  // is no timeline to drag.
-  const timeline = cc.viewer.timeline as unknown as { addEventListener?: (type: string, listener: () => void) => void } | undefined;
-  timeline?.addEventListener?.("settime", () => {
-    cesiumStore.setTime(clockMinute() ?? null);
   });
 
   cc.sats.onTrackedChange((name) => {

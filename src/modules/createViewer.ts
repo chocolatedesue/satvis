@@ -11,15 +11,21 @@ import { Viewer } from "@cesium/widgets";
 /**
  * A viewer with this app's widget selection and scene defaults already applied.
  *
- * `minimalUI` is the caller's answer, not this module's: the same fact decides
- * which widgets exist here and how CesiumController treats the chrome later, and
- * it is read once (`DeviceDetect.minimalUI`) rather than re-derived per consumer.
+ * No `animation` and no `timeline` on any device: the clock deck replaces both
+ * (`ClockDeck.vue`). One row over one band says what a shuttle ring, a clock face
+ * and a 1200 px bar were saying between them, and at a phone's width the three of
+ * them did not fit at all.
+ *
+ * `minimalUI` is the caller's answer, not this module's, and decides only the
+ * fullscreen button: a control with nothing to do inside an iframe and no meaning
+ * on iOS. It is read once (`DeviceDetect.minimalUI`) rather than re-derived per
+ * consumer.
  */
 export function createViewer(container: string | Element, options: { minimalUI: boolean }): Viewer {
   const { minimalUI } = options;
 
   const viewer = new Viewer(container, {
-    animation: !minimalUI,
+    animation: false,
     // No base layer here: the store's layer stack is the only default, and it
     // arrives through sceneSync's immediate watcher a tick later. Naming one here
     // as well meant two defaults that could drift.
@@ -34,13 +40,26 @@ export function createViewer(container: string | Element, options: { minimalUI: 
     navigationInstructionsInitiallyVisible: false,
     sceneModePicker: false,
     selectionIndicator: false,
-    timeline: !minimalUI,
+    timeline: false,
     contextOptions: {
       webgl: {
         alpha: true,
       },
     },
   });
+
+  // Cesium's own wording for the lightbox link is "Data attribution", which is 28 px
+  // of a credit line the clock deck has to share the bottom row with — and the two
+  // breakpoints that decide where that line goes are measured off its width
+  // (`useClockDeckChrome`, and the corner rule in main.css). "Attribution" says the
+  // same thing about the same lightbox.
+  //
+  // Written once, because CreditDisplay sets this text in its constructor and never
+  // rewrites it: only the credit list beside it is rebuilt as credits come and go.
+  const expandLink = viewer.container.querySelector(".cesium-credit-expand-link");
+  if (expandLink) {
+    expandLink.textContent = "Attribution";
+  }
 
   viewer.clock.shouldAnimate = true;
   viewer.scene.globe.enableLighting = true;

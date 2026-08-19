@@ -128,6 +128,18 @@ discussion; sharpen them here when they drift.
   moment the user chose. Live is the default. The clock becomes pinned only by
   a deliberate act — a time supplied in the URL, or scrubbing the timeline —
   and stays pinned for the session, still advancing from that moment.
+- **Clock deck**: the bottom controls that stand in for Cesium's animation and
+  timeline widgets, which this app no longer builds on any device — pause,
+  playback speed and scrubbing, in one row over one band (`ClockDeck.vue`). Not a
+  port of the two widgets: they are two instruments always both on screen, and
+  this is one band that is either of them.
+- **Band**: the deck's lower row, and the scale it is currently showing — the
+  **ruler** of wall-clock time, or the **ladder** of playback speeds. One at a
+  time, switched from the control row, both dragged by the same gesture. Its
+  height is fixed by the band rather than by either scale, so switching moves
+  nothing above or below it.
+- **Rung**: one detent of the speed ladder, from Cesium's own shuttle-ring ticks
+  (1× to 86400× either way). The ladder rests on a rung, never between two.
 - **Sampled trajectory**: the sliding sample window of a satellite's position
   (half an orbit back, 1.5 forward) in both the fixed and inertial frames,
   kept fresh as time advances (`SampledTrajectory`). The two frames are not

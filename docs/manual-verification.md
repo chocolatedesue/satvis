@@ -27,8 +27,8 @@ the centre, and assert the control contains what comes back.
   ["toolbar Map", "#toolbarLeft .toolbarButtons button:nth-child(4)"],
   ["toolbar eye", "#toolbarRight button"],
   ["cesium credits", ".cesium-credit-logoContainer"],
-  ["cesium timeline", ".cesium-timeline-bar"],
-  ["cesium clock", ".cesium-viewer-animationContainer"],
+  ["clock deck controls", ".cluster"],
+  ["clock deck band", ".band"],
   ["entity info panel", ".entity-info-panel"],
 ].map(([name, selector]) => {
   const el = document.querySelector(selector);
@@ -43,8 +43,10 @@ The entity info panel needs a selection first — `cc.viewer.selectedEntity =
 cc.sats.activeSatellites[0].defaultEntity`.
 
 **Result, 2026-07-27, Chrome, desktop viewport 1618x1576.** All six clickable.
-Note that `minimalUI` (in an iframe, or on iOS) removes the clock and timeline
-entirely, so on those platforms the check covers only the controls that exist.
+
+The two Cesium widgets in that list are now the clock deck instead, which no longer
+depends on the platform — `createViewer` builds neither widget anywhere. What does
+still vary is the fullscreen button, absent under `minimalUI`.
 
 Since the compass control moved to the View menu the HUD holds nothing interactive
 at all, which makes the arrangement above easier to keep rather than harder.
@@ -576,3 +578,114 @@ untested heading source is required to either work or decline.
     `Offline` and `OfflineHighres` have since collapsed into the single `NaturalEarth`
     layer, so that list is one shorter now. What was being checked — that the radios bind
     by provider, so an `_0.5` token still reads as the layer it is — is unaffected.
+
+## Clock deck: the replacement for the animation and timeline widgets
+
+**Why it cannot be a unit test.** Everything the deck is depends on layout. Its
+surface is measured off the controls with `getBoundingClientRect`, the ruler's
+scale depends on the width it measures for itself, the credit line has to clear it
+without being covered or made unclickable, and both scales are pointer gestures
+with inertia — jsdom answers none of that.
+
+**Procedure.** The deck is on every device now, so no patching is needed. At any
+viewport:
+
+```js
+const cluster = document.querySelector(".cluster");
+const surface = getComputedStyle(cluster, "::before");
+const box = cluster.getBoundingClientRect();
+const parts = [...cluster.querySelectorAll(".play__circle, .stamp, .mode, .reset")].map((el) => el.getBoundingClientRect());
+const credits = document.querySelector(".cesium-viewer-bottom").getBoundingClientRect();
+({
+  // The surface hugs the controls, 8 px either side.
+  surfaceLeft: box.left + parseFloat(surface.left) - (Math.min(...parts.map((p) => p.left)) - 8),
+  surfaceRight: box.right - parseFloat(surface.right) - (Math.max(...parts.map((p) => p.right)) + 8),
+  // It is flush against the band: one shape, not two.
+  seam: document.querySelector(".band").getBoundingClientRect().top - box.bottom,
+  // The clock sits on the needle.
+  clockOffset: (() => {
+    const s = document.querySelector(".stamp").getBoundingClientRect();
+    return (s.left + s.right) / 2 - innerWidth / 2;
+  })(),
+  creditBottom: innerHeight - credits.bottom,
+  // The deck must not be the thing a tap on the credits hits.
+  creditHit: document.elementFromPoint(credits.left + 20, credits.top + 14)?.className,
+});
+```
+
+Then: tap the clock to fold and unfold (the clock and play button must not move,
+and the credits must drop to Cesium's own 3 px and come back); tap the gauge to put
+the ladder on the band (the deck's height must not change); swipe the ladder and let
+go (it must coast and rest exactly on a rung — `scrollLeft / 64` an integer); drag
+the ruler and let go (the clock pins, `?time=` appears, and the reset appears).
+
+**Result, 2026-08-19, Chrome, 375x700 and 390x844 (with the deck still gated on
+`minimalUI`, so those two runs had it forced), rechecked at 694x800 once it was on
+every device.** Surface 92.5 → 317.5 against controls at 100.5 → 309.5, so both
+edges exact; seam 0.0; clock centred to 0.0; credits at 98 px above the deck and
+3 px when folded, clearing the folded card by 17 px; the credit logo and both links
+hit-test to themselves, and `Attribution` still opens Cesium's lightbox. At 682 px
+the credits move into the control row (57 px) with 10.2 px of clearance to the
+surface, and at 681 they stay above the deck; at 1050 px the deck caps at 560 px and
+centres and the credits return to the bottom-left corner, 9.2 px clear of it.
+
+Both of those widths are measured off the credit container's box, which ends 5 px
+past its last link: 236 px, not the 226 px of content. Sized off the content, each
+breakpoint left half the intended gap at the width that triggers it. The wording
+matters too — `createViewer` shortens Cesium's `Data attribution` to `Attribution`,
+which is 28 px of a line the deck has to share a row with, so both numbers move if
+that changes back.
+
+Sky view's cards resolve to `bottom: 102px` with the deck present and 64 px without.
+
+**Where the credit line sits is one CSS variable, in four cases.** The offsets were
+literals in `useClockDeckChrome` — 98, 57, 3 — measured on a phone with no home
+indicator, so on one with a notch the deck grew by `env(safe-area-inset-bottom)` and
+the credit line did not: it ended up behind the band. The composable now sets
+`body[data-clock-deck]` to the case, and main.css writes each offset in terms of
+`--clock-deck-safe`. Check by reading the computed variable in each state rather
+than the pixel, since the pixel is only right on a device without a notch.
+
+**Result, 2026-08-19, Chrome, 694x800 and 1280x800.** `calc(51px + max(6px, 0px))`
+beside the controls, `calc(3px + 0px)` folded and again in the desktop corner, and
+`calc(var(--clock-deck-height) + 4px)` clear of the deck below 682 px.
+
+**The ruler must measure itself against the deck it is in.** `--clock-deck-max`
+lives on `:root` and not on `body.clock-deck`, because the class is added by the
+deck's own `onMounted` and the ruler measures its width in that same tick: hung off
+the class, the first measurement was the uncapped one and the clock's moment sat
+350 px away from the needle. Check it by reading where the hour labels fall —
+150 px apart, and the one before the needle no further from it than the clock is
+past the hour.
+
+**Result, 2026-08-19, Chrome, 1280x800.** Ruler 560 px, 23 ticks spanning it, hour
+labels at 118.5 / 268.5 / 418.5, needle at 280, clock 21:04:48 — so 21:00 sits
+11.5 px left of the needle where 4.8 minutes is 12 px. Deck centred at 360–920,
+credits in the bottom-left corner 277 px clear of it, fullscreen button still
+present and 331 px clear. Below the cap the band covers the corner that button sits
+in, so it is hidden there: `display: none` at 900 px, back to `block` at 1280. The eye toggle removes the deck, the body class and the fullscreen button
+together, and restores all three.
+
+**Pass bands.** The selected satellite's passes are published to
+`usePassHighlights` and drawn on the ruler, which is what Cesium's timeline
+highlight ranges used to do. With no satellite data to hand, drive the seam
+directly — Vite hands back the same module instance the deck imported:
+
+```js
+const mod = await import("/src/composables/usePassHighlights.ts");
+const clockMs = Date.now(); // or the deck's own clock, if it has drifted
+mod.setPassHighlights([{ start: clockMs + 5 * 60_000, end: clockMs + 13 * 60_000 }]);
+```
+
+**Result, 2026-08-19, Chrome, 1280x800.** A pass five minutes ahead lands 12.5 px
+right of the needle and is 20 px wide, which is 8 minutes at 1 hour per 150 px; one
+40 minutes behind lands 100 px left; one spanning the whole window is clipped to the
+ruler rather than dropped; one ten hours out is not drawn.
+
+**Still needs a real device.** The gesture feel — flick inertia, the ladder's
+settle, and whether 1 hour per 150 px is the right scale for a thumb — was judged in
+the prototype this deck came from, but not on iOS. Nor is the notch itself tested:
+the offsets are written in terms of `env(safe-area-inset-bottom)` now rather than
+around it, but no run has had a home indicator to prove it. The same goes for
+rotation, where the surface is re-measured from the `resize` listener rather than
+from the observer.

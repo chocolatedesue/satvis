@@ -144,7 +144,8 @@ export class CesiumController {
 
   performanceStats: CesiumPerformanceStats | undefined;
 
-  oldBottomContainerStyleLeft: string = "";
+  /** Whether the app's chrome is showing. See the `showUI` accessors. */
+  #uiVisible: boolean = true;
 
   #removeCameraTrackEci: (() => void) | undefined;
 
@@ -631,10 +632,6 @@ export class CesiumController {
     this.viewer.clock.startTime = JulianDate.fromIso8601(dayjs.utc(start).toISOString());
     this.viewer.clock.stopTime = JulianDate.fromIso8601(dayjs.utc(stop).toISOString());
     this.viewer.clock.currentTime = JulianDate.fromIso8601(dayjs.utc(current).toISOString());
-    if (typeof this.viewer.timeline !== "undefined") {
-      this.viewer.timeline.updateFromClock();
-      this.viewer.timeline.zoomTo(this.viewer.clock.startTime, this.viewer.clock.stopTime);
-    }
   }
 
   createInputHandler(): void {
@@ -689,25 +686,24 @@ export class CesiumController {
     satStore.setGroundStations([...satStore.groundStations, { lat, lon, ...(name ? { name } : {}) }]);
   }
 
+  /**
+   * Cesium's own chrome, hidden and shown with the app's. That is the fullscreen
+   * button and nothing else: the animation and timeline widgets are not built, and
+   * the clock deck decides where the credit line goes while it is on screen.
+   *
+   * The flag is stored rather than read off the DOM, because the widget whose
+   * `visibility` used to answer this question no longer exists.
+   */
   set showUI(enabled: boolean) {
-    if (enabled) {
-      this.viewer._animation.container.style.visibility = "";
-      this.viewer._timeline.container.style.visibility = "";
-      this.viewer._fullscreenButton._container.style.visibility = "";
-      this.viewer._bottomContainer.style.left = this.oldBottomContainerStyleLeft;
-      this.viewer._bottomContainer.style.bottom = "30px";
-    } else {
-      this.viewer._animation.container.style.visibility = "hidden";
-      this.viewer._timeline.container.style.visibility = "hidden";
-      this.viewer._fullscreenButton._container.style.visibility = "hidden";
-      this.oldBottomContainerStyleLeft = this.viewer._bottomContainer.style.left;
-      this.viewer._bottomContainer.style.left = "5px";
-      this.viewer._bottomContainer.style.bottom = "0px";
+    this.#uiVisible = enabled;
+    const fullscreen = this.viewer._fullscreenButton?._container;
+    if (fullscreen) {
+      fullscreen.style.visibility = enabled ? "" : "hidden";
     }
   }
 
   get showUI(): boolean {
-    return this.viewer._timeline.container.style.visibility !== "hidden";
+    return this.#uiVisible;
   }
 
   fixLogo(): void {

@@ -257,7 +257,9 @@ onUnmounted(() => {
 .sky-hud__warn {
   position: absolute;
   right: 8px;
-  bottom: 64px;
+  /* Clear of the clock deck when there is one; 64 px is what the sky view alone
+     needs (`main.css`, `--clock-deck-height`). */
+  bottom: max(64px, calc(var(--clock-deck-height, 0px) + 8px));
   max-width: 200px;
   padding: 6px 8px;
   border-radius: 8px;
@@ -269,7 +271,9 @@ onUnmounted(() => {
 .sky-hud__card {
   position: absolute;
   left: 50%;
-  bottom: 64px;
+  /* Clear of the clock deck when there is one; 64 px is what the sky view alone
+     needs (`main.css`, `--clock-deck-height`). */
+  bottom: max(64px, calc(var(--clock-deck-height, 0px) + 8px));
   transform: translateX(-50%);
   min-width: 220px;
   padding: 8px 12px;

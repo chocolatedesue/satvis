@@ -2,25 +2,11 @@
 // exposed in the published `.d.ts`. Restricting these to a single declaration
 // file keeps the rest of the codebase honest about what's "real" Cesium API.
 
-import type { Color, JulianDate } from "@cesium/engine";
-
-interface TimelineHighlightRange {
-  setRange(start: JulianDate, end: JulianDate): void;
-}
-
 declare module "@cesium/widgets" {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  interface Timeline {
-    updateFromClock(): void;
-    addHighlightRange(color: Color, heightInPx: number, baseInPx: number): TimelineHighlightRange;
-    _highlightRanges: TimelineHighlightRange[];
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface Viewer {
-    _animation: { container: HTMLElement };
-    _timeline: { container: HTMLElement };
-    _fullscreenButton: { _container: HTMLElement };
+    /** Absent under `minimalUI`, which is why the accessor guards it. */
+    _fullscreenButton?: { _container: HTMLElement };
     /** Container holding the Cesium credit and bottom UI. */
     _bottomContainer: HTMLElement;
   }

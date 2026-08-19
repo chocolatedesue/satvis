@@ -275,6 +275,10 @@
          Cesium InfoBox, which was visible with hidden UI and in minimalUI. -->
     <entity-info-panel />
     <sky-hud />
+    <!-- What Cesium's animation and timeline widgets used to be: `createViewer`
+         builds neither, on any device. Follows the UI toggle like the rest of the
+         chrome. -->
+    <clock-deck v-if="showUI" />
     <!-- Async, so nothing about it is in the
          bundle a normal visitor downloads. -->
     <benchmark-panel v-if="showBenchmark" @close="showBenchmark = false" />
@@ -296,6 +300,7 @@ import { DeviceDetect } from "../modules/util/DeviceDetect";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import AboutDialog from "./AboutDialog.vue";
+import ClockDeck from "./ClockDeck.vue";
 import EntityInfoPanel from "./EntityInfoPanel.vue";
 import GroundStationList from "./GroundStationList.vue";
 import SatelliteBrowser from "./SatelliteBrowser.vue";
@@ -443,9 +448,10 @@ function toggleMenu(name: MenuKey) {
 
 function toggleUI() {
   showUI.value = !showUI.value;
-  if (!cc.minimalUI) {
-    cc.showUI = showUI.value;
-  }
+  // Unconditional now: what this still hides is the fullscreen button, and the
+  // controller knows whether there is one. The clock deck follows the same flag
+  // through its own `v-if`.
+  cc.showUI = showUI.value;
 }
 
 function reload() {

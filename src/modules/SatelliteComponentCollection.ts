@@ -33,13 +33,13 @@ import {
 import type { Viewer } from "@cesium/widgets";
 import CesiumSensorVolumes from "cesium-sensor-volumes";
 
+import { clearPassHighlights, setPassHighlights } from "../composables/usePassHighlights";
 import { SATELLITE_COMPONENTS } from "../config/components";
 import { ORBIT_CLASS_COLOR, type OrbitClass } from "../config/orbitClass";
 import type { GroundStation } from "./PassPredictor";
 import type { CatalogEntry } from "./SatelliteCatalog";
 import { coneDescription, coneOrientation, groundTrackDescription, modelUri, orbitPathTimes, orbitTrackTimes, orbitUsesPathGraphic } from "./satelliteGraphics";
 import { SatelliteProperties } from "./SatelliteProperties";
-import { CesiumTimelineHelper } from "./util/CesiumTimelineHelper";
 import { drawablePositions } from "./util/drawablePositions";
 import type { PassPredictorSource } from "./util/passSource";
 import type { PolylineBatch } from "./util/PolylineBatch";
@@ -148,10 +148,10 @@ export class SatelliteComponentCollection {
   }
 
   /**
-   * Put this satellite's passes on the timeline, once they exist.
+   * Put this satellite's passes on the clock deck's ruler, once they exist.
    *
    * Prediction is off-thread, so the list a read returns may be the previous one
-   * or nothing at all. Highlighting what is known now and again when the answer
+   * or nothing at all. Publishing what is known now and again when the answer
    * lands is the whole adaptation: the first call paints a stale or empty band and
    * costs nothing, the second paints the real one.
    */
@@ -159,7 +159,7 @@ export class SatelliteComponentCollection {
     const predictor = this.props.passPredictor;
     const time = this.viewer.clock.currentTime;
     if (this.isSelected) {
-      CesiumTimelineHelper.updateHighlightRanges(this.viewer, predictor.passes(time));
+      setPassHighlights(predictor.passes(time));
     } else {
       // Not selected: nothing to paint, but the tracked satellite still wants the
       // window computed for its ground-station link.
@@ -328,14 +328,14 @@ export class SatelliteComponentCollection {
     // bands are painted once and do.
     this.eventListeners.passesChanged = this.props.passPredictor.onChanged(() => {
       if (this.isSelected) {
-        CesiumTimelineHelper.updateHighlightRanges(this.viewer, this.props.passPredictor.passes(this.viewer.clock.currentTime));
+        setPassHighlights(this.props.passPredictor.passes(this.viewer.clock.currentTime));
       }
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.eventListeners.selectedEntity = this.viewer.selectedEntityChanged.addEventListener((entity: any) => {
       if (!entity || entity?.name === "Ground station") {
-        CesiumTimelineHelper.clearHighlightRanges(this.viewer);
+        clearPassHighlights();
         return;
       }
       if (this.isSelected) {

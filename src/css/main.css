@@ -188,3 +188,64 @@ input:checked + .slider::before {
   justify-content: center;
   display: inline-flex;
 }
+
+/* The clock deck (`ClockDeck.vue`) shares the bottom of the screen with Cesium's
+   credit line, so two things are said out here: how much room the deck claims, and
+   where the credits go around it. */
+body.clock-deck {
+  /* Every offset below is written in terms of this, or a notch grows the deck and
+     leaves the credit line behind the band. */
+  --clock-deck-safe: max(6px, env(safe-area-inset-bottom));
+  /* What the deck occupies, for the sky view's cards. Constant across the fold. */
+  --clock-deck-height: calc(88px + var(--clock-deck-safe));
+  /* Clear of the deck: the default, and where a phone puts them. */
+  --clock-deck-credit-bottom: calc(var(--clock-deck-height) + 4px);
+}
+
+/* Beside the surface, in the control row: 28 px of credit centred in its 46. */
+body.clock-deck[data-clock-deck="beside"] {
+  --clock-deck-credit-bottom: calc(51px + var(--clock-deck-safe));
+}
+
+/* Folded, the band's reserved row is more room than the credit line needs. */
+body.clock-deck[data-clock-deck="folded"] {
+  --clock-deck-credit-bottom: calc(3px + env(safe-area-inset-bottom, 0px));
+}
+
+/* `!important` because Cesium writes this element's `bottom` inline, on every
+   `Viewer.resize`. The width cap is for the other half of the same problem: Cesium
+   stretches the container across the row, and the invisible strip swallows taps. */
+body.clock-deck .cesium-viewer-bottom {
+  bottom: var(--clock-deck-credit-bottom) !important;
+  left: 5px !important;
+  right: auto !important;
+  width: max-content !important;
+}
+
+/* Below the cap the deck spans the whole row and the band covers the corner Cesium
+   puts its fullscreen button in. Hidden rather than never built, so it returns with
+   the gutter; on a phone the viewport is always under the cap, and the button does
+   nothing worth having there anyway. `!important` for the reason above: Cesium
+   writes this container's `display` inline. */
+@media (max-width: 1049px) {
+  body.clock-deck .cesium-viewer-fullscreenContainer {
+    display: none !important;
+  }
+}
+
+/* Room for a phone-width deck and the credit line side by side: 560 plus twice the
+   236 px box the line ends at, plus air. The box, not its 226 px of content — the
+   container runs 5 px past the last link. */
+@media (min-width: 1050px) {
+  /* On `:root`, not `body.clock-deck`: the class arrives in the deck's `onMounted`,
+     and the ruler measures its own width in that same tick. */
+  :root {
+    --clock-deck-max: 560px;
+  }
+
+  /* Cesium's own corner. `[data-clock-deck]` matches any state, at equal specificity
+     to the rules above and later in the file, so it wins. */
+  body.clock-deck[data-clock-deck] {
+    --clock-deck-credit-bottom: calc(3px + env(safe-area-inset-bottom, 0px));
+  }
+}
