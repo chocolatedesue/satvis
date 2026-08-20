@@ -687,12 +687,9 @@ export class CesiumController {
   }
 
   /**
-   * Cesium's own chrome, hidden and shown with the app's. That is the fullscreen
-   * button and nothing else: the animation and timeline widgets are not built, and
-   * the clock deck decides where the credit line goes while it is on screen.
-   *
-   * The flag is stored rather than read off the DOM, because the widget whose
-   * `visibility` used to answer this question no longer exists.
+   * Cesium's own chrome, which is the fullscreen button and nothing else: no clock
+   * widgets are built, and the deck places the credit line while it is up. The flag
+   * is stored because no widget's `visibility` can be read back for it.
    */
   set showUI(enabled: boolean) {
     this.#uiVisible = enabled;

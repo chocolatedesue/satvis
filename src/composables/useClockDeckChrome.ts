@@ -10,6 +10,10 @@ type CreditPlace = "clear" | "beside" | "folded";
 // Where the credit line fits left of the surface: its 206 px box plus 10 px of air,
 // against a surface starting at `50% − 95`. Not measured at runtime — the line is a
 // fifth of its width until the ion logo loads.
+//
+// Only decides between "clear" and "beside". Above 1000 px main.css sends the line to
+// Cesium's own corner whichever of the two this returns, because the deck caps and
+// centres there and stops sharing the row at all.
 const CREDIT_BESIDE_MIN_PX = 624;
 
 export function useClockDeckChrome() {

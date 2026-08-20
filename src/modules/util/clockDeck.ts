@@ -11,7 +11,11 @@ export enum BandScale {
   Ladder = "ladder",
 }
 
-/** Cesium's `AnimationViewModel.defaultTicks` from 1× up. Its 0.001×–0.5× rungs are dropped: a swipe pays for every rung. */
+/**
+ * Cesium's `AnimationViewModel.defaultTicks`, from 1× up. Slower than real time is
+ * left out on purpose: a swipe pays for every rung it crosses, and the shuttle ring's
+ * 0.001× to 0.5× are thirteen rungs in front of the ones people reach for.
+ */
 export const SPEED_TICKS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400, 21600, 43200, 86400] as const;
 
 export const LADDER: readonly number[] = [...SPEED_TICKS]
@@ -38,7 +42,7 @@ export const MAX_SWIPE_VELOCITY = 4;
 export const MIN_SWIPE_VELOCITY = 0.02;
 
 /** Kept per frame at 16.7 ms; one curve for both scales. */
-export const FLICK_DECAY = 0.94;
+const FLICK_DECAY = 0.94;
 
 export const decayVelocity = (velocity: number, dtMs: number): number => velocity * FLICK_DECAY ** (dtMs / 16.7);
 
@@ -104,6 +108,9 @@ export function passMarks(spans: readonly TimeSpan[], centreMs: number, widthPx:
 /** Clamped to the ladder's ends. */
 export const nearestRung = (scrollLeft: number, chipPx: number = CHIP_PX): number => Math.min(LADDER.length - 1, Math.max(0, Math.round(scrollLeft / chipPx)));
 
+/** Which way an arrow key walks a scale, or 0 for a key that is not one. */
+export const arrowStep = (key: string): number => (key === "ArrowRight" ? 1 : key === "ArrowLeft" ? -1 : 0);
+
 /** The rung nearest a multiplier, so a url-set speed still steps sensibly. */
 export function rungFor(multiplier: number): number {
   return LADDER.reduce((best, value, at) => (Math.abs(value - multiplier) < Math.abs(LADDER[best]! - multiplier) ? at : best), 0);
@@ -131,4 +138,4 @@ export function rateLabel(multiplier: number): string {
 
 export const clockLabel = (date: Date): string => dayjs.utc(date).format("HH:mm:ss");
 export const dateLabel = (date: Date): string => dayjs.utc(date).format("ddd DD MMM");
-export const hhmmLabel = (date: Date): string => dayjs.utc(date).format("HH:mm");
+const hhmmLabel = (date: Date): string => dayjs.utc(date).format("HH:mm");

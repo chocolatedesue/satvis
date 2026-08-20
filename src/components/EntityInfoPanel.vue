@@ -73,8 +73,9 @@
         </span>
       </div>
 
-      <!-- A lone tab is a control that switches to nothing, which a ground station
-           hits: no satellite facts and no elements means no `Details`.
+      <!-- The row shows even when there is one tab, which a ground station has: it is
+           the handle the fold hangs off, so a lone tab switches to nothing but still
+           does something.
 
            `min-h-8` is the height a trigger takes once it carries a badge. Reserved
            always, because the badge appears only once the pass count is known: the
@@ -87,7 +88,7 @@
         size="sm"
         :ui="{
           root: 'gap-0',
-          list: tabs.length > 1 ? 'px-2 border-y border-neutral-600' : 'hidden',
+          list: 'px-2 border-y border-neutral-600',
           trigger: 'min-h-8',
           content: collapsed ? 'hidden' : 'px-3 pb-3 info-body',
         }"
@@ -320,6 +321,12 @@ const resolvedTab = computed(() => (tabs.value.some((item) => item.value === pre
 // marks on its ruler — is often what you opened it to look at. The selection stays,
 // so the marks stay with it.
 const collapsed = ref(false);
+
+// A new selection is a request to see it, so it arrives unfolded. Watched rather than
+// cleared on close, because the panel is not remounted between entities.
+watch(selection, () => {
+  collapsed.value = false;
+});
 
 const activeTab = computed({
   get: () => resolvedTab.value,

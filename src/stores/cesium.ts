@@ -59,7 +59,7 @@ export const useCesiumStore = defineStore(
     const layers = computed(() => activeLayers.value);
 
     // null means the clock is live and follows the present; a value means it
-    // was pinned, by a url or by the user scrubbing the timeline. Read-only so
+    // was pinned, by a url or by a scrub of the clock deck's ruler. Read-only so
     // the minute-rounding cannot be skipped — see CONTEXT.md, live vs pinned.
     const pinnedTime = ref<string | null>(null);
     const time = computed(() => pinnedTime.value);

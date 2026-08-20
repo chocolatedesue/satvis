@@ -12,14 +12,11 @@ import { Viewer } from "@cesium/widgets";
  * A viewer with this app's widget selection and scene defaults already applied.
  *
  * No `animation` and no `timeline` on any device: the clock deck replaces both
- * (`ClockDeck.vue`). One row over one band says what a shuttle ring, a clock face
- * and a 1200 px bar were saying between them, and at a phone's width the three of
- * them did not fit at all.
+ * (`ClockDeck.vue`), and neither widget fits a phone's width.
  *
  * `minimalUI` is the caller's answer, not this module's, and decides only the
- * fullscreen button: a control with nothing to do inside an iframe and no meaning
- * on iOS. It is read once (`DeviceDetect.minimalUI`) rather than re-derived per
- * consumer.
+ * fullscreen button: nothing to do in an iframe, no meaning on iOS. Read once
+ * (`DeviceDetect.minimalUI`) rather than re-derived per consumer.
  */
 export function createViewer(container: string | Element, options: { minimalUI: boolean }): Viewer {
   const { minimalUI } = options;

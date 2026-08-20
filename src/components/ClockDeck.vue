@@ -1,12 +1,9 @@
 <!-- Pause, playback speed and scrubbing, in place of Cesium's animation and timeline
      widgets. See CONTEXT.md: clock deck, band, rung.
 
-     One control row over one band. The band is the ruler or the speed ladder, never
-     both, so the deck is a constant 94 px and the clock never moves; both scales
-     answer to the same drag. The row holds the clock on the needle's line, a dot
-     while it is at the present, and two buttons that only ever act: one switches the
-     band's scale, one undoes whatever that scale has deviated from. Tapping the clock
-     folds the band away. -->
+     One control row over one band, and the band is the ruler or the ladder, never
+     both — which is what keeps the deck's height fixed and the clock still. Tapping
+     the clock folds the band away. -->
 <template>
   <div class="deck" :class="{ 'deck--folded': !open }">
     <div ref="cluster" class="cluster" :style="surfaceStyle">
@@ -48,6 +45,7 @@
         <div
           ref="strip"
           class="strip"
+          :style="{ '--rung-width': `${CHIP_PX}px`, '--rung-inset': `${CHIP_PX / 2}px` }"
           role="radiogroup"
           aria-label="Playback speed"
           @scroll="onStripScroll"
@@ -109,7 +107,7 @@ import { useLadder, useRuler } from "../composables/useClockBand";
 import { useClockDeckChrome } from "../composables/useClockDeckChrome";
 import { usePassHighlights } from "../composables/usePassHighlights";
 import { useViewerClock } from "../composables/useViewerClock";
-import { BandScale, clockLabel, dateLabel, LADDER, multiplierLabel, passMarks, rateLabel, REAL_TIME_RUNG } from "../modules/util/clockDeck";
+import { arrowStep, BandScale, CHIP_PX, clockLabel, dateLabel, LADDER, multiplierLabel, passMarks, rateLabel, REAL_TIME_RUNG } from "../modules/util/clockDeck";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 
 const clock = useViewerClock();
@@ -124,13 +122,13 @@ const { passes } = usePassHighlights();
 const marks = computed(() => passMarks(passes.value, now.value.getTime(), rulerWidth.value));
 
 const strip = ref<HTMLElement>();
-const { onScroll: onStripScroll, onDown: onStripDown, onMove: onStripMove, onUp: onStripUp, pick: pickRung, openAt, settleOn, step } = useLadder(clock, strip);
+const { onScroll: onStripScroll, onDown: onStripDown, onMove: onStripMove, onUp: onStripUp, pick: pickRung, showRung, step } = useLadder(clock, strip);
 
 // The ruler by default: the timeline is what the deck is for.
 const bandScale = ref<BandScale>(BandScale.Ruler);
 const onLadder = computed(() => bandScale.value === BandScale.Ladder);
-// Folded on a phone, where 94 px is a tenth of the screen and the clock alone is
-// what most sessions need; open where there is room for it.
+// Folded wherever the pointer is coarse — a tablet as much as a phone, which is the
+// intent: the clock alone is what most touch sessions need. Open under a mouse.
 const open = ref(!DeviceDetect.hasTouch());
 
 /** Whether the scale on the band is away from where it rests. */
@@ -140,7 +138,7 @@ const resettable = computed(() => (onLadder.value ? multiplier.value !== 1 : off
 function reset(): void {
   if (onLadder.value) {
     // Through the ladder, or the rung it rests on and the rate in force disagree.
-    settleOn(REAL_TIME_RUNG);
+    showRung(REAL_TIME_RUNG, { animate: true });
     return;
   }
   goLive();
@@ -151,7 +149,7 @@ function toggleScale(): void {
   // Each scale is `v-if`d, so the arriving one has no width until it is in the tree.
   void nextTick(() => {
     if (onLadder.value) {
-      openAt(rung.value);
+      showRung(rung.value, { animate: false });
       return;
     }
     measure();
@@ -173,7 +171,7 @@ function toggle(): void {
 
 /** Arrow keys walk the ladder, and take focus with them. */
 function onStripKey(event: KeyboardEvent): void {
-  const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+  const direction = arrowStep(event.key);
   if (direction === 0) {
     return;
   }
@@ -499,7 +497,11 @@ onUnmounted(() => {
   height: 100%;
   overflow-x: auto;
   scrollbar-width: none;
-  padding-inline: calc(50% - 32px);
+  /* Half a rung either side, so the first and last rung can reach the middle. Both
+     widths come from `CHIP_PX`: the half is passed in rather than divided here,
+     because `calc(50% - var(--rung-width) / 2)` resolved to nothing and cost the
+     strip its padding, which put every rung half a rung off the needle. */
+  padding-inline: calc(50% - var(--rung-inset));
   /* Dragged, not scrolled — see useClockBand. `scroll-snap-type` is deliberately
      absent: mandatory snapping re-snaps every programmatic write, so the ladder
      notches under the finger instead of following it. */
@@ -516,7 +518,9 @@ onUnmounted(() => {
 /* Multipliers lead because `300× 600× 900×` reads as a scale where `5 min/s
    10 min/s` is ragged; the rate underneath says why you would pick one. */
 .rung {
-  flex: 0 0 64px;
+  /* `CHIP_PX`, which is also the scroll maths: a rung of another width selects the
+     wrong one. */
+  flex: 0 0 var(--rung-width);
   display: flex;
   flex-direction: column;
   align-items: center;

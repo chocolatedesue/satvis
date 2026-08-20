@@ -4,6 +4,7 @@
 import { computed, onUnmounted, ref, type Ref } from "vue";
 
 import {
+  arrowStep,
   CHIP_PX,
   clampMagnitude,
   decayVelocity,
@@ -132,7 +133,7 @@ export function useRuler(clock: ViewerClock, ruler: Ref<HTMLElement | undefined>
 
   /** The only path without a pointer. */
   function onKey(event: KeyboardEvent): void {
-    const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    const direction = arrowStep(event.key);
     if (direction === 0) {
       return;
     }
@@ -184,7 +185,7 @@ export function useLadder(clock: ViewerClock, strip: Ref<HTMLElement | undefined
     clock.setRung(at);
   }
 
-  const at = (): number => nearestRung(strip.value?.scrollLeft ?? 0, chipPx);
+  const restingRung = (): number => nearestRung(strip.value?.scrollLeft ?? 0, chipPx);
 
   function onScroll(): void {
     if (!strip.value) {
@@ -197,7 +198,7 @@ export function useLadder(clock: ViewerClock, strip: Ref<HTMLElement | undefined
       }
       return;
     }
-    const value = LADDER[at()]!;
+    const value = LADDER[restingRung()]!;
     if (value !== clock.multiplier.value) {
       clock.setMultiplier(value);
     }
@@ -238,7 +239,7 @@ export function useLadder(clock: ViewerClock, strip: Ref<HTMLElement | undefined
 
   /** Rest on a rung, never between two. */
   function settle(): void {
-    const rung = at();
+    const rung = restingRung();
     // Animating from a rung to itself is how this loops.
     if (strip.value && Math.abs(strip.value.scrollLeft - rung * chipPx) < 1) {
       return;
@@ -257,11 +258,8 @@ export function useLadder(clock: ViewerClock, strip: Ref<HTMLElement | undefined
     scrollToRung(rung, scrollBehavior());
   }
 
-  /** Arrive on the rung in force without animating. */
-  const openAt = (rung: number): void => scrollToRung(rung, "auto");
-
-  /** Move as a tap would, animation and all. */
-  const settleOn = (rung: number): void => scrollToRung(rung, scrollBehavior());
+  /** Put the ladder on a rung. Animated where a tap would animate; instant when arriving on the rung already in force. */
+  const showRung = (rung: number, { animate }: { animate: boolean }): void => scrollToRung(rung, animate ? scrollBehavior() : "auto");
 
   /** Arrow keys, a rung at a time. */
   function step(direction: number, from: number): number {
@@ -278,5 +276,5 @@ export function useLadder(clock: ViewerClock, strip: Ref<HTMLElement | undefined
     drag.stop();
   });
 
-  return { onScroll, onDown: drag.onDown, onMove: drag.onMove, onUp: drag.onUp, pick, openAt, settleOn, step };
+  return { onScroll, onDown: drag.onDown, onMove: drag.onMove, onUp: drag.onUp, pick, showRung, step };
 }

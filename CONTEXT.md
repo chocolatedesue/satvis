@@ -126,8 +126,8 @@ discussion; sharpen them here when they drift.
   and the on-sky track describe.
 - **Live vs pinned time**: whether the viewer's clock follows the present or a
   moment the user chose. Live is the default. The clock becomes pinned only by
-  a deliberate act — a time supplied in the URL, or scrubbing the timeline —
-  and stays pinned for the session, still advancing from that moment.
+  a deliberate act — a time supplied in the URL, or scrubbing the clock deck's
+  ruler — and stays pinned for the session, still advancing from that moment.
 - **Clock deck**: the bottom controls that stand in for Cesium's animation and
   timeline widgets, which this app no longer builds on any device — pause,
   playback speed and scrubbing, in one row over one band (`ClockDeck.vue`). Not a

@@ -275,9 +275,7 @@
          Cesium InfoBox, which was visible with hidden UI and in minimalUI. -->
     <entity-info-panel />
     <sky-hud />
-    <!-- What Cesium's animation and timeline widgets used to be: `createViewer`
-         builds neither, on any device. Follows the UI toggle like the rest of the
-         chrome. -->
+    <!-- Pause, speed and scrubbing; `createViewer` builds no Cesium clock widgets. -->
     <clock-deck v-if="showUI" />
     <!-- Async, so nothing about it is in the
          bundle a normal visitor downloads. -->
@@ -448,9 +446,8 @@ function toggleMenu(name: MenuKey) {
 
 function toggleUI() {
   showUI.value = !showUI.value;
-  // Unconditional now: what this still hides is the fullscreen button, and the
-  // controller knows whether there is one. The clock deck follows the same flag
-  // through its own `v-if`.
+  // The controller knows whether there is a fullscreen button to hide; the deck
+  // follows the same flag through its own `v-if`.
   cc.showUI = showUI.value;
 }
 
