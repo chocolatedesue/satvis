@@ -73,8 +73,9 @@
         </span>
       </div>
 
-      <!-- A lone tab is a control that switches to nothing, which a ground station
-           hits: no satellite facts and no elements means no `Details`.
+      <!-- The row shows even when there is one tab, which a ground station has: it is
+           the handle the fold hangs off, so a lone tab switches to nothing but still
+           does something.
 
            `min-h-8` is the height a trigger takes once it carries a badge. Reserved
            always, because the badge appears only once the pass count is known: the
@@ -87,9 +88,9 @@
         size="sm"
         :ui="{
           root: 'gap-0',
-          list: tabs.length > 1 ? 'px-2 border-y border-neutral-600' : 'hidden',
+          list: 'px-2 border-y border-neutral-600',
           trigger: 'min-h-8',
-          content: 'px-3 pb-3 info-body',
+          content: collapsed ? 'hidden' : 'px-3 pb-3 info-body',
         }"
       >
         <template #passes>
@@ -313,9 +314,30 @@ const tabs = computed(() => {
  * change. So an uncontrolled UTabs kept pointing at a tab that had gone, and
  * rendered an empty body. What is remembered, and why, is `preferredTab`.
  */
+const resolvedTab = computed(() => (tabs.value.some((item) => item.value === preferredTab.value) ? preferredTab.value : (tabs.value[0]?.value ?? "passes")));
+
+// Tapping the tab you are already on folds the body away. On a phone the panel is
+// most of the screen, and what it covers — the globe, and the passes the clock deck
+// marks on its ruler — is often what you opened it to look at. The selection stays,
+// so the marks stay with it.
+const collapsed = ref(false);
+
+// A new selection is a request to see it, so it arrives unfolded. Watched rather than
+// cleared on close, because the panel is not remounted between entities.
+watch(selection, () => {
+  collapsed.value = false;
+});
+
 const activeTab = computed({
-  get: () => (tabs.value.some((item) => item.value === preferredTab.value) ? preferredTab.value : (tabs.value[0]?.value ?? "passes")),
+  get: () => resolvedTab.value,
   set: (value: string) => {
+    // Reka's trigger sets the model on every press, unchanged value included, so the
+    // second press on the tab you are on arrives here as the value it already had.
+    if (value === resolvedTab.value) {
+      collapsed.value = !collapsed.value;
+      return;
+    }
+    collapsed.value = false;
     preferredTab.value = value;
   },
 });

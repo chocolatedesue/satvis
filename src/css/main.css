@@ -188,3 +188,84 @@ input:checked + .slider::before {
   justify-content: center;
   display: inline-flex;
 }
+
+/* Cesium's ion logo at 80%. Its guide allows placement and presentation to be
+   adjusted while the logo stays prominent, and the line's width is what the deck's
+   breakpoints are measured against.
+   https://cesium.com/learn/ion/content-usage-and-attribution-guide/ */
+.cesium-credit-logoContainer img {
+  height: 22px;
+  width: auto;
+}
+
+/* The clock deck shares the bottom of the screen with Cesium's credit line: how much
+   room the deck claims, and where the credits go around it. */
+body.clock-deck {
+  /* Every offset below is in terms of this, or a notch grows the deck past the line. */
+  --clock-deck-safe: max(6px, env(safe-area-inset-bottom));
+  /* What the deck occupies, for the sky view's cards. Constant across the fold. */
+  --clock-deck-height: calc(88px + var(--clock-deck-safe));
+  /* Clear of the deck: the default, and where a phone puts them. */
+  --clock-deck-credit-bottom: calc(var(--clock-deck-height) + 4px);
+}
+
+/* In the control row beside the surface: 28 px of credit centred in its 46. */
+body.clock-deck[data-clock-deck="beside"] {
+  --clock-deck-credit-bottom: calc(51px + var(--clock-deck-safe));
+}
+
+/* Folded, the reserved scale row is more room than the credit line needs. */
+body.clock-deck[data-clock-deck="folded"] {
+  --clock-deck-credit-bottom: calc(3px + env(safe-area-inset-bottom, 0px));
+}
+
+/* A rounded corner cuts the logo off there: a 55 px radius intrudes ~21 px at 12 px
+   up, so the line moves to 24 in and 12 up. `pointer: coarse` stands in for
+   "rounded", because the insets that would say so read 0 without
+   `viewport-fit=cover`, which this app does not set. */
+@media (pointer: coarse) {
+  body.clock-deck[data-clock-deck="folded"] {
+    --clock-deck-credit-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  body.clock-deck[data-clock-deck="folded"] .cesium-viewer-bottom {
+    left: calc(24px + env(safe-area-inset-left, 0px)) !important;
+  }
+}
+
+/* `!important` because Cesium rewrites this element's `bottom` inline on every
+   resize. The width cap stops its full-row container swallowing taps. */
+body.clock-deck .cesium-viewer-bottom {
+  bottom: var(--clock-deck-credit-bottom) !important;
+  left: 5px !important;
+  right: auto !important;
+  width: max-content !important;
+}
+
+/* Below the cap the scale row covers the corner Cesium puts the fullscreen button in.
+   Hidden, not unbuilt, so it returns with the gutter. `!important` for the reason
+   above. */
+@media (max-width: 999px) {
+  body.clock-deck .cesium-viewer-fullscreenContainer {
+    display: none !important;
+  }
+}
+
+/* Room for a phone-width deck and the line side by side: 560 plus twice the 206 px
+   box it ends at, plus air. The box, not its 196 px of content. Both with the logo at
+   22 px; 236 and 226 at Cesium's own 28. */
+@media (min-width: 1000px) {
+  /* On `:root`, not `body.clock-deck`: the class arrives in the deck's `onMounted`,
+     and the timeline measures its own width in that same tick. */
+  :root {
+    --clock-deck-max: 560px;
+  }
+
+  /* Cesium's own corner, for the two cases that hold the line above the deck. Not
+     folded: a coarse pointer keeps 12 px there, and matching it here took that back
+     at equal specificity, splitting the pair. */
+  body.clock-deck[data-clock-deck="clear"],
+  body.clock-deck[data-clock-deck="beside"] {
+    --clock-deck-credit-bottom: calc(3px + env(safe-area-inset-bottom, 0px));
+  }
+}

@@ -269,6 +269,9 @@ reading of that request rather than a brisker version of the same movement.
   lower half untenable.
 - **`minimalUI` hides the clock and timeline on iOS**, so the shared-clock benefit is
   desktop-only and the sky view is live-time on the device it was designed for.
+  _Superseded:_ the clock deck now stands in for both widgets on every device, so
+  the clock is as controllable from the sky view on a phone as anywhere else
+  (CONTEXT.md, **Clock deck**).
 - **The overlay's click-through is verified by hand**, not by a test — jsdom has no
   layout, so `elementFromPoint` cannot answer there. The procedure and its result
   are in `docs/manual-verification.md`; a browser-driven test would replace it.
