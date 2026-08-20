@@ -6,8 +6,9 @@ import utc from "dayjs/plugin/utc";
 
 dayjs.extend(utc);
 
-export enum BandScale {
-  Ruler = "ruler",
+/** What the deck's scale row is showing. An enum, not the app's usual `const` array: nothing iterates it. */
+export enum Scale {
+  Timeline = "timeline",
   Ladder = "ladder",
 }
 
@@ -48,10 +49,10 @@ export const decayVelocity = (velocity: number, dtMs: number): number => velocit
 
 export const clampMagnitude = (value: number, limit: number): number => Math.max(-limit, Math.min(limit, value));
 
-export interface RulerTick {
+export interface TimelineTick {
   /** Epoch ms. */
   at: number;
-  /** Pixels from the ruler's left edge. */
+  /** Pixels from the timeline's left edge. */
   x: number;
   major: boolean;
   /** Empty on a minor tick; a day boundary reads as its date, not `00:00`. */
@@ -59,10 +60,10 @@ export interface RulerTick {
 }
 
 /** Ten-minute ticks either side of `centreMs`, hours labelled, enough to fill `widthPx`. */
-export function rulerTicks(centreMs: number, widthPx: number): RulerTick[] {
+export function timelineTicks(centreMs: number, widthPx: number): TimelineTick[] {
   const half = (widthPx / 2) * MS_PER_PX;
   const first = Math.floor((centreMs - half) / MINOR_MS) * MINOR_MS;
-  const ticks: RulerTick[] = [];
+  const ticks: TimelineTick[] = [];
   for (let at = first; at <= centreMs + half; at += MINOR_MS) {
     const major = at % MAJOR_MS === 0;
     ticks.push({
@@ -81,14 +82,14 @@ export interface TimeSpan {
   end: number;
 }
 
-/** Pixels from the ruler's left edge. */
+/** Pixels from the timeline's left edge. */
 export interface PassMark {
   key: string;
   left: number;
   width: number;
 }
 
-/** Clipped to the ruler, not dropped: a pass wider than the screen is worth drawing. Minimum a pixel. */
+/** Clipped to the timeline, not dropped: a pass wider than the screen is worth drawing. Minimum a pixel. */
 export function passMarks(spans: readonly TimeSpan[], centreMs: number, widthPx: number): PassMark[] {
   const half = (widthPx / 2) * MS_PER_PX;
   const first = centreMs - half;

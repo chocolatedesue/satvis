@@ -13,7 +13,7 @@ import {
   rateLabel,
   REAL_TIME_RUNG,
   passMarks,
-  rulerTicks,
+  timelineTicks,
   rungFor,
   LADDER,
   SPEED_TICKS,
@@ -80,14 +80,14 @@ describe("labels", () => {
 
 describe("the ruler", () => {
   test("centres the clock's moment under the needle", () => {
-    const ticks = rulerTicks(AT.getTime(), 360);
+    const ticks = timelineTicks(AT.getTime(), 360);
     const centre = ticks.reduce((best, tick) => (Math.abs(tick.x - 180) < Math.abs(best.x - 180) ? tick : best));
     // The nearest tick to the middle is within half a ten-minute step of now.
     expect(Math.abs(centre.at - AT.getTime())).toBeLessThanOrEqual(300_000);
   });
 
   test("covers the width it is given, at the scale it promises", () => {
-    const ticks = rulerTicks(AT.getTime(), 360);
+    const ticks = timelineTicks(AT.getTime(), 360);
     const step = 600_000 / MS_PER_PX;
     // Ticks land on ten-minute boundaries, so the outermost pair cannot be the
     // ruler's own edges — what matters is that neither end is short by more than
@@ -100,7 +100,7 @@ describe("the ruler", () => {
 
   test("labels the hour, and names the day at midnight", () => {
     const midnight = Date.UTC(2026, 7, 19, 0, 0, 0);
-    const ticks = rulerTicks(midnight, 360);
+    const ticks = timelineTicks(midnight, 360);
     const labelled = ticks.filter((tick) => tick.label !== "");
     expect(labelled.every((tick) => tick.major)).toBe(true);
     expect(ticks.find((tick) => tick.at === midnight)?.label).toBe("Wed 19 Aug");
@@ -110,8 +110,8 @@ describe("the ruler", () => {
   });
 
   test("draws more ticks for a wider ruler and none beyond it", () => {
-    const narrow = rulerTicks(AT.getTime(), 320);
-    const wide = rulerTicks(AT.getTime(), 900);
+    const narrow = timelineTicks(AT.getTime(), 320);
+    const wide = timelineTicks(AT.getTime(), 900);
     expect(wide.length).toBeGreaterThan(narrow.length);
     expect(narrow.every((tick) => tick.x >= -600 && tick.x <= 920)).toBe(true);
   });

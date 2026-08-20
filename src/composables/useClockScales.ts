@@ -1,5 +1,5 @@
-// The band's two instruments as gestures: a ruler dragged past a fixed needle, and a
-// ladder of speeds swiped under the same middle. One drag model for both.
+// The scale row's two instruments as gestures: a timeline dragged past a fixed
+// needle, and a ladder of speeds swiped under the same middle. One drag model for both.
 
 import { computed, onUnmounted, ref, type Ref } from "vue";
 
@@ -13,7 +13,7 @@ import {
   MIN_SWIPE_VELOCITY,
   MS_PER_PX,
   nearestRung,
-  rulerTicks,
+  timelineTicks,
   LADDER,
 } from "../modules/util/clockDeck";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
@@ -25,7 +25,7 @@ const scrollBehavior = (): ScrollBehavior => (DeviceDetect.prefersReducedMotion(
 /**
  * Move with the finger, coast on release, settle when the coast runs out.
  *
- * Works in the caller's units — sim ms for the ruler, scroll px for the ladder — so
+ * Works in the caller's units — sim ms for the timeline, scroll px for the ladder — so
  * velocities are those units per real ms. `advance` answers whether the move landed,
  * which is how the coast knows it has hit the end of the ladder.
  */
@@ -38,7 +38,7 @@ function useFlickDrag(options: {
   onSettle: (moved: boolean) => void;
 }) {
   let dragging = false;
-  // A press that never moved is not a gesture: the ruler must not pin, and the ladder
+  // A press that never moved is not a gesture: the timeline must not pin, and the ladder
   // must let the rung's own tap through.
   let moved = false;
   let lastX = 0;
@@ -112,9 +112,9 @@ function useFlickDrag(options: {
   return { onDown, onMove, onUp, stop, dragging: () => dragging, gliding: () => coasting, moved: () => moved };
 }
 
-export function useRuler(clock: ViewerClock, ruler: Ref<HTMLElement | undefined>) {
+export function useTimeline(clock: ViewerClock, timeline: Ref<HTMLElement | undefined>) {
   const width = ref(360);
-  const ticks = computed(() => rulerTicks(clock.now.value.getTime(), width.value));
+  const ticks = computed(() => timelineTicks(clock.now.value.getTime(), width.value));
 
   // Sim ms per real ms; the floor is a coast moving the clock by under a ms a frame.
   const drag = useFlickDrag({
@@ -145,7 +145,7 @@ export function useRuler(clock: ViewerClock, ruler: Ref<HTMLElement | undefined>
   }
 
   const measure = (): void => {
-    width.value = ruler.value?.clientWidth ?? width.value;
+    width.value = timeline.value?.clientWidth ?? width.value;
   };
 
   window.addEventListener("resize", measure);
@@ -162,7 +162,7 @@ export function useRuler(clock: ViewerClock, ruler: Ref<HTMLElement | undefined>
  * is nothing at all under a mouse, and it re-snaps every programmatic write, so the
  * ladder notches against the finger; `settle` rests it on a rung instead.
  */
-export function useLadder(clock: ViewerClock, strip: Ref<HTMLElement | undefined>, chipPx: number = CHIP_PX) {
+export function useLadder(clock: ViewerClock, ladder: Ref<HTMLElement | undefined>, chipPx: number = CHIP_PX) {
   // A programmatic scroll raises the same event a finger does.
   let settling = false;
   let settleTarget = 0;
@@ -177,7 +177,7 @@ export function useLadder(clock: ViewerClock, strip: Ref<HTMLElement | undefined
   function scrollToRung(at: number, behavior: ScrollBehavior): void {
     settling = true;
     settleTarget = at * chipPx;
-    strip.value?.scrollTo({ left: settleTarget, behavior });
+    ladder.value?.scrollTo({ left: settleTarget, behavior });
     clearTimeout(settleTimer);
     settleTimer = setTimeout(() => {
       settling = false;
@@ -185,14 +185,14 @@ export function useLadder(clock: ViewerClock, strip: Ref<HTMLElement | undefined
     clock.setRung(at);
   }
 
-  const restingRung = (): number => nearestRung(strip.value?.scrollLeft ?? 0, chipPx);
+  const restingRung = (): number => nearestRung(ladder.value?.scrollLeft ?? 0, chipPx);
 
   function onScroll(): void {
-    if (!strip.value) {
+    if (!ladder.value) {
       return;
     }
     if (settling) {
-      if (Math.abs(strip.value.scrollLeft - settleTarget) < 1) {
+      if (Math.abs(ladder.value.scrollLeft - settleTarget) < 1) {
         settling = false;
         clearTimeout(settleTimer);
       }
@@ -222,12 +222,12 @@ export function useLadder(clock: ViewerClock, strip: Ref<HTMLElement | undefined
       settling = false;
     },
     advance: (delta) => {
-      if (!strip.value) {
+      if (!ladder.value) {
         return false;
       }
-      const before = strip.value.scrollLeft;
-      strip.value.scrollLeft += delta;
-      return strip.value.scrollLeft !== before;
+      const before = ladder.value.scrollLeft;
+      ladder.value.scrollLeft += delta;
+      return ladder.value.scrollLeft !== before;
     },
 
     onSettle: (moved) => {
@@ -241,7 +241,7 @@ export function useLadder(clock: ViewerClock, strip: Ref<HTMLElement | undefined
   function settle(): void {
     const rung = restingRung();
     // Animating from a rung to itself is how this loops.
-    if (strip.value && Math.abs(strip.value.scrollLeft - rung * chipPx) < 1) {
+    if (ladder.value && Math.abs(ladder.value.scrollLeft - rung * chipPx) < 1) {
       return;
     }
     scrollToRung(rung, scrollBehavior());

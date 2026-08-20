@@ -1,9 +1,9 @@
 <!-- Pause, playback speed and scrubbing, in place of Cesium's animation and timeline
-     widgets. See CONTEXT.md: clock deck, band, rung.
+     widgets. See CONTEXT.md: clock deck, scale row, rung.
 
-     One control row over one band, and the band is the ruler or the ladder, never
-     both — which is what keeps the deck's height fixed and the clock still. Tapping
-     the clock folds the band away. -->
+     A control row over a scale row, and the scale row is the timeline or the ladder,
+     never both — which is what keeps the deck's height fixed and the clock still.
+     Tapping the clock folds the scale row away. -->
 <template>
   <div class="deck" :class="{ 'deck--folded': !open }">
     <div ref="cluster" class="cluster" :style="surfaceStyle">
@@ -38,22 +38,22 @@
     </div>
 
     <!-- Height fixed here, not by the scale inside it, so switching moves nothing. -->
-    <div v-if="open" class="band">
+    <div v-if="open" class="scale-row">
       <template v-if="onLadder">
         <!-- Roving tabindex: focusing a rung scrolls it into view, and that sets the
              speed, so 36 tab stops would drag the clock across the whole ladder. -->
         <div
-          ref="strip"
-          class="strip"
+          ref="ladder"
+          class="ladder"
           :style="{ '--rung-width': `${CHIP_PX}px`, '--rung-inset': `${CHIP_PX / 2}px` }"
           role="radiogroup"
           aria-label="Playback speed"
-          @scroll="onStripScroll"
-          @keydown="onStripKey"
-          @pointerdown="onStripDown"
-          @pointermove="onStripMove"
-          @pointerup="onStripUp"
-          @pointercancel="onStripUp"
+          @scroll="onLadderScroll"
+          @keydown="onLadderKey"
+          @pointerdown="onLadderDown"
+          @pointermove="onLadderMove"
+          @pointerup="onLadderUp"
+          @pointercancel="onLadderUp"
         >
           <button
             v-for="(value, index) in LADDER"
@@ -76,16 +76,16 @@
         <!-- A group, not a `slider`: a slider must say what its bounds are, and a
              relative drag on an unbounded scale has none. -->
         <div
-          ref="ruler"
-          class="ruler"
+          ref="timeline"
+          class="timeline"
           role="group"
           tabindex="0"
           aria-label="Timeline"
-          @pointerdown="onRulerDown"
-          @pointermove="onRulerMove"
-          @pointerup="onRulerUp"
-          @pointercancel="onRulerUp"
-          @keydown="onRulerKey"
+          @pointerdown="onTimelineDown"
+          @pointermove="onTimelineMove"
+          @pointerup="onTimelineUp"
+          @pointercancel="onTimelineUp"
+          @keydown="onTimelineKey"
         >
           <!-- Before the ticks, so the scale stays readable across a mark. -->
           <div v-for="mark in marks" :key="mark.key" class="pass" :style="{ left: `${mark.left}px`, width: `${mark.width}px` }"></div>
@@ -93,7 +93,7 @@
             <span v-if="tick.label" class="tick__label">{{ tick.label }}</span>
           </div>
         </div>
-        <!-- Ruler only: over the ladder it strikes through the selected multiplier. -->
+        <!-- Timeline only: over the ladder it strikes through the selected multiplier. -->
         <div class="needle"></div>
       </template>
     </div>
@@ -103,38 +103,38 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
-import { useLadder, useRuler } from "../composables/useClockBand";
 import { useClockDeckChrome } from "../composables/useClockDeckChrome";
+import { useLadder, useTimeline } from "../composables/useClockScales";
 import { usePassHighlights } from "../composables/usePassHighlights";
 import { useViewerClock } from "../composables/useViewerClock";
-import { arrowStep, BandScale, CHIP_PX, clockLabel, dateLabel, LADDER, multiplierLabel, passMarks, rateLabel, REAL_TIME_RUNG } from "../modules/util/clockDeck";
+import { arrowStep, Scale, CHIP_PX, clockLabel, dateLabel, LADDER, multiplierLabel, passMarks, rateLabel, REAL_TIME_RUNG } from "../modules/util/clockDeck";
 import { DeviceDetect } from "../modules/util/DeviceDetect";
 
 const clock = useViewerClock();
 const { now, playing, multiplier, rung, offPresent, togglePlaying, goLive } = clock;
 
-const ruler = ref<HTMLElement>();
-const { ticks, width: rulerWidth, onDown: onRulerDown, onMove: onRulerMove, onUp: onRulerUp, onKey: onRulerKey, measure } = useRuler(clock, ruler);
+const timeline = ref<HTMLElement>();
+const { ticks, width: timelineWidth, onDown: onTimelineDown, onMove: onTimelineMove, onUp: onTimelineUp, onKey: onTimelineKey, measure } = useTimeline(clock, timeline);
 
-// Marks, not ranges: the ruler moves under a fixed needle, so a pass only has a
+// Marks, not ranges: the timeline moves under a fixed needle, so a pass only has a
 // position relative to this frame.
 const { passes } = usePassHighlights();
-const marks = computed(() => passMarks(passes.value, now.value.getTime(), rulerWidth.value));
+const marks = computed(() => passMarks(passes.value, now.value.getTime(), timelineWidth.value));
 
-const strip = ref<HTMLElement>();
-const { onScroll: onStripScroll, onDown: onStripDown, onMove: onStripMove, onUp: onStripUp, pick: pickRung, showRung, step } = useLadder(clock, strip);
+const ladder = ref<HTMLElement>();
+const { onScroll: onLadderScroll, onDown: onLadderDown, onMove: onLadderMove, onUp: onLadderUp, pick: pickRung, showRung, step } = useLadder(clock, ladder);
 
-// The ruler by default: the timeline is what the deck is for.
-const bandScale = ref<BandScale>(BandScale.Ruler);
-const onLadder = computed(() => bandScale.value === BandScale.Ladder);
+// The timeline by default: it is what the deck is for.
+const scale = ref<Scale>(Scale.Timeline);
+const onLadder = computed(() => scale.value === Scale.Ladder);
 // Folded wherever the pointer is coarse — a tablet as much as a phone, which is the
 // intent: the clock alone is what most touch sessions need. Open under a mouse.
 const open = ref(!DeviceDetect.hasTouch());
 
-/** Whether the scale on the band is away from where it rests. */
+/** Whether the scale showing is away from where it rests. */
 const resettable = computed(() => (onLadder.value ? multiplier.value !== 1 : offPresent.value));
 
-/** Undo the deviation on whichever scale the band is showing. */
+/** Undo the deviation on whichever scale is showing. */
 function reset(): void {
   if (onLadder.value) {
     // Through the ladder, or the rung it rests on and the rate in force disagree.
@@ -145,7 +145,7 @@ function reset(): void {
 }
 
 function toggleScale(): void {
-  bandScale.value = onLadder.value ? BandScale.Ruler : BandScale.Ladder;
+  scale.value = onLadder.value ? Scale.Timeline : Scale.Ladder;
   // Each scale is `v-if`d, so the arriving one has no width until it is in the tree.
   void nextTick(() => {
     if (onLadder.value) {
@@ -160,7 +160,7 @@ function toggle(): void {
   open.value = !open.value;
   if (!open.value) {
     // Coming back to the ladder is coming back to the wrong instrument.
-    bandScale.value = BandScale.Ruler;
+    scale.value = Scale.Timeline;
   }
   chrome.setFolded(!open.value);
   if (!open.value) {
@@ -170,7 +170,7 @@ function toggle(): void {
 }
 
 /** Arrow keys walk the ladder, and take focus with them. */
-function onStripKey(event: KeyboardEvent): void {
+function onLadderKey(event: KeyboardEvent): void {
   const direction = arrowStep(event.key);
   if (direction === 0) {
     return;
@@ -178,7 +178,7 @@ function onStripKey(event: KeyboardEvent): void {
   event.preventDefault();
   step(direction, rung.value);
   // After the re-render, the newly selected rung is the one holding tabindex 0.
-  void nextTick(() => strip.value?.querySelector<HTMLElement>(".rung--on")?.focus());
+  void nextTick(() => ladder.value?.querySelector<HTMLElement>(".rung--on")?.focus());
 }
 
 // The surface's insets from the row's edges. Measured, not derived: the reset comes
@@ -265,7 +265,7 @@ onUnmounted(() => {
   max-width: var(--clock-deck-max, 100%);
 }
 
-/* The band's row is held when it goes, or the clock drops onto the credits. */
+/* The scale row's height is held when it goes, or the clock drops onto the credits. */
 .deck--folded {
   padding-bottom: calc(42px + var(--safe));
 }
@@ -285,7 +285,7 @@ onUnmounted(() => {
 
 /* Covers the controls, not the row: two thirds of the row is empty. Insets from
    `measureSurface`; flush along the bottom, and the shadow goes up only, or it draws
-   the join with the band. */
+   the join with the scale row. */
 .cluster::before {
   content: "";
   position: absolute;
@@ -428,7 +428,7 @@ onUnmounted(() => {
 
 /* The ticks are hairlines over the globe and need a surface. The safe area is inside
    its height, not under it, or a strip of globe shows below the ticks. */
-.band {
+.scale-row {
   position: relative;
   pointer-events: auto;
   height: calc(42px + var(--safe));
@@ -436,7 +436,7 @@ onUnmounted(() => {
   background: #14181ceb;
 }
 
-.ruler {
+.timeline {
   position: relative;
   height: 100%;
   overflow: hidden;
@@ -490,9 +490,9 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-.strip {
+.ladder {
   display: flex;
-  /* The band's height, not its own, so swapping the scales moves nothing. */
+  /* The row's height, not its own, so swapping the scales moves nothing. */
   align-items: center;
   height: 100%;
   overflow-x: auto;
@@ -500,9 +500,9 @@ onUnmounted(() => {
   /* Half a rung either side, so the first and last rung can reach the middle. Both
      widths come from `CHIP_PX`: the half is passed in rather than divided here,
      because `calc(50% - var(--rung-width) / 2)` resolved to nothing and cost the
-     strip its padding, which put every rung half a rung off the needle. */
+     the ladder its padding, which put every rung half a rung off the needle. */
   padding-inline: calc(50% - var(--rung-inset));
-  /* Dragged, not scrolled — see useClockBand. `scroll-snap-type` is deliberately
+  /* Dragged, not scrolled — see useClockScales. `scroll-snap-type` is deliberately
      absent: mandatory snapping re-snaps every programmatic write, so the ladder
      notches under the finger instead of following it. */
   touch-action: none;
@@ -511,7 +511,7 @@ onUnmounted(() => {
   mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
 }
 
-.strip::-webkit-scrollbar {
+.ladder::-webkit-scrollbar {
   display: none;
 }
 

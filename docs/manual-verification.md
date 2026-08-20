@@ -28,7 +28,7 @@ the centre, and assert the control contains what comes back.
   ["toolbar eye", "#toolbarRight button"],
   ["cesium credits", ".cesium-credit-logoContainer"],
   ["clock deck controls", ".cluster"],
-  ["clock deck band", ".band"],
+  ["clock deck scale row", ".scale-row"],
   ["entity info panel", ".entity-info-panel"],
 ].map(([name, selector]) => {
   const el = document.querySelector(selector);
@@ -595,7 +595,7 @@ untested heading source is required to either work or decline.
 ## Clock deck: the replacement for the animation and timeline widgets
 
 **Why it cannot be a unit test.** Everything the deck is depends on layout. Its
-surface is measured off the controls with `getBoundingClientRect`, the ruler's
+surface is measured off the controls with `getBoundingClientRect`, the timeline's
 scale depends on the width it measures for itself, the credit line has to clear it
 without being covered or made unclickable, and both scales are pointer gestures
 with inertia — jsdom answers none of that.
@@ -614,7 +614,7 @@ const credits = document.querySelector(".cesium-viewer-bottom").getBoundingClien
   surfaceLeft: box.left + parseFloat(surface.left) - (Math.min(...parts.map((p) => p.left)) - 8),
   surfaceRight: box.right - parseFloat(surface.right) - (Math.max(...parts.map((p) => p.right)) + 8),
   // It is flush against the band: one shape, not two.
-  seam: document.querySelector(".band").getBoundingClientRect().top - box.bottom,
+  seam: document.querySelector(".scale-row").getBoundingClientRect().top - box.bottom,
   // The clock sits on the needle.
   clockOffset: (() => {
     const s = document.querySelector(".stamp").getBoundingClientRect();
@@ -630,7 +630,7 @@ Then: tap the clock to fold and unfold (the clock and play button must not move,
 and the credits must drop to Cesium's own 3 px and come back); tap the gauge to put
 the ladder on the band (the deck's height must not change); swipe the ladder and let
 go (it must coast and rest exactly on a rung — `scrollLeft / 64` an integer); drag
-the ruler and let go (the clock pins, `?time=` appears, and the reset appears).
+the timeline and let go (the clock pins, `?time=` appears, and the reset appears).
 
 **Result, 2026-08-19, Chrome, 375x700 and 390x844 (with the deck still gated on
 `minimalUI`, so those two runs had it forced), rechecked at 694x800 once it was on
@@ -655,7 +655,7 @@ Sky view's cards resolve to `bottom: 102px` with the deck present and 64 px with
 **Where the credit line sits is one CSS variable, in four cases.** The offsets were
 literals in `useClockDeckChrome` — 98, 57, 3 — measured on a phone with no home
 indicator, so on one with a notch the deck grew by `env(safe-area-inset-bottom)` and
-the credit line did not: it ended up behind the band. The composable now sets
+the credit line did not: it ended up behind the scale row. The composable now sets
 `body[data-clock-deck]` to the case, and main.css writes each offset in terms of
 `--clock-deck-safe`. Check by reading the computed variable in each state rather
 than the pixel, since the pixel is only right on a device without a notch.
@@ -666,7 +666,7 @@ beside the controls, `calc(3px + 0px)` folded and again in the desktop corner, a
 
 **The ruler must measure itself against the deck it is in.** `--clock-deck-max`
 lives on `:root` and not on `body.clock-deck`, because the class is added by the
-deck's own `onMounted` and the ruler measures its width in that same tick: hung off
+deck's own `onMounted` and the timeline measures its width in that same tick: hung off
 the class, the first measurement was the uncapped one and the clock's moment sat
 350 px away from the needle. Check it by reading where the hour labels fall —
 150 px apart, and the one before the needle no further from it than the clock is
@@ -676,12 +676,12 @@ past the hour.
 labels at 118.5 / 268.5 / 418.5, needle at 280, clock 21:04:48 — so 21:00 sits
 11.5 px left of the needle where 4.8 minutes is 12 px. Deck centred at 360–920,
 credits in the bottom-left corner 277 px clear of it, fullscreen button still
-present and 331 px clear. Below the cap the band covers the corner that button sits
+present and 331 px clear. Below the cap the scale row covers the corner that button sits
 in, so it is hidden there: `display: none` at 900 px, back to `block` at 1280. The eye toggle removes the deck, the body class and the fullscreen button
 together, and restores all three.
 
 **Pass bands.** The selected satellite's passes are published to
-`usePassHighlights` and drawn on the ruler, which is what Cesium's timeline
+`usePassHighlights` and drawn on the timeline, which is what Cesium's timeline
 highlight ranges used to do. With no satellite data to hand, drive the seam
 directly — Vite hands back the same module instance the deck imported:
 
@@ -718,7 +718,7 @@ Cesium's own 5 and 3. Breakpoints
 re-measured after the logo change: 623 keeps the credits above the deck, 624 puts
 them in the row with 10.8 px of clearance and the Attribution link still hit-testing
 to itself, 1000 caps the deck at 560 and returns the credits to the corner 13.8 px
-clear of the band with the fullscreen button back and 191 px clear.
+clear of the scale row with the fullscreen button back and 191 px clear.
 
 **Still needs a real device.** The gesture feel — flick inertia, the ladder's
 settle, and whether 1 hour per 150 px is the right scale for a thumb — was judged in

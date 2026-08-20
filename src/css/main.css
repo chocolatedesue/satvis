@@ -214,7 +214,7 @@ body.clock-deck[data-clock-deck="beside"] {
   --clock-deck-credit-bottom: calc(51px + var(--clock-deck-safe));
 }
 
-/* Folded, the band's reserved row is more room than the credit line needs. */
+/* Folded, the reserved scale row is more room than the credit line needs. */
 body.clock-deck[data-clock-deck="folded"] {
   --clock-deck-credit-bottom: calc(3px + env(safe-area-inset-bottom, 0px));
 }
@@ -242,7 +242,7 @@ body.clock-deck .cesium-viewer-bottom {
   width: max-content !important;
 }
 
-/* Below the cap the band covers the corner Cesium puts the fullscreen button in.
+/* Below the cap the scale row covers the corner Cesium puts the fullscreen button in.
    Hidden, not unbuilt, so it returns with the gutter. `!important` for the reason
    above. */
 @media (max-width: 999px) {
@@ -256,7 +256,7 @@ body.clock-deck .cesium-viewer-bottom {
    22 px; 236 and 226 at Cesium's own 28. */
 @media (min-width: 1000px) {
   /* On `:root`, not `body.clock-deck`: the class arrives in the deck's `onMounted`,
-     and the ruler measures its own width in that same tick. */
+     and the timeline measures its own width in that same tick. */
   :root {
     --clock-deck-max: 560px;
   }
