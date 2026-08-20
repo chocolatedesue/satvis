@@ -7,10 +7,10 @@ const BODY_CLASS = "clock-deck";
 
 type CreditPlace = "clear" | "beside" | "folded";
 
-// Where the credit line fits left of the surface: its 236 px box plus 10 px of air,
+// Where the credit line fits left of the surface: its 206 px box plus 10 px of air,
 // against a surface starting at `50% − 95`. Not measured at runtime — the line is a
 // fifth of its width until the ion logo loads.
-const CREDIT_BESIDE_MIN_PX = 682;
+const CREDIT_BESIDE_MIN_PX = 624;
 
 export function useClockDeckChrome() {
   let folded = false;
@@ -26,7 +26,8 @@ export function useClockDeckChrome() {
     document.body.dataset.clockDeck = place();
   };
 
-  function attach(): void {
+  function attach(startFolded: boolean): void {
+    folded = startFolded;
     document.body.classList.add(BODY_CLASS);
     apply();
     window.addEventListener("resize", apply);

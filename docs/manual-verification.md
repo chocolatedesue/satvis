@@ -624,17 +624,18 @@ the ruler and let go (the clock pins, `?time=` appears, and the reset appears).
 every device.** Surface 92.5 → 317.5 against controls at 100.5 → 309.5, so both
 edges exact; seam 0.0; clock centred to 0.0; credits at 98 px above the deck and
 3 px when folded, clearing the folded card by 17 px; the credit logo and both links
-hit-test to themselves, and `Attribution` still opens Cesium's lightbox. At 682 px
+hit-test to themselves, and `Attribution` still opens Cesium's lightbox. At 624 px
 the credits move into the control row (57 px) with 10.2 px of clearance to the
-surface, and at 681 they stay above the deck; at 1050 px the deck caps at 560 px and
+surface, and at 623 they stay above the deck; at 1000 px the deck caps at 560 px and
 centres and the credits return to the bottom-left corner, 9.2 px clear of it.
 
 Both of those widths are measured off the credit container's box, which ends 5 px
-past its last link: 236 px, not the 226 px of content. Sized off the content, each
-breakpoint left half the intended gap at the width that triggers it. The wording
-matters too — `createViewer` shortens Cesium's `Data attribution` to `Attribution`,
-which is 28 px of a line the deck has to share a row with, so both numbers move if
-that changes back.
+past its last link: 206 px, not the 196 px of content. Sized off the content, each
+breakpoint left half the intended gap at the width that triggers it. Two things
+inside that line move both numbers if they change: `createViewer` shortens Cesium's
+`Data attribution` to `Attribution`, and main.css draws the ion logo at 22 px rather
+than its own 28. Measured at each: box 236 px with the long link and the full-size
+logo, 206 with both changes.
 
 Sky view's cards resolve to `bottom: 102px` with the deck present and 64 px without.
 
@@ -648,7 +649,7 @@ than the pixel, since the pixel is only right on a device without a notch.
 
 **Result, 2026-08-19, Chrome, 694x800 and 1280x800.** `calc(51px + max(6px, 0px))`
 beside the controls, `calc(3px + 0px)` folded and again in the desktop corner, and
-`calc(var(--clock-deck-height) + 4px)` clear of the deck below 682 px.
+`calc(var(--clock-deck-height) + 4px)` clear of the deck below 624 px.
 
 **The ruler must measure itself against the deck it is in.** `--clock-deck-max`
 lives on `:root` and not on `body.clock-deck`, because the class is added by the
@@ -681,6 +682,30 @@ mod.setPassHighlights([{ start: clockMs + 5 * 60_000, end: clockMs + 13 * 60_000
 right of the needle and is 20 px wide, which is 8 minutes at 1 hour per 150 px; one
 40 minutes behind lands 100 px left; one spanning the whole window is clipped to the
 ruler rather than dropped; one ten hours out is not drawn.
+
+**Folded, the credit line has to clear a phone's rounded corner.** At Cesium's own
+5 px in and the deck's 3 px up it sits inside the curve and the logo is cut off. A
+55 px corner radius intrudes about 21 px at 12 px above the bottom, so on those
+screens the folded case moves the line to 24 px in and 12 px up. Only that case, and
+only there: the other three placements are far enough up that the curve never reaches
+them, and a square screen has nothing to avoid.
+
+The condition is `pointer: coarse`, which is a stand-in. The safe-area insets would
+say "rounded" directly, but in an iOS standalone app they are all 0 unless the
+viewport is `viewport-fit=cover`, which this app does not set — measured on the iPhone
+that showed the clipping, the line sat 2 px above the bottom rather than the 36 an
+inset would have given it. Setting `viewport-fit=cover` would make the insets real and
+is the better answer, at the cost of compensating every top-anchored control for the
+status bar.
+
+**Result, 2026-08-20, Chrome, 390x844 with touch emulation.** Deck starts folded,
+credit line at left 24 and bottom 12, clearing the folded card by 8 px. With a fine
+pointer at 748 px the deck starts open, and folding it by hand leaves the line at
+Cesium's own 5 and 3. Breakpoints
+re-measured after the logo change: 623 keeps the credits above the deck, 624 puts
+them in the row with 10.8 px of clearance and the Attribution link still hit-testing
+to itself, 1000 caps the deck at 560 and returns the credits to the corner 13.8 px
+clear of the band with the fullscreen button back and 191 px clear.
 
 **Still needs a real device.** The gesture feel — flick inertia, the ladder's
 settle, and whether 1 hour per 150 px is the right scale for a thumb — was judged in

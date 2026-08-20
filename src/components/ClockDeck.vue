@@ -110,6 +110,7 @@ import { useClockDeckChrome } from "../composables/useClockDeckChrome";
 import { usePassHighlights } from "../composables/usePassHighlights";
 import { useViewerClock } from "../composables/useViewerClock";
 import { BandScale, clockLabel, dateLabel, LADDER, multiplierLabel, passMarks, rateLabel, REAL_TIME_RUNG } from "../modules/util/clockDeck";
+import { DeviceDetect } from "../modules/util/DeviceDetect";
 
 const clock = useViewerClock();
 const { now, playing, multiplier, rung, offPresent, togglePlaying, goLive } = clock;
@@ -128,8 +129,9 @@ const { onScroll: onStripScroll, onDown: onStripDown, onMove: onStripMove, onUp:
 // The ruler by default: the timeline is what the deck is for.
 const bandScale = ref<BandScale>(BandScale.Ruler);
 const onLadder = computed(() => bandScale.value === BandScale.Ladder);
-/** A deck you have to ask for is not a deck. */
-const open = ref(true);
+// Folded on a phone, where 94 px is a tenth of the screen and the clock alone is
+// what most sessions need; open where there is room for it.
+const open = ref(!DeviceDetect.hasTouch());
 
 /** Whether the scale on the band is away from where it rests. */
 const resettable = computed(() => (onLadder.value ? multiplier.value !== 1 : offPresent.value));
@@ -224,7 +226,7 @@ watch(open, () => void nextTick(measureSurface));
 onMounted(() => {
   measure();
   measureSurface();
-  chrome.attach();
+  chrome.attach(!open.value);
   window.addEventListener("resize", onResize);
   const group = cluster.value?.querySelector(".right");
   if (cluster.value && group) {
