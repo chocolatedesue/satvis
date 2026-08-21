@@ -3,11 +3,12 @@
 
      A control row over a scale row, and the scale row is the timeline or the ladder,
      never both — which is what keeps the deck's height fixed and the clock still.
-     Tapping the clock folds the scale row away. -->
+     Tapping the clock folds the deck to the clock alone: the controls go with the
+     scale row, or they hang off one side of it. -->
 <template>
   <div class="deck" :class="{ 'deck--folded': !open }">
     <div ref="cluster" class="cluster" :style="surfaceStyle">
-      <button type="button" class="play" :aria-label="playing ? 'Pause' : 'Play'" @click="togglePlaying">
+      <button v-if="open" type="button" class="play" :aria-label="playing ? 'Pause' : 'Play'" @click="togglePlaying">
         <span class="play__circle">
           <UIcon :name="playing ? 'lucide:pause' : 'lucide:play'" />
         </span>
@@ -352,9 +353,16 @@ onUnmounted(() => {
 /* Fixed: the side tracks derive from it, so a clock that changed width would move its neighbours. */
 .stamp {
   position: relative;
+  /* Placed, not auto-flowed: the play button goes when folded, and the clock would
+     take the column it left. */
+  grid-column: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
+  /* Held here, not by the play button, which goes when folded: or the clock drops as
+     the deck closes. */
+  min-height: 44px;
   width: 84px;
   line-height: 1.15;
   white-space: nowrap;
@@ -386,11 +394,18 @@ onUnmounted(() => {
 }
 
 .right {
+  grid-column: 3;
   display: flex;
   align-items: center;
   gap: 6px;
   justify-self: start;
   min-width: 0;
+}
+
+/* Gone, not just empty: under the flex fallback an empty item still takes its gap,
+   and that pushes the clock off centre. */
+.deck--folded .right {
+  display: none;
 }
 
 /* A 30 px disc in a 44 px box: chip-sized to look at, thumb-sized to hit. */
