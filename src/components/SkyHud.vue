@@ -179,7 +179,7 @@ onUnmounted(() => {
 /* Full height and top-aligned, so a tick's projected window y is still its y in
    here. Only the width is constrained, which is the whole point. */
 .sky-hud__side {
-  inset: 0 0 0 auto;
+  inset: 0 var(--safe-right, 0px) 0 auto;
   width: 64px;
 }
 
@@ -256,10 +256,11 @@ onUnmounted(() => {
 
 .sky-hud__warn {
   position: absolute;
-  right: 8px;
+  right: calc(8px + var(--safe-right, 0px));
   /* Clear of the clock deck when there is one; 64 px is what the sky view alone
-     needs (`main.css`, `--clock-deck-height`). */
-  bottom: max(64px, calc(var(--clock-deck-height, 0px) + 8px));
+     needs (`main.css`, `--clock-deck-height`). The deck's height already carries the
+     home indicator, so only the deckless term adds it. */
+  bottom: max(calc(64px + var(--safe-bottom, 0px)), calc(var(--clock-deck-height, 0px) + 8px));
   max-width: 200px;
   padding: 6px 8px;
   border-radius: 8px;
@@ -272,8 +273,9 @@ onUnmounted(() => {
   position: absolute;
   left: 50%;
   /* Clear of the clock deck when there is one; 64 px is what the sky view alone
-     needs (`main.css`, `--clock-deck-height`). */
-  bottom: max(64px, calc(var(--clock-deck-height, 0px) + 8px));
+     needs (`main.css`, `--clock-deck-height`). The deck's height already carries the
+     home indicator, so only the deckless term adds it. */
+  bottom: max(calc(64px + var(--safe-bottom, 0px)), calc(var(--clock-deck-height, 0px) + 8px));
   transform: translateX(-50%);
   min-width: 220px;
   padding: 8px 12px;

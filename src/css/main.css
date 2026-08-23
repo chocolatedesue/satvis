@@ -27,19 +27,41 @@ body {
   display: none;
 }
 
+/* The safe area, named once. `viewport-fit=cover` in index.html is what makes these
+   report anything: without it iOS keeps them 0 even where the page already reaches
+   under the home indicator. The top is 0 on every iOS layout, and is carried for an
+   Android install, which is edge to edge. */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  /* Cesium's credit line in the bottom-left corner: the inset lifts it off the home
+     indicator, and the screen's rounded corner then cuts into the left. The same inset
+     scales how much of 12px that costs, so a square screen keeps Cesium's own 5/3. */
+  --credit-corner-bottom: calc(3px + var(--safe-bottom));
+  --credit-corner-left: calc(5px + var(--safe-left) + min(12px, var(--safe-bottom)));
+
+  /* With no deck to clear, the corner. `body.clock-deck` moves the line up. */
+  --credit-bottom: var(--credit-corner-bottom);
+  --credit-left: var(--credit-corner-left);
+}
+
 /* Above the sky view's HUD (z-4) and the entity info panel (z-5), so the control
-   that leaves the sky view stays reachable while it is up. */
+   that leaves the sky view stays reachable while it is up. Sideways the notch is
+   beside these rows, and without the inset they slide under it. */
 #toolbarLeft {
   position: absolute;
-  top: 5px;
-  left: 2px;
+  top: calc(5px + var(--safe-top));
+  left: calc(2px + var(--safe-left));
   z-index: 6;
 }
 
 #toolbarRight {
   position: absolute;
-  top: 5px;
-  right: 2px;
+  top: calc(5px + var(--safe-top));
+  right: calc(2px + var(--safe-right));
   z-index: 6;
 }
 
@@ -202,42 +224,36 @@ input:checked + .slider::before {
    room the deck claims, and where the credits go around it. */
 body.clock-deck {
   /* Every offset below is in terms of this, or a notch grows the deck past the line. */
-  --clock-deck-safe: max(6px, env(safe-area-inset-bottom));
+  --clock-deck-safe: max(6px, var(--safe-bottom));
   /* What the deck occupies, for the sky view's cards. Constant across the fold. */
   --clock-deck-height: calc(88px + var(--clock-deck-safe));
-  /* Clear of the deck: the default, and where a phone puts them. */
-  --clock-deck-credit-bottom: calc(var(--clock-deck-height) + 4px);
+  /* Clear of the deck: the default, and where a phone puts them. Far enough up that
+     the corner is no concern, so the left goes back to Cesium's own. */
+  --credit-bottom: calc(var(--clock-deck-height) + 4px);
+  --credit-left: calc(5px + var(--safe-left));
 }
 
 /* In the control row beside the surface: 28 px of credit centred in its 46. */
 body.clock-deck[data-clock-deck="beside"] {
-  --clock-deck-credit-bottom: calc(51px + var(--clock-deck-safe));
+  --credit-bottom: calc(51px + var(--clock-deck-safe));
 }
 
-/* Folded, the reserved scale row is more room than the credit line needs. */
+/* Folded, the reserved scale row is more room than the credit line needs, which
+   leaves the rounded corner as the only thing to clear. */
 body.clock-deck[data-clock-deck="folded"] {
-  --clock-deck-credit-bottom: calc(3px + env(safe-area-inset-bottom, 0px));
-}
-
-/* A rounded corner cuts the logo off there: a 55 px radius intrudes ~21 px at 12 px
-   up, so the line moves to 24 in and 12 up. `pointer: coarse` stands in for
-   "rounded", because the insets that would say so read 0 without
-   `viewport-fit=cover`, which this app does not set. */
-@media (pointer: coarse) {
-  body.clock-deck[data-clock-deck="folded"] {
-    --clock-deck-credit-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-  }
-
-  body.clock-deck[data-clock-deck="folded"] .cesium-viewer-bottom {
-    left: calc(24px + env(safe-area-inset-left, 0px)) !important;
-  }
+  --credit-bottom: var(--credit-corner-bottom);
+  --credit-left: var(--credit-corner-left);
 }
 
 /* `!important` because Cesium rewrites this element's `bottom` inline on every
-   resize. The width cap stops its full-row container swallowing taps. */
+   resize. Unscoped: the corner is the viewport's, deck or no deck. */
+.cesium-viewer-bottom {
+  bottom: var(--credit-bottom) !important;
+  left: var(--credit-left) !important;
+}
+
+/* The width cap stops its full-row container swallowing taps meant for the deck. */
 body.clock-deck .cesium-viewer-bottom {
-  bottom: var(--clock-deck-credit-bottom) !important;
-  left: 5px !important;
   right: auto !important;
   width: max-content !important;
 }
@@ -261,11 +277,11 @@ body.clock-deck .cesium-viewer-bottom {
     --clock-deck-max: 560px;
   }
 
-  /* Cesium's own corner, for the two cases that hold the line above the deck. Not
-     folded: a coarse pointer keeps 12 px there, and matching it here took that back
-     at equal specificity, splitting the pair. */
+  /* Cesium's own corner, for the two cases that hold the line above the deck: the
+     deck caps and centres at this width and stops sharing the row. */
   body.clock-deck[data-clock-deck="clear"],
   body.clock-deck[data-clock-deck="beside"] {
-    --clock-deck-credit-bottom: calc(3px + env(safe-area-inset-bottom, 0px));
+    --credit-bottom: var(--credit-corner-bottom);
+    --credit-left: var(--credit-corner-left);
   }
 }

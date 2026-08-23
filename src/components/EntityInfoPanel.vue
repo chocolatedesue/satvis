@@ -467,11 +467,13 @@ function notifyPasses(): void {
 </script>
 
 <style scoped>
+/* Below the toolbars and inside the same insets: sideways the notch is beside this
+   panel, and the width has to lose both sides or the card overflows. */
 .entity-info-panel {
   position: absolute;
-  top: 50px;
-  right: 5px;
-  width: calc(100% - 10px);
+  top: calc(50px + var(--safe-top, 0px));
+  right: calc(5px + var(--safe-right, 0px));
+  width: calc(100% - 10px - var(--safe-left, 0px) - var(--safe-right, 0px));
   max-width: 540px;
   z-index: 5;
   font-size: 14px;
