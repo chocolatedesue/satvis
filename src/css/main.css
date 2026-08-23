@@ -65,6 +65,45 @@ body {
   z-index: 6;
 }
 
+/* Cesium styles these buttons for a mouse, and on iOS a tap leaves `:hover` and
+   `:focus` behind on whatever it touched last. The lit state is bound to `menu` in
+   Satvis.vue instead; these put the pointer states back to base. */
+#toolbarLeft .cesium-button:not(.toolbarButton--open):focus,
+#toolbarRight .cesium-button:not(.toolbarButton--open):focus {
+  border-color: #444;
+}
+
+/* Only where a pointer can actually rest on a button. Elsewhere :hover is whatever
+   was tapped last. */
+@media (hover: none) {
+  #toolbarLeft .cesium-button:not(.toolbarButton--open):hover,
+  #toolbarRight .cesium-button:not(.toolbarButton--open):hover {
+    background: #303336;
+    border-color: #444;
+    color: #edffff;
+    fill: #edffff;
+    box-shadow: none;
+  }
+}
+
+/* Cesium's `outline: none` leaves keyboard focus with nothing to show for it. */
+#toolbarLeft .cesium-button:focus-visible,
+#toolbarRight .cesium-button:focus-visible {
+  outline: 2px solid #7fd2ea;
+  outline-offset: 2px;
+}
+
+/* The button whose panel is open. The shadow is cleared so it looks the same whether
+   or not a pointer also happens to be resting on it. */
+#toolbarLeft .toolbarButton--open,
+#toolbarRight .toolbarButton--open {
+  background: #3d4348;
+  border-color: #7fd2ea;
+  color: #7fd2ea;
+  fill: #7fd2ea;
+  box-shadow: none;
+}
+
 .toolbarSwitches {
   display: flex;
   flex-direction: column;
