@@ -479,11 +479,13 @@ function notifyPasses(): void {
 
 /*
  * The strip and the header are permanent, and the hero lives inside the body. The
- * cap is what is left of a reasonable card height. The vh term keeps the whole
- * thing on screen on a short window, where the card has no cap of its own.
+ * cap is what is left of a reasonable card height. The dvh term keeps the whole
+ * thing on screen on a short window, where the card has no cap of its own. It has to
+ * be dvh: an installed iOS app reports vh as the full screen, taller than the
+ * viewport it can paint.
  */
 .entity-info-panel :deep(.info-body) {
-  max-height: min(520px, 58vh);
+  max-height: min(520px, 58dvh);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }

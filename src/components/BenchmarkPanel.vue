@@ -776,7 +776,7 @@ watch(
   flex-direction: column;
   width: 480px;
   max-width: calc(100vw - 10px);
-  max-height: calc(100vh - 60px);
+  max-height: calc(100dvh - 60px);
   border: 1px solid #ffb000;
   border-radius: 4px;
   background: rgba(12, 14, 18, 0.94);
@@ -793,7 +793,7 @@ watch(
    switched on would be paying for it twice. */
 .bench--below-fps {
   top: 110px;
-  max-height: calc(100vh - 120px);
+  max-height: calc(100dvh - 120px);
 }
 
 /* The frame: bar, alert and live readout pinned, body scrolls. `min-height: 0`
