@@ -467,11 +467,13 @@ function notifyPasses(): void {
 </script>
 
 <style scoped>
+/* Below the toolbars and inside the same insets: sideways the notch is beside this
+   panel, and the width has to lose both sides or the card overflows. */
 .entity-info-panel {
   position: absolute;
-  top: 50px;
-  right: 5px;
-  width: calc(100% - 10px);
+  top: calc(50px + var(--safe-top, 0px));
+  right: calc(5px + var(--safe-right, 0px));
+  width: calc(100% - 10px - var(--safe-left, 0px) - var(--safe-right, 0px));
   max-width: 540px;
   z-index: 5;
   font-size: 14px;
@@ -479,11 +481,13 @@ function notifyPasses(): void {
 
 /*
  * The strip and the header are permanent, and the hero lives inside the body. The
- * cap is what is left of a reasonable card height. The vh term keeps the whole
- * thing on screen on a short window, where the card has no cap of its own.
+ * cap is what is left of a reasonable card height. The dvh term keeps the whole
+ * thing on screen on a short window, where the card has no cap of its own. It has to
+ * be dvh: an installed iOS app reports vh as the full screen, taller than the
+ * viewport it can paint.
  */
 .entity-info-panel :deep(.info-body) {
-  max-height: min(520px, 58vh);
+  max-height: min(520px, 58dvh);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }

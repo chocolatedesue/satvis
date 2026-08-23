@@ -257,7 +257,7 @@ onUnmounted(() => {
      across. The deck therefore hits nothing, and the things that are controls opt
      back in. */
   pointer-events: none;
-  --safe: max(6px, env(safe-area-inset-bottom));
+  --safe: max(6px, var(--safe-bottom, 0px));
   color: #edffff;
   font-variant-numeric: tabular-nums;
   /* A phone's width, centred, on anything wider. main.css sets the cap and places
@@ -281,7 +281,8 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 6px;
-  padding: 2px 8px 0 8px;
+  /* Sideways the notch is beside this row, not above it. */
+  padding: 2px calc(8px + var(--safe-right, 0px)) 0 calc(8px + var(--safe-left, 0px));
 }
 
 /* Covers the controls, not the row: two thirds of the row is empty. Insets from

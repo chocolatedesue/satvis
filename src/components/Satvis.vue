@@ -3,37 +3,37 @@
     <div v-show="showUI" id="toolbarLeft">
       <div class="toolbarButtons">
         <UTooltip text="Satellite selection">
-          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('cat')">
+          <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.cat }" @click="toggleMenu('cat')">
             <UIcon name="lucide:satellite" />
           </button>
         </UTooltip>
         <UTooltip text="Satellite components">
-          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('sat')">
+          <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.sat }" @click="toggleMenu('sat')">
             <UIcon name="lucide:orbit" />
           </button>
         </UTooltip>
         <UTooltip text="Ground station">
-          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('gs')">
+          <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.gs }" @click="toggleMenu('gs')">
             <UIcon name="lucide:map-pin" />
           </button>
         </UTooltip>
         <UTooltip text="Map">
-          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('map')">
+          <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.map }" @click="toggleMenu('map')">
             <UIcon name="lucide:layers" />
           </button>
         </UTooltip>
         <UTooltip text="View">
-          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('view')">
+          <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.view }" @click="toggleMenu('view')">
             <UIcon name="lucide:telescope" />
           </button>
         </UTooltip>
         <UTooltip v-if="cc.minimalUI" text="Mobile">
-          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('ios')">
+          <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.ios }" @click="toggleMenu('ios')">
             <UIcon name="lucide:smartphone" />
           </button>
         </UTooltip>
         <UTooltip text="Render">
-          <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleMenu('render')">
+          <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.render }" @click="toggleMenu('render')">
             <UIcon name="lucide:gauge" />
           </button>
         </UTooltip>
