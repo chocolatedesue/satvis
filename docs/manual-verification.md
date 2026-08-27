@@ -738,8 +738,9 @@ WebGL. jsdom has none of those. What a browser can answer, and a unit test canno
 is whether a pattern typed into the panel ends up as satellites on a globe with
 plausible physics attached.
 
-**Procedure.** Serve `pnpm build`'s output statically, then drive headless Chromium
-over CDP (`--enable-unsafe-swiftshader` for a WebGL context). Pin the clock with
+**Procedure.** `node scripts/verify-orbit-lab.mjs <baseUrl> <outDir>` — serve
+`pnpm build`'s output statically, then drive headless Chromium over CDP
+(`--enable-unsafe-swiftshader` for a WebGL context). Pin the clock with
 `?time=2026-01-01T00:00` — the sun geometry decides every state count, so an
 unpinned run reports a different and equally correct census every time. Then: open
 the lab panel, Generate the default 6/3/1 pattern, read the census; switch to the
