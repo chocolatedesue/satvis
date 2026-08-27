@@ -14,6 +14,19 @@
       epoch, so this is the pattern's geometry, not a forecast of any real constellation.
     </p>
 
+    <div class="orbitLab__radios">
+      <label v-for="mode in CAMERA_MODES" :key="mode" class="toolbarSwitch">
+        <input type="radio" name="orbitLabCameraMode" :value="mode" :checked="cameraMode === mode" @change="cameraMode = mode" />
+        <span class="slider"></span>
+        {{ CAMERA_MODE_LABEL[mode] }}
+      </label>
+    </div>
+    <p class="orbitLab__note">
+      An orbit plane is fixed in <em>inertial</em> space, not in the rotating Earth's — once launched it does not follow the ground round. So in the <strong>Inertial</strong> frame
+      the orbit holds still and the Earth turns underneath it, which is what actually happens; in <strong>Earth-fixed</strong> the ground holds still and the same stationary orbit
+      appears to sweep past. Both demos below open in the inertial frame.
+    </p>
+
     <button type="button" class="orbitLab__button orbitLab__button--wide" @click="twoOrbitDemo">Two-orbit demo</button>
     <p class="orbitLab__note">
       One click: two orbital planes 90° apart with ten satellites each, orbit lines coloured by illumination, points coloured to match and enlarged, and the clock at
@@ -115,6 +128,10 @@
     </p>
     <table class="orbitLab__facts">
       <tbody>
+        <tr title='How fast the J₂ bulge turns this orbit&apos;s node — the rate by which "fixed" is only nearly true'>
+          <td class="orbitLab__factName">Node drift, this orbit</td>
+          <td class="orbitLab__factValue">{{ nodeDrift }}</td>
+        </tr>
         <tr title="The inclination that makes this altitude sun-synchronous">
           <td class="orbitLab__factName">Sun-sync inclination</td>
           <td class="orbitLab__factValue">{{ ssoInclination }}</td>
@@ -133,6 +150,10 @@
         </tr>
       </tbody>
     </table>
+    <p class="orbitLab__note">
+      Fixed, but not exactly: the Earth's J₂ bulge turns every orbit's node a few degrees a day — −5°/day for the ISS, and precisely +0.9856°/day for a sun-synchronous orbit, which
+      is the whole trick those orbits are built on.
+    </p>
     <p class="orbitLab__note">
       Always-sunlit dawn–dusk orbits exist only between <strong>{{ sunlitBand }}</strong> — a band, not a floor: the shadow shrinks with altitude, but sun-synchrony demands an ever
       steeper retrograde inclination, which caps β. Above the band the second effect wins. Every flown dawn–dusk mission (Sentinel-1 at 693 km, TerraSAR-X at 514 km) sits below it
@@ -220,8 +241,15 @@ import {
   type IlluminationState,
   type PanelAxis,
 } from "../config/illumination";
+import { CAMERA_MODES } from "../config/viewModes";
 import { illuminationTimeline } from "../modules/util/illumination";
-import { alwaysSunlitAltitudeBandKm, alwaysSunlitVerdict, representativeAlwaysSunlitAltitudeKm, sunSyncWalkerParams } from "../modules/util/sunSynchronous";
+import {
+  alwaysSunlitAltitudeBandKm,
+  alwaysSunlitVerdict,
+  nodalPrecessionDegPerDay,
+  representativeAlwaysSunlitAltitudeKm,
+  sunSyncWalkerParams,
+} from "../modules/util/sunSynchronous";
 import {
   decodeWalker,
   encodeWalker,
@@ -235,6 +263,7 @@ import {
   walkerTagFor,
   type WalkerDeltaParams,
 } from "../modules/util/walkerDelta";
+import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 
 /** How often the census and the selected satellite's readout are recomputed. */
@@ -262,6 +291,17 @@ const { pointColorMode, pointSize, panelAxis, walker } = storeToRefs(satStore);
 // this is the seam the clock deck writes it through — so the demo writes it the same
 // way rather than reaching for viewer.clock.
 const clock = useViewerClock();
+
+// The reference frame the camera is pinned to. Already a setting — it lives in the
+// View menu and travels as `?camera=` — surfaced here because it is the difference
+// between a picture that shows what the orbit does and one that does not.
+const cesiumStore = useCesiumStore();
+const { cameraMode } = storeToRefs(cesiumStore);
+
+const CAMERA_MODE_LABEL: Record<string, string> = {
+  Fixed: "Earth-fixed — ground still, orbit sweeps",
+  Inertial: "Inertial — orbit still, Earth turns",
+};
 
 /**
  * How fast the demo runs the clock.
@@ -345,6 +385,10 @@ const demoOrbitSeconds = computed(() =>
 // Everything the Sun-synchronous block reports, recomputed as the altitude field is
 // typed. Cheap: an arcsin and an inverse cosine.
 const ssoFacts = computed(() => alwaysSunlitVerdict(draft.altitudeKm));
+const nodeDrift = computed(() => {
+  const rate = nodalPrecessionDegPerDay(draft.altitudeKm, draft.inclinationDeg);
+  return Number.isFinite(rate) ? `${rate >= 0 ? "+" : ""}${rate.toFixed(3)}°/day` : "—";
+});
 const ssoInclination = computed(() => (ssoFacts.value.inclinationDeg === undefined ? "none" : `${ssoFacts.value.inclinationDeg.toFixed(2)}°`));
 const ssoWorstBeta = computed(() => (Number.isFinite(ssoFacts.value.worstBetaDeg) ? `${ssoFacts.value.worstBetaDeg.toFixed(1)}°` : "—"));
 const ssoRequiredBeta = computed(() => `${ssoFacts.value.requiredBetaDeg.toFixed(1)}°`);
@@ -435,6 +479,10 @@ function twoOrbitDemo(): void {
   satStore.setActivation({ enabledTags: [...kept, walkerTagFor(preset.params)] });
   // Last, and the part that makes the rest worth looking at: without motion this is
   // a still picture of a state nobody watched change.
+  // The frame the orbit is actually fixed in. Earth-fixed makes a stationary orbit
+  // look like it is sweeping past the globe, which is the one thing this scene is
+  // meant to show is not happening.
+  cameraMode.value = "Inertial";
   clock.setMultiplier(DEMO_MULTIPLIER);
   if (!clock.playing.value) {
     clock.togglePlaying();
@@ -481,6 +529,10 @@ function sunSyncDemo(): void {
   satStore.enabledComponents = [...components];
   const kept = satStore.enabledTags.filter((tag) => !isWalkerTag(tag));
   satStore.setActivation({ enabledTags: [...kept, walkerTagFor(dawnDusk), walkerTagFor(noonMidnight)] });
+  // The frame the orbit is actually fixed in. Earth-fixed makes a stationary orbit
+  // look like it is sweeping past the globe, which is the one thing this scene is
+  // meant to show is not happening.
+  cameraMode.value = "Inertial";
   clock.setMultiplier(DEMO_MULTIPLIER);
   if (!clock.playing.value) {
     clock.togglePlaying();

@@ -10,6 +10,7 @@ import {
   dawnDuskBetaDeg,
   dawnDuskBetaRangeDeg,
   eclipseFreeBetaDeg,
+  nodalPrecessionDegPerDay,
   representativeAlwaysSunlitAltitudeKm,
   ssoRaanDeg,
   sunRightAscensionDeg,
@@ -77,6 +78,38 @@ describe("sunSyncInclinationDeg", () => {
     // Through SGP4's recovered elements rather than the two-body ones, so a few
     // hundredths of a degree a day is the agreement to expect.
     expect(degPerDay).toBeCloseTo(SUN_DEG_PER_DAY, 1);
+  });
+});
+
+describe("nodalPrecessionDegPerDay", () => {
+  it("gives the sun's own rate back at a sun-synchronous inclination", () => {
+    for (const altitude of [500, 700, 1000, 1500]) {
+      const inclination = sunSyncInclinationDeg(altitude)!;
+      expect(nodalPrecessionDegPerDay(altitude, inclination)).toBeCloseTo(SUN_DEG_PER_DAY, 6);
+    }
+  });
+
+  it("regresses westward for a prograde orbit, at about 5°/day for the ISS", () => {
+    // 420 km, 51.6°: the textbook figure is about −5°/day.
+    expect(nodalPrecessionDegPerDay(420, 51.6)).toBeCloseTo(-5, 0);
+  });
+
+  it("is zero for a polar orbit, where the bulge has no lever arm", () => {
+    expect(nodalPrecessionDegPerDay(700, 90)).toBeCloseTo(0, 9);
+  });
+
+  it("is slower for a higher orbit, because the bulge is further away", () => {
+    expect(Math.abs(nodalPrecessionDegPerDay(2000, 51.6))).toBeLessThan(Math.abs(nodalPrecessionDegPerDay(400, 51.6)));
+  });
+
+  it("says an orbit is nearly fixed, not exactly: a few degrees a day at most in LEO", () => {
+    // The claim the panel makes. Equatorial LEO is the fastest case.
+    expect(Math.abs(nodalPrecessionDegPerDay(300, 0))).toBeLessThan(11);
+  });
+
+  it("declines inputs it cannot mean", () => {
+    expect(nodalPrecessionDegPerDay(-10, 51.6)).toBeNaN();
+    expect(nodalPrecessionDegPerDay(700, Number.NaN)).toBeNaN();
   });
 });
 

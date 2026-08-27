@@ -780,7 +780,7 @@ because Cesium tonemaps: a `#f0e442` line arrives at about `(200, 200, 40)`, the
 right colour at 84% intensity. Only the region right of the panel and above the clock
 deck is sampled, since the legend swatches carry these same five colours.
 
-**Result, 2026-08-27 — 35/35.**
+**Result, 2026-08-27 — 39/39.**
 
 | Check                                            | Returned                                                                                                                                 |
 | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -800,6 +800,10 @@ deck is sampled, since the legend swatches carry these same five colours.
 | right now                                        | dawn–dusk 12 × `sunlit_on`; noon–midnight 9 × `sunlit_edge`, 3 × `umbra`                                                                 |
 | over a whole orbit at both solstices             | dawn–dusk 0% eclipsed in June and December; noon–midnight 28.7% in both                                                                  |
 | the computed band                                | `between 1610 and 3080 km`                                                                                                               |
+| the demos open in the inertial frame             | `?camera=Inertial`, and the controller agrees                                                                                            |
+| inertial camera, 5 s apart                       | world position moved 638 km, range change 0 m — a rotation, not a drift                                                                  |
+| the orbit batch over the same 5 s                | model matrix changed, so the geometry is held in inertial space                                                                          |
+| earth-fixed camera, same interval                | moved 0 m, so the orbit is what appears to sweep                                                                                         |
 
 **Two things worth knowing from writing this.**
 
@@ -824,6 +828,11 @@ it is drawn over the night side, where a dark line on a dark globe is the hardes
 part of the picture to see. The isolated frame above (globe hidden) is where the
 eclipsed arc reads most clearly; on the globe the eye finds the sunlit and back-sun
 arcs first.
+
+**`camera.position` cannot see the inertial frame.** While a `lookAtTransform` is
+active — which is exactly what pins the camera to ICRF — Cesium reports the camera's
+position _inside_ that frame, so it is constant by construction and the first version
+of this check measured 0 m of motion in both frames. `positionWC` is the quantity.
 
 **Untrack before counting.** The activation is tag-enabled entries _plus the tracked
 satellite_ (CONTEXT.md), so a satellite tracked earlier in the run stays on the globe

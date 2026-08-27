@@ -173,6 +173,11 @@ record("panel offers all five illumination states", await evaluate("document.que
 await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /Two-orbit demo/.test(b.textContent)).click()");
 await until("/walker=53%3A20|walker=53:20/.test(window.location.search)", "the demo pattern in the url");
 record(
+  "the demo opens in the inertial frame, where the orbit is the thing that holds still",
+  await evaluate("({ url: new URLSearchParams(window.location.search).get('camera'), controller: window.cc.cameraMode })"),
+  (state) => state.url === "Inertial" && state.controller === "Inertial",
+);
+record(
   "the demo starts the clock and speeds it up, so the motion is visible",
   await evaluate("({ multiplier: window.cc.viewer.clock.multiplier, running: window.cc.viewer.clock.shouldAnimate })"),
   (state) => state.multiplier === 60 && state.running === true,
@@ -354,6 +359,85 @@ record("the arc draws every illumination state on the globe, not just in the leg
 await evaluate("window.cc.viewer.scene.globe.show = true; window.cc.viewer.scene.skyBox.show = true; window.cc.viewer.scene.requestRender();");
 await sleep(2500);
 await send("Page.captureScreenshot", { format: "png" }).then(({ data }) => writeFileSync(`${OUT}/00-two-orbit-demo.png`, Buffer.from(data, "base64")));
+
+// What the inertial frame actually does, measured rather than asserted, and without
+// needing anything the app does not already expose.
+//
+// Two independent mechanisms are being checked:
+//
+//   1. The camera. `cameraTrackEci` re-pins it to the ICRF→Fixed transform every
+//      tick, so in the inertial frame the camera's position *in the fixed frame*
+//      sweeps round while its distance from the Earth holds; in the earth-fixed frame
+//      it does not move at all. That is the whole difference between the two views.
+//   2. The orbit geometry. The batch carries inertially-expressed vertices and is
+//      re-oriented by the same transform, so its primitive's model matrix is not the
+//      identity and does not stand still. That is what makes the orbit fixed in
+//      inertial space rather than merely drawn once.
+// `positionWC`, not `position`: while a lookAtTransform is active — which is exactly
+// what pins the camera to the inertial frame — `camera.position` is reported *inside*
+// that frame and is therefore constant by construction. The world-coordinate position
+// is the one that says where the camera is relative to the ground.
+const sampleCamera = () =>
+  evaluate(`(() => {
+    const p = window.cc.viewer.camera.positionWC;
+    return { x: Math.round(p.x), y: Math.round(p.y), z: Math.round(p.z), range: Math.round(Math.hypot(p.x, p.y, p.z)) };
+  })()`);
+const matrixOf = () =>
+  evaluate(`(() => {
+    const primitives = window.cc.viewer.scene.primitives;
+    for (let i = 0; i < primitives.length; i += 1) {
+      const m = primitives.get(i)?.modelMatrix;
+      if (m && typeof m[0] === 'number') return [m[0], m[1], m[4], m[5]].map((v) => Math.round(v * 1e6) / 1e6);
+    }
+    return undefined;
+  })()`);
+
+const inertialBefore = await sampleCamera();
+const matrixBefore = await matrixOf();
+await sleep(5000);
+const inertialAfter = await sampleCamera();
+const matrixAfter = await matrixOf();
+
+record(
+  "in the inertial frame the camera sweeps round the fixed frame at a constant range",
+  {
+    moved: Math.round(Math.hypot(inertialAfter.x - inertialBefore.x, inertialAfter.y - inertialBefore.y, inertialAfter.z - inertialBefore.z)),
+    rangeChange: Math.abs(inertialAfter.range - inertialBefore.range),
+    range: inertialBefore.range,
+  },
+  // Kilometres of sweep against metres of range change: it is a rotation, not a drift.
+  (state) => state.moved > 10_000 && state.rangeChange < state.moved / 20,
+);
+record(
+  "and the orbit batch is re-oriented by that same transform rather than standing still",
+  { before: matrixBefore, after: matrixAfter },
+  (state) => Array.isArray(state.before) && Array.isArray(state.after) && state.before.some((value, index) => value !== state.after[index]),
+);
+
+// The control: the same reading with the camera put back in the earth-fixed frame.
+await evaluate(`(() => {
+  const url = new URL(window.location.href);
+  url.searchParams.set('camera', 'Fixed');
+  window.history.replaceState(null, '', url);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+})()`);
+await until("window.cc.cameraMode === 'Fixed'", "the earth-fixed frame");
+await sleep(1500);
+const fixedBefore = await sampleCamera();
+await sleep(5000);
+const fixedAfter = await sampleCamera();
+record(
+  "in the earth-fixed frame the camera does not move, so the orbit is what appears to sweep",
+  { moved: Math.round(Math.hypot(fixedAfter.x - fixedBefore.x, fixedAfter.y - fixedBefore.y, fixedAfter.z - fixedBefore.z)) },
+  (state) => state.moved < 1000,
+);
+await evaluate(`(() => {
+  const url = new URL(window.location.href);
+  url.searchParams.set('camera', 'Inertial');
+  window.history.replaceState(null, '', url);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+})()`);
+await until("window.cc.cameraMode === 'Inertial'", "the inertial frame again");
 
 // ── Generating a Walker pattern ──────────────────────────────────────────────
 // Back to the minimal preset, so the checks below start from a known form.

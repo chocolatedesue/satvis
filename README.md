@@ -263,6 +263,14 @@ The five states are shown **two ways**, because they answer different questions:
   eclipsed arc, the penumbra slivers either side of it and the arc where the panel has
   turned away are all in view at once, on a paused clock.
 
+**The reference frame matters more than it looks.** An orbit plane is fixed in _inertial_
+space, not in the rotating Earth's — so in the **Inertial** frame the orbit holds still and
+the Earth turns underneath it, which is what actually happens, while in **Earth-fixed** the
+same stationary orbit is drawn sweeping past a motionless globe. The orbit lab surfaces the
+control and both demos open in the inertial frame. Fixed is only nearly true: the J₂ bulge
+turns every orbit's node a few degrees a day, and the panel reports the rate — the same
+number that makes sun-synchronous orbits possible in the first place.
+
 **Start with the "Two-orbit demo" button.** It sets up the smallest scene that shows all of
 it: two orbital planes 90° apart with ten satellites each, arcs on, points enlarged and
 coloured to match, and the clock at 60× so an orbit takes about a minute and a half — long

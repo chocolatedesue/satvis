@@ -215,6 +215,35 @@ secular inclination differs from SGP4's recovered one by tenths of a degree. Wit
 the margin the band comes out ~20 km too wide at the bottom and the demo shows the one
 thing it claims cannot happen.
 
+### The demos open in the inertial frame
+
+An orbit plane is fixed in **inertial** space. Once launched it does not follow the ground
+round — so in an earth-fixed camera, where the globe is held still, a perfectly stationary
+orbit is drawn sweeping past it, and the picture says the opposite of what is true.
+
+The geometry was never wrong: the Orbit and Illumination arc components are already
+expressed in inertial coordinates and re-oriented by the ICRF→Fixed transform every half
+second (`PolylineBatch`, frame `inertial`). What was wrong was the _view_ they were being
+read in, and the fix is one setting the app already had — `cameraMode`, in the View menu and
+in `?camera=`. Both demos now set it, and the orbit lab surfaces the control with a line
+saying what each frame shows, because the choice is not a preference here: it decides
+whether the scene demonstrates the thing or contradicts it.
+
+Measured rather than asserted: in the inertial frame the camera's world position sweeps
+638 km in five seconds with **zero** change in its range from the Earth — a rotation, not a
+drift — while the orbit batch's model matrix changes to match. In the earth-fixed frame the
+camera does not move at all, so the orbit is what appears to. Note that
+`camera.position` cannot see this: while a `lookAtTransform` is active it reports the
+position _inside_ that frame, which is constant by construction. `positionWC` is the
+quantity.
+
+**"Fixed" is only nearly true, and the panel now says by how much.** The J₂ bulge turns
+every orbit's node — a few degrees a day in LEO, −5°/day for the ISS, and precisely
++0.9856°/day for a sun-synchronous orbit, which is the whole trick those orbits are built
+on. So the same number that makes the always-sunlit result possible is the reason "the orbit
+is fixed" needs a footnote, and `nodalPrecessionDegPerDay` reports it for whatever is in the
+form.
+
 ## Alternatives
 
 **Generate TLE text and feed it through the existing text parser.** Rejected: it makes

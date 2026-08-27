@@ -45,6 +45,38 @@ export const SUN_DEG_PER_DAY = 360 / 365.2422;
 export const SUN_MAX_DECLINATION_DEG = 23.4392911;
 
 /**
+ * How fast an orbit plane's node turns, in degrees a day — the answer to "is the
+ * orbit fixed?".
+ *
+ * Almost. An orbit plane is fixed in *inertial* space, not in the rotating Earth's:
+ * once launched, it does not follow the ground round, which is why an earth-fixed
+ * camera makes a stationary orbit look like it is sweeping past. What it does do is
+ * precess, slowly, because the Earth is not a sphere — the J₂ bulge torques the plane
+ * at
+ *
+ *   Ω̇ = −(3/2) J₂ n (Rₑ/a)² cos i / (1−e²)²
+ *
+ * which is a few degrees a day in LEO: −5°/day for the ISS, and *exactly* +0.9856°/day
+ * for a sun-synchronous orbit, which is the entire trick those orbits are built on.
+ * So "fixed" is right to within a rate this function will tell you.
+ *
+ * The forward direction of `sunSyncInclinationDeg`, and the same formula
+ * `./orbitFacts.ts` applies to a satrec — this one takes the numbers a pattern is
+ * quoted in, so the panel can report it before anything is generated.
+ */
+export function nodalPrecessionDegPerDay(altitudeKm: number, inclinationDeg: number, eccentricity = 0): number {
+  const semiMajorAxisKm = EARTH_RADIUS_KM + altitudeKm;
+  if (!Number.isFinite(altitudeKm) || semiMajorAxisKm <= EARTH_RADIUS_KM || !Number.isFinite(inclinationDeg) || eccentricity < 0 || eccentricity >= 1) {
+    return Number.NaN;
+  }
+  const meanMotionRadPerMinute = (meanMotionRevPerDay(altitudeKm) * 2 * Math.PI) / MINUTES_PER_DAY;
+  const axisRatio = semiMajorAxisKm / EARTH_RADIUS_KM;
+  const oneMinusESquared = 1 - eccentricity * eccentricity;
+  const ratePerMinute = (-1.5 * J2 * meanMotionRadPerMinute * Math.cos(inclinationDeg * DEG_TO_RAD)) / (axisRatio * axisRatio * oneMinusESquared * oneMinusESquared);
+  return ratePerMinute * RAD_TO_DEG * MINUTES_PER_DAY;
+}
+
+/**
  * The inclination that makes a circular orbit at this altitude sun-synchronous.
  *
  * Inverts the secular nodal precession
