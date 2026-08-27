@@ -3,7 +3,18 @@ import { describe, expect, it } from "vitest";
 
 import { ILLUMINATION_COLOR, ILLUMINATION_DESCRIPTION, ILLUMINATION_STATES } from "../../config/illumination";
 import { createSatrec } from "./gp";
-import { IlluminationCache, illuminationAt, illuminationOf, illuminationState, illuminationTimeline, panelNormal, sunGeometry, type SunGeometry } from "./illumination";
+import {
+  IlluminationCache,
+  illuminationAlongOrbit,
+  illuminationAt,
+  illuminationOf,
+  illuminationRing,
+  illuminationState,
+  illuminationTimeline,
+  panelNormal,
+  sunGeometry,
+  type SunGeometry,
+} from "./illumination";
 import { walkerDeltaRecords } from "./walkerDelta";
 
 const EPOCH = new Date("2026-01-01T00:00:00.000Z");
@@ -232,6 +243,172 @@ describe("illuminationTimeline", () => {
     expect(timeline.samples).toEqual([]);
     expect(timeline.fractions).toEqual({});
     expect(timeline.darkFraction).toBe(0);
+  });
+});
+
+describe("illuminationAlongOrbit", () => {
+  /** A closed ring of `count` points in the x-y plane at `radiusKm`, last repeating the first. */
+  function ring(count: number, radiusKm = 6928): { x: number; y: number; z: number }[] {
+    const points = Array.from({ length: count }, (_unused, index) => {
+      const angle = (index / count) * 2 * Math.PI;
+      return { x: radiusKm * Math.cos(angle), y: radiusKm * Math.sin(angle), z: 0 };
+    });
+    return [...points, points[0]!];
+  }
+
+  it("answers once per vertex", () => {
+    const positions = ring(64);
+    expect(illuminationAlongOrbit(positions, sunAlongX, "zenith")).toHaveLength(positions.length);
+  });
+
+  it("finds both an eclipsed arc and a sunlit one on an orbit in the sun's own plane", () => {
+    const states = illuminationAlongOrbit(ring(180), sunAlongX, "zenith");
+    expect(states).toContain("umbra");
+    expect(states).toContain("sunlit_on");
+    // And the two halves of the panel's own sign, either side of the sunlit arc.
+    expect(states).toContain("sunlit_edge");
+  });
+
+  it("puts the eclipsed arc on the side away from the sun", () => {
+    const positions = ring(180);
+    const states = illuminationAlongOrbit(positions, sunAlongX, "zenith");
+    for (const [index, state] of states.entries()) {
+      if (state === "umbra") {
+        // Umbra means the Earth is between this point and the sun, so the point is
+        // on the far side in x.
+        expect(positions[index]!.x).toBeLessThan(0);
+      }
+      if (state === "sunlit_on") {
+        expect(positions[index]!.x).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("colours the seam vertices the same as their neighbours", () => {
+    // The closing repeat gets a one-sided tangent rather than a central one; that
+    // must not show up as a different colour at the seam.
+    const states = illuminationAlongOrbit(ring(180), sunAlongX, "zenith");
+    expect(states.at(-1)).toBe(states[0]);
+    expect(states[0]).toBe(states[1]);
+  });
+
+  it("leaves a whole orbit edge-on when the sun stands on the orbit normal", () => {
+    const sunAlongZ: SunGeometry = { au: { x: 0, y: 0, z: 1 }, unit: { x: 0, y: 0, z: 1 } };
+    const states = illuminationAlongOrbit(ring(90), sunAlongZ, "zenith");
+    expect(new Set(states)).toEqual(new Set(["sunlit_edge"]));
+  });
+
+  it("reports a back-facing arc where a velocity panel turns away from the sun", () => {
+    const states = illuminationAlongOrbit(ring(180), sunAlongX, "velocity");
+    expect(states).toContain("sunlit_back");
+    expect(states).toContain("sunlit_on");
+  });
+
+  it("declines a ring too short to have a tangent rather than guessing one", () => {
+    expect(illuminationAlongOrbit([], sunAlongX, "zenith")).toEqual([]);
+    expect(illuminationAlongOrbit([{ x: 7000, y: 0, z: 0 }], sunAlongX, "zenith")).toEqual([undefined]);
+    expect(
+      illuminationAlongOrbit(
+        [
+          { x: 7000, y: 0, z: 0 },
+          { x: 0, y: 7000, z: 0 },
+        ],
+        sunAlongX,
+        "zenith",
+      ),
+    ).toEqual([undefined, undefined]);
+  });
+
+  it("declines a vertex whose neighbours are the same point", () => {
+    const stuck = [
+      { x: 7000, y: 0, z: 0 },
+      { x: 0, y: 7000, z: 0 },
+      { x: 7000, y: 0, z: 0 },
+    ];
+    // Vertex 1's neighbours are both the same point, so there is no tangent there —
+    // and the other two do have one.
+    expect(illuminationAlongOrbit(stuck, sunAlongX, "zenith")[1]).toBeUndefined();
+  });
+
+  it("agrees with the propagated answer for the same position", () => {
+    // The along-orbit path takes its velocity from the ring rather than from SGP4;
+    // for a circular ring in the sun's plane the two must reach the same state.
+    const positions = ring(360);
+    const geometric = illuminationAlongOrbit(positions, sunAlongX, "zenith");
+    for (const index of [0, 40, 90, 180, 270]) {
+      const position = positions[index]!;
+      const count = positions.length;
+      const previous = positions[(index - 1 + count) % count]!;
+      const next = positions[(index + 1) % count]!;
+      const tangent = { x: next.x - previous.x, y: next.y - previous.y, z: next.z - previous.z };
+      expect(geometric[index]).toBe(illuminationOf(position, tangent, sunAlongX, "zenith")!.state);
+    }
+  });
+});
+
+describe("illuminationRing", () => {
+  function ring(count: number, radiusKm = 6928): { x: number; y: number; z: number }[] {
+    const points = Array.from({ length: count }, (_unused, index) => {
+      const angle = (index / count) * 2 * Math.PI;
+      return { x: radiusKm * Math.cos(angle), y: radiusKm * Math.sin(angle), z: 0 };
+    });
+    return [...points, points[0]!];
+  }
+
+  it("returns one state per position", () => {
+    const refined = illuminationRing(ring(120), sunAlongX, "zenith");
+    expect(refined.states).toHaveLength(refined.positionsKm.length);
+  });
+
+  it("leaves a ring with no state change untouched", () => {
+    const sunAlongZ: SunGeometry = { au: { x: 0, y: 0, z: 1 }, unit: { x: 0, y: 0, z: 1 } };
+    const positions = ring(60);
+    const refined = illuminationRing(positions, sunAlongZ, "zenith");
+    expect(refined.positionsKm).toHaveLength(positions.length);
+  });
+
+  it("adds vertices only at the boundaries, not everywhere", () => {
+    const positions = ring(120);
+    const refined = illuminationRing(positions, sunAlongX, "zenith");
+    const added = refined.positionsKm.length - positions.length;
+    expect(added).toBeGreaterThan(0);
+    // Four boundaries on this geometry (in and out of shadow, and the panel's two
+    // sign changes) at seven points each — nowhere near a whole extra ring.
+    expect(added).toBeLessThan(positions.length);
+  });
+
+  it("finds the penumbra a coarse ring skips entirely", () => {
+    // 40 samples over an orbit is ~140 s apart, well over the ~15 s the satellite
+    // spends in penumbra, so the coarse pass steps straight from sunlit to umbra.
+    const positions = ring(40);
+    expect(illuminationAlongOrbit(positions, sunAlongX, "zenith")).not.toContain("penumbra");
+    expect(illuminationRing(positions, sunAlongX, "zenith").states).toContain("penumbra");
+  });
+
+  it("keeps the inserted vertices on the ring", () => {
+    const refined = illuminationRing(ring(60), sunAlongX, "zenith");
+    for (const position of refined.positionsKm) {
+      const radius = Math.sqrt(position.x ** 2 + position.y ** 2 + position.z ** 2);
+      // Chord interpolation cuts the corner; at 60 samples that is a few km on 6928.
+      expect(radius).toBeGreaterThan(6900);
+      expect(radius).toBeLessThanOrEqual(6928.001);
+    }
+  });
+
+  it("keeps the states in the order the positions are in", () => {
+    const refined = illuminationRing(ring(90), sunAlongX, "zenith");
+    // Every umbra vertex is on the far side, refined ones included.
+    for (const [index, state] of refined.states.entries()) {
+      if (state === "umbra") {
+        expect(refined.positionsKm[index]!.x).toBeLessThan(0);
+      }
+    }
+  });
+
+  it("passes a degenerate ring through rather than refining it", () => {
+    const refined = illuminationRing([{ x: 7000, y: 0, z: 0 }], sunAlongX, "zenith");
+    expect(refined.positionsKm).toHaveLength(1);
+    expect(refined.states).toEqual([undefined]);
   });
 });
 

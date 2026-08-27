@@ -748,21 +748,70 @@ split; track one generated satellite and read its ν/κ/β and its one-orbit str
 
 **Result, 2026-08-27, Chromium 1440×900 SwiftShader — 17/17.**
 
-| Check | Returned |
-| --- | --- |
-| `6/3/1@550` reaches the url and its tag goes on | `walker=53:6/3/1@550`, `tags=Walker 53:6/3/1@550` |
-| all six generated satellites classified | `6 satellites on screen · 50% without usable power`, states `[1,0,2,0,3]` |
-| replacing the pattern replaces what is drawn | `348 satellites on screen` — not 354, so the previous pattern's tag went off |
-| the 97.6° / 560 km shell splits across states | umbra 95, penumbra 0, sunlit_back 61, sunlit_edge 36, sunlit_on 156 |
-| one satellite's readout | `sunlit_on · ν 1.000 · κ 0.178 · β 71.0°` |
-| its next orbit | `0.0% umbra · 0.0% penumbra · 40.0% back-facing · 40.0% dark in total`, 5 strip segments |
-| the strip is reachable by scrolling the panel | top 705, bottom 717, viewport 761 |
-| console errors, ion and analytics aside | none |
+| Check                                           | Returned                                                                                 |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `6/3/1@550` reaches the url and its tag goes on | `walker=53:6/3/1@550`, `tags=Walker 53:6/3/1@550`                                        |
+| all six generated satellites classified         | `6 satellites on screen · 50% without usable power`, states `[1,0,2,0,3]`                |
+| replacing the pattern replaces what is drawn    | `348 satellites on screen` — not 354, so the previous pattern's tag went off             |
+| the 97.6° / 560 km shell splits across states   | umbra 95, penumbra 0, sunlit_back 61, sunlit_edge 36, sunlit_on 156                      |
+| one satellite's readout                         | `sunlit_on · ν 1.000 · κ 0.178 · β 71.0°`                                                |
+| its next orbit                                  | `0.0% umbra · 0.0% penumbra · 40.0% back-facing · 40.0% dark in total`, 5 strip segments |
+| the strip is reachable by scrolling the panel   | top 705, bottom 717, viewport 761                                                        |
+| console errors, ion and analytics aside         | none                                                                                     |
 
 The last two physics rows are the point of the feature and worth reading twice: at
 β = 71° that near-polar shell never enters the Earth's shadow at all, and still
 spends 40% of every orbit with its panel facing away from the sun. An
 eclipse-only view reports that orbit as fully lit.
+
+### The illumination arc, and the two-orbit demo
+
+Added with the arc. Same runner, same pinned clock; the extra thing being checked is
+that the arc's colours reach the screen, which no DOM assertion can see.
+
+**Procedure.** Press "Two-orbit demo", wait for `cc.sats.illuminationArcs.pending` to
+go false, then hide the globe and the sky box for one frame and screenshot it. With
+the globe gone the only coloured pixels in the frame are the two arcs and their
+points, so the frame can be counted. The page decodes its own screenshot into a 2D
+canvas — the WebGL one Cesium draws into would need `preserveDrawingBuffer` — and
+colours are matched by **hue**, normalising each triple to its brightest channel,
+because Cesium tonemaps: a `#f0e442` line arrives at about `(200, 200, 40)`, the
+right colour at 84% intensity. Only the region right of the panel and above the clock
+deck is sampled, since the legend swatches carry these same five colours.
+
+**Result, 2026-08-27 — 22/22.**
+
+| Check | Returned |
+| --- | --- |
+| the demo writes all four settings in one press | `walker=53:2/2/1@550~180`, `elements=Point,Orbit,Illumination arc`, `paint=illumination`, tag `Walker 53:2/2/1@550~180` |
+| two orbits, and only two | `2 satellites on screen` — the previous pattern's tag went off |
+| both arcs in the batch, a primitive in the scene | `{ batch: 2, scenePrimitives: 1 }` |
+| every state drawn on the globe | umbra 7289 px, sunlit_on 4522 px, sunlit_back 534, sunlit_edge 369, penumbra 15 |
+| the strip covers two orbits | `Next 2 orbits (191.6 min): … 40.1% back-facing · 40.1% dark in total` |
+
+**Two things worth knowing from writing this.**
+
+- **A reused browser profile verifies the previous build.** The app is a PWA; a
+  persisted profile keeps its service worker, and the service worker serves the
+  bundle it precached. The runner now makes a fresh profile every run. The first
+  version of this check spent three rounds "failing" against a bundle from before
+  the feature existed.
+- **Cesium releases `geometryInstances` once a Primitive is built**
+  (`releaseGeometryInstances` defaults true), so the arcs cannot be read back off
+  the scene graph. The batch that owns them is the only thing left to count.
+
+**Penumbra is 15 pixels because it is 15 seconds.** A LEO satellite crosses the
+penumbra in 10–20 s of a ~96 minute orbit — 0.3% of the ring — so at any zoom that
+shows a whole orbit it is a short blue tick at each eclipse boundary however finely
+it is sampled. The boundary refinement in `illuminationRing` is what makes it appear
+at all: on the app's own ~47 s sample grid the coarse pass steps straight from
+sunlit to umbra and the state never occurs.
+
+**Legibility caveat.** `umbra` is a dark neutral, and with `globe.enableLighting` on
+it is drawn over the night side, where a dark line on a dark globe is the hardest
+part of the picture to see. The isolated frame above (globe hidden) is where the
+eclipsed arc reads most clearly; on the globe the eye finds the sunlit and back-sun
+arcs first.
 
 **What this cannot answer.** Throughput. SwiftShader renders a 1584-point scene at
 a few frames a second, and satellites are built against a per-frame budget, so the

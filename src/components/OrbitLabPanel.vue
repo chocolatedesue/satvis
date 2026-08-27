@@ -14,6 +14,19 @@
       epoch, so this is the pattern's geometry, not a forecast of any real constellation.
     </p>
 
+    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="twoOrbitDemo">Two-orbit demo</button>
+    <p class="orbitLab__note">
+      One click: two orbital planes 90° apart with one satellite each, orbit lines coloured by illumination, and the points coloured to match. The simplest scene that shows a whole
+      sunlit arc, a whole eclipsed arc and the penumbra between them.
+    </p>
+    <p class="orbitLab__note">
+      Penumbra is a sliver either way: a satellite crosses it in 10–20 s of a ~96 minute orbit, so on the arc it is a short blue tick at each eclipse boundary rather than a band.
+    </p>
+    <p class="orbitLab__note">
+      The <code>Illumination arc</code> component is in the satellite-components menu. It stands in for the plain <code>Orbit</code> while it is on — the two are the same ellipse,
+      so drawing both would z-fight.
+    </p>
+
     <label class="orbitLab__field">
       <span>Preset</span>
       <select :value="presetIndex" @change="applyPreset(Number(($event.target as HTMLSelectElement).value))">
@@ -108,11 +121,11 @@
         <span class="orbitLab__swatch" :style="{ backgroundColor: ILLUMINATION_COLOR[selected.state] }"></span>
         {{ selected.state }} · ν {{ selected.nu.toFixed(3) }} · κ {{ selected.kappa.toFixed(3) }} · β {{ selected.betaDeg.toFixed(1) }}°
       </p>
-      <div v-if="selected.strip.length > 0" class="orbitLab__strip" :title="`One orbit from now (${selected.periodMinutes} min), 10 s per sample`">
+      <div v-if="selected.strip.length > 0" class="orbitLab__strip" :title="`${STRIP_ORBITS} orbits from now (${selected.spanMinutes} min), ${STRIP_STEP_SECONDS} s per sample`">
         <span v-for="(segment, index) in selected.strip" :key="index" :style="{ backgroundColor: segment.color, flexGrow: segment.weight }"></span>
       </div>
       <p v-if="selected.strip.length > 0" class="orbitLab__note">
-        Next orbit: {{ pct(selected.fractions.umbra ?? 0) }} umbra · {{ pct(selected.fractions.penumbra ?? 0) }} penumbra ·
+        Next {{ STRIP_ORBITS }} orbits ({{ selected.spanMinutes }} min): {{ pct(selected.fractions.umbra ?? 0) }} umbra · {{ pct(selected.fractions.penumbra ?? 0) }} penumbra ·
         {{ pct(selected.fractions.sunlit_back ?? 0) }} back-facing · {{ pct(selected.darkFraction) }} dark in total
       </p>
     </template>
@@ -154,8 +167,19 @@ import { useSatStore } from "../stores/sat";
 /** How often the census and the selected satellite's readout are recomputed. */
 const REFRESH_MS = 500;
 
-/** Sample step for the one-orbit strip, in seconds. Matches illuminationTimeline's own default reasoning. */
+/** Sample step for the strip, in seconds. Matches illuminationTimeline's own default reasoning. */
 const STRIP_STEP_SECONDS = 10;
+
+/**
+ * How many orbits the strip covers.
+ *
+ * Two rather than one, because one orbit cannot show what changes between them.
+ * The sun moves ~0.04° an hour and the orbit plane regresses a few degrees a day,
+ * so consecutive orbits are nearly but not exactly alike — and where a satellite
+ * is close to entering or leaving eclipse season, two orbits is where that first
+ * shows up as two visibly different halves of the strip.
+ */
+const STRIP_ORBITS = 2;
 
 const cc = useController();
 const satStore = useSatStore();
@@ -212,6 +236,28 @@ function generate(): void {
   satStore.setActivation({ enabledTags: [...kept, walkerTagFor(draft)] });
 }
 
+/**
+ * The whole two-orbit demo in one press.
+ *
+ * Four writes that only make sense together — the pattern, its tag, the components
+ * that draw the arc, and the colouring that matches the points to it. Offered as
+ * one button because the thing being asked for is "show me the simplest version of
+ * this", and reaching it through four menus is not that. Nothing here is a mode: a
+ * reader can undo any of the four afterwards.
+ */
+function twoOrbitDemo(): void {
+  const preset = WALKER_PRESETS[0] as (typeof WALKER_PRESETS)[number];
+  Object.assign(draft, preset.params);
+  walker.value = encodeWalker(preset.params);
+  pointColorMode.value = "illumination";
+  const components = new Set([...satStore.enabledComponents, "Point", "Illumination arc"]);
+  // The label is noise on a two-satellite scene whose names are 20 characters long.
+  components.delete("Label");
+  satStore.enabledComponents = [...components];
+  const kept = satStore.enabledTags.filter((tag) => !isWalkerTag(tag));
+  satStore.setActivation({ enabledTags: [...kept, walkerTagFor(preset.params)] });
+}
+
 /** Leave the records in the catalog and stop drawing them — the tag is the switch. */
 function clear(): void {
   satStore.setActivation({ enabledTags: satStore.enabledTags.filter((tag) => !isWalkerTag(tag)) });
@@ -231,7 +277,8 @@ interface SelectedReadout {
   nu: number;
   kappa: number;
   betaDeg: number;
-  periodMinutes: string;
+  /** The whole strip's span, not one period. */
+  spanMinutes: string;
   strip: { color: string; weight: number }[];
   fractions: Partial<Record<IlluminationState, number>>;
   darkFraction: number;
@@ -289,15 +336,15 @@ function refresh(): void {
     selected.value = undefined;
     return;
   }
-  const subjectPeriod = subject.props.orbit.orbitalPeriod;
-  const timeline = illuminationTimeline(subject.props.orbit.satrec, date, subjectPeriod * 60, STRIP_STEP_SECONDS, axis);
+  const spanMinutes = subject.props.orbit.orbitalPeriod * STRIP_ORBITS;
+  const timeline = illuminationTimeline(subject.props.orbit.satrec, date, spanMinutes * 60, STRIP_STEP_SECONDS, axis);
   selected.value = {
     name: subject.props.name,
     state: now.state,
     nu: now.nu,
     kappa: now.kappa,
     betaDeg: now.betaDeg,
-    periodMinutes: subjectPeriod.toFixed(1),
+    spanMinutes: spanMinutes.toFixed(1),
     strip: runsOf(timeline.samples.map((sample) => sample.state)),
     fractions: timeline.fractions,
     darkFraction: timeline.darkFraction,
@@ -417,6 +464,10 @@ watch(panelAxis, () => refresh());
   cursor: pointer;
 }
 
+.orbitLab__button--wide {
+  width: 100%;
+}
+
 .orbitLab__button:disabled {
   cursor: default;
   opacity: 0.4;
@@ -468,8 +519,13 @@ watch(panelAxis, () => refresh());
   border-radius: 2px;
 }
 
+/* A state that happens at all is never invisible.
+   A penumbra crossing is 10–20 s of a ~96 minute orbit, so proportionally it is a
+   third of a pixel — and "0.3% penumbra" printed under a strip with no blue in it
+   reads as a bug. Two pixels overstates a sliver's width and understates nothing
+   else; the percentages beside the strip are what carry the real proportions. */
 .orbitLab__strip > span {
   flex-basis: 0;
-  min-width: 0;
+  min-width: 2px;
 }
 </style>

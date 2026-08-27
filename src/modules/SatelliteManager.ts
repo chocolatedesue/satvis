@@ -137,6 +137,12 @@ export class SatelliteManager {
   readonly tracks: PolylineBatch;
 
   /**
+   * The third batch: the Illumination arc's per-vertex-coloured ellipses. See
+   * SatelliteBatches for why it cannot share the orbits' primitive.
+   */
+  readonly illuminationArcs: PolylineBatch;
+
+  /**
    * How points are painted, as one object shared by reference with every
    * satellite. One owner rather than a module-level value, and mutated in place
    * rather than replaced, so a satellite created between two reconciles reads the
@@ -158,6 +164,9 @@ export class SatelliteManager {
 
   /** Simulation time the ground-track corridors were last re-cut at. */
   #groundTracksRefreshedAt: JulianDate;
+
+  /** Simulation time the illumination arcs were last re-cut at. See refreshIlluminationArc. */
+  #arcsRefreshedAt: JulianDate;
 
   /** Frames since this manager existed. See GROUND_TRACK_REFRESH_FRAMES. */
   #frames = 0;
@@ -214,8 +223,10 @@ export class SatelliteManager {
     this.viewer = viewer;
     this.orbits = new PolylineBatch(viewer, "inertial");
     this.tracks = new PolylineBatch(viewer, "fixed");
+    this.illuminationArcs = new PolylineBatch(viewer, "inertial");
     this.#tracksRefreshedAt = viewer.clock.currentTime;
     this.#groundTracksRefreshedAt = viewer.clock.currentTime;
+    this.#arcsRefreshedAt = viewer.clock.currentTime;
     // Considered every frame rather than on a grid of its own: the decision is a
     // few comparisons, and a grid quantises — a re-cut declined because the last
     // one is still landing waits out the whole next square, which at ×1 turned a
@@ -286,6 +297,23 @@ export class SatelliteManager {
 
     if (!sameValue(previous.components, desired.components)) {
       this.#components.choose(desired.components);
+      // The arc IS the orbit, coloured: both are cut from the same vertices, so
+      // drawing them together puts two polylines on identical geometry and they
+      // z-fight — the line comes out mottled, half one colour and half the other.
+      // The arc wins while it is on, through the same suppression a scene morph
+      // uses, so the user's Orbit choice is kept rather than rewritten.
+      //
+      // Only on the transition, because `#suppressed` is a set and not a count:
+      // releasing on every reconcile would undo a morph's own suppression of the
+      // same component.
+      const arcChosen = desired.components.includes("Illumination arc");
+      if (arcChosen !== previous.components.includes("Illumination arc")) {
+        if (arcChosen) {
+          this.#components.suppress("Orbit");
+        } else {
+          this.#components.release("Orbit");
+        }
+      }
     }
 
     if (previous.trackedSatellite !== desired.trackedSatellite) {
@@ -299,8 +327,20 @@ export class SatelliteManager {
     if (previous.pointColorMode !== desired.pointColorMode) {
       this.repaintPoints();
     }
+    if (previous.panelAxis !== desired.panelAxis) {
+      // The points look after themselves — their cache drops its memo when the axis
+      // changes and the next frame reads the new answer. The arcs are baked
+      // geometry, so they have to be re-cut.
+      this.refreshIlluminationArcs();
+    }
 
     this.#reconcileActive();
+  }
+
+  /** Re-cut every live satellite's illumination arc against the current clock. */
+  refreshIlluminationArcs(): void {
+    const time = this.viewer.clock.currentTime;
+    this.activeSatellites.forEach((sat) => sat.refreshIlluminationArc(time));
   }
 
   /**
@@ -467,16 +507,23 @@ export class SatelliteManager {
       this.#tracksRefreshedAt = time;
     }
     const tracksDue = !this.tracks.pending && stale(this.#tracksRefreshedAt);
+    if (this.illuminationArcs.pending) {
+      this.#arcsRefreshedAt = time;
+    }
+    const arcsDue = !this.illuminationArcs.pending && stale(this.#arcsRefreshedAt);
     // Asked ahead of the budget, not behind it: the rebuild is timed by when it
     // was seen to land, so behind the budget the first look comes a whole budget
     // late and doubles the interval it was meant to shorten.
     const groundTracksRested = this.#groundTracksRested();
     const groundTracksDue = groundTracksRested && stale(this.#groundTracksRefreshedAt);
-    if (!tracksDue && !groundTracksDue) {
+    if (!tracksDue && !groundTracksDue && !arcsDue) {
       return;
     }
     if (tracksDue) {
       this.#tracksRefreshedAt = time;
+    }
+    if (arcsDue) {
+      this.#arcsRefreshedAt = time;
     }
     if (groundTracksDue) {
       this.#groundTracksRefreshedAt = time;
@@ -486,6 +533,9 @@ export class SatelliteManager {
     for (const sat of this.#active.values()) {
       if (tracksDue) {
         sat.refreshOrbitTrack(time);
+      }
+      if (arcsDue) {
+        sat.refreshIlluminationArc(time);
       }
       if (groundTracksDue) {
         sat.refreshGroundTrack(time);
@@ -736,7 +786,7 @@ export class SatelliteManager {
     const sat = new SatelliteComponentCollection(
       this.viewer,
       entry,
-      { orbits: this.orbits, tracks: this.tracks },
+      { orbits: this.orbits, tracks: this.tracks, illuminationArcs: this.illuminationArcs },
       this.#samples.samplerFor(entry.satnum, entry.record),
       this.#passes.predictorFor(entry.satnum, entry.record),
       this.#paint,

@@ -271,3 +271,110 @@ export function illuminationTimeline(satrec: SatRec, start: Date, durationSecond
   const dark = (fractions.umbra ?? 0) + (fractions.penumbra ?? 0) + (fractions.sunlit_back ?? 0);
   return { samples, fractions, darkFraction: samples.length === 0 ? 0 : dark };
 }
+
+/**
+ * The illumination state at every point of a closed orbit, from the shape of the
+ * orbit alone.
+ *
+ * This is the other way round from `illuminationTimeline`: that one walks time and
+ * propagates, this one walks a ring of positions someone has already drawn. What
+ * it exists for is colouring the orbit line itself — the caller has the vertices
+ * of a polyline and needs one state per vertex, in the same frame the polyline is
+ * drawn in, with no second propagation and no frame conversion.
+ *
+ * Three deliberate approximations, all of them small at the scale of an eclipse
+ * boundary, and all of them the reason this is a separate function rather than
+ * something `illuminationTimeline` should be made to do:
+ *
+ * 1. **One sun for the whole ring.** The sun moves about 0.04° an hour, so across
+ *    one ~96 minute orbit it moves 0.07°. Holding it fixed is what lets a whole
+ *    orbit be coloured from one `sunGeometry` call.
+ * 2. **Velocity from the ring, not from a propagator.** The tangent is a central
+ *    difference between the neighbouring vertices, which is the direction of
+ *    motion to first order and exactly what κ needs a direction for. Wrapped at
+ *    both ends, because the ring is closed.
+ * 3. **Whatever inertial frame the caller is in.** The positions are used for a
+ *    shadow test and two dot products, so a frame that differs from satellite.js's
+ *    TEME by the ~0.1° of precession between epochs changes no state.
+ *
+ * `positionsKm` must be a closed ring in an Earth-centred inertial frame, in
+ * kilometres. Returns one state per position, `undefined` where the geometry is
+ * degenerate (two coincident neighbours leave no tangent).
+ *
+ * A ring whose last vertex repeats its first — which is how a polyline is closed —
+ * is handled without special-casing: the seam vertices get a one-sided difference
+ * instead of a central one, which is the same direction and half the magnitude,
+ * and the magnitude is normalized away.
+ */
+export function illuminationAlongOrbit(positionsKm: readonly Vec3[], sun: SunGeometry, axis: PanelAxis): (IlluminationState | undefined)[] {
+  const count = positionsKm.length;
+  if (count < 3) {
+    // Two points is a line segment, not an orbit: there is no central difference
+    // to take, so there is nothing to say about a panel.
+    return Array.from({ length: count }, () => undefined);
+  }
+  return positionsKm.map((position, index) => {
+    const previous = positionsKm[(index - 1 + count) % count] as Vec3;
+    const next = positionsKm[(index + 1) % count] as Vec3;
+    const tangent = { x: next.x - previous.x, y: next.y - previous.y, z: next.z - previous.z };
+    return illuminationOf(position, tangent, sun, axis)?.state;
+  });
+}
+
+/**
+ * How many extra vertices a state boundary is subdivided into.
+ *
+ * The ring a caller brings is the app's own sample grid — around 47 s apart for a
+ * LEO orbit — and the penumbra is a band the satellite crosses in 10 to 20 s. So
+ * without this the sliver falls between two samples and is simply not drawn: the
+ * eclipse boundary renders as one hard umbra/sunlit edge, and the one state of the
+ * three that is *about* that boundary is the one the picture loses.
+ *
+ * Seven points across a differing segment puts a vertex every ~6 s, which catches a
+ * penumbra band two or three times over. It is paid only at boundaries — six or so
+ * per orbit — so a refined ring is about fifty vertices longer, not eight times.
+ */
+const BOUNDARY_REFINEMENTS = 7;
+
+/** A ring of positions and the state at each, ready to be drawn as one polyline. */
+export interface IlluminationRing {
+  positionsKm: Vec3[];
+  states: (IlluminationState | undefined)[];
+}
+
+/**
+ * The same ring as `illuminationAlongOrbit`, with extra vertices inserted wherever
+ * the state changes.
+ *
+ * Positions are interpolated along the chord rather than propagated. Over one sample
+ * interval that cuts the corner by about 2 km on a 6928 km radius — a fraction of a
+ * pixel on any view that shows a whole orbit — and it keeps this a pure function of
+ * the ring it is handed, in whatever frame that ring is in.
+ */
+export function illuminationRing(positionsKm: readonly Vec3[], sun: SunGeometry, axis: PanelAxis): IlluminationRing {
+  const coarse = illuminationAlongOrbit(positionsKm, sun, axis);
+  const positions: Vec3[] = [];
+  const states: (IlluminationState | undefined)[] = [];
+  for (const [index, position] of positionsKm.entries()) {
+    positions.push(position);
+    states.push(coarse[index]);
+    const next = positionsKm[index + 1];
+    if (!next || coarse[index] === coarse[index + 1]) {
+      continue;
+    }
+    // The segment's own direction stands in for the velocity at every point on it:
+    // over one sample interval the tangent turns by ~3°, and κ is a cosine.
+    const tangent = { x: next.x - position.x, y: next.y - position.y, z: next.z - position.z };
+    for (let step = 1; step <= BOUNDARY_REFINEMENTS; step += 1) {
+      const fraction = step / (BOUNDARY_REFINEMENTS + 1);
+      const midpoint = {
+        x: position.x + tangent.x * fraction,
+        y: position.y + tangent.y * fraction,
+        z: position.z + tangent.z * fraction,
+      };
+      positions.push(midpoint);
+      states.push(illuminationOf(midpoint, tangent, sun, axis)?.state);
+    }
+  }
+  return { positionsKm: positions, states };
+}

@@ -42,6 +42,7 @@ import type { CatalogEntry } from "./SatelliteCatalog";
 import { coneDescription, coneOrientation, groundTrackDescription, modelUri, orbitPathTimes, orbitTrackTimes, orbitUsesPathGraphic } from "./satelliteGraphics";
 import { SatelliteProperties } from "./SatelliteProperties";
 import { drawablePositions } from "./util/drawablePositions";
+import { illuminationRing, sunGeometry } from "./util/illumination";
 import type { PassPredictorSource } from "./util/passSource";
 import type { PolylineBatch } from "./util/PolylineBatch";
 import type { TrajectorySampler } from "./util/sampleSource";
@@ -54,6 +55,16 @@ export interface SatelliteBatches {
   orbits: PolylineBatch;
   /** Fixed: the Orbit track component's Earth-relative path. */
   tracks: PolylineBatch;
+  /**
+   * Inertial: the Illumination arc component's per-vertex-coloured ellipse.
+   *
+   * A third batch rather than a second colour in the first one, and not for the
+   * frame this time: the arc carries its colour in the *geometry* (one Color per
+   * vertex) while a plain orbit carries it as a per-instance attribute. Cesium
+   * builds one vertex-attribute layout per Primitive, so instances of the two
+   * kinds cannot share one.
+   */
+  illuminationArcs: PolylineBatch;
 }
 
 /**
@@ -69,6 +80,18 @@ const POINT_COLOR = Object.fromEntries(Object.entries(ORBIT_CLASS_COLOR).map(([o
 
 /** The illumination palette, converted once for the same reason POINT_COLOR is. */
 const ILLUMINATION_POINT_COLOR = Object.fromEntries(Object.entries(ILLUMINATION_COLOR).map(([state, hex]) => [state, Color.fromCssColorString(hex)])) as Record<
+  IlluminationState,
+  Color
+>;
+
+/**
+ * The same palette for the arc, and at full opacity.
+ *
+ * The plain orbit is drawn at 15% alpha because it is context — one of ten
+ * thousand ellipses nobody is reading individually. The arc is the thing being
+ * read, and at 15% none of these five hues is nameable.
+ */
+const ILLUMINATION_ARC_COLOR = Object.fromEntries(Object.entries(ILLUMINATION_COLOR).map(([state, hex]) => [state, Color.fromCssColorString(hex)])) as Record<
   IlluminationState,
   Color
 >;
@@ -96,6 +119,7 @@ const CREATORS: Record<(typeof SATELLITE_COMPONENTS)[number] | typeof GROUND_STA
   Point: (sat) => sat.createPoint(),
   Label: (sat) => sat.createLabel(),
   Orbit: (sat) => sat.createOrbit(),
+  "Illumination arc": (sat) => sat.createIlluminationArc(),
   "Orbit track": (sat) => sat.createOrbitTrack(),
   "Ground track": (sat) => sat.createGroundTrack(),
   "Sensor cone": (sat) => sat.createCone(),
@@ -147,6 +171,8 @@ export class SatelliteComponentCollection {
 
   readonly #tracks: PolylineBatch;
 
+  readonly #illuminationArcs: PolylineBatch;
+
   /**
    * How points are painted right now. Shared by reference with every other
    * satellite and owned by the SatelliteManager, so this reads the live value
@@ -166,6 +192,7 @@ export class SatelliteComponentCollection {
     this.props = new SatelliteProperties(entry, sampler, passes);
     this.#orbits = batches.orbits;
     this.#tracks = batches.tracks;
+    this.#illuminationArcs = batches.illuminationArcs;
     this.#paint = paint;
   }
 
@@ -190,7 +217,10 @@ export class SatelliteComponentCollection {
   }
 
   #batchFor(name: SatelliteComponentName): PolylineBatch {
-    return name === "Orbit track" ? this.#tracks : this.#orbits;
+    if (name === "Orbit track") {
+      return this.#tracks;
+    }
+    return name === "Illumination arc" ? this.#illuminationArcs : this.#orbits;
   }
 
   get components(): Record<string, Component> {
@@ -423,6 +453,12 @@ export class SatelliteComponentCollection {
           this.disableComponent("Orbit");
           this.enableComponent("Orbit");
         }
+      } else if (type === "Illumination arc") {
+        if (update) {
+          // Cut from the inertial samples, so a window that has just slid leaves the
+          // arc describing positions the satellite has already left.
+          this.refreshIlluminationArc(this.viewer.clock.currentTime);
+        }
       } else if (type === "Orbit track") {
         if (component instanceof Entity) {
           // The sampled property, not the grid — this one is a path, and an Orbit
@@ -608,6 +644,91 @@ export class SatelliteComponentCollection {
       id: this.props.name,
     });
     this.components.Orbit = geometryInstance;
+  }
+
+  /**
+   * The orbit line itself, cut into the sun's own colours.
+   *
+   * The second way of showing what the point colouring shows, and the one that
+   * needs no clock to read: where the plain Orbit is one translucent ellipse, this
+   * draws the same ellipse with each vertex carrying its own illumination state, so
+   * the eclipsed arc, the penumbra slivers either side of it and the arc where the
+   * panel has turned away are all visible at once, in place, without waiting for
+   * the satellite to fly through them.
+   *
+   * Independent of `pointColorMode`: this is a component someone switches on, not a
+   * mode that repaints what is already there.
+   */
+  createIlluminationArc(): void {
+    // Same declaration the Orbit component makes, and for the same reason: the
+    // inertial sample set exists only because something asked for it.
+    this.props.trajectory.requireInertial();
+    const geometry = this.#illuminationArcGeometry(this.viewer.clock.currentTime);
+    if (geometry) {
+      this.components["Illumination arc"] = geometry;
+    }
+  }
+
+  /**
+   * One polyline, one colour per vertex.
+   *
+   * `colorsPerVertex` rather than one instance per state run: a run boundary is a
+   * vertex either way, and a single geometry keeps this component the same shape as
+   * every other one — one GeometryInstance the existing enable/disable and
+   * `replace` paths already handle. It also gives the boundaries a one-segment
+   * gradient instead of a hard edge, which is what a penumbra actually looks like.
+   */
+  #illuminationArcGeometry(time: JulianDate): GeometryInstance | undefined {
+    const positions = drawablePositions(this.props.trajectory.positionsForNextOrbit(time) as (Cartesian3 | undefined)[]);
+    if (positions.length < MIN_POLYLINE_POSITIONS) {
+      return undefined;
+    }
+    const sun = sunGeometry(JulianDate.toDate(time));
+    if (!sun) {
+      return undefined;
+    }
+    // Cesium works in metres and the shadow model in kilometres. The ring comes back
+    // longer than it went in: the state boundaries are refined, because the penumbra
+    // is shorter than one sample interval and would otherwise not be drawn at all.
+    const ring = illuminationRing(
+      positions.map((position) => ({ x: position.x / 1000, y: position.y / 1000, z: position.z / 1000 })),
+      sun,
+      this.#paint.panelAxis,
+    );
+    return new GeometryInstance({
+      geometry: new PolylineGeometry({
+        positions: ring.positionsKm.map((position) => new Cartesian3(position.x * 1000, position.y * 1000, position.z * 1000)),
+        colors: ring.states.map((state) => (state ? ILLUMINATION_ARC_COLOR[state] : ILLUMINATION_UNKNOWN_COLOR)),
+        colorsPerVertex: true,
+        // Wider than the plain orbit's 2 px. The arc is read rather than glanced at,
+        // and its darkest state is a dark line: at 2 px the eclipsed arc disappears
+        // into a lit globe behind it.
+        width: 4,
+        arcType: ArcType.NONE,
+        vertexFormat: PolylineColorAppearance.VERTEX_FORMAT,
+      }),
+      id: this.props.name,
+    });
+  }
+
+  /**
+   * Re-cut the arc so its colours still describe where the sun is.
+   *
+   * Unlike the inertial orbit it is cut from, this one does go stale: the ellipse
+   * is fixed in inertial space and a model matrix keeps it current, but the sun
+   * moves through that space — 0.04° an hour, which is nothing across one orbit and
+   * a whole eclipse season at ×86400. Re-cut on the same schedule as the
+   * Earth-relative tracks, which have the same shape of problem.
+   */
+  refreshIlluminationArc(time: JulianDate): void {
+    const current = this.#components["Illumination arc"];
+    if (!(current instanceof GeometryInstance)) {
+      return;
+    }
+    const next = this.#illuminationArcGeometry(time);
+    if (next && this.#illuminationArcs.replace(current, next)) {
+      this.#components["Illumination arc"] = next;
+    }
   }
 
   createOrbitTrack(): void {

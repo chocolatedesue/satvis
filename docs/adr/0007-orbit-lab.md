@@ -49,7 +49,7 @@ clear of the NORAD catalog below.
 
 **Generated on the store's say-so, activated separately.** The `walker` parameter is
 expanded by `sceneSync` — the one place store state becomes globe state — and the records
-are added to the catalog. Whether they are *drawn* is a tag, the same switch every other
+are added to the catalog. Whether they are _drawn_ is a tag, the same switch every other
 group has. Pressing Generate writes both, because a constellation nobody asked to see is
 not what pressing Generate means.
 
@@ -67,12 +67,12 @@ session, and leaves keeping two on screen one click away.
 - **κ** — the signed cosine between the sun and the solar panel's normal. Not clamped:
   the sign is the entire point.
 
-Five states rather than two, because a reader wants to know *why* there is no power:
+Five states rather than two, because a reader wants to know _why_ there is no power:
 `umbra`, `penumbra`, `sunlit_back`, `sunlit_edge`, `sunlit_on`. `sunlit_back` is the state
 the vocabulary exists for.
 
 **κ is a model, and says so.** Nothing in a GP element set describes attitude, so κ cannot
-be derived — only assumed. The assumption is therefore *selectable* (`PanelAxis`: zenith,
+be derived — only assumed. The assumption is therefore _selectable_ (`PanelAxis`: zenith,
 velocity, orbit normal) and named in the readout, so a reader can see how much of the
 answer it decides. The default is zenith — a body-fixed panel on the anti-Earth face of a
 nadir-pointing bus — because it is the only one of the three whose κ changes sign within
@@ -80,8 +80,55 @@ one orbit, which is what makes `sunlit_back` a state the timeline visits rather 
 seasonal fact.
 
 **ν and κ come from the satrec, not from the drawn position.** The sampled trajectory is
-pseudo-fixed and interpolated; κ is a cosine against a frame built from position *and*
+pseudo-fixed and interpolated; κ is a cosine against a frame built from position _and_
 velocity. Reading the satrec directly is what keeps the two consistent by construction.
+
+### Two ways of showing the same five states, because they answer different questions
+
+The point colour answers "what is happening to this satellite **now**". It needs the
+clock to be read: to see that an orbit has an eclipsed arc at all, you have to watch a
+satellite fly into it.
+
+The **illumination arc** answers "what happens **along this orbit**". It is the orbit line
+itself, drawn with one colour per vertex, so the eclipsed arc, the penumbra slivers either
+side of it and the arc where the panel has turned away are all in view at once, in place,
+on a paused clock. That is the reading a constellation designer wants and the point colour
+cannot give.
+
+Both, not one:
+
+- A separate **component**, not a second mode of the Orbit component. The plain orbit is
+  context — one of ten thousand translucent ellipses nobody reads individually — and the
+  arc is the thing being read, at full opacity and a wider line. Someone comparing two
+  constellations wants the first without paying for the second.
+- **Per-vertex colours on one polyline**, not one polyline per state run. A run boundary is
+  a vertex either way, and a single `GeometryInstance` keeps the component the same shape
+  as every other one, so the existing enable/disable and `replace` paths need no changes.
+  It also renders a boundary as a one-segment gradient rather than a hard edge, which is
+  what a penumbra looks like.
+- **Its own batch.** Cesium builds one vertex-attribute layout per `Primitive`, and the arc
+  carries colour in the geometry while a plain orbit carries it as a per-instance
+  attribute. The two cannot share a primitive, so there is a third `PolylineBatch`.
+- **Coloured from the ring, not from a second propagation.** `illuminationAlongOrbit` takes
+  the vertices the polyline is already drawn from, holds the sun fixed across the orbit
+  (0.07° over 96 minutes) and takes the velocity as a central difference along the ring.
+  So the arc overlays the orbit exactly, in the orbit's own frame, with no frame conversion
+  and no second SGP4 pass.
+- **Re-cut on the tracks' schedule.** The inertial ellipse is kept current by a model
+  matrix, but the sun moves through that frame — nothing at ×1 across one orbit, a whole
+  eclipse season at ×86400 — so the arc is stale geometry in a way the orbit is not.
+
+### The strip covers two orbits, and there is a two-orbit demo
+
+The panel's per-satellite strip runs **two** orbital periods rather than one: one orbit
+cannot show what changes _between_ orbits, and where a satellite is near the edge of
+eclipse season two orbits is where that first reads as two visibly different halves.
+
+And the smallest useful scene gets a **button**. "Two-orbit demo" writes the four things
+that only make sense together — a 2/2/1 pattern (two planes 90° apart, one satellite each),
+its tag, the Point and Illumination arc components, and the illumination colouring —
+because "show me the simplest version of this" should not be four menus. None of it is a
+mode; every one of the four is still the user's to change afterwards.
 
 ### A second colour mode, not a sixth orbit class
 
@@ -95,7 +142,7 @@ callback that returns a constant.
 
 The per-frame read is bounded by `IlluminationCache`, which memoizes on a one-second grid
 of simulation time. At the default 1× that is sixty reads collapsed into one. At 3600× it
-buys nothing, because there every frame *is* a new second — the honest cost of colouring
+buys nothing, because there every frame _is_ a new second — the honest cost of colouring
 by a physical quantity rather than by a standing fact.
 
 ## Alternatives

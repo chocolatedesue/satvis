@@ -18,7 +18,8 @@ The sky view trades the globe for a ground-level camera aimed by your phone's co
 - Find a satellite in the sky overhead rather than on a map, in a ground-level sky view aimed by your phone's compass and gyroscope and walked with the movement keys
 - Add OpenStreetMap buildings to the globe, or Google's photorealistic tiles under the sky view
 - Generate a Walker Delta or Walker Star constellation from its `i: T/P/F` specification and fly it beside the real catalog, with every per-satellite visual the real ones get
-- Colour satellites by what the sun is doing to them — eclipse (ν) *and* solar panel incidence (κ) — and read one satellite's eclipse/back-sun budget over its next orbit
+- Colour satellites by what the sun is doing to them — eclipse (ν) _and_ solar panel incidence (κ) — as a point colour, and as the orbit line itself cut into sunlit, penumbra and back-sun arcs
+- Read one satellite's eclipse and back-sun budget over its next two orbits, as percentages and as a strip of colour
 - Share the exact view you are looking at as a link: the url carries the satellites, the components, the ground station and the map layers
 - Install it as a Progressive Web App and keep using it offline, from a cached element-set snapshot and base map
 - Deploy it serverless: static files on a CDN, with an optional Cloudflare Worker serving fresh satellite data
@@ -208,7 +209,7 @@ from the last by F·360°/T; a RAAN span of 360° is a Walker Delta and 180° a 
 The pattern is expanded into circular OMM element sets at a fixed epoch and registered in
 the catalog under its own tag — `Walker 53:1584/72/17@550` — so everything the app does to a
 real satellite it does to a generated one: orbits, ground tracks, sensor cones, pass
-prediction, the browser list. It is a *geometry*, not a forecast — no drag term, no
+prediction, the browser list. It is a _geometry_, not a forecast — no drag term, no
 station-keeping, no per-plane epoch. Generating a second pattern replaces the first on
 screen; both stay in the satellite browser, so showing them together is one click.
 
@@ -230,6 +231,17 @@ Which resolve into five states: `umbra`, `penumbra`, `sunlit_back`, `sunlit_edge
 faces away from the sun has no more power than one in the Earth's shadow, and eclipse alone
 reports it as lit.
 
+The five states are shown **two ways**, because they answer different questions:
+
+- the **point colour** says what is happening to a satellite _now_, and needs the clock
+  running to be read;
+- the **Illumination arc** component draws the _orbit line_ with a colour per vertex, so the
+  eclipsed arc, the penumbra slivers either side of it and the arc where the panel has
+  turned away are all in view at once, on a paused clock.
+
+**Start with the "Two-orbit demo" button.** It sets up the smallest scene that shows all of
+it: two orbital planes 90° apart with one satellite each, arcs on, points matching.
+
 κ is a **model, not a measurement**: no GP element set carries attitude, so the panel
 normal is assumed. Which assumption is yours to pick (`Panel normal`: zenith, velocity,
 orbit normal) and is named in the readout. The default is a body-fixed panel on the
@@ -237,8 +249,9 @@ anti-Earth face of a nadir-pointing bus, the one choice whose κ changes sign wi
 orbit.
 
 The panel also shows a live census of the states across everything on screen, and for the
-satellite you click: its current ν, κ and beta angle, and a strip of its next orbit with
-the share spent in each state. Reasoning and alternatives are in
+satellite you click: its current ν, κ and beta angle, and a strip of its next **two** orbits
+with the share spent in each state — two rather than one, because one orbit cannot show what
+changes between them. Reasoning and alternatives are in
 `docs/adr/0007-orbit-lab.md`.
 
 ### Satellite metadata
