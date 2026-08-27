@@ -1,9 +1,11 @@
+import type { PanelAxis } from "../config/illumination";
 import type { OrbitClass } from "../config/orbitClass";
 import { DEFAULT_CONE_FOV_DEG, DEFAULT_SWATH_KM, swathExtentsOf, type SatelliteMetadata, type SwathExtents } from "../config/satelliteMetadata";
 import Orbit from "./Orbit";
 import { PassPredictor } from "./PassPredictor";
 import { SampledTrajectory } from "./SampledTrajectory";
 import type { CatalogEntry } from "./SatelliteCatalog";
+import { IlluminationCache, type Illumination } from "./util/illumination";
 import type { PassPredictorSource } from "./util/passSource";
 import type { TrajectorySampler } from "./util/sampleSource";
 
@@ -23,6 +25,17 @@ export class SatelliteProperties {
   // Owns the sampled position window (fixed/inertial frames, gap-filling).
   readonly trajectory: SampledTrajectory;
 
+  /**
+   * This satellite's ν/κ answers, memoized on a one-second grid.
+   *
+   * Its own cache rather than a shared one because the memo is keyed on time
+   * alone — see IlluminationCache. Deliberately *not* fed from `trajectory`: the
+   * sampled positions are pseudo-fixed and interpolated, and κ is a signed cosine
+   * against a frame built from position and velocity, so it reads the satrec
+   * directly and gets the two consistent with each other by construction.
+   */
+  readonly #illumination: IlluminationCache;
+
   constructor(entry: CatalogEntry, sampler: TrajectorySampler, passes: PassPredictorSource) {
     this.entry = entry;
     this.name = entry.name;
@@ -30,6 +43,20 @@ export class SatelliteProperties {
     this.orbit = new Orbit(entry.name, entry.record);
     this.passPredictor = new PassPredictor(this.orbit, () => this.swathExtents, passes);
     this.trajectory = new SampledTrajectory(this.orbit, sampler);
+    this.#illumination = new IlluminationCache(this.orbit.satrec, "zenith");
+  }
+
+  /**
+   * What the sun is doing to this satellite at `date`, under the given panel model.
+   *
+   * The axis arrives per call rather than being held, because the caller that
+   * wants a colour already holds the live paint settings and this way there is no
+   * second copy to keep in step; the cache drops its memo when the value changes.
+   * Undefined when SGP4 declines the element set.
+   */
+  illumination(date: Date, panelAxis: PanelAxis): Illumination | undefined {
+    this.#illumination.axis = panelAxis;
+    return this.#illumination.at(date);
   }
 
   // Tags are owned by the catalog entry; this getter reflects live merges.

@@ -120,6 +120,15 @@ body {
   background-color: #303336e6;
 }
 
+/* The orbit lab is a form plus two tables of numbers, so it needs a fixed width
+   the number fields can be laid out against, and the catalog's opacity for the
+   same reason: nothing in it is legible with a globe showing through. */
+.toolbarSwitches--lab {
+  width: 288px;
+  padding: 0 8px 8px;
+  background-color: #303336e6;
+}
+
 .toolbarTitle {
   text-align: center;
   height: 24px;

@@ -19,6 +19,8 @@ import type { CatalogEntry } from "./SatelliteCatalog";
 import type { DesiredScene } from "./SatelliteManager";
 import { type SceneTarget, startSceneSync } from "./sceneSync";
 import type { Observer } from "./SkyView";
+import { recordName, recordSatnum, type GpRecord } from "./util/gp";
+import { WALKER_TAG } from "./util/walkerDelta";
 
 /** Everything sceneSync writes to, recorded rather than enacted. */
 function fakeTarget() {
@@ -33,6 +35,7 @@ function fakeTarget() {
     suppressCamera: 0,
     releaseCamera: 0,
     reconciled: [] as DesiredScene[],
+    customRecords: [] as { records: GpRecord[]; tags: string[] }[],
     surfaceModels: [] as [string, string][],
     starMaps: [] as string[],
   };
@@ -82,6 +85,9 @@ function fakeTarget() {
       },
       onTrackedChange: () => {},
       onCatalogChange: () => {},
+      addCustomRecords: (records: GpRecord[], tags: string[]) => {
+        calls.customRecords.push({ records, tags });
+      },
       catalog,
     },
     viewer: {
@@ -421,6 +427,107 @@ describe("startSceneSync", () => {
     // Copies, not the store's own arrays: the manager diffs against what it was
     // last given, and a live reference would compare equal to itself.
     expect(last?.enabledTags).not.toBe(satStore.enabledTags);
+  });
+
+  describe("the paint settings", () => {
+    test("travel to the globe with the rest of the desired scene", async () => {
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      // The default is what a normal visitor gets: no per-frame colour callbacks.
+      expect(calls.reconciled.at(-1)?.pointColorMode).toBe("class");
+
+      satStore.pointColorMode = "illumination";
+      satStore.panelAxis = "normal";
+      await settle();
+
+      const last = calls.reconciled.at(-1);
+      expect(last?.pointColorMode).toBe("illumination");
+      expect(last?.panelAxis).toBe("normal");
+    });
+  });
+
+  describe("the generated Walker constellation", () => {
+    test("is not generated at all without a pattern", async () => {
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      await settle();
+
+      expect(calls.customRecords).toEqual([]);
+    });
+
+    test("expands a pattern into element sets under the Walker tag", async () => {
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      satStore.walker = "53:6/3/1@550";
+      await settle();
+
+      expect(calls.customRecords).toHaveLength(1);
+      expect(calls.customRecords[0]?.tags).toEqual([WALKER_TAG]);
+      expect(calls.customRecords[0]?.records).toHaveLength(6);
+    });
+
+    test("names the satellites after the pattern that made them", async () => {
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      useSatStore().walker = "53:6/3/1@550";
+      await settle();
+
+      const record = calls.customRecords[0]?.records[0];
+      expect(record?.kind).toBe("omm");
+      expect(recordName(record!)).toBe("W53:6/3/1@550 P01-01");
+    });
+
+    test("keeps two patterns off each other's satnums", async () => {
+      // Satnum is the propagation pool's identity for a satellite, not a label —
+      // two patterns sharing one would put the second's satellites on the first's
+      // orbits. See walkerSatnumBase.
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      satStore.walker = "53:6/3/1@550";
+      await settle();
+      satStore.walker = "87:6/3/1@1200";
+      await settle();
+
+      const [first, second] = calls.customRecords;
+      const firstSatnums = new Set((first?.records ?? []).map((record) => recordSatnum(record)));
+      const secondSatnums = (second?.records ?? []).map((record) => recordSatnum(record));
+      expect(secondSatnums.some((satnum) => firstSatnums.has(satnum))).toBe(false);
+    });
+
+    test("draws the same geometry on every load, whatever the wall clock says", async () => {
+      const { target: first, calls: firstCalls } = fakeTarget();
+      startSceneSync(first);
+      useSatStore().walker = "53:6/3/1@550";
+      await settle();
+
+      setActivePinia(createPinia());
+      const { target: second, calls: secondCalls } = fakeTarget();
+      startSceneSync(second);
+      useSatStore().walker = "53:6/3/1@550";
+      await settle();
+
+      expect(secondCalls.customRecords[0]?.records).toEqual(firstCalls.customRecords[0]?.records);
+    });
+
+    test("ignores a pattern the url cannot mean, rather than half-building it", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+
+      // 7 satellites do not fill 3 planes.
+      useSatStore().walker = "53:7/3/1@550";
+      await settle();
+
+      expect(calls.customRecords).toEqual([]);
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
+    });
   });
 
   describe("the label budget", () => {

@@ -570,6 +570,11 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       groundStations: station ? [{ lat: station.lat, lon: station.lon, name: "Benchmark" }] : [],
       overpassMode: "elevation",
       trackedSatellite: "",
+      // Fixed rather than read from the store: illumination colouring costs a
+      // per-frame callback per point, and a benchmark row has to mean the same
+      // thing whatever the user last left the paint mode on.
+      pointColorMode: "class",
+      panelAxis: "zenith",
     };
   }
 
@@ -584,6 +589,8 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       groundStations: store.groundStations.map((station) => ({ ...station })),
       overpassMode: store.overpassMode,
       trackedSatellite: store.trackedSatellite,
+      pointColorMode: store.pointColorMode,
+      panelAxis: store.panelAxis,
     };
   }
 }

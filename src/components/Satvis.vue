@@ -32,6 +32,11 @@
             <UIcon name="lucide:smartphone" />
           </button>
         </UTooltip>
+        <UTooltip text="Orbit lab: Walker constellations and illumination">
+          <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.lab }" @click="toggleMenu('lab')">
+            <UIcon name="lucide:sun" />
+          </button>
+        </UTooltip>
         <UTooltip text="Render">
           <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.render }" @click="toggleMenu('render')">
             <UIcon name="lucide:gauge" />
@@ -66,6 +71,11 @@
       <div v-show="menu.gs" class="toolbarSwitches">
         <div class="toolbarTitle">Ground station</div>
         <ground-station-list />
+      </div>
+      <!-- v-if, like the catalog panel: the census walks every active satellite on
+           a timer, and a closed panel should not be paying for it. -->
+      <div v-if="menu.lab" class="toolbarSwitches toolbarSwitches--lab">
+        <orbit-lab-panel />
       </div>
       <div v-show="menu.map" class="toolbarSwitches">
         <!-- The imagery is two groups rather than one list, each with the control
@@ -301,10 +311,11 @@ import AboutDialog from "./AboutDialog.vue";
 import ClockDeck from "./ClockDeck.vue";
 import EntityInfoPanel from "./EntityInfoPanel.vue";
 import GroundStationList from "./GroundStationList.vue";
+import OrbitLabPanel from "./OrbitLabPanel.vue";
 import SatelliteBrowser from "./SatelliteBrowser.vue";
 import SkyHud from "./SkyHud.vue";
 
-type MenuKey = "cat" | "sat" | "gs" | "map" | "view" | "ios" | "render";
+type MenuKey = "cat" | "sat" | "gs" | "lab" | "map" | "view" | "ios" | "render";
 
 // The benchmarking framework. Async, so nothing about it — the sweep, the
 // report tables, the panel — is in the bundle a normal visitor downloads.
@@ -316,6 +327,7 @@ const menu = reactive<Record<MenuKey, boolean>>({
   cat: false,
   sat: false,
   gs: false,
+  lab: false,
   map: false,
   view: false,
   ios: false,

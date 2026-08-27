@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { SATELLITE_COMPONENTS } from "../config/components";
+import { DEFAULT_POINT_PAINT, PANEL_AXES, POINT_COLOR_MODES, type PanelAxis, type PointColorMode } from "../config/illumination";
 import { sameValue } from "../modules/util/equality";
 import { closedStringList, enumString, groundStationList, plainString, stringList, tildeEscapedStringList } from "../modules/util/urlCodec";
 
@@ -36,6 +37,20 @@ export const useSatStore = defineStore(
     const catalogRevision = ref(0);
     const trackedSatellite = ref("");
     const overpassMode = ref("elevation");
+
+    // The orbit lab: how points are coloured, under which solar-panel model, and
+    // which Walker pattern is generated. Three free values rather than an
+    // invariant cluster — each is meaningful on its own, and a paint mode with no
+    // constellation to paint is a perfectly good state.
+    //
+    // `walker` is a whole pattern in one parameter, in Walker's own `i:T/P/F@alt`
+    // notation (see modules/util/walkerDelta.ts). One string rather than five
+    // numbers because five can arrive inconsistent with each other — a T that does
+    // not fill P planes is not a constellation, and the url should not be able to
+    // say it. Empty means no generated constellation.
+    const pointColorMode = ref<PointColorMode>(DEFAULT_POINT_PAINT.mode);
+    const panelAxis = ref<PanelAxis>(DEFAULT_POINT_PAINT.panelAxis);
+    const walker = ref("");
 
     // Activation is one invariant cluster — see CONTEXT.md. Held privately and
     // exposed read-only so every writer goes through setActivation and the
@@ -143,6 +158,9 @@ export const useSatStore = defineStore(
       catalogRevision,
       trackedSatellite,
       overpassMode,
+      pointColorMode,
+      panelAxis,
+      walker,
       enabledTags,
       enabledSatellites,
       disabledSatellites,
@@ -165,6 +183,9 @@ export const useSatStore = defineStore(
         { name: "groundStations", url: "gs", kind: groundStationList() },
         { name: "trackedSatellite", url: "track", kind: plainString() },
         { name: "overpassMode", url: "overpass", kind: enumString(["elevation", "swath"]) },
+        { name: "pointColorMode", url: "paint", kind: enumString(POINT_COLOR_MODES) },
+        { name: "panelAxis", url: "panel", kind: enumString(PANEL_AXES) },
+        { name: "walker", url: "walker", kind: plainString() },
       ],
       // Guarded keys are read-only, so the url goes through the same actions as
       // every other writer; the triple is applied in one call to keep it

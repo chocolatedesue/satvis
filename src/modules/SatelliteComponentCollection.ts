@@ -35,6 +35,7 @@ import CesiumSensorVolumes from "cesium-sensor-volumes";
 
 import { clearPassHighlights, setPassHighlights } from "../composables/usePassHighlights";
 import { SATELLITE_COMPONENTS } from "../config/components";
+import { ILLUMINATION_COLOR, type IlluminationState, type PointPaint } from "../config/illumination";
 import { ORBIT_CLASS_COLOR, type OrbitClass } from "../config/orbitClass";
 import type { GroundStation } from "./PassPredictor";
 import type { CatalogEntry } from "./SatelliteCatalog";
@@ -65,6 +66,19 @@ const GROUND_STATION_LINK = "Ground station link";
 // The palette converted once, not per satellite: with ~10,000 points on screen
 // these are shared instances, the same way Cesium shares its own Color constants.
 const POINT_COLOR = Object.fromEntries(Object.entries(ORBIT_CLASS_COLOR).map(([orbitClass, hex]) => [orbitClass, Color.fromCssColorString(hex)])) as Record<OrbitClass, Color>;
+
+/** The illumination palette, converted once for the same reason POINT_COLOR is. */
+const ILLUMINATION_POINT_COLOR = Object.fromEntries(Object.entries(ILLUMINATION_COLOR).map(([state, hex]) => [state, Color.fromCssColorString(hex)])) as Record<
+  IlluminationState,
+  Color
+>;
+
+/**
+ * What an illumination-coloured point falls back to when SGP4 declines to say
+ * where the satellite is. Its orbit class would be a claim about the sun that
+ * nothing supports, so it reads as the neutral instead.
+ */
+const ILLUMINATION_UNKNOWN_COLOR = Color.fromCssColorString(ORBIT_CLASS_COLOR.LEO);
 
 /**
  * `BoundingSphereState.PENDING`. Written out rather than imported: the enum is
@@ -133,6 +147,13 @@ export class SatelliteComponentCollection {
 
   readonly #tracks: PolylineBatch;
 
+  /**
+   * How points are painted right now. Shared by reference with every other
+   * satellite and owned by the SatelliteManager, so this reads the live value
+   * rather than a copy taken at construction.
+   */
+  readonly #paint: PointPaint;
+
   #components: Record<string, Component> = {};
 
   /** What a click or a track acts on — the first Entity to be created. */
@@ -140,11 +161,12 @@ export class SatelliteComponentCollection {
 
   eventListeners: Record<string, () => void> = {};
 
-  constructor(viewer: Viewer, entry: CatalogEntry, batches: SatelliteBatches, sampler: TrajectorySampler, passes: PassPredictorSource) {
+  constructor(viewer: Viewer, entry: CatalogEntry, batches: SatelliteBatches, sampler: TrajectorySampler, passes: PassPredictorSource, paint: PointPaint) {
     this.viewer = viewer;
     this.props = new SatelliteProperties(entry, sampler, passes);
     this.#orbits = batches.orbits;
     this.#tracks = batches.tracks;
+    this.#paint = paint;
   }
 
   /**
@@ -458,7 +480,9 @@ export class SatelliteComponentCollection {
   }
 
   // Coloured by orbit regime, matching the badge the satellite browser shows on
-  // the same satellite's row — so the menu reads as the legend for the globe.
+  // the same satellite's row — so the menu reads as the legend for the globe. In
+  // illumination mode it is coloured by what the sun is doing to it instead; see
+  // `#illuminationColor`.
   //
   // Small on purpose: a whole constellation at 6 px merges into a sheet that
   // hides the globe under it. 5 px still leaves the globe legible under a full
@@ -467,11 +491,34 @@ export class SatelliteComponentCollection {
   createPoint(): void {
     const point = new PointGraphics({
       pixelSize: 5,
-      color: POINT_COLOR[this.props.orbitClass],
+      color: this.#paint.mode === "illumination" ? this.#illuminationColor() : POINT_COLOR[this.props.orbitClass],
       outlineColor: Color.DIMGREY,
       outlineWidth: 1,
     });
     this.createCesiumSatelliteEntity("Point", "point", point);
+  }
+
+  /**
+   * The point's colour as a function of the clock, for illumination mode.
+   *
+   * A CallbackProperty, so it is only ever built for satellites that are actually
+   * painted this way — a mode change tears the points down and remakes them
+   * (SatelliteManager.repaintPoints) rather than leaving every point in the
+   * catalog evaluating a callback that returns a constant. The per-satellite
+   * memoization behind `props.illumination` is what keeps the per-frame read from
+   * being a per-frame SGP4 propagation.
+   */
+  #illuminationColor(): CallbackProperty {
+    return new CallbackProperty((time: JulianDate | undefined) => {
+      // Cesium types the time as optional because a Property can be evaluated
+      // without one. There is no illumination without an instant, so an absent
+      // time is the same answer as an absent position.
+      if (!time) {
+        return ILLUMINATION_UNKNOWN_COLOR;
+      }
+      const illumination = this.props.illumination(JulianDate.toDate(time), this.#paint.panelAxis);
+      return illumination ? ILLUMINATION_POINT_COLOR[illumination.state] : ILLUMINATION_UNKNOWN_COLOR;
+    }, false);
   }
 
   createModel(): void {

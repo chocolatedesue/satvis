@@ -2,6 +2,7 @@ import { Cartesian3, JulianDate } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 
 import { SATELLITE_COMPONENTS } from "../config/components";
+import { DEFAULT_POINT_PAINT, type PanelAxis, type PointColorMode, type PointPaint } from "../config/illumination";
 import type { SerializedGroundStation } from "../stores/sat";
 import { GroundStationEntity, type GroundStationPositionData } from "./GroundStationEntity";
 import { activeTargetEntries, buildOrder } from "./satelliteActivation";
@@ -81,6 +82,9 @@ export interface DesiredScene {
   groundStations: SerializedGroundStation[];
   overpassMode: string;
   trackedSatellite: string;
+  /** How points are coloured, and under which panel model. See config/illumination.ts. */
+  pointColorMode: PointColorMode;
+  panelAxis: PanelAxis;
 }
 
 const EMPTY_SCENE: DesiredScene = {
@@ -91,6 +95,8 @@ const EMPTY_SCENE: DesiredScene = {
   groundStations: [],
   overpassMode: "elevation",
   trackedSatellite: "",
+  pointColorMode: DEFAULT_POINT_PAINT.mode,
+  panelAxis: DEFAULT_POINT_PAINT.panelAxis,
 };
 
 export class SatelliteManager {
@@ -129,6 +135,14 @@ export class SatelliteManager {
    * need different model matrices and cannot share a primitive.
    */
   readonly tracks: PolylineBatch;
+
+  /**
+   * How points are painted, as one object shared by reference with every
+   * satellite. One owner rather than a module-level value, and mutated in place
+   * rather than replaced, so a satellite created between two reconciles reads the
+   * same settings as its neighbours without being told.
+   */
+  readonly #paint: PointPaint = { ...DEFAULT_POINT_PAINT };
 
   // Live collections keyed by catalog entry key. Satellites are instantiated
   // lazily: only entries in the current activation target (see #reconcileActive)
@@ -278,7 +292,33 @@ export class SatelliteManager {
       this.#applyTracked(desired.trackedSatellite);
     }
 
+    // The panel axis only reaches the screen through the illumination colouring,
+    // so a change to it while painting by orbit class is a change to nothing yet.
+    this.#paint.mode = desired.pointColorMode;
+    this.#paint.panelAxis = desired.panelAxis;
+    if (previous.pointColorMode !== desired.pointColorMode) {
+      this.repaintPoints();
+    }
+
     this.#reconcileActive();
+  }
+
+  /**
+   * Rebuild the Point component of every live satellite.
+   *
+   * The colour is decided when the point is made — a constant in orbit-class mode
+   * and a CallbackProperty in illumination mode — so switching between them is a
+   * teardown and a rebuild, not an assignment. Exactly the path a user toggling
+   * the Point checkbox already takes, and only for satellites that have one.
+   */
+  repaintPoints(): void {
+    if (!this.#components.inForce.includes("Point")) {
+      return;
+    }
+    this.activeSatellites.forEach((sat) => {
+      sat.disableComponent("Point");
+      sat.enableComponent("Point");
+    });
   }
 
   #applyOverpassMode(mode: string): void {
@@ -699,6 +739,7 @@ export class SatelliteManager {
       { orbits: this.orbits, tracks: this.tracks },
       this.#samples.samplerFor(entry.satnum, entry.record),
       this.#passes.predictorFor(entry.satnum, entry.record),
+      this.#paint,
     );
     // Before show(), which is what reads the trajectory.
     sat.props.trajectory.adopt(chunk);

@@ -24,8 +24,10 @@ import { activeTargetEntries } from "./satelliteActivation";
 import type { CatalogEntry } from "./SatelliteCatalog";
 import type { DesiredScene } from "./SatelliteManager";
 import type { Observer } from "./SkyView";
+import type { GpRecord } from "./util/gp";
 import { repositioned } from "./util/groundStationEdits";
 import { toMinuteIso } from "./util/urlCodec";
+import { decodeWalker, WALKER_EPOCH_ISO, WALKER_TAG, walkerDeltaRecords, walkerNamePrefix, walkerSatnumBase } from "./util/walkerDelta";
 
 // Enough to keep a fast clock multiplier from hammering the history api.
 const MIN_CLOCK_WRITE_MS = 1000;
@@ -66,6 +68,12 @@ export interface SceneTarget {
     reconcile(desired: DesiredScene): void;
     onTrackedChange(callback: (name: string) => void): void;
     onCatalogChange(callback: () => void): void;
+    /**
+     * How a generated Walker pattern enters the catalog. Records rather than a
+     * group, because there is no source to fetch: the store's `walker` parameter
+     * is the whole element set.
+     */
+    addCustomRecords(records: GpRecord[], tags: string[]): void;
     // Read to size an activation before it is reconciled — how many satellites
     // a set of tags implies is a question about the catalog, not about what is
     // currently on the globe.
@@ -397,6 +405,36 @@ export function startSceneSync(cc: SceneTarget): void {
     { immediate: true },
   );
 
+  // The generated constellation. Kept here with the other store-to-globe wiring
+  // because that is what it is: `walker` is a pattern in the url, and the records
+  // it expands to are the globe's copy of it.
+  //
+  // Generated once per distinct pattern and never removed: the catalog dedupes by
+  // satnum and name, so re-registering the same pattern is a no-op, and a
+  // superseded one simply stops being activated. Removal would be a catalog
+  // operation nothing else needs yet.
+  //
+  // The epoch is the pattern's own reference instant rather than "now", so the
+  // same url draws the same geometry tomorrow — a Walker pattern is a shape, and
+  // an epoch that moved with the clock would make every reload a slightly
+  // different one.
+  watch(
+    () => satStore.walker,
+    (wire) => {
+      if (!wire) {
+        return;
+      }
+      const params = decodeWalker(wire);
+      if (!params) {
+        console.warn(`Ignoring unusable Walker pattern "${wire}"`);
+        return;
+      }
+      const records = walkerDeltaRecords(params, new Date(WALKER_EPOCH_ISO), walkerNamePrefix(params), walkerSatnumBase(params));
+      cc.sats.addCustomRecords(records, [WALKER_TAG]);
+    },
+    { immediate: true },
+  );
+
   const desired = (): DesiredScene => ({
     enabledTags: [...satStore.enabledTags],
     enabledSatellites: [...satStore.enabledSatellites],
@@ -405,6 +443,8 @@ export function startSceneSync(cc: SceneTarget): void {
     groundStations: satStore.groundStations.map((station) => ({ ...station })),
     overpassMode: satStore.overpassMode,
     trackedSatellite: satStore.trackedSatellite,
+    pointColorMode: satStore.pointColorMode,
+    panelAxis: satStore.panelAxis,
   });
 
   watch(desired, (next) => cc.sats.reconcile(next), { deep: true, immediate: true });
