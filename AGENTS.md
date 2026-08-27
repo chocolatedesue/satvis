@@ -12,7 +12,8 @@ workspace package). One `pnpm install` at the root covers both.
   pipeline, plugin config, the offline base map, worker-less deploys.
 - **`docs/adr/`** — decisions and the alternatives they beat: url parameters
   (0001), satellite metadata and swath extents (0002), the sky view (0003),
-  compass aiming (0004), surface models (0005).
+  compass aiming (0004), surface models (0005), SATCAT enrichment (0006), the
+  orbit lab — Walker generation and ν/κ illumination (0007).
 - **`docs/manual-verification.md`** — the checks jsdom cannot run. Rerun the ones
   covering code you change, and record what they returned.
 - **`worker/src/gp/types.ts`** — the group and satellite-table config schema,

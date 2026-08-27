@@ -194,3 +194,31 @@ discussion; sharpen them here when they drift.
   defaults, not initial state: the URL carries only deviations from the
   preset's values, so the same query string means different things on different
   routes (`src/config/presets.ts`).
+- **Walker pattern**: a constellation specified rather than catalogued — `i: T/P/F`
+  plus an altitude, expanded into circular element sets at a fixed epoch
+  (`walkerDeltaRecords`). T satellites in P planes, each plane offset along-track
+  from the last by F·360°/T; the planes span 360° for a Walker *Delta* and 180° for
+  a Walker *Star*. It enters the catalog as records with the `Walker` tag, so
+  everything true of a real satellite is true of a generated one — and it is a
+  geometry, never a forecast: no drag term, no per-plane epoch. Its tag is its own
+  — `Walker <pattern>`, one per pattern, because the tag is the only switch a
+  satellite has and a shared one left a superseded pattern still on screen
+  (`docs/adr/0007-orbit-lab.md`).
+- **ν (nu)**: the fraction of the solar disc *not* covered by the Earth, as seen
+  from one satellite. 0 is umbra, 1 is full sun, between is penumbra. Eclipse as a
+  continuous quantity rather than a boolean, from satellite.js's conical shadow
+  model.
+- **κ (kappa)**: the signed cosine between the sun and the solar panel's normal.
+  Never clamped, because the sign is the point: a satellite in full sunlight with
+  κ < 0 has no power. Under a **panel axis** — a selectable model of where the
+  panel points (zenith, velocity, orbit normal), because no element set carries
+  attitude, so κ is assumed and not derived.
+- **Illumination state**: what ν and κ resolve into together — `umbra`,
+  `penumbra`, `sunlit_back`, `sunlit_edge`, `sunlit_on`. One enum over two
+  independent channels, because what a reader wants is *why* there is no power.
+  `sunlit_back` is the state it exists for: eclipse alone calls that satellite lit.
+- **Point colour mode**: which question a satellite's point answers — its orbit
+  class (a standing fact) or its illumination state (what the sun is doing now).
+  Exactly one, and only the second costs a per-frame evaluation, which is why it
+  is not the default.
+

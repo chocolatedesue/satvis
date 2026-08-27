@@ -9,8 +9,12 @@ import {
   meanMotionRevPerDay,
   satsPerPlane,
   validateWalkerDelta,
+  isWalkerTag,
   WALKER_PRESETS,
   walkerDeltaRecords,
+  walkerNamePrefix,
+  walkerSatnumBase,
+  walkerTagFor,
   type WalkerDeltaParams,
 } from "./walkerDelta";
 
@@ -222,5 +226,33 @@ describe("WALKER_PRESETS", () => {
       expect(validateWalkerDelta(preset.params).ok, preset.label).toBe(true);
       expect(walkerDeltaRecords(preset.params, EPOCH)).toHaveLength(preset.params.total);
     }
+  });
+});
+
+describe("identity across patterns", () => {
+  it("gives each pattern its own tag, recognisable as a generated one", () => {
+    expect(walkerTagFor(minimal)).toBe("Walker 53:6/3/1@550");
+    expect(isWalkerTag(walkerTagFor(minimal))).toBe(true);
+    expect(isWalkerTag("Starlink")).toBe(false);
+  });
+
+  it("names every preset's satellites distinctly", () => {
+    const prefixes = WALKER_PRESETS.map((preset) => walkerNamePrefix(preset.params));
+    expect(new Set(prefixes).size).toBe(WALKER_PRESETS.length);
+  });
+
+  it("puts every preset in its own satnum band, clear of the NORAD catalog", () => {
+    const bases = WALKER_PRESETS.map((preset) => walkerSatnumBase(preset.params));
+    expect(new Set(bases).size).toBe(WALKER_PRESETS.length);
+    for (const base of bases) {
+      expect(base).toBeGreaterThanOrEqual(900000);
+    }
+  });
+
+  it("keeps a pattern's satnums inside its own band", () => {
+    const base = walkerSatnumBase(starlinkShell1);
+    const satnums = walkerDeltaRecords(starlinkShell1, EPOCH, walkerNamePrefix(starlinkShell1), base).map((record) => Number(ommOf(record).NORAD_CAT_ID));
+    expect(Math.min(...satnums)).toBe(base);
+    expect(Math.max(...satnums)).toBeLessThan(base + MAX_WALKER_SATELLITES);
   });
 });

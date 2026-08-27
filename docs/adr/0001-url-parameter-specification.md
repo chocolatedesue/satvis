@@ -39,6 +39,9 @@ Every parameter is optional. An absent parameter means "use the default" (see
 | `gs`         | `sat.groundStations`     | ground-station list | `_`-joined; each station `lat,lon` or `lat,lon,name`; lat/lon emitted at 4 decimal places                         | empty           |
 | `track`      | `sat.trackedSatellite`   | string              | one satellite name; empty means nothing tracked                                                                   | empty           |
 | `overpass`   | `sat.overpassMode`       | enum                | `elevation` \| `swath`                                                                                            | `elevation`     |
+| `paint`      | `sat.pointColorMode`     | enum                | `class` \| `illumination` — which question a satellite's point answers                                            | `class`         |
+| `panel`      | `sat.panelAxis`          | enum                | `zenith` \| `velocity` \| `normal` — the assumed solar panel normal behind κ                                       | `zenith`        |
+| `walker`     | `sat.walker`             | string              | one Walker pattern, `i:T/P/F@altKm` with optional `~raanSpan`; empty means none generated                          | empty           |
 | `layers`     | `cesium.layers`          | layer list          | comma-joined; each item `Name` or `Name_<alpha>`; list order is z-order                                           | `NaturalEarth`  |
 | `terrain`    | `cesium.terrainProvider` | enum                | `None` \| `CesiumWorldTerrain` \| `ReEarth` \| `Maptiler`                                                         | `None`          |
 | `surface`    | `cesium.surfaceModel`    | enum                | `None` \| `OsmBuildings` \| `GooglePhotorealistic`                                                                | `None`          |

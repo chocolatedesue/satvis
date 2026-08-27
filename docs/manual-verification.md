@@ -24,7 +24,7 @@ the centre, and assert the control contains what comes back.
 
 ```js
 [
-  ["toolbar Map", "#toolbarLeft .toolbarButtons button:nth-child(4)"],
+  ["toolbar Map", "#toolbarLeft .toolbarButtons button:nth-child(5)"],
   ["toolbar eye", "#toolbarRight button"],
   ["cesium credits", ".cesium-credit-logoContainer"],
   ["clock deck controls", ".cluster"],
@@ -727,3 +727,44 @@ the offsets are written in terms of `env(safe-area-inset-bottom)` now rather tha
 around it, but no run has had a home indicator to prove it. The same goes for
 rotation, where the surface is re-measured from the `resize` listener rather than
 from the observer.
+
+## Orbit lab: a generated pattern is drawn, and coloured by illumination
+
+**Why it cannot be a unit test.** The census and the per-satellite readout are DOM
+and could be, but what they are reporting on is not: satellites are instantiated
+against a per-frame budget off a propagation worker, the point colour is a
+`CallbackProperty` Cesium evaluates during its own render loop, and the picture is
+WebGL. jsdom has none of those. What a browser can answer, and a unit test cannot,
+is whether a pattern typed into the panel ends up as satellites on a globe with
+plausible physics attached.
+
+**Procedure.** Serve `pnpm build`'s output statically, then drive headless Chromium
+over CDP (`--enable-unsafe-swiftshader` for a WebGL context). Pin the clock with
+`?time=2026-01-01T00:00` — the sun geometry decides every state count, so an
+unpinned run reports a different and equally correct census every time. Then: open
+the lab panel, Generate the default 6/3/1 pattern, read the census; switch to the
+Starlink shell 5 preset and the Illumination colouring, Generate, read the state
+split; track one generated satellite and read its ν/κ/β and its one-orbit strip.
+
+**Result, 2026-08-27, Chromium 1440×900 SwiftShader — 17/17.**
+
+| Check | Returned |
+| --- | --- |
+| `6/3/1@550` reaches the url and its tag goes on | `walker=53:6/3/1@550`, `tags=Walker 53:6/3/1@550` |
+| all six generated satellites classified | `6 satellites on screen · 50% without usable power`, states `[1,0,2,0,3]` |
+| replacing the pattern replaces what is drawn | `348 satellites on screen` — not 354, so the previous pattern's tag went off |
+| the 97.6° / 560 km shell splits across states | umbra 95, penumbra 0, sunlit_back 61, sunlit_edge 36, sunlit_on 156 |
+| one satellite's readout | `sunlit_on · ν 1.000 · κ 0.178 · β 71.0°` |
+| its next orbit | `0.0% umbra · 0.0% penumbra · 40.0% back-facing · 40.0% dark in total`, 5 strip segments |
+| the strip is reachable by scrolling the panel | top 705, bottom 717, viewport 761 |
+| console errors, ion and analytics aside | none |
+
+The last two physics rows are the point of the feature and worth reading twice: at
+β = 71° that near-polar shell never enters the Earth's shadow at all, and still
+spends 40% of every orbit with its panel facing away from the sun. An
+eclipse-only view reports that orbit as fully lit.
+
+**What this cannot answer.** Throughput. SwiftShader renders a 1584-point scene at
+a few frames a second, and satellites are built against a per-frame budget, so the
+1584-satellite shell never finishes building under this runner. The 348 case is the
+largest one checked here; the benchmark panel is what sizes the rest.

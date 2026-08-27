@@ -27,7 +27,7 @@ import type { Observer } from "./SkyView";
 import type { GpRecord } from "./util/gp";
 import { repositioned } from "./util/groundStationEdits";
 import { toMinuteIso } from "./util/urlCodec";
-import { decodeWalker, WALKER_EPOCH_ISO, WALKER_TAG, walkerDeltaRecords, walkerNamePrefix, walkerSatnumBase } from "./util/walkerDelta";
+import { decodeWalker, WALKER_EPOCH_ISO, walkerDeltaRecords, walkerNamePrefix, walkerSatnumBase, walkerTagFor } from "./util/walkerDelta";
 
 // Enough to keep a fast clock multiplier from hammering the history api.
 const MIN_CLOCK_WRITE_MS = 1000;
@@ -411,8 +411,9 @@ export function startSceneSync(cc: SceneTarget): void {
   //
   // Generated once per distinct pattern and never removed: the catalog dedupes by
   // satnum and name, so re-registering the same pattern is a no-op, and a
-  // superseded one simply stops being activated. Removal would be a catalog
-  // operation nothing else needs yet.
+  // superseded one stops being drawn when its own tag goes off (see
+  // walkerTagFor — that is what the per-pattern tag is for). Removal would be a
+  // catalog operation nothing else needs yet.
   //
   // The epoch is the pattern's own reference instant rather than "now", so the
   // same url draws the same geometry tomorrow — a Walker pattern is a shape, and
@@ -430,7 +431,7 @@ export function startSceneSync(cc: SceneTarget): void {
         return;
       }
       const records = walkerDeltaRecords(params, new Date(WALKER_EPOCH_ISO), walkerNamePrefix(params), walkerSatnumBase(params));
-      cc.sats.addCustomRecords(records, [WALKER_TAG]);
+      cc.sats.addCustomRecords(records, [walkerTagFor(params)]);
     },
     { immediate: true },
   );

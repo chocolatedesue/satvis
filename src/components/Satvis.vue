@@ -17,6 +17,11 @@
             <UIcon name="lucide:map-pin" />
           </button>
         </UTooltip>
+        <UTooltip text="Orbit lab: Walker constellations and illumination">
+          <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.lab }" @click="toggleMenu('lab')">
+            <UIcon name="lucide:sun" />
+          </button>
+        </UTooltip>
         <UTooltip text="Map">
           <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.map }" @click="toggleMenu('map')">
             <UIcon name="lucide:layers" />
@@ -30,11 +35,6 @@
         <UTooltip v-if="cc.minimalUI" text="Mobile">
           <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.ios }" @click="toggleMenu('ios')">
             <UIcon name="lucide:smartphone" />
-          </button>
-        </UTooltip>
-        <UTooltip text="Orbit lab: Walker constellations and illumination">
-          <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.lab }" @click="toggleMenu('lab')">
-            <UIcon name="lucide:sun" />
           </button>
         </UTooltip>
         <UTooltip text="Render">

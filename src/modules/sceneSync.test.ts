@@ -20,7 +20,7 @@ import type { DesiredScene } from "./SatelliteManager";
 import { type SceneTarget, startSceneSync } from "./sceneSync";
 import type { Observer } from "./SkyView";
 import { recordName, recordSatnum, type GpRecord } from "./util/gp";
-import { WALKER_TAG } from "./util/walkerDelta";
+import { walkerTagFor } from "./util/walkerDelta";
 
 /** Everything sceneSync writes to, recorded rather than enacted. */
 function fakeTarget() {
@@ -466,7 +466,7 @@ describe("startSceneSync", () => {
       await settle();
 
       expect(calls.customRecords).toHaveLength(1);
-      expect(calls.customRecords[0]?.tags).toEqual([WALKER_TAG]);
+      expect(calls.customRecords[0]?.tags).toEqual(["Walker 53:6/3/1@550"]);
       expect(calls.customRecords[0]?.records).toHaveLength(6);
     });
 
@@ -479,6 +479,22 @@ describe("startSceneSync", () => {
       const record = calls.customRecords[0]?.records[0];
       expect(record?.kind).toBe("omm");
       expect(recordName(record!)).toBe("W53:6/3/1@550 P01-01");
+    });
+
+    test("gives each pattern its own tag, so a new one can replace the last", async () => {
+      // One shared tag left a superseded pattern activated and still on screen,
+      // because nothing had turned its tag off.
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      satStore.walker = "53:6/3/1@550";
+      await settle();
+      satStore.walker = "87:6/3/1@1200";
+      await settle();
+
+      expect(calls.customRecords.map((call) => call.tags)).toEqual([["Walker 53:6/3/1@550"], ["Walker 87:6/3/1@1200"]]);
+      expect(walkerTagFor({ total: 6, planes: 3, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 })).toBe("Walker 53:6/3/1@550");
     });
 
     test("keeps two patterns off each other's satnums", async () => {

@@ -143,9 +143,10 @@ import {
   MAX_WALKER_SATELLITES,
   meanMotionRevPerDay,
   satsPerPlane,
+  isWalkerTag,
   validateWalkerDelta,
   WALKER_PRESETS,
-  WALKER_TAG,
+  walkerTagFor,
   type WalkerDeltaParams,
 } from "../modules/util/walkerDelta";
 import { useSatStore } from "../stores/sat";
@@ -177,7 +178,7 @@ const meanMotion = computed(() => meanMotionRevPerDay(draft.altitudeKm).toFixed(
 const periodMinutes = computed(() => (1440 / meanMotionRevPerDay(draft.altitudeKm)).toFixed(1));
 
 const generatedWire = computed(() => walker.value);
-const walkerActive = computed(() => satStore.enabledTags.includes(WALKER_TAG));
+const walkerActive = computed(() => satStore.enabledTags.some((tag) => isWalkerTag(tag)));
 
 const presetIndex = computed(() => WALKER_PRESETS.findIndex((preset) => encodeWalker(preset.params) === wire.value));
 const presetNote = computed(() => WALKER_PRESETS[presetIndex.value]?.note ?? "");
@@ -190,24 +191,30 @@ function applyPreset(index: number): void {
 }
 
 /**
- * Hand the pattern to the globe and switch its tag on.
+ * Hand the pattern to the globe and switch its tag on, dropping any other
+ * pattern's.
  *
  * Two writes rather than one, and both to the store: the pattern is what
  * sceneSync expands into element sets, and the tag is what activates them. A
  * generated constellation nobody asked to see would be a catalog entry and no
  * more, which is not what pressing Generate means.
+ *
+ * Replacing rather than adding, because Generate means "show me this pattern" —
+ * the previous one is still in the catalog and still in the browser's group list,
+ * so keeping both on screen stays one click away.
  */
 function generate(): void {
   if (!validation.value.ok) {
     return;
   }
   walker.value = wire.value;
-  satStore.setActivation({ enabledTags: [...new Set([...satStore.enabledTags, WALKER_TAG])] });
+  const kept = satStore.enabledTags.filter((tag) => !isWalkerTag(tag));
+  satStore.setActivation({ enabledTags: [...kept, walkerTagFor(draft)] });
 }
 
 /** Leave the records in the catalog and stop drawing them — the tag is the switch. */
 function clear(): void {
-  satStore.setActivation({ enabledTags: satStore.enabledTags.filter((tag) => tag !== WALKER_TAG) });
+  satStore.setActivation({ enabledTags: satStore.enabledTags.filter((tag) => !isWalkerTag(tag)) });
 }
 
 interface Census {

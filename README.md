@@ -17,6 +17,8 @@ The sky view trades the globe for a ground-level camera aimed by your phone's co
 - Show the globe in 3D, flattened to 2D or in Columbus view, over a base map, star field and terrain you choose
 - Find a satellite in the sky overhead rather than on a map, in a ground-level sky view aimed by your phone's compass and gyroscope and walked with the movement keys
 - Add OpenStreetMap buildings to the globe, or Google's photorealistic tiles under the sky view
+- Generate a Walker Delta or Walker Star constellation from its `i: T/P/F` specification and fly it beside the real catalog, with every per-satellite visual the real ones get
+- Colour satellites by what the sun is doing to them — eclipse (ν) *and* solar panel incidence (κ) — and read one satellite's eclipse/back-sun budget over its next orbit
 - Share the exact view you are looking at as a link: the url carries the satellites, the components, the ground station and the map layers
 - Install it as a Progressive Web App and keep using it offline, from a cached element-set snapshot and base map
 - Deploy it serverless: static files on a CDN, with an optional Cloudflare Worker serving fresh satellite data
@@ -193,6 +195,51 @@ Levels 0–3 (1.4 MB) are precached by the service worker, so the globe is compl
 offline wherever it is turned; 4 and 5 are cached as they are requested, and anywhere
 you have not been shows level 3 magnified rather than nothing at all.
 `pnpm update-starmap` does the same job for the optional star maps.
+
+### Orbit lab: Walker constellations and illumination
+
+The **sun button** in the left toolbar opens a panel with two halves.
+
+**Walker constellations.** Enter a pattern in Walker's own notation — `i: T/P/F` plus an
+altitude — or pick one of the presets (Iridium-like, the Starlink shells, OneWeb-like),
+and press Generate. T satellites are laid out in P planes, each plane offset along-track
+from the last by F·360°/T; a RAAN span of 360° is a Walker Delta and 180° a Walker Star.
+
+The pattern is expanded into circular OMM element sets at a fixed epoch and registered in
+the catalog under its own tag — `Walker 53:1584/72/17@550` — so everything the app does to a
+real satellite it does to a generated one: orbits, ground tracks, sensor cones, pass
+prediction, the browser list. It is a *geometry*, not a forecast — no drag term, no
+station-keeping, no per-plane epoch. Generating a second pattern replaces the first on
+screen; both stay in the satellite browser, so showing them together is one click.
+
+A pattern travels in the url as one parameter, so a link is a constellation:
+
+```
+https://satvis.space/?walker=53:1584/72/17@550&tags=Walker%2053:1584/72/17@550&elements=Point&paint=illumination
+```
+
+**Illumination.** Switch the point colouring from `Orbit class` to `Illumination` and every
+satellite is drawn by what the sun is doing to it, over two quantities:
+
+- **ν** — the fraction of the solar disc left uncovered by the Earth, from satellite.js's
+  conical shadow model. 0 is umbra, 1 is full sun, between is penumbra.
+- **κ** — the signed cosine between the sun and the solar panel's normal.
+
+Which resolve into five states: `umbra`, `penumbra`, `sunlit_back`, `sunlit_edge`,
+`sunlit_on`. The third is the one worth having — a satellite in full sunlight whose panel
+faces away from the sun has no more power than one in the Earth's shadow, and eclipse alone
+reports it as lit.
+
+κ is a **model, not a measurement**: no GP element set carries attitude, so the panel
+normal is assumed. Which assumption is yours to pick (`Panel normal`: zenith, velocity,
+orbit normal) and is named in the readout. The default is a body-fixed panel on the
+anti-Earth face of a nadir-pointing bus, the one choice whose κ changes sign within an
+orbit.
+
+The panel also shows a live census of the states across everything on screen, and for the
+satellite you click: its current ν, κ and beta angle, and a strip of its next orbit with
+the share spent in each state. Reasoning and alternatives are in
+`docs/adr/0007-orbit-lab.md`.
 
 ### Satellite metadata
 

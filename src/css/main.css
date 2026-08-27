@@ -122,11 +122,20 @@ body {
 
 /* The orbit lab is a form plus two tables of numbers, so it needs a fixed width
    the number fields can be laid out against, and the catalog's opacity for the
-   same reason: nothing in it is legible with a globe showing through. */
+   same reason: nothing in it is legible with a globe showing through.
+
+   It scrolls because it is taller than a laptop viewport once a satellite is
+   selected — the per-satellite readout and its one-orbit strip are the last
+   things in it, and they were the first things off the bottom of the screen. The
+   ceiling leaves room for the toolbar above and the clock deck below. */
 .toolbarSwitches--lab {
   width: 288px;
+  max-height: calc(100vh - 132px);
   padding: 0 8px 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
   background-color: #303336e6;
+  overscroll-behavior: contain;
 }
 
 .toolbarTitle {

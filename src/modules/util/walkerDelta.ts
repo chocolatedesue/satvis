@@ -217,12 +217,28 @@ function trimNumber(value: number): string {
 }
 
 /**
- * The tag a generated constellation is registered under.
+ * What a generated constellation's tag starts with.
  *
- * One tag for all of them: the tag is what a user switches on, and "the pattern I
- * generated" is one thing to switch on however many times it has been changed.
+ * A tag *per pattern* rather than one shared "Walker" tag, because the tag is the
+ * only switch a satellite has: with one tag, generating a second pattern left the
+ * first one still activated and still on screen, since nothing had turned its tag
+ * off. Per-pattern tags make replacing a pattern a tag swap — and leave keeping
+ * both possible, by switching the older one back on in the satellite browser.
+ *
+ * The remainder of the tag is the pattern's own wire form, so the browser's group
+ * list reads as the list of patterns generated this session.
  */
-export const WALKER_TAG = "Walker";
+export const WALKER_TAG_PREFIX = "Walker ";
+
+/** The tag this pattern's satellites carry. */
+export function walkerTagFor(params: WalkerDeltaParams): string {
+  return `${WALKER_TAG_PREFIX}${encodeWalker(params)}`;
+}
+
+/** Whether a tag names a generated pattern rather than a catalog group. */
+export function isWalkerTag(tag: string): boolean {
+  return tag.startsWith(WALKER_TAG_PREFIX);
+}
 
 /**
  * The epoch every generated pattern is stated at.
