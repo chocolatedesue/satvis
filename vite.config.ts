@@ -113,7 +113,7 @@ export default defineConfig({
           "data/imagery/NaturalEarthII/{0,1,2,3}/**/*.webp",
           "data/imagery/NaturalEarthII/tilemapresource.xml",
         ],
-        globIgnores: ["cesium/ThirdParty/**/*", "cesium/Widgets/**/*", "cesium/Workers/**/*", "cesium/Assets/Textures/maki/*", "**/*.map"],
+        globIgnores: ["cesium/ThirdParty/**/*", "cesium/Widgets/**/*", "cesium/Workers/**/*", "cesium/Assets/Textures/maki/*", "**/*.map", "data/privacy.html"],
         sourcemap: true,
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/\.(css|js|png|svg|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|txt|glb)$/, /^\/api\//, /^\/data\//, /^\/cesium\//],
