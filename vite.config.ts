@@ -164,21 +164,6 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: /^https:\/\/assets\.ion\.cesium\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "ion-asset-cache",
-              expiration: {
-                maxEntries: 4000,
-                maxAgeSeconds: 30 * 24 * 60 * 60,
-                purgeOnQuotaError: true,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          {
             urlPattern: /data\/models\/.*\.glb$/,
             handler: "CacheFirst",
             options: {

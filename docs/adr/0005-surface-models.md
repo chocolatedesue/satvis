@@ -187,13 +187,12 @@ desktops alike. This is the one saving here that costs picture quality rather th
 patience, and it is acceptable only because the mesh degrades — blurrier, never absent —
 where the same change to OSM Buildings would delete buildings outright.
 
-**ion assets are cached by the service worker** for 30 days
-(`assets.ion.cesium.com`, CacheFirst), covering both OSM Buildings and World Terrain, so a
-second sky-view session over the same city costs nothing. ion already sends
-`public, max-age=86400`, so this buys reuse across days and offline rather than within a
-session. Scoped to that host deliberately: Google's tiles come from `tile.googleapis.com`
-and their Map Tiles policies restrict caching, so this is the one rule that must never
-widen into a path or a file extension.
+**Neither ion assets nor Google's tiles are cached by the service worker.** Cesium allows
+caching only as "a general caching mechanism for performance that caches other internet
+traffic as well, and not just Cesium Data Output", and Google's Map Tiles policies restrict
+caching `tile.googleapis.com`. So a second sky-view session over the same city pays for its
+tiles again, beyond what ion's own `public, max-age=86400` covers in the browser's cache.
+This is the boundary a runtime rule must not cross.
 
 The OSM ceiling is 1 km rather than 2, and it is measured above the _ground_. That is not
 pedantry: from the ellipsoid, a ceiling of one kilometre puts La Paz permanently 2.6 km

@@ -561,9 +561,9 @@ descent costs nothing and is not black. On landing, `settled: true` flipped it t
 The skip-LOD saving itself is **not measured** — a clean before-and-after needs an uncached
 city and burns Google quota — so it is reasoned from Cesium's documented behaviour only.
 
-The service-worker rule was checked in the build output rather than at runtime: `dist/sw.js`
-contains `ion-asset-cache` and the pattern `ion\.cesium\.com`, and `googleapis` appears
-zero times in it, which is the property that matters — Google's tiles must not be cached.
+The service worker is checked in the build output rather than at runtime: neither
+`ion.cesium.com` nor `googleapis` appears in `dist/sw.js`, which is the property that
+matters. Both providers limit the caching of their tiles.
 
 The 1 km OSM ceiling's above-ground behaviour is **unverified here**: this environment
 never refines terrain past level 0, so `globe.getHeight` returns either nothing or

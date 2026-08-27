@@ -77,9 +77,10 @@ workspace package). One `pnpm install` at the root covers both.
   change what a `fetch()` receives. What it controls is opening a data url
   directly; `/api/`, `/data/` and `/cesium/` are denylisted by prefix, because an
   extension list alone missed `.json`.
-- **Keep the ion cache pattern scoped to `assets.ion.cesium.com`.** Google's
-  photorealistic tiles come from `tile.googleapis.com`, and the Map Tiles policies
-  restrict caching them.
+- **No service-worker cache for ion or Google tiles.** Cesium permits caching only
+  as a general mechanism that carries other traffic too, and Google's Map Tiles
+  policies restrict caching `tile.googleapis.com`. Neither host appears in
+  `dist/sw.js`.
 - **The committed Cesium ion token is restricted to satvis.space.** ion rejects it
   on localhost, on `deploy:preview` origins and in foreign iframes, so local work
   on terrain or the surface models needs an unrestricted `VITE_CESIUM_ION_TOKEN`.
