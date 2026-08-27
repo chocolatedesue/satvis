@@ -224,6 +224,13 @@ discussion; sharpen them here when they drift.
   colours as the point, at full opacity, cut from the orbit's own geometry — so
   unlike the point colouring it needs no clock to read, and unlike the plain
   orbit it goes stale as the sun moves and is re-cut on a timer.
+- **Point size**: how big a satellite's point is drawn — `small` (5 px), `medium`
+  (9 px) or `large` (14 px). A choice rather than a constant because the right
+  answer depends on what is on screen and nothing in the app knows that: 5 px is
+  what keeps a full Starlink activation from merging into a sheet over the globe,
+  and it is far too small to read a colour off in a scene of two orbits. Fixed when
+  the point is made, so a change goes through the same rebuild the colour mode does
+  (`SatelliteManager.repaintPoints`), and the label offset follows it.
 - **Point colour mode**: which question a satellite's point answers — its orbit
   class (a standing fact) or its illumination state (what the sun is doing now).
   Exactly one, and only the second costs a per-frame evaluation, which is why it

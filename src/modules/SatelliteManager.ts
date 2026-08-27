@@ -1,7 +1,7 @@
 import { Cartesian3, JulianDate } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 
-import { SATELLITE_COMPONENTS } from "../config/components";
+import { SATELLITE_COMPONENTS, type PointSize } from "../config/components";
 import { DEFAULT_POINT_PAINT, type PanelAxis, type PointColorMode, type PointPaint } from "../config/illumination";
 import type { SerializedGroundStation } from "../stores/sat";
 import { GroundStationEntity, type GroundStationPositionData } from "./GroundStationEntity";
@@ -82,9 +82,10 @@ export interface DesiredScene {
   groundStations: SerializedGroundStation[];
   overpassMode: string;
   trackedSatellite: string;
-  /** How points are coloured, and under which panel model. See config/illumination.ts. */
+  /** How points are coloured and how big they are. See config/illumination.ts. */
   pointColorMode: PointColorMode;
   panelAxis: PanelAxis;
+  pointSize: PointSize;
 }
 
 const EMPTY_SCENE: DesiredScene = {
@@ -97,6 +98,7 @@ const EMPTY_SCENE: DesiredScene = {
   trackedSatellite: "",
   pointColorMode: DEFAULT_POINT_PAINT.mode,
   panelAxis: DEFAULT_POINT_PAINT.panelAxis,
+  pointSize: DEFAULT_POINT_PAINT.size,
 };
 
 export class SatelliteManager {
@@ -324,7 +326,9 @@ export class SatelliteManager {
     // so a change to it while painting by orbit class is a change to nothing yet.
     this.#paint.mode = desired.pointColorMode;
     this.#paint.panelAxis = desired.panelAxis;
-    if (previous.pointColorMode !== desired.pointColorMode) {
+    this.#paint.size = desired.pointSize;
+    // Both are fixed when the point is made, so both need the same rebuild.
+    if (previous.pointColorMode !== desired.pointColorMode || previous.pointSize !== desired.pointSize) {
       this.repaintPoints();
     }
     if (previous.panelAxis !== desired.panelAxis) {

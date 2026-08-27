@@ -575,6 +575,8 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       // thing whatever the user last left the paint mode on.
       pointColorMode: "class",
       panelAxis: "zenith",
+      // 5 px is the size the frame costs in the published numbers were measured at.
+      pointSize: "small",
     };
   }
 
@@ -591,6 +593,7 @@ export class CesiumBenchmarkTarget implements BenchmarkTarget {
       trackedSatellite: store.trackedSatellite,
       pointColorMode: store.pointColorMode,
       panelAxis: store.panelAxis,
+      pointSize: store.pointSize,
     };
   }
 }

@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
-import { SATELLITE_COMPONENTS } from "../config/components";
+import { POINT_SIZES, SATELLITE_COMPONENTS, type PointSize } from "../config/components";
 import { DEFAULT_POINT_PAINT, PANEL_AXES, POINT_COLOR_MODES, type PanelAxis, type PointColorMode } from "../config/illumination";
 import { sameValue } from "../modules/util/equality";
 import { closedStringList, enumString, groundStationList, plainString, stringList, tildeEscapedStringList } from "../modules/util/urlCodec";
@@ -49,6 +49,7 @@ export const useSatStore = defineStore(
     // not fill P planes is not a constellation, and the url should not be able to
     // say it. Empty means no generated constellation.
     const pointColorMode = ref<PointColorMode>(DEFAULT_POINT_PAINT.mode);
+    const pointSize = ref<PointSize>(DEFAULT_POINT_PAINT.size);
     const panelAxis = ref<PanelAxis>(DEFAULT_POINT_PAINT.panelAxis);
     const walker = ref("");
 
@@ -159,6 +160,7 @@ export const useSatStore = defineStore(
       trackedSatellite,
       overpassMode,
       pointColorMode,
+      pointSize,
       panelAxis,
       walker,
       enabledTags,
@@ -184,6 +186,7 @@ export const useSatStore = defineStore(
         { name: "trackedSatellite", url: "track", kind: plainString() },
         { name: "overpassMode", url: "overpass", kind: enumString(["elevation", "swath"]) },
         { name: "pointColorMode", url: "paint", kind: enumString(POINT_COLOR_MODES) },
+        { name: "pointSize", url: "psize", kind: enumString(POINT_SIZES) },
         { name: "panelAxis", url: "panel", kind: enumString(PANEL_AXES) },
         { name: "walker", url: "walker", kind: plainString() },
       ],

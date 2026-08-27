@@ -25,6 +25,9 @@
 //     are built against a per-frame budget and SwiftShader renders a few frames a
 //     second, so the largest pattern checked here is 348.
 
+/* eslint-disable no-await-in-loop -- polling a live browser is sequential by nature:
+   each read has to see the effect of the last one. */
+
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -92,7 +95,11 @@ ws.addEventListener("message", (event) => {
   if (message.id !== undefined) {
     const entry = pending.get(message.id);
     pending.delete(message.id);
-    message.error ? entry.reject(new Error(JSON.stringify(message.error))) : entry.resolve(message.result);
+    if (message.error) {
+      entry.reject(new Error(JSON.stringify(message.error)));
+    } else {
+      entry.resolve(message.result);
+    }
     return;
   }
   if (message.method === "Runtime.consoleAPICalled" && message.params.type === "error") {
@@ -155,11 +162,7 @@ await until("document.querySelectorAll('#toolbarLeft .toolbarButtons button').le
 await until("!!document.querySelector('canvas')", "the Cesium canvas");
 await sleep(6000);
 
-record(
-  "toolbar carries the orbit lab button",
-  await evaluate("document.querySelectorAll('#toolbarLeft .toolbarButtons button').length"),
-  (value) => value >= 7,
-);
+record("toolbar carries the orbit lab button", await evaluate("document.querySelectorAll('#toolbarLeft .toolbarButtons button').length"), (value) => value >= 7);
 
 // ── The lab panel opens ──────────────────────────────────────────────────────
 await evaluate("document.querySelectorAll('#toolbarLeft .toolbarButtons button')[3].click()");
@@ -168,25 +171,100 @@ record("panel offers all five illumination states", await evaluate("document.que
 
 // ── The one-click two-orbit demo ─────────────────────────────────────────────
 await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /Two-orbit demo/.test(b.textContent)).click()");
-await until("/walker=53:2%2F2%2F1@550|walker=53:2\\/2\\/1@550/.test(window.location.search)", "the demo pattern in the url");
+await until("/walker=53%3A20|walker=53:20/.test(window.location.search)", "the demo pattern in the url");
 record(
-  "the demo writes the pattern, the arc component and the colouring in one press",
+  "the demo starts the clock and speeds it up, so the motion is visible",
+  await evaluate("({ multiplier: window.cc.viewer.clock.multiplier, running: window.cc.viewer.clock.shouldAnimate })"),
+  (state) => state.multiplier === 60 && state.running === true,
+);
+record(
+  "the demo writes the pattern, the arc component, the colouring and the point size in one press",
   await evaluate(`(() => {
     const q = new URLSearchParams(window.location.search);
-    return { walker: q.get('walker'), elements: q.get('elements'), paint: q.get('paint'), tags: q.get('tags') };
+    return { walker: q.get('walker'), elements: q.get('elements'), paint: q.get('paint'), psize: q.get('psize'), tags: q.get('tags') };
   })()`),
-  (q) => q.walker === "53:2/2/1@550~180" && (q.elements ?? "").includes("Illumination arc") && q.paint === "illumination" && (q.tags ?? "").includes("Walker 53:2/2/1@550"),
+  (q) =>
+    q.walker === "53:20/2/1@550~180" &&
+    (q.elements ?? "").includes("Illumination arc") &&
+    q.paint === "illumination" &&
+    q.psize === "large" &&
+    (q.tags ?? "").includes("Walker 53:20/2/1@550"),
 );
-await until("Number(([...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.match(/(\\d+) satellites/) ?? [0, 0])[1]) === 2", "the two demo satellites", 120_000);
-record("two orbits, and only two", await evaluate("[...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.trim().replace(/\\s+/g, ' ')"), (value) =>
-  value.startsWith("2 satellites on screen"),
+await until(
+  "Number(([...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.match(/(\\d+) satellites/) ?? [0, 0])[1]) === 20",
+  "the twenty demo satellites",
+  180_000,
 );
+record("two orbits, ten satellites each", await evaluate("[...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.trim().replace(/\\s+/g, ' ')"), (value) =>
+  value.startsWith("20 satellites on screen"),
+);
+record(
+  "every point is drawn at the large size",
+  await evaluate(`(() => {
+    const sizes = window.cc.sats.activeSatellites.map((sat) => {
+      const graphics = sat.components.Point?.point;
+      const size = graphics?.pixelSize;
+      return size?.getValue ? size.getValue(window.cc.viewer.clock.currentTime) : size;
+    });
+    return [...new Set(sizes)];
+  })()`),
+  (sizes) => sizes.length === 1 && sizes[0] === 14,
+);
+record(
+  "spread round two rings, the twenty satellites occupy more than one state at once",
+  await evaluate(`(() => {
+    const date = new Date(window.cc.viewer.clock.currentTime.toString());
+    const counts = {};
+    for (const sat of window.cc.sats.activeSatellites) {
+      const state = sat.props.illumination(date, 'zenith')?.state;
+      if (state) counts[state] = (counts[state] ?? 0) + 1;
+    }
+    return counts;
+  })()`),
+  (counts) => Object.keys(counts).length >= 2 && Object.values(counts).reduce((sum, value) => sum + value, 0) === 20,
+);
+// The ask this whole section exists for: the colours follow the motion. One
+// satellite, two readings a simulated ten minutes apart — at 60× that is ten
+// seconds of waiting, and a tenth of an orbit of travel.
+const stateWalk = await evaluate(`(() => {
+  const sat = window.cc.sats.activeSatellites[0];
+  const start = new Date(window.cc.viewer.clock.currentTime.toString());
+  const walk = [];
+  for (let minute = 0; minute <= 96; minute += 4) {
+    const at = new Date(start.getTime() + minute * 60_000);
+    walk.push(sat.props.illumination(at, 'zenith')?.state ?? 'none');
+  }
+  return { name: sat.props.name, walk };
+})()`);
+record(
+  "one satellite passes through eclipse and back over its own orbit",
+  { name: stateWalk.name, distinct: [...new Set(stateWalk.walk)] },
+  (result) => result.distinct.includes("umbra") && result.distinct.includes("sunlit_on") && result.distinct.length >= 3,
+);
+record(
+  "and its live colour changes as the clock advances",
+  await (async () => {
+    const readState = () => evaluate("window.cc.sats.activeSatellites[0].props.illumination(new Date(window.cc.viewer.clock.currentTime.toString()), 'zenith')?.state");
+    const before = await readState();
+    // Long enough at 60x to cross a boundary from wherever it started: the shortest
+    // run in the walk above is the penumbra, and the rest are many minutes wide.
+    const seen = new Set([before]);
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await sleep(1000);
+      seen.add(await readState());
+      if (seen.size > 1) break;
+    }
+    return [...seen];
+  })(),
+  (seen) => seen.length > 1,
+);
+
 // The arc is a Primitive built asynchronously from geometry Cesium then releases,
 // so what can be asserted here is that both arcs are in the batch and a primitive
 // reached the scene. That the colours are the right ones is what the unit tests on
 // illuminationAlongOrbit cover, and what the screenshot shows.
 record(
-  "both orbits are in the illumination-arc batch, and it reached the scene",
+  "every orbit is in the illumination-arc batch, and it reached the scene",
   await evaluate(`(() => {
     const sats = window.cc?.sats;
     if (!sats) return 'no viewer handle';
@@ -195,15 +273,15 @@ record(
     // be counted. The scene primitive count is what says one was actually added.
     return { batch: sats.illuminationArcs?.size, pending: sats.illuminationArcs?.pending, scenePrimitives: window.cc.viewer.scene.primitives.length };
   })()`),
-  (state) => state.batch === 2 && state.scenePrimitives > 0,
+  (state) => state.batch === 20 && state.scenePrimitives > 0,
 );
 record(
   "each satellite carries an Illumination arc component",
   await evaluate(`(() => {
     const sats = window.cc?.sats?.activeSatellites ?? [];
-    return sats.map((sat) => sat.componentNames.includes('Illumination arc'));
+    return { count: sats.length, withArc: sats.filter((sat) => sat.componentNames.includes('Illumination arc')).length };
   })()`),
-  (flags) => Array.isArray(flags) && flags.length === 2 && flags.every(Boolean),
+  (result) => result.count === 20 && result.withArc === 20,
 );
 // The batch builds asynchronously, so nothing is on screen until it settles —
 // which is also why the first version of this check screenshotted a bare globe.
@@ -213,7 +291,7 @@ await sleep(3000);
 // What the arc actually put on screen, read off the pixels.
 //
 // The globe and the sky box are hidden for this one frame, so the only things left
-// in it are the two arcs and their points: any coloured pixel is the feature under
+// in it are the arcs and their points: any coloured pixel is the feature under
 // test, with no background to be confused with. Restored immediately afterwards.
 //
 // Matched by *hue* rather than by value, because Cesium tonemaps the frame — a
@@ -269,9 +347,7 @@ const arcPixels = await evaluate(`(async () => {
 // orbit, so at any zoom that shows a whole orbit it is a few pixels of ring however
 // finely it is sampled. What is being checked is that all five states are drawn —
 // the proportions are the panel's job, not the picture's.
-record("the arc draws every illumination state on the globe, not just in the legend", arcPixels, (counts) =>
-  Object.keys(palette5).every((state) => (counts[state] ?? 0) > 8),
-);
+record("the arc draws every illumination state on the globe, not just in the legend", arcPixels, (counts) => Object.keys(palette5).every((state) => (counts[state] ?? 0) > 8));
 
 await evaluate("window.cc.viewer.scene.globe.show = true; window.cc.viewer.scene.skyBox.show = true; window.cc.viewer.scene.requestRender();");
 await sleep(2500);
@@ -285,10 +361,8 @@ await evaluate(`(() => {
   select.value = String(index - 1);
   select.dispatchEvent(new Event('change'));
 })()`);
-record(
-  "the default preset is the minimal 6/3/1 pattern",
-  await evaluate("document.querySelector('.orbitLab__derived').textContent.trim().replace(/\\s+/g, ' ')"),
-  (value) => value.startsWith("2 per plane"),
+record("the default preset is the minimal 6/3/1 pattern", await evaluate("document.querySelector('.orbitLab__derived').textContent.trim().replace(/\\s+/g, ' ')"), (value) =>
+  value.startsWith("2 per plane"),
 );
 
 await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /Generate/.test(b.textContent)).click()");
@@ -298,7 +372,11 @@ record("the Walker tag is switched on", await evaluate("new URLSearchParams(wind
 
 // Satellites are built off the propagation worker, so the census only fills once
 // their opening sample windows land.
-await until("Number(([...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.match(/(\\d+) satellites/) ?? [0, 0])[1]) === 6", "all six satellites to build", 120_000);
+await until(
+  "Number(([...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.match(/(\\d+) satellites/) ?? [0, 0])[1]) === 6",
+  "all six satellites to build",
+  120_000,
+);
 record(
   "all six generated satellites are on screen and classified",
   await evaluate("[...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.trim().replace(/\\s+/g, ' ')"),
@@ -338,7 +416,7 @@ await until(
   300_000,
 );
 const census = await evaluate("[...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.trim().replace(/\\s+/g, ' ')");
-record("the whole shell is on screen", census, (value) => value.startsWith('348 satellites on screen'));
+record("the whole shell is on screen", census, (value) => value.startsWith("348 satellites on screen"));
 const stateCounts = await evaluate(
   "Object.fromEntries([...document.querySelectorAll('.orbitLab__legend tbody tr')].map((tr) => [tr.children[1].textContent.trim(), Number(tr.children[2].textContent)]))",
 );
@@ -359,11 +437,7 @@ await evaluate(`(() => {
 await until("!!document.querySelector('.orbitLab__strip')", "the one-orbit strip", 120_000);
 const readout = await evaluate("[...document.querySelectorAll('.orbitLab__derived')].find((p) => /ν/.test(p.textContent)).textContent.trim().replace(/\\s+/g, ' ')");
 record("the selected satellite reports ν, κ and β", readout, (value) => /ν \d/.test(value) && /κ -?\d/.test(value) && /β -?\d/.test(value));
-record(
-  "its next orbit is more than one state",
-  await evaluate("document.querySelectorAll('.orbitLab__strip > span').length"),
-  (value) => value >= 2,
-);
+record("its next orbit is more than one state", await evaluate("document.querySelectorAll('.orbitLab__strip > span').length"), (value) => value >= 2);
 // The readout is the last thing in the panel, so it is the first thing to fall off
 // a laptop viewport. Scrolling the panel has to be able to reach it.
 await evaluate("document.querySelector('.orbitLab__strip').scrollIntoView({ block: 'center' })");
@@ -376,8 +450,10 @@ record(
   })()`),
   (box) => box.top >= 0 && box.bottom <= box.viewport && box.width > 100,
 );
-const orbitBudget = await evaluate("[...document.querySelectorAll('.orbitLab__note')].find((p) => /Next \\d+ orbits/.test(p.textContent)).textContent.trim().replace(/\\s+/g, ' ')");
-record("its eclipse budget is reported for both orbits", orbitBudget, (value) => value.startsWith('Next 2 orbits') && /umbra/.test(value) && /dark in total/.test(value));
+const orbitBudget = await evaluate(
+  "[...document.querySelectorAll('.orbitLab__note')].find((p) => /Next \\d+ orbits/.test(p.textContent)).textContent.trim().replace(/\\s+/g, ' ')",
+);
+record("its eclipse budget is reported for both orbits", orbitBudget, (value) => value.startsWith("Next 2 orbits") && /umbra/.test(value) && /dark in total/.test(value));
 
 await send("Page.captureScreenshot", { format: "png" }).then(({ data }) => writeFileSync(`${OUT}/03-satellite-readout.png`, Buffer.from(data, "base64")));
 

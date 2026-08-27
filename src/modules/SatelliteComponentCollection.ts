@@ -34,7 +34,7 @@ import type { Viewer } from "@cesium/widgets";
 import CesiumSensorVolumes from "cesium-sensor-volumes";
 
 import { clearPassHighlights, setPassHighlights } from "../composables/usePassHighlights";
-import { SATELLITE_COMPONENTS } from "../config/components";
+import { labelOffsetFor, POINT_PIXEL_SIZE, SATELLITE_COMPONENTS } from "../config/components";
 import { ILLUMINATION_COLOR, type IlluminationState, type PointPaint } from "../config/illumination";
 import { ORBIT_CLASS_COLOR, type OrbitClass } from "../config/orbitClass";
 import type { GroundStation } from "./PassPredictor";
@@ -339,7 +339,8 @@ export class SatelliteComponentCollection {
 
   disableComponent(name: SatelliteComponentName): void {
     if (name === "3D model") {
-      this.#setLabelOffset(10);
+      // Back to whatever the point's own size asks for, not a hardcoded 10.
+      this.#setLabelOffset(labelOffsetFor(this.#paint.size));
     }
 
     const component = this.#components[name];
@@ -520,13 +521,14 @@ export class SatelliteComponentCollection {
   // illumination mode it is coloured by what the sun is doing to it instead; see
   // `#illuminationColor`.
   //
-  // Small on purpose: a whole constellation at 6 px merges into a sheet that
-  // hides the globe under it. 5 px still leaves the globe legible under a full
+  // Small by default on purpose: a whole constellation at 6 px merges into a sheet
+  // that hides the globe under it. 5 px still leaves the globe legible under a full
   // Starlink activation, and the outline is what keeps a point visible against
-  // bright imagery rather than its size.
+  // bright imagery rather than its size. A scene of two orbits is the other case
+  // entirely, which is what the size setting is for (config/components.ts).
   createPoint(): void {
     const point = new PointGraphics({
-      pixelSize: 5,
+      pixelSize: POINT_PIXEL_SIZE[this.#paint.size],
       color: this.#paint.mode === "illumination" ? this.#illuminationColor() : POINT_COLOR[this.props.orbitClass],
       outlineColor: Color.DIMGREY,
       outlineWidth: 1,
@@ -578,7 +580,9 @@ export class SatelliteComponentCollection {
       outlineColor: Color.DIMGREY,
       outlineWidth: 2,
       horizontalOrigin: HorizontalOrigin.LEFT,
-      pixelOffset: new Cartesian2(10, 0),
+      // Clear of the marker at whatever size the marker is: at 14 px a fixed 10 px
+      // offset starts the text inside the point it names.
+      pixelOffset: new Cartesian2(labelOffsetFor(this.#paint.size), 0),
       distanceDisplayCondition: new DistanceDisplayCondition(2000, 8e7),
       translucencyByDistance: new NearFarScalar(6e7, 1.0, 8e7, 0.0),
     });

@@ -294,9 +294,9 @@ export function walkerSatnumBase(params: WalkerDeltaParams): number {
  */
 export const WALKER_PRESETS: ReadonlyArray<{ label: string; note: string; params: WalkerDeltaParams }> = [
   {
-    label: "Two orbits 2/2/1",
-    note: "Two planes 90° apart, one satellite each — the smallest scene that still shows a whole lit and eclipsed arc.",
-    params: { total: 2, planes: 2, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 180 },
+    label: "Two orbits 20/2/1",
+    note: "Two planes 90° apart with ten satellites each — few enough to follow one, enough that every state is occupied at once.",
+    params: { total: 20, planes: 2, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 180 },
   },
   {
     label: "Minimal 6/3/1",

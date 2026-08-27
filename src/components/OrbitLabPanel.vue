@@ -16,8 +16,8 @@
 
     <button type="button" class="orbitLab__button orbitLab__button--wide" @click="twoOrbitDemo">Two-orbit demo</button>
     <p class="orbitLab__note">
-      One click: two orbital planes 90° apart with one satellite each, orbit lines coloured by illumination, and the points coloured to match. The simplest scene that shows a whole
-      sunlit arc, a whole eclipsed arc and the penumbra between them.
+      One click: two orbital planes 90° apart with ten satellites each, orbit lines coloured by illumination, points coloured to match and enlarged, and the clock at
+      {{ DEMO_MULTIPLIER }}× so an orbit takes about {{ demoOrbitSeconds }} s. Watch a point cross from the sunlit arc into the eclipsed one and change colour as it goes.
     </p>
     <p class="orbitLab__note">
       Penumbra is a sliver either way: a satellite crosses it in 10–20 s of a ~96 minute orbit, so on the arc it is a short blue tick at each eclipse boundary rather than a band.
@@ -94,6 +94,13 @@
     </div>
 
     <label class="orbitLab__field">
+      <span>Point size</span>
+      <select :value="pointSize" @change="pointSize = ($event.target as HTMLSelectElement).value as PointSize">
+        <option v-for="size in POINT_SIZES" :key="size" :value="size">{{ POINT_SIZE_LABEL[size] }}</option>
+      </select>
+    </label>
+
+    <label class="orbitLab__field">
       <span>Panel normal</span>
       <select :value="panelAxis" @change="panelAxis = ($event.target as HTMLSelectElement).value as PanelAxis">
         <option v-for="axis in PANEL_AXES" :key="axis" :value="axis">{{ PANEL_AXIS_LABEL[axis] }}</option>
@@ -139,6 +146,8 @@ import { storeToRefs } from "pinia";
 import { computed, onUnmounted, reactive, ref, watch } from "vue";
 
 import { useController } from "../composables/useController";
+import { useViewerClock } from "../composables/useViewerClock";
+import { POINT_SIZE_LABEL, POINT_SIZES, type PointSize } from "../config/components";
 import {
   ILLUMINATION_COLOR,
   ILLUMINATION_DESCRIPTION,
@@ -183,7 +192,23 @@ const STRIP_ORBITS = 2;
 
 const cc = useController();
 const satStore = useSatStore();
-const { pointColorMode, panelAxis, walker } = storeToRefs(satStore);
+const { pointColorMode, pointSize, panelAxis, walker } = storeToRefs(satStore);
+
+// The clock is live viewer state rather than store state (see useViewerClock), and
+// this is the seam the clock deck writes it through — so the demo writes it the same
+// way rather than reaching for viewer.clock.
+const clock = useViewerClock();
+
+/**
+ * How fast the demo runs the clock.
+ *
+ * A 550 km orbit takes 95.6 minutes, which at 1× is a scene where nothing appears to
+ * happen: the whole point of colouring by illumination is watching a satellite cross
+ * a boundary, and at real time that is a 30-minute wait. 60× puts an orbit at about
+ * a minute and a half, slow enough to follow one satellite and fast enough that the
+ * eclipse entry arrives while someone is still looking.
+ */
+const DEMO_MULTIPLIER = 60;
 
 // The form's own copy: a pattern is only handed to the globe when Generate is
 // pressed, so a half-typed T never becomes a constellation. Seeded from the url's
@@ -203,6 +228,10 @@ const periodMinutes = computed(() => (1440 / meanMotionRevPerDay(draft.altitudeK
 
 const generatedWire = computed(() => walker.value);
 const walkerActive = computed(() => satStore.enabledTags.some((tag) => isWalkerTag(tag)));
+
+const demoOrbitSeconds = computed(() =>
+  Math.round(((1440 / meanMotionRevPerDay((WALKER_PRESETS[0] as (typeof WALKER_PRESETS)[number]).params.altitudeKm)) * 60) / DEMO_MULTIPLIER),
+);
 
 const presetIndex = computed(() => WALKER_PRESETS.findIndex((preset) => encodeWalker(preset.params) === wire.value));
 const presetNote = computed(() => WALKER_PRESETS[presetIndex.value]?.note ?? "");
@@ -250,12 +279,21 @@ function twoOrbitDemo(): void {
   Object.assign(draft, preset.params);
   walker.value = encodeWalker(preset.params);
   pointColorMode.value = "illumination";
+  // Big enough to read a colour off, which 5 px is not — and this scene is twenty
+  // satellites, not ten thousand, so nothing is hidden under them.
+  pointSize.value = "large";
   const components = new Set([...satStore.enabledComponents, "Point", "Illumination arc"]);
-  // The label is noise on a two-satellite scene whose names are 20 characters long.
+  // The labels are noise on twenty satellites whose names are 20 characters long.
   components.delete("Label");
   satStore.enabledComponents = [...components];
   const kept = satStore.enabledTags.filter((tag) => !isWalkerTag(tag));
   satStore.setActivation({ enabledTags: [...kept, walkerTagFor(preset.params)] });
+  // Last, and the part that makes the rest worth looking at: without motion this is
+  // a still picture of a state nobody watched change.
+  clock.setMultiplier(DEMO_MULTIPLIER);
+  if (!clock.playing.value) {
+    clock.togglePlaying();
+  }
 }
 
 /** Leave the records in the catalog and stop drawing them — the tag is the switch. */

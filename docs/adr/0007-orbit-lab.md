@@ -124,11 +124,28 @@ The panel's per-satellite strip runs **two** orbital periods rather than one: on
 cannot show what changes _between_ orbits, and where a satellite is near the edge of
 eclipse season two orbits is where that first reads as two visibly different halves.
 
-And the smallest useful scene gets a **button**. "Two-orbit demo" writes the four things
-that only make sense together — a 2/2/1 pattern (two planes 90° apart, one satellite each),
-its tag, the Point and Illumination arc components, and the illumination colouring —
-because "show me the simplest version of this" should not be four menus. None of it is a
-mode; every one of the four is still the user's to change afterwards.
+And the smallest useful scene gets a **button**. "Two-orbit demo" writes the six things
+that only make sense together — a 20/2/1 pattern (two planes 90° apart, ten satellites
+each), its tag, the Point and Illumination arc components, the illumination colouring, the
+large point size, and a 60× clock — because "show me the simplest version of this" should
+not be six menus. None of it is a mode; every one of the six is still the user's to change
+afterwards.
+
+Three of those six are about being _watchable_ rather than about being correct, and each was
+wrong in the first version:
+
+- **Ten satellites per plane, not one.** One satellite is in one state, so the legend has one
+  row occupied and the picture says nothing about the rest. Ten per plane leaves every state
+  occupied at once, and is still few enough to follow a single one round.
+- **Large points.** 5 px is the size that keeps ten thousand satellites from hiding the
+  globe. It is also too small to read a colour off, which is the entire premise here. So the
+  size became a setting (`POINT_SIZES`) rather than a compromise: small for a constellation,
+  large for a scene someone is reading. The label offset is derived from it, because a label
+  10 px out starts inside a 14 px point.
+- **A 60× clock.** At 1× a 550 km orbit is 95.6 minutes, so a scene coloured by what the sun
+  is doing shows nothing happening. The clock is live viewer state rather than store state,
+  so the demo writes it through `useViewerClock` — the same seam the clock deck uses — rather
+  than reaching into `viewer.clock`.
 
 ### A second colour mode, not a sixth orbit class
 

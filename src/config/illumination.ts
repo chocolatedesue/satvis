@@ -24,6 +24,8 @@
  * it as "lit", and the satellite still has no power. Collapsing it into
  * "no light" would lose the distinction the analysis is about.
  */
+import type { PointSize } from "./components";
+
 export type IlluminationState = "umbra" | "penumbra" | "sunlit_back" | "sunlit_edge" | "sunlit_on";
 
 /** In the order a legend reads them: darkest and most starved first. */
@@ -117,6 +119,12 @@ export const POINT_COLOR_MODE_LABEL: Record<PointColorMode, string> = {
 export interface PointPaint {
   mode: PointColorMode;
   panelAxis: PanelAxis;
+  /**
+   * How big the point is. Here rather than beside POINT_SIZES because this is the
+   * record of what is currently being drawn, and a size change goes through the
+   * same repaint the colour mode does — the size is fixed when the point is made.
+   */
+  size: PointSize;
 }
 
-export const DEFAULT_POINT_PAINT: PointPaint = { mode: "class", panelAxis: "zenith" };
+export const DEFAULT_POINT_PAINT: PointPaint = { mode: "class", panelAxis: "zenith", size: "small" };

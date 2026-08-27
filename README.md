@@ -240,7 +240,11 @@ The five states are shown **two ways**, because they answer different questions:
   turned away are all in view at once, on a paused clock.
 
 **Start with the "Two-orbit demo" button.** It sets up the smallest scene that shows all of
-it: two orbital planes 90° apart with one satellite each, arcs on, points matching.
+it: two orbital planes 90° apart with ten satellites each, arcs on, points enlarged and
+coloured to match, and the clock at 60× so an orbit takes about a minute and a half — long
+enough to watch a satellite cross from the sunlit arc into the eclipsed one and change colour
+as it goes. Point size is its own control (5, 9 or 14 px): 5 px is what keeps a full Starlink
+activation from hiding the globe, and too small to read a colour off.
 
 κ is a **model, not a measurement**: no GP element set carries attitude, so the panel
 normal is assumed. Which assumption is yours to pick (`Panel normal`: zenith, velocity,

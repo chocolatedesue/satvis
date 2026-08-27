@@ -445,6 +445,7 @@ export function startSceneSync(cc: SceneTarget): void {
     overpassMode: satStore.overpassMode,
     trackedSatellite: satStore.trackedSatellite,
     pointColorMode: satStore.pointColorMode,
+    pointSize: satStore.pointSize,
     panelAxis: satStore.panelAxis,
   });
 

@@ -780,15 +780,20 @@ because Cesium tonemaps: a `#f0e442` line arrives at about `(200, 200, 40)`, the
 right colour at 84% intensity. Only the region right of the panel and above the clock
 deck is sampled, since the legend swatches carry these same five colours.
 
-**Result, 2026-08-27 — 22/22.**
+**Result, 2026-08-27 — 27/27.**
 
-| Check | Returned |
-| --- | --- |
-| the demo writes all four settings in one press | `walker=53:2/2/1@550~180`, `elements=Point,Orbit,Illumination arc`, `paint=illumination`, tag `Walker 53:2/2/1@550~180` |
-| two orbits, and only two | `2 satellites on screen` — the previous pattern's tag went off |
-| both arcs in the batch, a primitive in the scene | `{ batch: 2, scenePrimitives: 1 }` |
-| every state drawn on the globe | umbra 7289 px, sunlit_on 4522 px, sunlit_back 534, sunlit_edge 369, penumbra 15 |
-| the strip covers two orbits | `Next 2 orbits (191.6 min): … 40.1% back-facing · 40.1% dark in total` |
+| Check                                            | Returned                                                                                                                                 |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| the demo writes all six settings in one press    | `walker=53:20/2/1@550~180`, `elements=Point,Orbit,Illumination arc`, `paint=illumination`, `psize=large`, tag `Walker 53:20/2/1@550~180` |
+| it starts the clock and speeds it up             | `{ multiplier: 60, running: true }`                                                                                                      |
+| two orbits, ten satellites each                  | `20 satellites on screen` — the previous pattern's tag went off                                                                          |
+| every point at the large size                    | `[14]` — one distinct value across all twenty                                                                                            |
+| more than one state occupied at once             | sunlit_on 10, umbra 6, sunlit_back 3, penumbra 1                                                                                         |
+| one satellite over its own orbit                 | `sunlit_on, sunlit_edge, sunlit_back, umbra`, sampled every 4 min across 96                                                              |
+| its live colour changes as the clock runs        | `sunlit_on` → `sunlit_edge`, inside 40 s of real time at 60×                                                                             |
+| every arc in the batch, a primitive in the scene | `{ batch: 20, scenePrimitives: 1 }`                                                                                                      |
+| every state drawn on the globe                   | umbra 13866 px, sunlit_on 7380 px, sunlit_back 989, sunlit_edge 748, penumbra 18                                                         |
+| the strip covers two orbits                      | `Next 2 orbits (191.6 min): … 39.9% back-facing · 39.9% dark in total`                                                                   |
 
 **Two things worth knowing from writing this.**
 
@@ -801,7 +806,7 @@ deck is sampled, since the legend swatches carry these same five colours.
   (`releaseGeometryInstances` defaults true), so the arcs cannot be read back off
   the scene graph. The batch that owns them is the only thing left to count.
 
-**Penumbra is 15 pixels because it is 15 seconds.** A LEO satellite crosses the
+**Penumbra is 18 pixels because it is 15 seconds.** A LEO satellite crosses the
 penumbra in 10–20 s of a ~96 minute orbit — 0.3% of the ring — so at any zoom that
 shows a whole orbit it is a short blue tick at each eclipse boundary however finely
 it is sampled. The boundary refinement in `illuminationRing` is what makes it appear
