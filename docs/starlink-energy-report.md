@@ -14,8 +14,8 @@ painted with.
 - **κ, the panel channel** — this repo's model, not a measurement. Nothing in a GP element
   set describes attitude. Computed here under the **zenith** panel model: a body-fixed
   panel on the anti-Earth face of a nadir-pointing bus. A sun-tracking panel would read
-  much better; the orbit-normal model would read better still. Treat every _dark_ figure
-  below as "this panel model", and every _eclipse_ figure as geometry.
+  much better; the orbit-normal model would read better still. Treat every *dark* figure
+  below as "this panel model", and every *eclipse* figure as geometry.
 - **Propagation** — SGP4 over synthetic circular element sets generated from the shell
   parameters, at the shells' filed altitudes and inclinations. No drag, no
   station-keeping, no manoeuvres.
@@ -28,15 +28,15 @@ painted with.
 As commonly cited from the post-modification gen-1 filings — 4408 satellites in five
 shells. Plane counts are the design as filed, not what is in orbit today.
 
-| Shell               | Satellites | Planes | Period   | Node drift | β cycle            | Max \|β\| reachable | β needed to clear the shadow |
-| ------------------- | ---------- | ------ | -------- | ---------- | ------------------ | ------------------- | ---------------------------- |
-| S1 — 550 km / 53.0° | 1584       | 72     | 95.7 min | -4.49°/day | 66 days            | 76.4°               | 67.0°                        |
-| S2 — 540 km / 53.2° | 1584       | 72     | 95.4 min | -4.49°/day | 66 days            | 76.6°               | 67.2°                        |
-| S3 — 570 km / 70.0° | 720        | 36     | 96.0 min | -2.53°/day | 103 days           | 86.6°               | 66.6°                        |
-| S4 — 560 km / 97.6° | 348        | 6      | 95.8 min | 0.98°/day  | frozen — quasi-SSO | 82.4°               | 66.8°                        |
-| S5 — 560 km / 97.6° | 172        | 4      | 95.8 min | 0.98°/day  | frozen — quasi-SSO | 82.4°               | 66.8°                        |
+| Shell | Satellites | Planes | Period | Node drift | β cycle | Max \|β\| reachable | β needed to clear the shadow |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| S1 — 550 km / 53.0° | 1584 | 72 | 95.7 min | -4.49°/day | 66 days | 76.4° | 67.0° |
+| S2 — 540 km / 53.2° | 1584 | 72 | 95.4 min | -4.49°/day | 66 days | 76.6° | 67.2° |
+| S3 — 570 km / 70.0° | 720 | 36 | 96.0 min | -2.53°/day | 103 days | 86.6° | 66.6° |
+| S4 — 560 km / 97.6° | 348 | 6 | 95.8 min | 0.98°/day | frozen — quasi-SSO | 82.4° | 66.8° |
+| S5 — 560 km / 97.6° | 172 | 4 | 95.8 min | 0.98°/day | frozen — quasi-SSO | 82.4° | 66.8° |
 
-None of the five is sun-synchronous, and none is at an altitude where a _dawn–dusk_
+None of the five is sun-synchronous, and none is at an altitude where a *dawn–dusk*
 orbit could be always sunlit — that band is 1610–3080 km.
 
 But the last two columns say something the shells were not designed for, and it is the
@@ -51,7 +51,7 @@ The β-cycle column says how that structure behaves over time, and the shells sp
   1°/day, so each plane takes its turn in the sunlit season roughly every 66 days. Any
   static assignment of energy-hungry work to planes goes stale in weeks.
 - **The 97.6° shells (S4, S5) are frozen.** Their node drift is +0.98°/day, which is the
-  sun's own rate to within a hundredth — they are _accidentally sun-synchronous_. Each plane
+  sun's own rate to within a hundredth — they are *accidentally sun-synchronous*. Each plane
   keeps its angle to the sun indefinitely, so its energy budget is a standing property of
   the plane rather than a phase in a cycle. Some planes are permanently well-lit and others
   permanently deeply eclipsed, and it does not rotate.
@@ -64,41 +64,41 @@ The β-cycle column says how that structure behaves over time, and the shells sp
 β varies with a plane's right ascension, so within one shell on one day the planes do not
 agree — which is itself a routing-relevant fact.
 
-| Shell               | Date         | \|β\| across planes | Eclipse per orbit | Planes with none | Longest eclipse | No usable power | Longest dark run | Penumbra/orbit |
-| ------------------- | ------------ | ------------------- | ----------------- | ---------------- | --------------- | --------------- | ---------------- | -------------- |
-| S1 — 550 km / 53.0° | Mar equinox  | 6–52°               | 28.1%–37.5%       | 0/12             | 35.8 min        | 44.7%–46.9%     | 44.8 min         | 40 s           |
-| S1 — 550 km / 53.0° | Jun solstice | 1–74°               | 0.0%–37.4%        | 2/12             | 35.8 min        | 38.1%–46.9%     | 44.8 min         | 35 s           |
-| S1 — 550 km / 53.0° | Sep equinox  | 10–51°              | 28.7%–37.1%       | 0/12             | 35.5 min        | 44.8%–46.9%     | 44.8 min         | 30 s           |
-| S1 — 550 km / 53.0° | Dec solstice | 7–76°               | 0.0%–37.3%        | 1/12             | 35.7 min        | 36.2%–46.9%     | 44.8 min         | 60 s           |
-| S2 — 540 km / 53.2° | Mar equinox  | 6–53°               | 28.3%–37.5%       | 0/12             | 35.8 min        | 44.7%–46.9%     | 44.7 min         | 35 s           |
-| S2 — 540 km / 53.2° | Jun solstice | 1–74°               | 0.0%–37.5%        | 2/12             | 35.8 min        | 38.0%–46.9%     | 44.7 min         | 35 s           |
-| S2 — 540 km / 53.2° | Sep equinox  | 10–52°              | 28.9%–37.3%       | 0/12             | 35.7 min        | 44.8%–46.8%     | 44.7 min         | 35 s           |
-| S2 — 540 km / 53.2° | Dec solstice | 6–77°               | 0.0%–37.5%        | 1/12             | 35.8 min        | 36.1%–46.8%     | 44.7 min         | 50 s           |
-| S3 — 570 km / 70.0° | Mar equinox  | 11–67°              | 0.0%–36.9%        | 1/12             | 35.5 min        | 41.8%–46.7%     | 45.0 min         | 160 s          |
-| S3 — 570 km / 70.0° | Jun solstice | 3–78°               | 0.0%–37.1%        | 2/12             | 35.7 min        | 34.9%–46.8%     | 45.0 min         | 35 s           |
-| S3 — 570 km / 70.0° | Sep equinox  | 6–69°               | 0.0%–37.1%        | 2/12             | 35.7 min        | 41.0%–46.8%     | 45.0 min         | 50 s           |
-| S3 — 570 km / 70.0° | Dec solstice | 3–83°               | 0.0%–37.1%        | 2/12             | 35.7 min        | 14.9%–46.7%     | 45.0 min         | 40 s           |
-| S4 — 560 km / 97.6° | Mar equinox  | 17–75°              | 0.0%–36.7%        | 2/6              | 35.2 min        | 37.3%–46.7%     | 44.8 min         | 25 s           |
-| S4 — 560 km / 97.6° | Jun solstice | 13–70°              | 0.0%–36.9%        | 1/6              | 35.5 min        | 40.4%–46.7%     | 44.8 min         | 40 s           |
-| S4 — 560 km / 97.6° | Sep equinox  | 19–77°              | 0.0%–36.5%        | 2/6              | 35.0 min        | 34.9%–46.7%     | 44.8 min         | 25 s           |
-| S4 — 560 km / 97.6° | Dec solstice | 13–70°              | 0.0%–36.8%        | 1/6              | 35.3 min        | 40.3%–46.6%     | 44.8 min         | 40 s           |
-| S5 — 560 km / 97.6° | Mar equinox  | 13–75°              | 0.0%–37.0%        | 2/4              | 35.5 min        | 37.3%–46.8%     | 44.8 min         | 20 s           |
-| S5 — 560 km / 97.6° | Jun solstice | 8–70°               | 0.0%–37.1%        | 1/4              | 35.7 min        | 40.3%–46.7%     | 44.8 min         | 40 s           |
-| S5 — 560 km / 97.6° | Sep equinox  | 10–77°              | 0.0%–37.1%        | 2/4              | 35.7 min        | 34.9%–46.8%     | 44.8 min         | 20 s           |
-| S5 — 560 km / 97.6° | Dec solstice | 8–70°               | 0.0%–37.1%        | 1/4              | 35.7 min        | 40.3%–46.8%     | 44.8 min         | 40 s           |
+| Shell | Date | \|β\| across planes | Eclipse per orbit | Planes with none | Longest eclipse | No usable power | Longest dark run | Penumbra/orbit |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| S1 — 550 km / 53.0° | Mar equinox | 6–52° | 28.1%–37.5% | 0/12 | 35.8 min | 44.7%–46.9% | 44.8 min | 40 s |
+| S1 — 550 km / 53.0° | Jun solstice | 1–74° | 0.0%–37.4% | 2/12 | 35.8 min | 38.1%–46.9% | 44.8 min | 35 s |
+| S1 — 550 km / 53.0° | Sep equinox | 10–51° | 28.7%–37.1% | 0/12 | 35.5 min | 44.8%–46.9% | 44.8 min | 30 s |
+| S1 — 550 km / 53.0° | Dec solstice | 7–76° | 0.0%–37.3% | 1/12 | 35.7 min | 36.2%–46.9% | 44.8 min | 60 s |
+| S2 — 540 km / 53.2° | Mar equinox | 6–53° | 28.3%–37.5% | 0/12 | 35.8 min | 44.7%–46.9% | 44.7 min | 35 s |
+| S2 — 540 km / 53.2° | Jun solstice | 1–74° | 0.0%–37.5% | 2/12 | 35.8 min | 38.0%–46.9% | 44.7 min | 35 s |
+| S2 — 540 km / 53.2° | Sep equinox | 10–52° | 28.9%–37.3% | 0/12 | 35.7 min | 44.8%–46.8% | 44.7 min | 35 s |
+| S2 — 540 km / 53.2° | Dec solstice | 6–77° | 0.0%–37.5% | 1/12 | 35.8 min | 36.1%–46.8% | 44.7 min | 50 s |
+| S3 — 570 km / 70.0° | Mar equinox | 11–67° | 0.0%–36.9% | 1/12 | 35.5 min | 41.8%–46.7% | 45.0 min | 160 s |
+| S3 — 570 km / 70.0° | Jun solstice | 3–78° | 0.0%–37.1% | 2/12 | 35.7 min | 34.9%–46.8% | 45.0 min | 35 s |
+| S3 — 570 km / 70.0° | Sep equinox | 6–69° | 0.0%–37.1% | 2/12 | 35.7 min | 41.0%–46.8% | 45.0 min | 50 s |
+| S3 — 570 km / 70.0° | Dec solstice | 3–83° | 0.0%–37.1% | 2/12 | 35.7 min | 14.9%–46.7% | 45.0 min | 40 s |
+| S4 — 560 km / 97.6° | Mar equinox | 17–75° | 0.0%–36.7% | 2/6 | 35.2 min | 37.3%–46.7% | 44.8 min | 25 s |
+| S4 — 560 km / 97.6° | Jun solstice | 13–70° | 0.0%–36.9% | 1/6 | 35.5 min | 40.4%–46.7% | 44.8 min | 40 s |
+| S4 — 560 km / 97.6° | Sep equinox | 19–77° | 0.0%–36.5% | 2/6 | 35.0 min | 34.9%–46.7% | 44.8 min | 25 s |
+| S4 — 560 km / 97.6° | Dec solstice | 13–70° | 0.0%–36.8% | 1/6 | 35.3 min | 40.3%–46.6% | 44.8 min | 40 s |
+| S5 — 560 km / 97.6° | Mar equinox | 13–75° | 0.0%–37.0% | 2/4 | 35.5 min | 37.3%–46.8% | 44.8 min | 20 s |
+| S5 — 560 km / 97.6° | Jun solstice | 8–70° | 0.0%–37.1% | 1/4 | 35.7 min | 40.3%–46.7% | 44.8 min | 40 s |
+| S5 — 560 km / 97.6° | Sep equinox | 10–77° | 0.0%–37.1% | 2/4 | 35.7 min | 34.9%–46.8% | 44.8 min | 20 s |
+| S5 — 560 km / 97.6° | Dec solstice | 8–70° | 0.0%–37.1% | 1/4 | 35.7 min | 40.3%–46.8% | 44.8 min | 40 s |
 
 ## The whole fleet at once
 
 All 4408 satellites, one day per date, sampled every 2 minutes. This is the number a
-router cares about: not how often _a_ satellite is in shadow, but how much of the fleet is
-in shadow _at the same time_.
+router cares about: not how often *a* satellite is in shadow, but how much of the fleet is
+in shadow *at the same time*.
 
-| Date         | Eclipsed share (min–mean–max) | No usable power (min–mean–max) |
-| ------------ | ----------------------------- | ------------------------------ |
-| Mar equinox  | 30.8% – 31.0% – 31.2%         | 45.1% – 45.4% – 45.7%          |
-| Jun solstice | 28.9% – 29.2% – 29.4%         | 44.5% – 44.8% – 45.1%          |
-| Sep equinox  | 30.8% – 31.1% – 31.3%         | 45.0% – 45.3% – 45.6%          |
-| Dec solstice | 28.9% – 29.2% – 29.4%         | 44.5% – 44.8% – 45.0%          |
+| Date | Eclipsed share (min–mean–max) | No usable power (min–mean–max) |
+| --- | --- | --- |
+| Mar equinox | 30.8% – 31.0% – 31.2% | 45.1% – 45.4% – 45.7% |
+| Jun solstice | 28.9% – 29.2% – 29.4% | 44.5% – 44.8% – 45.1% |
+| Sep equinox | 30.8% – 31.1% – 31.3% | 45.0% – 45.3% – 45.6% |
+| Dec solstice | 28.9% – 29.2% – 29.4% | 44.5% – 44.8% – 45.0% |
 
 ## Scheduling horizon
 
@@ -115,11 +115,11 @@ An orbit is eclipse-free exactly when |β| ≥ arcsin(Rₑ/(Rₑ+h)), and eclips
 third of every revolution when β is small. So there are only three knobs, and they are not
 equally powerful:
 
-| Knob                              | What it does to β                                                                                   | Worth                                                                                                         |
-| --------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Node vs sun** (`raanOffsetDeg`) | Chooses β within the range the inclination allows — 90° from the sun is the maximum, 0° the minimum | **Free.** Same launch, same altitude, same inclination. The strongest lever per unit cost by a wide margin    |
-| **Inclination**                   | Raises the _ceiling_ on β one-for-one, up to 90°                                                    | 1° of inclination ≈ **51 km** of altitude at 550 km, 85 km at 1200 km                                         |
-| **Altitude**                      | Lowers the β the shadow _demands_, by shrinking the Earth's angular size                            | The weak knob: ~0.02°/km at 550 km. It also steepens the sun-synchronous inclination, which works against you |
+| Knob | What it does to β | Worth |
+| --- | --- | --- |
+| **Node vs sun** (`raanOffsetDeg`) | Chooses β within the range the inclination allows — 90° from the sun is the maximum, 0° the minimum | **Free.** Same launch, same altitude, same inclination. The strongest lever per unit cost by a wide margin |
+| **Inclination** | Raises the *ceiling* on β one-for-one, up to 90° | 1° of inclination ≈ **51 km** of altitude at 550 km, 85 km at 1200 km |
+| **Altitude** | Lowers the β the shadow *demands*, by shrinking the Earth's angular size | The weak knob: ~0.02°/km at 550 km. It also steepens the sun-synchronous inclination, which works against you |
 
 The node angle being free is the practical headline. A plane already in orbit at 53° / 550 km
 is eclipsed a third of every orbit or not at all depending on nothing but where its node
@@ -130,15 +130,15 @@ instant.
 ### The floor: the lowest inclination that can ever escape the shadow
 
 | Altitude | β demanded | Lowest inclination that can ever reach it |
-| -------- | ---------- | ----------------------------------------- |
-| 400 km   | 70.2°      | 46.8°                                     |
-| 550 km   | 67.0°      | 43.6°                                     |
-| 700 km   | 64.3°      | 40.9°                                     |
-| 850 km   | 61.9°      | 38.5°                                     |
-| 1000 km  | 59.8°      | 36.4°                                     |
-| 1200 km  | 57.3°      | 33.9°                                     |
-| 1500 km  | 54.1°      | 30.6°                                     |
-| 2000 km  | 49.6°      | 26.1°                                     |
+| --- | --- | --- |
+| 400 km | 70.2° | 46.8° |
+| 550 km | 67.0° | 43.6° |
+| 700 km | 64.3° | 40.9° |
+| 850 km | 61.9° | 38.5° |
+| 1000 km | 59.8° | 36.4° |
+| 1200 km | 57.3° | 33.9° |
+| 1500 km | 54.1° | 30.6° |
+| 2000 km | 49.6° | 26.1° |
 
 Below that inclination no node angle and no season helps: the orbit is eclipsed every
 revolution for its whole life. A 30° shell is in that category at every altitude here.
@@ -150,16 +150,16 @@ of node angles clears the shadow" and "what fraction of my planes is in sunlight
 same number — and it depends on nothing but altitude, inclination and the date. This is the
 table to design against.
 
-| Altitude \ inclination | 30°  | 45°   | 53°   | 60°   | 70°   | 80°   | 90°   | 97.6° |
-| ---------------------- | ---- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
-| **400 km**             | —    | —     | 3.4%  | 6.6%  | 10.0% | 12.0% | 10.6% | 12.1% |
-| **550 km**             | —    | 0.9%  | 5.6%  | 8.9%  | 12.7% | 15.2% | 15.8% | 15.6% |
-| **700 km**             | —    | 2.8%  | 7.4%  | 11.0% | 15.0% | 18.2% | 21.4% | 18.9% |
-| **850 km**             | —    | 4.6%  | 9.4%  | 12.9% | 17.3% | 21.1% | 25.1% | 22.0% |
-| **1000 km**            | —    | 6.3%  | 11.2% | 14.8% | 19.4% | 23.9% | 28.1% | 25.2% |
-| **1200 km**            | —    | 8.5%  | 13.3% | 17.2% | 22.1% | 27.7% | 31.5% | 29.7% |
-| **1500 km**            | —    | 11.4% | 16.5% | 20.5% | 25.9% | 33.4% | 35.8% | 34.5% |
-| **2000 km**            | 3.9% | 15.9% | 21.1% | 25.5% | 32.1% | 39.8% | 41.5% | 40.5% |
+| Altitude \ inclination | 30° | 45° | 53° | 60° | 70° | 80° | 90° | 97.6° |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **400 km** | — | — | 3.4% | 6.6% | 10.0% | 12.0% | 10.6% | 12.1% |
+| **550 km** | — | 0.9% | 5.6% | 8.9% | 12.7% | 15.2% | 15.8% | 15.6% |
+| **700 km** | — | 2.8% | 7.4% | 11.0% | 15.0% | 18.2% | 21.4% | 18.9% |
+| **850 km** | — | 4.6% | 9.4% | 12.9% | 17.3% | 21.1% | 25.1% | 22.0% |
+| **1000 km** | — | 6.3% | 11.2% | 14.8% | 19.4% | 23.9% | 28.1% | 25.2% |
+| **1200 km** | — | 8.5% | 13.3% | 17.2% | 22.1% | 27.7% | 31.5% | 29.7% |
+| **1500 km** | — | 11.4% | 16.5% | 20.5% | 25.9% | 33.4% | 35.8% | 34.5% |
+| **2000 km** | 3.9% | 15.9% | 21.1% | 25.5% | 32.1% | 39.8% | 41.5% | 40.5% |
 
 Read it as: at 550 km and 53° — the Starlink case — **5.6%** of planes are eclipse-free
 averaged over the year, and none at all at the equinoxes. Holding the altitude and taking the
@@ -168,14 +168,14 @@ gives **22.1%** — so 650 km of altitude is worth about as much as the 17° of
 inclination was, which is the exchange rate above restated as a design choice.
 
 Two shapes in the table worth noticing. **The gain from inclination saturates near polar**:
-80° to 90° adds little, and 97.6° is slightly _worse_ than 90° because a retrograde plane
+80° to 90° adds little, and 97.6° is slightly *worse* than 90° because a retrograde plane
 reaches its ceiling on fewer days of the year. And **nothing below ~45° is ever eclipse-free
 at any LEO altitude** — the 30° column is empty until 2000 km.
 
 ### What to do with it, for a power-aware router
 
-- **If the constellation is already designed**, the only lever left is _knowing which planes
-  are currently in their sunlit season and steering work to them._ The per-plane spread is
+- **If the constellation is already designed**, the only lever left is *knowing which planes
+  are currently in their sunlit season and steering work to them.* The per-plane spread is
   large (0%–37% of the orbit in shadow at one instant) and the fleet aggregate is flat, so
   all of the available win is in plane-level placement, none in fleet-level timing.
 - **If the inclination is still open**, it is the knob to spend on: 1° buys as much β as
@@ -189,6 +189,45 @@ at any LEO altitude** — the 30° column is empty until 2000 km.
   kilometre, and it costs latency, launch mass and radiation dose that this model knows
   nothing about.
 
+## What the per-plane spread does to a pipeline
+
+Taking the migration model's own two formulas — optimal depth `P* = ⌊N(1−f_ecl)⌋` and
+`p_full(P) = max(0, (1−f_ecl) − (P−1)/N)` — and feeding them the *per-plane* eclipse
+fraction instead of one shell-wide number. S1 — 550 km / 53.0°, N = 22 satellites per plane.
+
+| Date | Plane | f_ecl | P\* | p_full(P=8) |
+| --- | --- | --- | --- | --- |
+| Mar equinox | best (β 52°) | 28.1% | **15** | 40.0% |
+| Mar equinox | worst (β 6°) | 37.5% | **13** | 30.7% |
+| Jun solstice | best (β 68°) | 0.0% | **22** | 68.2% |
+| Jun solstice | worst (β 1°) | 37.4% | **13** | 30.8% |
+| Sep equinox | best (β 51°) | 28.7% | **15** | 39.4% |
+| Sep equinox | worst (β 10°) | 37.1% | **13** | 31.1% |
+| Dec solstice | best (β 76°) | 0.0% | **22** | 68.2% |
+| Dec solstice | worst (β 7°) | 37.3% | **13** | 30.9% |
+
+So `P*` is not one number. Across planes of a single shell it runs from **13**
+to **22** — at the Jun solstice the same shell offers both 13 and 22 on the same day,
+depending only on which plane the pipeline is placed in. The model's cliff at `P*` therefore
+moves with the plane, and a depth chosen for the shell average is past the cliff on the worst
+planes and leaves throughput on the table on the best ones.
+
+## Forced-migration churn
+
+Every satellite loses power once per revolution, so the arrival rate of forced migrations is
+a property of the constellation and not of the workload:
+
+- **15 dark intervals per satellite per day** at S1 — 550 km / 53.0°
+- across the shell's 1584 satellites that is **23,760 events/day**, one every
+  **3.6 s** somewhere in the shell
+- warning before each: **3050 s** at p10, **3050 s** at p50
+
+At 100 Gbps a stage's KV is a sub-second transfer, so the warning is never the binding
+constraint — the churn rate is. The question an algorithm has to answer is not *can* a
+migration finish in time but *how many* of them per second the placement must absorb, and
+whether they can be planned instead of reacted to. Because the schedule above is
+deterministic and computable a year ahead, they can.
+
 ---
 
-Generated 2026-08-27T13:35:33.962Z · panel model `zenith` · 4408 satellites.
+Generated 2026-08-27T13:55:51.611Z · panel model `zenith` · 4408 satellites.

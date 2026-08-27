@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PanelAxis } from "../../config/illumination";
 import { fleetSeries, fleetSnapshot, orbitEnergyProfile, percentile, secondsUntilDark, type OrbitEnergyProfile } from "./energyStatistics";
+import { darkIntervals, fullyLitFraction, optimalPipelineDepth } from "./energyTrace";
 import { createSatrec } from "./gp";
 import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, designPoint, minInclinationForEclipseFreeDeg } from "./orbitDesign";
 import { betaCycleDays, dawnDuskBetaRangeDeg, eclipseFreeBetaDeg, nodalPrecessionDegPerDay, SUN_DEG_PER_DAY } from "./sunSynchronous";
@@ -356,6 +357,76 @@ describe.skipIf(!ENABLED)("the Starlink energy report", () => {
     lines.push("- **Do not spend altitude on this alone.** It is the weakest of the three knobs per");
     lines.push("  kilometre, and it costs latency, launch mass and radiation dose that this model knows");
     lines.push("  nothing about.");
+    lines.push("");
+    // ── What the per-plane spread does to a pipeline ──────────────────────────
+    // The migration model (LAB-47) derives P* = ⌊N(1−f_ecl)⌋ and
+    // p_full(P) = max(0, (1−f_ecl) − (P−1)/N) from one shell-wide f_ecl. Both are
+    // functions of the eclipse fraction, and the eclipse fraction is per plane — so
+    // both are per plane, which is the whole reason to measure the spread.
+    const RING = 22;
+    const DEPTH = 8;
+    const pipelineShell = SHELLS[0] as Shell;
+    const pipelineSatrecs = planeRepresentatives(pipelineShell);
+
+    lines.push("## What the per-plane spread does to a pipeline");
+    lines.push("");
+    lines.push(`Taking the migration model's own two formulas — optimal depth \`P* = ⌊N(1−f_ecl)⌋\` and`);
+    lines.push(`\`p_full(P) = max(0, (1−f_ecl) − (P−1)/N)\` — and feeding them the *per-plane* eclipse`);
+    lines.push(`fraction instead of one shell-wide number. ${pipelineShell.name}, N = ${RING} satellites per plane.`);
+    lines.push("");
+    lines.push(`| Date | Plane | f_ecl | P\\* | p_full(P=${DEPTH}) |`);
+    lines.push("| --- | --- | --- | --- | --- |");
+    const depthSpread: { date: string; best: number; worst: number }[] = [];
+    for (const [label, iso] of DATES) {
+      const profiles = pipelineSatrecs.map((satrec, index) => ({ index, profile: orbitEnergyProfile(satrec, new Date(iso), AXIS) }));
+      const sorted = profiles.toSorted((a, b) => a.profile.eclipseFraction - b.profile.eclipseFraction);
+      const best = sorted[0]!;
+      const worst = sorted.at(-1)!;
+      for (const [role, entry] of [
+        ["best", best],
+        ["worst", worst],
+      ] as const) {
+        const fraction = entry.profile.eclipseFraction;
+        lines.push(
+          `| ${label} | ${role} (β ${Math.abs(entry.profile.betaDeg).toFixed(0)}°) | ${percent(fraction)} | **${optimalPipelineDepth(RING, fraction)}** | ${percent(fullyLitFraction(RING, fraction, DEPTH))} |`,
+        );
+      }
+      depthSpread.push({
+        date: label,
+        best: optimalPipelineDepth(RING, best.profile.eclipseFraction),
+        worst: optimalPipelineDepth(RING, worst.profile.eclipseFraction),
+      });
+    }
+    lines.push("");
+    const widest = depthSpread.toSorted((a, b) => b.best - b.worst - (a.best - a.worst))[0]!;
+    lines.push(`So \`P*\` is not one number. Across planes of a single shell it runs from **${Math.min(...depthSpread.map((entry) => entry.worst))}**`);
+    lines.push(
+      `to **${Math.max(...depthSpread.map((entry) => entry.best))}** — at the ${widest.date} the same shell offers both ${widest.worst} and ${widest.best} on the same day,`,
+    );
+    lines.push("depending only on which plane the pipeline is placed in. The model's cliff at `P*` therefore");
+    lines.push("moves with the plane, and a depth chosen for the shell average is past the cliff on the worst");
+    lines.push("planes and leaves throughput on the table on the best ones.");
+    lines.push("");
+    lines.push("## Forced-migration churn");
+    lines.push("");
+    const churnIntervals = darkIntervals(pipelineSatrecs[0]!, new Date(DATES[1][1]), 86400, AXIS);
+    const whole = churnIntervals.filter((interval) => !interval.truncated);
+    const leads = whole.slice(1).map((interval) => interval.leadSeconds);
+    lines.push("Every satellite loses power once per revolution, so the arrival rate of forced migrations is");
+    lines.push("a property of the constellation and not of the workload:");
+    lines.push("");
+    lines.push(`- **${whole.length} dark intervals per satellite per day** at ${pipelineShell.name}`);
+    lines.push(
+      `- across the shell's ${pipelineShell.params.total} satellites that is **${(whole.length * pipelineShell.params.total).toLocaleString("en-US")} events/day**, one every`,
+    );
+    lines.push(`  **${(86400 / (whole.length * pipelineShell.params.total)).toFixed(1)} s** somewhere in the shell`);
+    lines.push(`- warning before each: **${seconds(percentile(leads, 0.1))}** at p10, **${seconds(percentile(leads, 0.5))}** at p50`);
+    lines.push("");
+    lines.push("At 100 Gbps a stage's KV is a sub-second transfer, so the warning is never the binding");
+    lines.push("constraint — the churn rate is. The question an algorithm has to answer is not *can* a");
+    lines.push("migration finish in time but *how many* of them per second the placement must absorb, and");
+    lines.push("whether they can be planned instead of reacted to. Because the schedule above is");
+    lines.push("deterministic and computable a year ahead, they can.");
     lines.push("");
     lines.push("---");
     lines.push("");
