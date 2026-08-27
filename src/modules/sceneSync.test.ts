@@ -462,7 +462,7 @@ describe("startSceneSync", () => {
       startSceneSync(target);
       const satStore = useSatStore();
 
-      satStore.walker = "53:6/3/1@550";
+      satStore.walker = ["53:6/3/1@550"];
       await settle();
 
       expect(calls.customRecords).toHaveLength(1);
@@ -473,7 +473,7 @@ describe("startSceneSync", () => {
     test("names the satellites after the pattern that made them", async () => {
       const { target, calls } = fakeTarget();
       startSceneSync(target);
-      useSatStore().walker = "53:6/3/1@550";
+      useSatStore().walker = ["53:6/3/1@550"];
       await settle();
 
       const record = calls.customRecords[0]?.records[0];
@@ -488,9 +488,9 @@ describe("startSceneSync", () => {
       startSceneSync(target);
       const satStore = useSatStore();
 
-      satStore.walker = "53:6/3/1@550";
+      satStore.walker = ["53:6/3/1@550"];
       await settle();
-      satStore.walker = "87:6/3/1@1200";
+      satStore.walker = ["87:6/3/1@1200"];
       await settle();
 
       expect(calls.customRecords.map((call) => call.tags)).toEqual([["Walker 53:6/3/1@550"], ["Walker 87:6/3/1@1200"]]);
@@ -505,9 +505,9 @@ describe("startSceneSync", () => {
       startSceneSync(target);
       const satStore = useSatStore();
 
-      satStore.walker = "53:6/3/1@550";
+      satStore.walker = ["53:6/3/1@550"];
       await settle();
-      satStore.walker = "87:6/3/1@1200";
+      satStore.walker = ["87:6/3/1@1200"];
       await settle();
 
       const [first, second] = calls.customRecords;
@@ -519,16 +519,62 @@ describe("startSceneSync", () => {
     test("draws the same geometry on every load, whatever the wall clock says", async () => {
       const { target: first, calls: firstCalls } = fakeTarget();
       startSceneSync(first);
-      useSatStore().walker = "53:6/3/1@550";
+      useSatStore().walker = ["53:6/3/1@550"];
       await settle();
 
       setActivePinia(createPinia());
       const { target: second, calls: secondCalls } = fakeTarget();
       startSceneSync(second);
-      useSatStore().walker = "53:6/3/1@550";
+      useSatStore().walker = ["53:6/3/1@550"];
       await settle();
 
       expect(secondCalls.customRecords[0]?.records).toEqual(firstCalls.customRecords[0]?.records);
+    });
+
+    test("keeps every pattern in the list, so a second does not cost the first", async () => {
+      // The whole point of the list: comparing two shells is what the panel is for,
+      // and a url that can only carry one loses the comparison on reload.
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      satStore.walker = ["53:6/3/1@550", "87:6/3/1@1200"];
+      await settle();
+
+      expect(calls.customRecords.map((call) => call.tags)).toEqual([["Walker 53:6/3/1@550"], ["Walker 87:6/3/1@1200"]]);
+    });
+
+    test("expands a pattern appended to the list, and only that one", async () => {
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      satStore.walker = ["53:6/3/1@550"];
+      await settle();
+      satStore.walker = [...satStore.walker, "87:6/3/1@1200"];
+      await settle();
+
+      // Two calls, not three: re-expanding the first would rebuild element sets the
+      // catalog already holds.
+      expect(calls.customRecords).toHaveLength(2);
+      expect(calls.customRecords[1]?.tags).toEqual(["Walker 87:6/3/1@1200"]);
+    });
+
+    test("does not re-expand a pattern that comes back after being dropped", async () => {
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      satStore.walker = ["53:6/3/1@550"];
+      await settle();
+      satStore.walker = [];
+      await settle();
+      satStore.walker = ["53:6/3/1@550"];
+      await settle();
+
+      // Generated once for the life of the session: the records are still in the
+      // catalog, so the only thing a re-add has to do is switch its tag back on.
+      expect(calls.customRecords).toHaveLength(1);
     });
 
     test("ignores a pattern the url cannot mean, rather than half-building it", async () => {
@@ -537,7 +583,7 @@ describe("startSceneSync", () => {
       startSceneSync(target);
 
       // 7 satellites do not fill 3 planes.
-      useSatStore().walker = "53:7/3/1@550";
+      useSatStore().walker = ["53:7/3/1@550"];
       await settle();
 
       expect(calls.customRecords).toEqual([]);

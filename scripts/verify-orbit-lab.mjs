@@ -191,12 +191,14 @@ record(
     (q.tags ?? "").includes("Walker 53:20/2/1@550"),
 );
 await until(
-  "Number(([...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.match(/(\\d+) satellites/) ?? [0, 0])[1]) === 20",
+  "Number((([...document.querySelectorAll('.orbitLab__derived')].find((p) => /satellites on screen/.test(p.textContent))?.textContent ?? '').match(/(\\d+) satellites/) ?? [0, 0])[1]) === 20",
   "the twenty demo satellites",
   180_000,
 );
-record("two orbits, ten satellites each", await evaluate("[...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.trim().replace(/\\s+/g, ' ')"), (value) =>
-  value.startsWith("20 satellites on screen"),
+record(
+  "two orbits, ten satellites each",
+  await evaluate("([...document.querySelectorAll('.orbitLab__derived')].find((p) => /satellites on screen/.test(p.textContent))?.textContent ?? '').trim().replace(/\\s+/g, ' ')"),
+  (value) => value.startsWith("20 satellites on screen"),
 );
 record(
   "every point is drawn at the large size",
@@ -365,7 +367,7 @@ record("the default preset is the minimal 6/3/1 pattern", await evaluate("docume
   value.startsWith("2 per plane"),
 );
 
-await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /Generate/.test(b.textContent)).click()");
+await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /^(Show only|Regenerate)$/.test(b.textContent.trim())).click()");
 await until("/walker=/.test(window.location.search)", "the pattern in the url");
 record("the pattern lands in the url", await evaluate("new URLSearchParams(window.location.search).get('walker')"), (value) => value === "53:6/3/1@550");
 record("the Walker tag is switched on", await evaluate("new URLSearchParams(window.location.search).get('tags')"), (value) => (value ?? "").includes("Walker"));
@@ -373,13 +375,13 @@ record("the Walker tag is switched on", await evaluate("new URLSearchParams(wind
 // Satellites are built off the propagation worker, so the census only fills once
 // their opening sample windows land.
 await until(
-  "Number(([...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.match(/(\\d+) satellites/) ?? [0, 0])[1]) === 6",
+  "Number((([...document.querySelectorAll('.orbitLab__derived')].find((p) => /satellites on screen/.test(p.textContent))?.textContent ?? '').match(/(\\d+) satellites/) ?? [0, 0])[1]) === 6",
   "all six satellites to build",
   120_000,
 );
 record(
   "all six generated satellites are on screen and classified",
-  await evaluate("[...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.trim().replace(/\\s+/g, ' ')"),
+  await evaluate("([...document.querySelectorAll('.orbitLab__derived')].find((p) => /satellites on screen/.test(p.textContent))?.textContent ?? '').trim().replace(/\\s+/g, ' ')"),
   (value) => value.startsWith("6 satellites on screen"),
 );
 record(
@@ -409,13 +411,15 @@ await evaluate("document.querySelectorAll('input[name=pointColorMode]')[1].click
 await until("new URLSearchParams(window.location.search).get('paint') === 'illumination'", "the paint mode in the url");
 record("the paint mode lands in the url", await evaluate("new URLSearchParams(window.location.search).get('paint')"), (value) => value === "illumination");
 
-await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /Generate/.test(b.textContent)).click()");
+await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /^(Show only|Regenerate)$/.test(b.textContent.trim())).click()");
 await until(
-  "Number(([...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.match(/(\\d+) satellites/) ?? [0, 0])[1]) === 348",
+  "Number((([...document.querySelectorAll('.orbitLab__derived')].find((p) => /satellites on screen/.test(p.textContent))?.textContent ?? '').match(/(\\d+) satellites/) ?? [0, 0])[1]) === 348",
   "all 348 satellites to build",
   300_000,
 );
-const census = await evaluate("[...document.querySelectorAll('.orbitLab__derived')].at(-1).textContent.trim().replace(/\\s+/g, ' ')");
+const census = await evaluate(
+  "([...document.querySelectorAll('.orbitLab__derived')].find((p) => /satellites on screen/.test(p.textContent))?.textContent ?? '').trim().replace(/\\s+/g, ' ')",
+);
 record("the whole shell is on screen", census, (value) => value.startsWith("348 satellites on screen"));
 const stateCounts = await evaluate(
   "Object.fromEntries([...document.querySelectorAll('.orbitLab__legend tbody tr')].map((tr) => [tr.children[1].textContent.trim(), Number(tr.children[2].textContent)]))",
@@ -456,6 +460,90 @@ const orbitBudget = await evaluate(
 record("its eclipse budget is reported for both orbits", orbitBudget, (value) => value.startsWith("Next 2 orbits") && /umbra/.test(value) && /dark in total/.test(value));
 
 await send("Page.captureScreenshot", { format: "png" }).then(({ data }) => writeFileSync(`${OUT}/03-satellite-readout.png`, Buffer.from(data, "base64")));
+
+// ── Two patterns at once, entered by hand, surviving a reload ────────────────
+// The question this answers: can a reader define several orbits without a rebuild,
+// and does the scene come back. Typed into the form rather than picked from the
+// presets, because the presets are the part that *is* in the source.
+// Untrack first. The activation is tag-enabled entries *plus the tracked satellite*
+// (CONTEXT.md), so the one this run tracked earlier stays on the globe however the
+// tags change — and the count below would be 18 rather than 8 + 9.
+await evaluate(`(() => {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('track');
+  window.history.replaceState(null, '', url);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+})()`);
+await until("!new URLSearchParams(window.location.search).get('track')", "the tracked satellite to be let go");
+
+const fields = ".orbitLab__grid input";
+await evaluate(`(() => {
+  const values = { 0: '8', 1: '4', 2: '1', 3: '70', 4: '700', 5: '360' };
+  const inputs = document.querySelectorAll('${fields}');
+  for (const [index, value] of Object.entries(values)) {
+    inputs[index].value = value;
+    inputs[index].dispatchEvent(new Event('input'));
+  }
+})()`);
+await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /^(Show only|Regenerate)$/.test(b.textContent.trim())).click()");
+await until("/walker=70/.test(window.location.search)", "the hand-typed pattern");
+
+await evaluate(`(() => {
+  const values = { 0: '9', 1: '3', 2: '2', 3: '30', 4: '1200', 5: '360' };
+  const inputs = document.querySelectorAll('${fields}');
+  for (const [index, value] of Object.entries(values)) {
+    inputs[index].value = value;
+    inputs[index].dispatchEvent(new Event('input'));
+  }
+})()`);
+await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => b.textContent.trim() === 'Add').click()");
+await until(
+  "Number((([...document.querySelectorAll('.orbitLab__derived')].find((p) => /satellites on screen/.test(p.textContent))?.textContent ?? '').match(/(\\d+) satellites/) ?? [0, 0])[1]) === 17",
+  "both hand-typed patterns",
+  180_000,
+);
+
+const bothPatterns = await evaluate(`(() => {
+  const q = new URLSearchParams(window.location.search);
+  return { walker: q.get('walker'), tags: q.get('tags'), listed: [...document.querySelectorAll('.orbitLab__patternName code')].map((el) => el.textContent) };
+})()`);
+record(
+  "two hand-typed patterns are both in the url and both listed",
+  bothPatterns,
+  (state) =>
+    (state.walker ?? "").split(",").length === 2 &&
+    (state.walker ?? "").includes("70:8/4/1@700") &&
+    (state.walker ?? "").includes("30:9/3/2@1200") &&
+    state.listed.length === 2 &&
+    (state.tags ?? "").includes("Walker 70:8/4/1@700") &&
+    (state.tags ?? "").includes("Walker 30:9/3/2@1200"),
+);
+record(
+  "and both are drawn together",
+  await evaluate("([...document.querySelectorAll('.orbitLab__derived')].find((p) => /satellites on screen/.test(p.textContent))?.textContent ?? '').trim().replace(/\\s+/g, ' ')"),
+  (value) => value.startsWith("17 satellites on screen"),
+);
+
+// The reload. Same url, fresh page: if the patterns only lived in memory this is
+// where the scene would come back empty.
+const sharedUrl = await evaluate("window.location.href");
+await send("Page.navigate", { url: `${BASE}/about:blank`.replace("/about:blank", "/") });
+await sleep(1500);
+await send("Page.navigate", { url: sharedUrl });
+await until("document.querySelectorAll('#toolbarLeft .toolbarButtons button').length >= 7", "the toolbar after the reload");
+await until("(window.cc?.sats?.activeSatellites?.length ?? 0) === 17", "both constellations after the reload", 180_000);
+record(
+  "and the url alone rebuilds both after a reload, with no code change",
+  await evaluate(`(() => {
+    const names = window.cc.sats.activeSatellites.map((sat) => sat.props.name.split(' ')[0]);
+    return { total: names.length, patterns: [...new Set(names)].sort() };
+  })()`),
+  (state) => state.total === 17 && state.patterns.length === 2,
+);
+await evaluate("document.querySelectorAll('#toolbarLeft .toolbarButtons button')[3].click()");
+await until("!!document.querySelector('.orbitLab')", "the panel after the reload");
+await sleep(1500);
+await send("Page.captureScreenshot", { format: "png" }).then(({ data }) => writeFileSync(`${OUT}/04-two-patterns-after-reload.png`, Buffer.from(data, "base64")));
 
 // ── Nothing threw along the way ──────────────────────────────────────────────
 const fatal = consoleErrors.filter((line) => !/favicon|posthog|ion\.cesium|Failed to load resource/i.test(line));

@@ -419,21 +419,30 @@ export function startSceneSync(cc: SceneTarget): void {
   // same url draws the same geometry tomorrow — a Walker pattern is a shape, and
   // an epoch that moved with the clock would make every reload a slightly
   // different one.
+  //
+  // Generated once per distinct pattern for the life of the session, which is what
+  // `generated` is for: the list is rewritten whenever one is added or dropped, and
+  // re-expanding the ones that were already there would rebuild thousands of
+  // element sets to arrive at the records the catalog already holds.
+  const generated = new Set<string>();
   watch(
     () => satStore.walker,
-    (wire) => {
-      if (!wire) {
-        return;
+    (wires) => {
+      for (const wire of wires) {
+        if (!wire || generated.has(wire)) {
+          continue;
+        }
+        const params = decodeWalker(wire);
+        if (!params) {
+          console.warn(`Ignoring unusable Walker pattern "${wire}"`);
+          continue;
+        }
+        generated.add(wire);
+        const records = walkerDeltaRecords(params, new Date(WALKER_EPOCH_ISO), walkerNamePrefix(params), walkerSatnumBase(params));
+        cc.sats.addCustomRecords(records, [walkerTagFor(params)]);
       }
-      const params = decodeWalker(wire);
-      if (!params) {
-        console.warn(`Ignoring unusable Walker pattern "${wire}"`);
-        return;
-      }
-      const records = walkerDeltaRecords(params, new Date(WALKER_EPOCH_ISO), walkerNamePrefix(params), walkerSatnumBase(params));
-      cc.sats.addCustomRecords(records, [walkerTagFor(params)]);
     },
-    { immediate: true },
+    { deep: true, immediate: true },
   );
 
   const desired = (): DesiredScene => ({

@@ -70,14 +70,37 @@
     <p v-if="validation.error" class="orbitLab__error">{{ validation.error }}</p>
 
     <div class="orbitLab__actions">
-      <button type="button" class="orbitLab__button" :disabled="!validation.ok" @click="generate">
-        {{ generatedWire === wire ? "Regenerate" : "Generate" }}
+      <button type="button" class="orbitLab__button" :disabled="!validation.ok" :title="`Draw only ${wire}`" @click="generate">
+        {{ patterns.length === 1 && patterns[0] === wire ? "Regenerate" : "Show only" }}
       </button>
-      <button type="button" class="orbitLab__button" :disabled="!walkerActive" @click="clear">Hide</button>
+      <button type="button" class="orbitLab__button" :disabled="!validation.ok || patterns.includes(wire)" :title="`Draw ${wire} beside the others`" @click="addPattern">
+        Add
+      </button>
+      <button type="button" class="orbitLab__button" :disabled="!walkerActive" @click="clear">Hide all</button>
     </div>
-    <p v-if="generatedWire" class="orbitLab__note">
-      Active: <code>{{ generatedWire }}</code> — shared in the url as <code>?walker={{ generatedWire }}</code>
-    </p>
+
+    <template v-if="patterns.length > 0">
+      <div class="toolbarTitle">Generated patterns</div>
+      <ul class="orbitLab__patterns">
+        <li v-for="pattern in patterns" :key="pattern">
+          <button
+            type="button"
+            class="orbitLab__patternName"
+            :class="{ 'orbitLab__patternName--off': !isShown(pattern) }"
+            :title="isShown(pattern) ? 'Stop drawing this pattern' : 'Draw this pattern'"
+            @click="toggleShown(pattern)"
+          >
+            <code>{{ pattern }}</code>
+          </button>
+          <button type="button" class="orbitLab__patternDrop" title="Load these numbers into the form" @click="loadIntoForm(pattern)">edit</button>
+          <button type="button" class="orbitLab__patternDrop" title="Forget this pattern" @click="dropPattern(pattern)">×</button>
+        </li>
+      </ul>
+      <p class="orbitLab__note">
+        All of them travel in the url, so this link is the whole scene:
+        <code>?walker={{ patterns.join(",") }}</code>
+      </p>
+    </template>
 
     <div class="toolbarTitle">Illumination</div>
     <p class="orbitLab__note">
@@ -161,6 +184,7 @@ import {
 } from "../config/illumination";
 import { illuminationTimeline } from "../modules/util/illumination";
 import {
+  decodeWalker,
   encodeWalker,
   MAX_WALKER_SATELLITES,
   meanMotionRevPerDay,
@@ -215,8 +239,10 @@ const DEMO_MULTIPLIER = 60;
 // pattern when there is one, so a shared link opens with its own numbers in the
 // fields rather than the default preset's.
 const draft = reactive<WalkerDeltaParams>({ ...(WALKER_PRESETS[0] as (typeof WALKER_PRESETS)[number]).params });
-const initial = walker.value ? WALKER_PRESETS.find((preset) => encodeWalker(preset.params) === walker.value)?.params : undefined;
+const initial = decodeWalker(walker.value[0] ?? "");
 if (initial) {
+  // The url's first pattern in the fields, so a shared link opens with its own
+  // numbers rather than the default preset's.
   Object.assign(draft, initial);
 }
 
@@ -226,8 +252,51 @@ const perPlane = computed(() => (validation.value.ok ? satsPerPlane(draft) : 0))
 const meanMotion = computed(() => meanMotionRevPerDay(draft.altitudeKm).toFixed(2));
 const periodMinutes = computed(() => (1440 / meanMotionRevPerDay(draft.altitudeKm)).toFixed(1));
 
-const generatedWire = computed(() => walker.value);
+/** Every pattern generated this session, in the order they were added. */
+const patterns = computed(() => walker.value);
 const walkerActive = computed(() => satStore.enabledTags.some((tag) => isWalkerTag(tag)));
+
+/** Whether this pattern's tag is currently switched on. */
+function isShown(pattern: string): boolean {
+  const params = decodeWalker(pattern);
+  return params !== undefined && satStore.enabledTags.includes(walkerTagFor(params));
+}
+
+function tagsWithout(pattern: string): string[] {
+  const params = decodeWalker(pattern);
+  const tag = params && walkerTagFor(params);
+  return satStore.enabledTags.filter((existing) => existing !== tag);
+}
+
+/** Draw or stop drawing one pattern, leaving the others as they are. */
+function toggleShown(pattern: string): void {
+  const params = decodeWalker(pattern);
+  if (!params) {
+    return;
+  }
+  const kept = tagsWithout(pattern);
+  satStore.setActivation({ enabledTags: isShown(pattern) ? kept : [...kept, walkerTagFor(params)] });
+}
+
+/** Put a pattern's numbers back in the form, so it can be edited into another one. */
+function loadIntoForm(pattern: string): void {
+  const params = decodeWalker(pattern);
+  if (params) {
+    Object.assign(draft, params);
+  }
+}
+
+/**
+ * Forget a pattern: out of the list, out of the url, off the globe.
+ *
+ * Its records stay in the catalog — the catalog has no removal and nothing else
+ * needs one — but with the tag gone and the pattern out of the url, nothing draws
+ * them and a reload does not bring them back.
+ */
+function dropPattern(pattern: string): void {
+  satStore.setActivation({ enabledTags: tagsWithout(pattern) });
+  walker.value = walker.value.filter((existing) => existing !== pattern);
+}
 
 const demoOrbitSeconds = computed(() =>
   Math.round(((1440 / meanMotionRevPerDay((WALKER_PRESETS[0] as (typeof WALKER_PRESETS)[number]).params.altitudeKm)) * 60) / DEMO_MULTIPLIER),
@@ -260,9 +329,24 @@ function generate(): void {
   if (!validation.value.ok) {
     return;
   }
-  walker.value = wire.value;
+  walker.value = [wire.value];
   const kept = satStore.enabledTags.filter((tag) => !isWalkerTag(tag));
   satStore.setActivation({ enabledTags: [...kept, walkerTagFor(draft)] });
+}
+
+/**
+ * The same, keeping what is already there.
+ *
+ * The reason both buttons exist: comparing two shells is the question this panel is
+ * for, and before this the second Generate silently dropped the first pattern out of
+ * the url — so the comparison survived until the page was reloaded and no further.
+ */
+function addPattern(): void {
+  if (!validation.value.ok || walker.value.includes(wire.value)) {
+    return;
+  }
+  walker.value = [...walker.value, wire.value];
+  satStore.setActivation({ enabledTags: [...satStore.enabledTags, walkerTagFor(draft)] });
 }
 
 /**
@@ -277,7 +361,7 @@ function generate(): void {
 function twoOrbitDemo(): void {
   const preset = WALKER_PRESETS[0] as (typeof WALKER_PRESETS)[number];
   Object.assign(draft, preset.params);
-  walker.value = encodeWalker(preset.params);
+  walker.value = [encodeWalker(preset.params)];
   pointColorMode.value = "illumination";
   // Big enough to read a colour off, which 5 px is not — and this scene is twenty
   // satellites, not ten thousand, so nothing is hidden under them.
@@ -514,6 +598,54 @@ watch(panelAxis, () => refresh());
 .orbitLab__radios {
   display: flex;
   flex-direction: column;
+}
+
+.orbitLab__patterns {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.orbitLab__patterns li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The name is the switch: clicking it draws or stops drawing that pattern, which is
+   the same thing its tag's checkbox in the satellite browser does. Dimmed when off,
+   because a pattern that is listed and not drawn has to look different from one that
+   is not listed at all. */
+.orbitLab__patternName {
+  flex: 1;
+  overflow: hidden;
+  padding: 1px 3px;
+  color: inherit;
+  font-size: 11px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.orbitLab__patternName--off {
+  opacity: 0.45;
+}
+
+.orbitLab__patternDrop {
+  padding: 1px 5px;
+  color: inherit;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  cursor: pointer;
 }
 
 .orbitLab__legend {

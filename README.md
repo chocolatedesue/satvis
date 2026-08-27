@@ -213,10 +213,19 @@ prediction, the browser list. It is a _geometry_, not a forecast — no drag ter
 station-keeping, no per-plane epoch. Generating a second pattern replaces the first on
 screen; both stay in the satellite browser, so showing them together is one click.
 
-A pattern travels in the url as one parameter, so a link is a constellation:
+Nothing here needs a rebuild: the numbers are a form, **Show only** draws that pattern alone,
+**Add** draws it beside the ones already there, and the panel lists what is live so each can
+be switched off, edited or forgotten. The only part that lives in the source is the preset
+dropdown (`WALKER_PRESETS`) — a convenience, not a gate.
+
+Patterns travel in the url as a comma-joined list, so a link is a whole scene:
 
 ```
+# one shell
 https://satvis.space/?walker=53:1584/72/17@550&tags=Walker%2053:1584/72/17@550&elements=Point&paint=illumination
+
+# two, side by side
+https://satvis.space/?walker=53:1584/72/17@550,97.6:348/6/58@560&tags=Walker%2053:1584/72/17@550,Walker%2097.6:348/6/58@560&elements=Point
 ```
 
 **Illumination.** Switch the point colouring from `Orbit class` to `Illumination` and every

@@ -32,10 +32,21 @@ every one of those is a way to generate a constellation that parses as something
 else. The OMM arm of `GpRecord` takes the same numbers as named fields and reaches the
 same `json2satrec`.
 
-**One url parameter, in Walker's own notation.** `?walker=53:1584/72/17@550` rather than
-five numeric parameters, because five can arrive inconsistent with each other: a T that
-does not fill P planes is not a constellation, and the url should not be able to say it.
-The string is also what a paper would print, so it needs no legend.
+**One url parameter per pattern, in Walker's own notation, and a _list_ of them.**
+`?walker=53:1584/72/17@550,97.6:348/6/58@560` rather than five numeric parameters per
+constellation, because five can arrive inconsistent with each other: a T that does not fill
+P planes is not a constellation, and the url should not be able to say it. The string is also
+what a paper would print, so it needs no legend. The wire form contains no comma, which is
+what lets the list be comma-joined like every other list in ADR 0001.
+
+A list rather than a single pattern, because the question this panel exists for is
+_comparing_ constellations, and a single-valued parameter quietly made that a session-only
+ability: generating a second pattern dropped the first out of the url, so the comparison
+survived until the page was reloaded and no further. With a list a link carries the whole
+scene, and the panel gets the two buttons the difference deserves — **Show only** replaces,
+**Add** appends. Patterns are expanded once per distinct wire form for the life of the
+session, so re-adding one that was dropped costs a tag write rather than thousands of element
+sets.
 
 **A fixed epoch.** `WALKER_EPOCH_ISO`, not "now". A Walker pattern is a shape; an epoch
 that moved with the clock would make every reload a slightly different one, because the

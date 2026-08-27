@@ -780,7 +780,7 @@ because Cesium tonemaps: a `#f0e442` line arrives at about `(200, 200, 40)`, the
 right colour at 84% intensity. Only the region right of the panel and above the clock
 deck is sampled, since the legend swatches carry these same five colours.
 
-**Result, 2026-08-27 — 27/27.**
+**Result, 2026-08-27 — 30/30.**
 
 | Check                                            | Returned                                                                                                                                 |
 | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -794,6 +794,8 @@ deck is sampled, since the legend swatches carry these same five colours.
 | every arc in the batch, a primitive in the scene | `{ batch: 20, scenePrimitives: 1 }`                                                                                                      |
 | every state drawn on the globe                   | umbra 13866 px, sunlit_on 7380 px, sunlit_back 989, sunlit_edge 748, penumbra 18                                                         |
 | the strip covers two orbits                      | `Next 2 orbits (191.6 min): … 39.9% back-facing · 39.9% dark in total`                                                                   |
+| two patterns typed into the form, both drawn     | `walker=70:8/4/1@700,30:9/3/2@1200`, both tags on, both listed, `17 satellites on screen`                                                |
+| the same url after a reload                      | 17 satellites again, from two name prefixes — the scene came back with no code change                                                    |
 
 **Two things worth knowing from writing this.**
 
@@ -818,6 +820,11 @@ it is drawn over the night side, where a dark line on a dark globe is the hardes
 part of the picture to see. The isolated frame above (globe hidden) is where the
 eclipsed arc reads most clearly; on the globe the eye finds the sunlit and back-sun
 arcs first.
+
+**Untrack before counting.** The activation is tag-enabled entries _plus the tracked
+satellite_ (CONTEXT.md), so a satellite tracked earlier in the run stays on the globe
+however the tags change — which is why the two-pattern count read 18 rather than 8 + 9
+until the check let it go first.
 
 **What this cannot answer.** Throughput. SwiftShader renders a 1584-point scene at
 a few frames a second, and satellites are built against a per-frame budget, so the

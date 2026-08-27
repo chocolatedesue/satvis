@@ -203,6 +203,8 @@ discussion; sharpen them here when they drift.
   geometry, never a forecast: no drag term, no per-plane epoch. Its tag is its own
   — `Walker <pattern>`, one per pattern, because the tag is the only switch a
   satellite has and a shared one left a superseded pattern still on screen
+  Several can be live at once: the url carries a comma-joined _list_ of patterns, so
+  a link is a whole scene of constellations rather than one
   (`docs/adr/0007-orbit-lab.md`).
 - **ν (nu)**: the fraction of the solar disc _not_ covered by the Earth, as seen
   from one satellite. 0 is umbra, 1 is full sun, between is penumbra. Eclipse as a

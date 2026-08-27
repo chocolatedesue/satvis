@@ -43,15 +43,17 @@ export const useSatStore = defineStore(
     // invariant cluster — each is meaningful on its own, and a paint mode with no
     // constellation to paint is a perfectly good state.
     //
-    // `walker` is a whole pattern in one parameter, in Walker's own `i:T/P/F@alt`
-    // notation (see modules/util/walkerDelta.ts). One string rather than five
-    // numbers because five can arrive inconsistent with each other — a T that does
-    // not fill P planes is not a constellation, and the url should not be able to
-    // say it. Empty means no generated constellation.
+    // `walker` is a *list* of whole patterns, each in Walker's own `i:T/P/F@alt`
+    // notation (see modules/util/walkerDelta.ts). One string per pattern rather
+    // than five numbers because five can arrive inconsistent with each other — a T
+    // that does not fill P planes is not a constellation, and the url should not be
+    // able to say it. A list rather than one, so a link can carry several
+    // constellations at once and generating a second does not cost the first; the
+    // wire form contains no comma, which is what lets the list be comma-joined.
     const pointColorMode = ref<PointColorMode>(DEFAULT_POINT_PAINT.mode);
     const pointSize = ref<PointSize>(DEFAULT_POINT_PAINT.size);
     const panelAxis = ref<PanelAxis>(DEFAULT_POINT_PAINT.panelAxis);
-    const walker = ref("");
+    const walker = ref<string[]>([]);
 
     // Activation is one invariant cluster — see CONTEXT.md. Held privately and
     // exposed read-only so every writer goes through setActivation and the
@@ -188,7 +190,7 @@ export const useSatStore = defineStore(
         { name: "pointColorMode", url: "paint", kind: enumString(POINT_COLOR_MODES) },
         { name: "pointSize", url: "psize", kind: enumString(POINT_SIZES) },
         { name: "panelAxis", url: "panel", kind: enumString(PANEL_AXES) },
-        { name: "walker", url: "walker", kind: plainString() },
+        { name: "walker", url: "walker", kind: stringList() },
       ],
       // Guarded keys are read-only, so the url goes through the same actions as
       // every other writer; the triple is applied in one call to keep it
