@@ -152,6 +152,11 @@ contributes two independent sections: `groups` (what is served, as which unit) a
 `data/custom/*/satvis.yaml` (inlining `extraRecordsFile` element sets) into the
 gitignored `worker/src/config/satvis.generated.json` used by the worker.
 
+A plugin may also ship files: `pnpm update-custom-data` runs each
+`data/custom/<plugin>/sync.sh` and collects the output into `data/custom/dist/`,
+which the build copies into `data/`. The privacy policy behind the credits' link is
+one of them.
+
 ### Worker-less deployments
 
 For plain static hosting (or forks without a worker), run
