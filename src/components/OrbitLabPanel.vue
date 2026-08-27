@@ -128,6 +128,18 @@
     </p>
     <table class="orbitLab__facts">
       <tbody>
+        <tr title="The best |β| any plane at this inclination can reach, at the best moment of the year, against what the shadow demands here">
+          <td class="orbitLab__factName">Reachable β vs demanded</td>
+          <td class="orbitLab__factValue">{{ reachableVsDemanded }}</td>
+        </tr>
+        <tr title="Share of this shell's planes that clear the Earth's shadow entirely, averaged over a year. Depends on altitude and inclination alone.">
+          <td class="orbitLab__factName">Planes never eclipsed</td>
+          <td class="orbitLab__factValue">{{ eclipseFreePlanes }}</td>
+        </tr>
+        <tr title="How much altitude buys the same β margin as one degree of inclination, at this altitude">
+          <td class="orbitLab__factName">1° inclination is worth</td>
+          <td class="orbitLab__factValue">{{ exchangeRate }}</td>
+        </tr>
         <tr title='How fast the J₂ bulge turns this orbit&apos;s node — the rate by which "fixed" is only nearly true'>
           <td class="orbitLab__factName">Node drift, this orbit</td>
           <td class="orbitLab__factValue">{{ nodeDrift }}</td>
@@ -150,6 +162,11 @@
         </tr>
       </tbody>
     </table>
+    <p class="orbitLab__note">
+      The three knobs, weakest last: <strong>where the node sits relative to the sun</strong> picks β within the range the inclination allows, and is free —
+      <strong>inclination</strong> raises that ceiling one-for-one — <strong>altitude</strong> only lowers what the shadow demands, at about 0.02°/km. Full sweep in
+      <code>docs/starlink-energy-report.md</code>.
+    </p>
     <p class="orbitLab__note">
       Fixed, but not exactly: the Earth's J₂ bulge turns every orbit's node a few degrees a day — −5°/day for the ISS, and precisely +0.9856°/day for a sun-synchronous orbit, which
       is the whole trick those orbits are built on.
@@ -243,6 +260,7 @@ import {
 } from "../config/illumination";
 import { CAMERA_MODES } from "../config/viewModes";
 import { illuminationTimeline } from "../modules/util/illumination";
+import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, maxReachableBetaDeg } from "../modules/util/orbitDesign";
 import {
   alwaysSunlitAltitudeBandKm,
   alwaysSunlitVerdict,
@@ -385,6 +403,20 @@ const demoOrbitSeconds = computed(() =>
 // Everything the Sun-synchronous block reports, recomputed as the altitude field is
 // typed. Cheap: an arcsin and an inverse cosine.
 const ssoFacts = computed(() => alwaysSunlitVerdict(draft.altitudeKm));
+// The design numbers, recomputed as the form is typed — this is the "can I tune it to
+// suit me" question, and the answer is two closed-form angles and a comparison.
+const reachableVsDemanded = computed(() => {
+  const reachable = maxReachableBetaDeg(draft.inclinationDeg);
+  // ssoFacts carries the margin; the geometric demand is the figure to compare against.
+  const demanded = ssoFacts.value.requiredBetaDeg - 1;
+  return `${reachable.toFixed(1)}° vs ${demanded.toFixed(1)}°${reachable >= demanded ? " ✓" : ""}`;
+});
+const eclipseFreePlanes = computed(() => {
+  const fraction = annualEclipseFreePlaneFraction(draft.altitudeKm, draft.inclinationDeg);
+  return fraction === 0 ? "none, ever" : `${(fraction * 100).toFixed(1)}% of the year`;
+});
+const exchangeRate = computed(() => `${betaExchangeRateKmPerDegree(draft.altitudeKm).toFixed(0)} km of altitude`);
+
 const nodeDrift = computed(() => {
   const rate = nodalPrecessionDegPerDay(draft.altitudeKm, draft.inclinationDeg);
   return Number.isFinite(rate) ? `${rate >= 0 ? "+" : ""}${rate.toFixed(3)}°/day` : "—";

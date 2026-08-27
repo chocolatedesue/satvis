@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 import type { PanelAxis } from "../../config/illumination";
 import { fleetSeries, fleetSnapshot, orbitEnergyProfile, percentile, secondsUntilDark, type OrbitEnergyProfile } from "./energyStatistics";
 import { createSatrec } from "./gp";
+import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, designPoint, minInclinationForEclipseFreeDeg } from "./orbitDesign";
 import { betaCycleDays, dawnDuskBetaRangeDeg, eclipseFreeBetaDeg, nodalPrecessionDegPerDay, SUN_DEG_PER_DAY } from "./sunSynchronous";
 import { WALKER_EPOCH_ISO, walkerDeltaRecords, type WalkerDeltaParams } from "./walkerDelta";
 
@@ -265,6 +266,97 @@ describe.skipIf(!ENABLED)("the Starlink energy report", () => {
     lines.push(`- p10 **${seconds(percentile(horizons, 0.1))}**, p50 **${seconds(percentile(horizons, 0.5))}**, p90 **${seconds(percentile(horizons, 0.9))}**`);
     lines.push(`- longest **${seconds(Math.max(...horizons))}**, shortest **${seconds(Math.min(...horizons))}**`);
     lines.push("");
+    // ── The design sweep ──────────────────────────────────────────────────────
+    const ALTITUDES = [400, 550, 700, 850, 1000, 1200, 1500, 2000];
+    const INCLINATIONS = [30, 45, 53, 60, 70, 80, 90, 97.6];
+
+    lines.push("## Which parameters move this, and by how much");
+    lines.push("");
+    lines.push("Everything above follows from one angle: **β**, the sun's elevation above the orbit plane.");
+    lines.push("An orbit is eclipse-free exactly when |β| ≥ arcsin(Rₑ/(Rₑ+h)), and eclipsed for about a");
+    lines.push("third of every revolution when β is small. So there are only three knobs, and they are not");
+    lines.push("equally powerful:");
+    lines.push("");
+    lines.push("| Knob | What it does to β | Worth |");
+    lines.push("| --- | --- | --- |");
+    lines.push(
+      "| **Node vs sun** (`raanOffsetDeg`) | Chooses β within the range the inclination allows — 90° from the sun is the maximum, 0° the minimum | **Free.** Same launch, same altitude, same inclination. The strongest lever per unit cost by a wide margin |",
+    );
+    lines.push(
+      `| **Inclination** | Raises the *ceiling* on β one-for-one, up to 90° | 1° of inclination ≈ **${betaExchangeRateKmPerDegree(550).toFixed(0)} km** of altitude at 550 km, ${betaExchangeRateKmPerDegree(1200).toFixed(0)} km at 1200 km |`,
+    );
+    lines.push(
+      "| **Altitude** | Lowers the β the shadow *demands*, by shrinking the Earth's angular size | The weak knob: ~0.02°/km at 550 km. It also steepens the sun-synchronous inclination, which works against you |",
+    );
+    lines.push("");
+    lines.push("The node angle being free is the practical headline. A plane already in orbit at 53° / 550 km");
+    lines.push("is eclipsed a third of every orbit or not at all depending on nothing but where its node");
+    lines.push("sits relative to the sun — and for a non-sun-synchronous shell that angle drifts through the");
+    lines.push("whole range anyway, which is why the shell's planes disagree with each other at every");
+    lines.push("instant.");
+    lines.push("");
+    lines.push("### The floor: the lowest inclination that can ever escape the shadow");
+    lines.push("");
+    lines.push("| Altitude | β demanded | Lowest inclination that can ever reach it |");
+    lines.push("| --- | --- | --- |");
+    for (const altitude of ALTITUDES) {
+      const minimum = minInclinationForEclipseFreeDeg(altitude);
+      lines.push(`| ${altitude} km | ${eclipseFreeBetaDeg(altitude).toFixed(1)}° | ${minimum === undefined ? "unreachable" : `${minimum.toFixed(1)}°`} |`);
+    }
+    lines.push("");
+    lines.push("Below that inclination no node angle and no season helps: the orbit is eclipsed every");
+    lines.push("revolution for its whole life. A 30° shell is in that category at every altitude here.");
+    lines.push("");
+    lines.push("### The sweep: share of a shell's planes that are eclipse-free, annual average");
+    lines.push("");
+    lines.push('Planes of a Walker shell are spread evenly over 360° of right ascension, so "what fraction');
+    lines.push('of node angles clears the shadow" and "what fraction of my planes is in sunlight" are the');
+    lines.push("same number — and it depends on nothing but altitude, inclination and the date. This is the");
+    lines.push("table to design against.");
+    lines.push("");
+    lines.push(`| Altitude \\ inclination | ${INCLINATIONS.map((value) => `${value}°`).join(" | ")} |`);
+    lines.push(`| --- | ${INCLINATIONS.map(() => "---").join(" | ")} |`);
+    for (const altitude of ALTITUDES) {
+      const cells = INCLINATIONS.map((inclination) => {
+        const fraction = annualEclipseFreePlaneFraction(altitude, inclination);
+        return fraction === 0 ? "—" : percent(fraction);
+      });
+      lines.push(`| **${altitude} km** | ${cells.join(" | ")} |`);
+    }
+    lines.push("");
+    // Quoted from the table rather than typed: the first draft of this paragraph said 7%,
+    // "four times" and "half the shell", none of which the sweep actually produces.
+    const starlinkCase = annualEclipseFreePlaneFraction(550, 53);
+    const steeper = annualEclipseFreePlaneFraction(550, 70);
+    const higherAndSteeper = annualEclipseFreePlaneFraction(1200, 70);
+    lines.push(`Read it as: at 550 km and 53° — the Starlink case — **${percent(starlinkCase)}** of planes are eclipse-free`);
+    lines.push("averaged over the year, and none at all at the equinoxes. Holding the altitude and taking the");
+    lines.push(`inclination to 70° gives **${percent(steeper)}**, a factor of ${(steeper / starlinkCase).toFixed(1)}. Taking that 70° shell up to 1200 km`);
+    lines.push(`gives **${percent(higherAndSteeper)}** — so 650 km of altitude is worth about as much as the 17° of`);
+    lines.push("inclination was, which is the exchange rate above restated as a design choice.");
+    lines.push("");
+    lines.push("Two shapes in the table worth noticing. **The gain from inclination saturates near polar**:");
+    lines.push("80° to 90° adds little, and 97.6° is slightly *worse* than 90° because a retrograde plane");
+    lines.push("reaches its ceiling on fewer days of the year. And **nothing below ~45° is ever eclipse-free");
+    lines.push("at any LEO altitude** — the 30° column is empty until 2000 km.");
+    lines.push("");
+    lines.push("### What to do with it, for a power-aware router");
+    lines.push("");
+    lines.push("- **If the constellation is already designed**, the only lever left is *knowing which planes");
+    lines.push("  are currently in their sunlit season and steering work to them.* The per-plane spread is");
+    lines.push("  large (0%–37% of the orbit in shadow at one instant) and the fleet aggregate is flat, so");
+    lines.push("  all of the available win is in plane-level placement, none in fleet-level timing.");
+    lines.push("- **If the inclination is still open**, it is the knob to spend on: 1° buys as much β as");
+    lines.push(`  ${betaExchangeRateKmPerDegree(550).toFixed(0)} km of altitude, and above 66.6° the ceiling reaches 90° so a plane can be`);
+    lines.push("  perfectly face-on to the sun once a year.");
+    lines.push("- **If a subset of the fleet can be sun-synchronous**, that subset stops rotating: put it at");
+    lines.push("  a dawn–dusk node and its planes hold their energy budget indefinitely, which turns plane");
+    lines.push("  placement from a scheduling problem into a static assignment. In the 1610–3080 km band it");
+    lines.push("  is never eclipsed at all.");
+    lines.push("- **Do not spend altitude on this alone.** It is the weakest of the three knobs per");
+    lines.push("  kilometre, and it costs latency, launch mass and radiation dose that this model knows");
+    lines.push("  nothing about.");
+    lines.push("");
     lines.push("---");
     lines.push("");
     lines.push(`Generated ${new Date().toISOString()} · panel model \`${AXIS}\` · ${fleet.length} satellites.`);
@@ -294,6 +386,16 @@ describe.skipIf(!ENABLED)("the Starlink energy report", () => {
     }
     // And that the 53° shells are not frozen, which is the contrast the text draws.
     expect(betaCycleDays(550, 53)).toBeLessThan(120);
+
+    // The sweep's own claims, checked: monotone in both knobs, and the two numbers the
+    // prose quotes.
+    expect(annualEclipseFreePlaneFraction(550, 30)).toBe(0);
+    expect(annualEclipseFreePlaneFraction(550, 70)).toBeGreaterThan(annualEclipseFreePlaneFraction(550, 53));
+    expect(annualEclipseFreePlaneFraction(1200, 70)).toBeGreaterThan(annualEclipseFreePlaneFraction(550, 70));
+    expect(designPoint(550, 53, 0).planeFractionNow).toBe(0);
+    // The two shapes the prose points at.
+    expect(annualEclipseFreePlaneFraction(700, 97.6)).toBeLessThan(annualEclipseFreePlaneFraction(700, 90));
+    expect(annualEclipseFreePlaneFraction(1500, 30)).toBe(0);
 
     // And the finding: at least one shell/date combination has a plane with no eclipse
     // at all. If this ever stops holding, the prose above is wrong.
