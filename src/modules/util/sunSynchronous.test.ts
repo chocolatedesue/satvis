@@ -10,6 +10,7 @@ import {
   dawnDuskBetaDeg,
   dawnDuskBetaRangeDeg,
   eclipseFreeBetaDeg,
+  betaCycleDays,
   nodalPrecessionDegPerDay,
   representativeAlwaysSunlitAltitudeKm,
   ssoRaanDeg,
@@ -110,6 +111,21 @@ describe("nodalPrecessionDegPerDay", () => {
   it("declines inputs it cannot mean", () => {
     expect(nodalPrecessionDegPerDay(-10, 51.6)).toBeNaN();
     expect(nodalPrecessionDegPerDay(700, Number.NaN)).toBeNaN();
+  });
+});
+
+describe("betaCycleDays", () => {
+  it("puts a 53° / 550 km Starlink plane on a roughly two-month cycle", () => {
+    expect(betaCycleDays(550, 53)).toBeGreaterThan(50);
+    expect(betaCycleDays(550, 53)).toBeLessThan(70);
+  });
+
+  it("is infinite for a sun-synchronous orbit, which never comes back round", () => {
+    expect(betaCycleDays(700, sunSyncInclinationDeg(700)!)).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it("is a year for a polar orbit, where only the sun moves", () => {
+    expect(betaCycleDays(700, 90)).toBeCloseTo(365.24, 0);
   });
 });
 

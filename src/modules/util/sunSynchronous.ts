@@ -77,6 +77,28 @@ export function nodalPrecessionDegPerDay(altitudeKm: number, inclinationDeg: num
 }
 
 /**
+ * How long a plane takes to return to the same angle to the sun, in days.
+ *
+ * The node regresses at `Ω̇` and the sun advances at 0.9856°/day, so what matters is
+ * the *relative* rate: `360 / |Ω̇ − 0.9856|`. For a 53° / 550 km Starlink plane that is
+ * about 60 days, and it is the period on which that plane's whole energy budget swings
+ * — from a third of every orbit in shadow to, at the peak, none at all.
+ *
+ * Infinite for a sun-synchronous orbit, where the two rates are equal by construction —
+ * the plane never comes back round because it never left. Tested against a threshold
+ * rather than against zero, because `sunSyncInclinationDeg` returns a float and the
+ * difference lands at 1e-16 rather than at 0: without it a sun-synchronous orbit reports
+ * a cycle of 3×10¹⁸ days, which is arithmetically true and useless to a reader.
+ * 1e-6 °/day is a cycle of a million years.
+ */
+const SYNCHRONOUS_RATE_TOLERANCE_DEG_PER_DAY = 1e-6;
+
+export function betaCycleDays(altitudeKm: number, inclinationDeg: number): number {
+  const relative = Math.abs(nodalPrecessionDegPerDay(altitudeKm, inclinationDeg) - SUN_DEG_PER_DAY);
+  return relative < SYNCHRONOUS_RATE_TOLERANCE_DEG_PER_DAY ? Number.POSITIVE_INFINITY : 360 / relative;
+}
+
+/**
  * The inclination that makes a circular orbit at this altitude sun-synchronous.
  *
  * Inverts the secular nodal precession

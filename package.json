@@ -26,7 +26,8 @@
     "update-starmap": "bash scripts/generate.sh starmap",
     "update-custom-data": "bash data/custom/update-custom-data.sh",
     "deploy": "pnpm build && pnpm --filter satvis-worker deploy",
-    "deploy:preview": "pnpm build && pnpm --filter satvis-worker deploy:preview"
+    "deploy:preview": "pnpm build && pnpm --filter satvis-worker deploy:preview",
+    "energy-report": "ENERGY_REPORT=1 vitest run src/modules/util/energyStatistics.report.test.ts"
   },
   "dependencies": {
     "@cesium/engine": "^26.2.0",
