@@ -27,6 +27,12 @@
       so drawing both would z-fight.
     </p>
 
+    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="sunSyncDemo">Always-sunlit SSO demo</button>
+    <p class="orbitLab__note">
+      Two sun-synchronous orbits at <strong>{{ alwaysSunlitAltitude }} km</strong>, differing only in how their plane faces the sun: the dawn–dusk one never enters the Earth's
+      shadow, the noon–midnight one is eclipsed for a third of every orbit. Same altitude, same inclination — a quarter turn of the plane apart.
+    </p>
+
     <label class="orbitLab__field">
       <span>Preset</span>
       <select :value="presetIndex" @change="applyPreset(Number(($event.target as HTMLSelectElement).value))">
@@ -101,6 +107,38 @@
         <code>?walker={{ patterns.join(",") }}</code>
       </p>
     </template>
+
+    <div class="toolbarTitle">Sun-synchronous</div>
+    <p class="orbitLab__note">
+      Computed from the altitude above, by inverting the J₂ nodal precession Ω̇ = −(3/2)·J₂·n·(Rₑ/a)²·cos i for the sun's own 0.9856°/day. Secular two-body, in the same WGS-72
+      system the element sets use — within about 0.1° of the published inclinations.
+    </p>
+    <table class="orbitLab__facts">
+      <tbody>
+        <tr title="The inclination that makes this altitude sun-synchronous">
+          <td class="orbitLab__factName">Sun-sync inclination</td>
+          <td class="orbitLab__factValue">{{ ssoInclination }}</td>
+        </tr>
+        <tr title="Sun elevation above the orbit plane at the worst moment of the year, for a dawn–dusk plane">
+          <td class="orbitLab__factName">Worst β (dawn–dusk)</td>
+          <td class="orbitLab__factValue">{{ ssoWorstBeta }}</td>
+        </tr>
+        <tr title="What |β| must clear for the orbit to miss the Earth's shadow: arcsin(Rₑ/(Rₑ+h)), plus a degree for the penumbra">
+          <td class="orbitLab__factName">β needed to stay lit</td>
+          <td class="orbitLab__factValue">{{ ssoRequiredBeta }}</td>
+        </tr>
+        <tr :title="ssoVerdictNote">
+          <td class="orbitLab__factName">Always sunlit?</td>
+          <td class="orbitLab__factValue">{{ ssoVerdict }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="orbitLab__note">
+      Always-sunlit dawn–dusk orbits exist only between <strong>{{ sunlitBand }}</strong> — a band, not a floor: the shadow shrinks with altitude, but sun-synchrony demands an ever
+      steeper retrograde inclination, which caps β. Above the band the second effect wins. Every flown dawn–dusk mission (Sentinel-1 at 693 km, TerraSAR-X at 514 km) sits below it
+      and is eclipse-free for part of the year only.
+    </p>
+    <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!validation.ok" @click="useSunSyncInclination">Use this inclination for the form</button>
 
     <div class="toolbarTitle">Illumination</div>
     <p class="orbitLab__note">
@@ -183,6 +221,7 @@ import {
   type PanelAxis,
 } from "../config/illumination";
 import { illuminationTimeline } from "../modules/util/illumination";
+import { alwaysSunlitAltitudeBandKm, alwaysSunlitVerdict, representativeAlwaysSunlitAltitudeKm, sunSyncWalkerParams } from "../modules/util/sunSynchronous";
 import {
   decodeWalker,
   encodeWalker,
@@ -192,6 +231,7 @@ import {
   isWalkerTag,
   validateWalkerDelta,
   WALKER_PRESETS,
+  WALKER_EPOCH_ISO,
   walkerTagFor,
   type WalkerDeltaParams,
 } from "../modules/util/walkerDelta";
@@ -302,6 +342,27 @@ const demoOrbitSeconds = computed(() =>
   Math.round(((1440 / meanMotionRevPerDay((WALKER_PRESETS[0] as (typeof WALKER_PRESETS)[number]).params.altitudeKm)) * 60) / DEMO_MULTIPLIER),
 );
 
+// Everything the Sun-synchronous block reports, recomputed as the altitude field is
+// typed. Cheap: an arcsin and an inverse cosine.
+const ssoFacts = computed(() => alwaysSunlitVerdict(draft.altitudeKm));
+const ssoInclination = computed(() => (ssoFacts.value.inclinationDeg === undefined ? "none" : `${ssoFacts.value.inclinationDeg.toFixed(2)}°`));
+const ssoWorstBeta = computed(() => (Number.isFinite(ssoFacts.value.worstBetaDeg) ? `${ssoFacts.value.worstBetaDeg.toFixed(1)}°` : "—"));
+const ssoRequiredBeta = computed(() => `${ssoFacts.value.requiredBetaDeg.toFixed(1)}°`);
+const ssoVerdict = computed(() => (ssoFacts.value.alwaysSunlit ? "yes" : "no"));
+const ssoVerdictNote = computed(() =>
+  ssoFacts.value.inclinationDeg === undefined
+    ? "No inclination makes this altitude sun-synchronous."
+    : ssoFacts.value.alwaysSunlit
+      ? "A dawn–dusk plane at this altitude clears the shadow all year."
+      : "A dawn–dusk plane at this altitude is eclipsed for part of the year.",
+);
+
+// The band and the altitude the demo uses. Constant for the session, so computed once
+// rather than per keystroke.
+const band = alwaysSunlitAltitudeBandKm();
+const sunlitBand = band ? `${band.lowestKm} and ${band.highestKm} km` : "no altitude";
+const alwaysSunlitAltitude = representativeAlwaysSunlitAltitudeKm() ?? 1760;
+
 const presetIndex = computed(() => WALKER_PRESETS.findIndex((preset) => encodeWalker(preset.params) === wire.value));
 const presetNote = computed(() => WALKER_PRESETS[presetIndex.value]?.note ?? "");
 
@@ -374,6 +435,52 @@ function twoOrbitDemo(): void {
   satStore.setActivation({ enabledTags: [...kept, walkerTagFor(preset.params)] });
   // Last, and the part that makes the rest worth looking at: without motion this is
   // a still picture of a state nobody watched change.
+  clock.setMultiplier(DEMO_MULTIPLIER);
+  if (!clock.playing.value) {
+    clock.togglePlaying();
+  }
+}
+
+/** Put the computed sun-synchronous inclination into the form, leaving the rest alone. */
+function useSunSyncInclination(): void {
+  const inclinationDeg = ssoFacts.value.inclinationDeg;
+  if (inclinationDeg !== undefined) {
+    draft.inclinationDeg = Number(inclinationDeg.toFixed(3));
+  }
+}
+
+/**
+ * The always-sunlit demo: the same orbit twice, a quarter turn of the plane apart.
+ *
+ * Two patterns rather than one, because "never in shadow" is only meaningful against
+ * something that is. Same altitude and same inclination in both, so the only thing
+ * the difference can be attributed to is where the plane faces — which is the whole
+ * content of the result.
+ *
+ * The node is placed relative to where the sun actually is at the pattern epoch, and
+ * sun-synchrony is what keeps it there afterwards.
+ */
+function sunSyncDemo(): void {
+  const epoch = new Date(WALKER_EPOCH_ISO);
+  const dawnDusk = sunSyncWalkerParams({ altitudeKm: alwaysSunlitAltitude, total: 12, plane: "dawn-dusk" }, epoch);
+  const noonMidnight = sunSyncWalkerParams({ altitudeKm: alwaysSunlitAltitude, total: 12, plane: "noon-midnight" }, epoch);
+  if (!dawnDusk || !noonMidnight) {
+    return;
+  }
+  Object.assign(draft, dawnDusk);
+  walker.value = [encodeWalker(dawnDusk), encodeWalker(noonMidnight)];
+  pointColorMode.value = "illumination";
+  pointSize.value = "large";
+  // The orbit normal, not the zenith: a dawn–dusk plane sits nearly face-on to the
+  // sun, so a zenith panel is edge-on all the way round and every satellite reads
+  // `sunlit_edge` — true, and it buries the eclipse story this demo is about. The
+  // orbit normal is also the axis a real dawn–dusk spacecraft points its panel along.
+  panelAxis.value = "normal";
+  const components = new Set([...satStore.enabledComponents, "Point", "Illumination arc"]);
+  components.delete("Label");
+  satStore.enabledComponents = [...components];
+  const kept = satStore.enabledTags.filter((tag) => !isWalkerTag(tag));
+  satStore.setActivation({ enabledTags: [...kept, walkerTagFor(dawnDusk), walkerTagFor(noonMidnight)] });
   clock.setMultiplier(DEMO_MULTIPLIER);
   if (!clock.playing.value) {
     clock.togglePlaying();
@@ -646,6 +753,26 @@ watch(panelAxis, () => refresh());
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 3px;
   cursor: pointer;
+}
+
+/* The sun-synchronous readout: two columns of computed numbers. Its own class rather
+   than the legend's, because a legend maps a colour to a name and this maps a name to
+   a value — and because sharing the class made every query for "the legend" match
+   both. */
+.orbitLab__facts {
+  width: 100%;
+  font-size: 11px;
+  border-collapse: collapse;
+}
+
+.orbitLab__factName {
+  width: 100%;
+}
+
+.orbitLab__factValue {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .orbitLab__legend {

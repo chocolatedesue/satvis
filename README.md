@@ -228,6 +228,21 @@ https://satvis.space/?walker=53:1584/72/17@550&tags=Walker%2053:1584/72/17@550&e
 https://satvis.space/?walker=53:1584/72/17@550,97.6:348/6/58@560&tags=Walker%2053:1584/72/17@550,Walker%2097.6:348/6/58@560&elements=Point
 ```
 
+**Sun-synchronous orbits, and永久 sunlight.** The panel computes the sun-synchronous
+inclination for whatever altitude is in the form — by inverting the J₂ nodal precession,
+landing within ~0.1° of the published figures for Sentinel-1/-2 and TerraSAR-X — and says
+whether a dawn–dusk plane at that altitude ever enters the Earth's shadow. It reports both
+sides of the comparison: the worst β of the year against the β the shadow demands.
+
+The answer is a **band, not a floor**: always-sunlit dawn–dusk orbits exist between
+**1610 and 3080 km**. Below it the Earth's shadow is still too big; above it sun-synchrony
+demands so steep a retrograde inclination that β collapses. No flown dawn–dusk mission is
+inside the band — Sentinel-1 at 693 km is eclipse-free for part of the year, not all of it.
+
+**"Always-sunlit SSO demo"** puts that on screen as two orbits at the same altitude and the
+same inclination, differing only in how the plane faces the sun: the dawn–dusk one is 0%
+eclipsed at both solstices, its noon–midnight twin 28.7%.
+
 **Illumination.** Switch the point colouring from `Orbit class` to `Illumination` and every
 satellite is drawn by what the sun is doing to it, over two quantities:
 

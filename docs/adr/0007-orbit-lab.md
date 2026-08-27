@@ -173,6 +173,48 @@ of simulation time. At the default 1× that is sixty reads collapsed into one. A
 buys nothing, because there every frame _is_ a new second — the honest cost of colouring
 by a physical quantity rather than by a standing fact.
 
+### Sun-synchronous orbits are solved for, not looked up
+
+"Which orbit is never in shadow" is a question with a computed answer, so the panel
+computes it rather than shipping a table of altitudes.
+
+Two conditions, and the interesting part is that they pull against each other:
+
+- **Sun-synchronous** — invert the secular nodal precession
+  `Ω̇ = −(3/2) J₂ n (Rₑ/a)² cos i / (1−e²)²` for `i` at the sun's own 0.9856°/day.
+  Closed form, always retrograde, and it lands within about 0.1° of the published
+  inclinations for Sentinel-1, Sentinel-2 and TerraSAR-X — which is the check that
+  says the arithmetic is right rather than merely self-consistent.
+- **Never eclipsed** — the sun has to stay more than `arcsin(Rₑ/(Rₑ+h))` out of the
+  orbit plane. For a dawn–dusk plane β is `sin(i + δ☉)`, so the worst moment of the
+  year is a solstice and the condition is `180° − i − 23.44° ≥ arcsin(Rₑ/(Rₑ+h))`.
+
+Both sides fall with altitude, so **the answer is a band, not a floor**: 1610 to
+3080 km. Below it the shadow is still too big; above it sun-synchrony has demanded so
+steep an inclination that β collapses — at 5000 km it wants i ≈ 139°, leaving β under
+20° against a required 35°. That is worth saying out loud because it is not where
+intuition puts it, and because **no flown dawn–dusk mission is inside the band**:
+Sentinel-1 at 693 km and TerraSAR-X at 514 km are eclipse-free for part of the year,
+not all of it.
+
+The demo is therefore **two** patterns, not one: the same altitude and the same
+inclination, one dawn–dusk and one noon–midnight. "Never in shadow" means nothing
+against no comparison, and putting the only difference in `raanOffsetDeg` is what
+makes the result attributable to the plane's orientation rather than to anything else.
+Measured in a browser: 0% eclipsed at both solstices against 28.7%.
+
+It also sets the panel model to **orbit normal**, which is the one place the demo
+overrides a default. A dawn–dusk plane sits nearly face-on to the sun, so a zenith
+panel is edge-on the whole way round and every satellite reads `sunlit_edge` — true,
+and it buries the eclipse result the demo is about. The orbit normal is also the axis
+a real dawn–dusk spacecraft points its panel along.
+
+**A margin of 1°** sits on the eclipse condition (`ALWAYS_SUNLIT_MARGIN_DEG`). The
+condition is umbral and the viewer's own ν is a conical model with a penumbra, and the
+secular inclination differs from SGP4's recovered one by tenths of a degree. Without
+the margin the band comes out ~20 km too wide at the bottom and the demo shows the one
+thing it claims cannot happen.
+
 ## Alternatives
 
 **Generate TLE text and feed it through the existing text parser.** Rejected: it makes

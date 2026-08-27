@@ -780,7 +780,7 @@ because Cesium tonemaps: a `#f0e442` line arrives at about `(200, 200, 40)`, the
 right colour at 84% intensity. Only the region right of the panel and above the clock
 deck is sampled, since the legend swatches carry these same five colours.
 
-**Result, 2026-08-27 — 30/30.**
+**Result, 2026-08-27 — 35/35.**
 
 | Check                                            | Returned                                                                                                                                 |
 | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -796,6 +796,10 @@ deck is sampled, since the legend swatches carry these same five colours.
 | the strip covers two orbits                      | `Next 2 orbits (191.6 min): … 39.9% back-facing · 39.9% dark in total`                                                                   |
 | two patterns typed into the form, both drawn     | `walker=70:8/4/1@700,30:9/3/2@1200`, both tags on, both listed, `17 satellites on screen`                                                |
 | the same url after a reload                      | 17 satellites again, from two name prefixes — the scene came back with no code change                                                    |
+| the always-sunlit demo's two patterns            | `103.422:12/1/0@1760+11.493` and `…+281.493` — same head, nodes 90° apart                                                                |
+| right now                                        | dawn–dusk 12 × `sunlit_on`; noon–midnight 9 × `sunlit_edge`, 3 × `umbra`                                                                 |
+| over a whole orbit at both solstices             | dawn–dusk 0% eclipsed in June and December; noon–midnight 28.7% in both                                                                  |
+| the computed band                                | `between 1610 and 3080 km`                                                                                                               |
 
 **Two things worth knowing from writing this.**
 

@@ -43,6 +43,17 @@ export interface WalkerDeltaParams {
    * flag because it is one, and because a partial span is a real design.
    */
   raanSpanDeg: number;
+  /**
+   * Where the first plane's ascending node sits, in absolute right ascension.
+   *
+   * A Walker pattern is normally quoted without one, because the notation describes
+   * how the planes sit relative to *each other* and a rigid rotation of the whole
+   * constellation is not a different pattern. It becomes load-bearing the moment the
+   * sun is in the picture: a sun-synchronous orbit at 06:00 local time and the same
+   * orbit at noon differ by exactly this and by nothing else, and one of them never
+   * enters the Earth's shadow (`./sunSynchronous.ts`). Optional, defaulting to 0.
+   */
+  raanOffsetDeg?: number;
 }
 
 /** Satellites per plane. Derived, never stored: T and P are what the notation gives. */
@@ -117,6 +128,10 @@ export function validateWalkerDelta(params: WalkerDeltaParams): WalkerValidation
   if (!Number.isFinite(raanSpanDeg) || raanSpanDeg <= 0 || raanSpanDeg > 360) {
     return { ok: false, error: "RAAN span must be greater than 0° and at most 360°." };
   }
+  const { raanOffsetDeg } = params;
+  if (raanOffsetDeg !== undefined && (!Number.isFinite(raanOffsetDeg) || raanOffsetDeg < 0 || raanOffsetDeg >= 360)) {
+    return { ok: false, error: "RAAN offset must be at least 0° and below 360°." };
+  }
   return { ok: true };
 }
 
@@ -146,7 +161,7 @@ export function walkerDeltaRecords(params: WalkerDeltaParams, epoch: Date, nameP
   const epochIso = epoch.toISOString();
   const records: GpRecord[] = [];
   for (let plane = 0; plane < params.planes; plane += 1) {
-    const raan = wrapDegrees((plane * params.raanSpanDeg) / params.planes);
+    const raan = wrapDegrees((params.raanOffsetDeg ?? 0) + (plane * params.raanSpanDeg) / params.planes);
     for (let slot = 0; slot < perPlane; slot += 1) {
       const meanAnomaly = wrapDegrees((slot * 360) / perPlane + (plane * params.phasing * 360) / params.total);
       const index = plane * perPlane + slot;
@@ -182,7 +197,7 @@ export function walkerDeltaRecords(params: WalkerDeltaParams, epoch: Date, nameP
 
 /**
  * The wire form: `i:T/P/F@altKm`, with `~span` appended when the planes do not
- * span the full 360°.
+ * span the full 360°, and `+offset` when the first node is not at 0°.
  *
  * Walker's own notation, so a link says what a paper would — `53:1584/72/17@550`
  * is one string a reader already knows how to read, and one url parameter rather
@@ -190,16 +205,18 @@ export function walkerDeltaRecords(params: WalkerDeltaParams, epoch: Date, nameP
  */
 export function encodeWalker(params: WalkerDeltaParams): string {
   const head = `${trimNumber(params.inclinationDeg)}:${params.total}/${params.planes}/${params.phasing}@${trimNumber(params.altitudeKm)}`;
-  return params.raanSpanDeg === 360 ? head : `${head}~${trimNumber(params.raanSpanDeg)}`;
+  const withSpan = params.raanSpanDeg === 360 ? head : `${head}~${trimNumber(params.raanSpanDeg)}`;
+  const offset = params.raanOffsetDeg ?? 0;
+  return offset === 0 ? withSpan : `${withSpan}+${trimNumber(offset)}`;
 }
 
 /** Undefined for anything that is not a valid pattern, so a bad url is simply no constellation. */
 export function decodeWalker(wire: string): WalkerDeltaParams | undefined {
-  const match = /^(-?[\d.]+):(\d+)\/(\d+)\/(\d+)@([\d.]+)(?:~([\d.]+))?$/.exec(wire.trim());
+  const match = /^(-?[\d.]+):(\d+)\/(\d+)\/(\d+)@([\d.]+)(?:~([\d.]+))?(?:\+([\d.]+))?$/.exec(wire.trim());
   if (!match) {
     return undefined;
   }
-  const [, inclination, total, planes, phasing, altitude, span] = match;
+  const [, inclination, total, planes, phasing, altitude, span, offset] = match;
   const params: WalkerDeltaParams = {
     inclinationDeg: Number(inclination),
     total: Number(total),
@@ -207,6 +224,7 @@ export function decodeWalker(wire: string): WalkerDeltaParams | undefined {
     phasing: Number(phasing),
     altitudeKm: Number(altitude),
     raanSpanDeg: span === undefined ? 360 : Number(span),
+    ...(offset === undefined ? {} : { raanOffsetDeg: Number(offset) }),
   };
   return validateWalkerDelta(params).ok ? params : undefined;
 }

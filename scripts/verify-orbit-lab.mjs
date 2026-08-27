@@ -545,6 +545,97 @@ await until("!!document.querySelector('.orbitLab')", "the panel after the reload
 await sleep(1500);
 await send("Page.captureScreenshot", { format: "png" }).then(({ data }) => writeFileSync(`${OUT}/04-two-patterns-after-reload.png`, Buffer.from(data, "base64")));
 
+// ── The always-sunlit sun-synchronous demo ───────────────────────────────────
+// The claim under test is a computed one: at the demo's altitude a dawn–dusk plane
+// never enters the shadow and a noon–midnight plane at the *same* altitude and
+// inclination does. So the check reads both, and the difference has to be in the
+// eclipse states and nowhere else.
+await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /Always-sunlit SSO demo/.test(b.textContent)).click()");
+await until("new URLSearchParams(window.location.search).get('walker')?.split(',').length === 2", "both sun-sync patterns");
+record(
+  "the demo generates a dawn-dusk and a noon-midnight orbit differing only in their node",
+  await evaluate(`(() => {
+    const patterns = (new URLSearchParams(window.location.search).get('walker') ?? '').split(',');
+    const parsed = patterns.map((p) => {
+      const [head, offset] = p.split('+');
+      return { head, offset: Number(offset ?? 0) };
+    });
+    return { patterns, sameHead: parsed[0].head === parsed[1].head, apartDeg: Math.round(((parsed[0].offset - parsed[1].offset + 360) % 360)) };
+  })()`),
+  (state) => state.patterns.length === 2 && state.sameHead && state.apartDeg === 90,
+);
+record(
+  "and points them at the orbit normal, which is what a dawn-dusk panel tracks",
+  await evaluate("new URLSearchParams(window.location.search).get('panel')"),
+  (value) => value === "normal",
+);
+
+await until("(window.cc?.sats?.activeSatellites?.length ?? 0) === 24", "both sun-sync constellations", 180_000);
+// The demo writes [dawn-dusk, noon-midnight] in that order, and each satellite's
+// name begins with `W` + its own pattern — so the url's order is what tells the two
+// apart. Reading it off the offset would not: both offsets are non-zero, because the
+// node is placed relative to wherever the sun actually is.
+const classify = `const wires = (new URLSearchParams(window.location.search).get('walker') ?? '').split(',');
+  const label = (name) => {
+    const prefix = name.split(' ')[0].slice(1);
+    return prefix === wires[0] ? 'dawnDusk' : prefix === wires[1] ? 'noonMidnight' : 'other';
+  };`;
+
+const ssoSplit = await evaluate(`(() => {
+  ${classify}
+  const date = new Date(window.cc.viewer.clock.currentTime.toString());
+  const byPattern = {};
+  for (const sat of window.cc.sats.activeSatellites) {
+    const key = label(sat.props.name);
+    const state = sat.props.illumination(date, 'normal')?.state;
+    byPattern[key] ??= {};
+    if (state) byPattern[key][state] = (byPattern[key][state] ?? 0) + 1;
+  }
+  return byPattern;
+})()`);
+record(
+  "right now, the dawn-dusk orbit is fully lit and its twin is partly in shadow",
+  ssoSplit,
+  (split) => Object.keys(split).length === 2 && (split.dawnDusk?.umbra ?? 0) === 0 && (split.dawnDusk?.sunlit_on ?? 0) === 12 && (split.noonMidnight?.umbra ?? 0) > 0,
+);
+
+// Over a whole orbit, from the satrec, at both solstices — the claim is about the year.
+const ssoYear = await evaluate(`(() => {
+  ${classify}
+  const out = {};
+  for (const sat of window.cc.sats.activeSatellites) {
+    const key = label(sat.props.name);
+    if (key === 'other' || out[key]) continue;
+    out[key] = {};
+    for (const iso of ['2026-06-21T00:00:00Z', '2026-12-21T00:00:00Z']) {
+      const start = new Date(iso);
+      const periodMinutes = sat.props.orbit.orbitalPeriod;
+      let eclipsed = 0;
+      let samples = 0;
+      for (let second = 0; second <= periodMinutes * 60; second += 20) {
+        const state = sat.props.illumination(new Date(start.getTime() + second * 1000), 'normal')?.state;
+        if (!state) continue;
+        samples += 1;
+        if (state === 'umbra' || state === 'penumbra') eclipsed += 1;
+      }
+      out[key][iso.slice(5, 7)] = Number((eclipsed / samples).toFixed(3));
+    }
+  }
+  return out;
+})()`);
+record(
+  "the dawn-dusk orbit is eclipse-free at both solstices, and its noon-midnight twin is not",
+  ssoYear,
+  (year) => year.dawnDusk?.["06"] === 0 && year.dawnDusk?.["12"] === 0 && (year.noonMidnight?.["06"] ?? 0) > 0.2 && (year.noonMidnight?.["12"] ?? 0) > 0.2,
+);
+record(
+  "the panel's computed band excludes every flown dawn-dusk mission",
+  await evaluate("[...document.querySelectorAll('.orbitLab__note')].find((p) => /a band, not a floor/.test(p.textContent))?.textContent.replace(/\\s+/g, ' ').trim() ?? 'missing'"),
+  (text) => /between 1\d{3} and 3\d{3} km/.test(text),
+);
+await sleep(2500);
+await send("Page.captureScreenshot", { format: "png" }).then(({ data }) => writeFileSync(`${OUT}/05-always-sunlit-sso.png`, Buffer.from(data, "base64")));
+
 // ── Nothing threw along the way ──────────────────────────────────────────────
 const fatal = consoleErrors.filter((line) => !/favicon|posthog|ion\.cesium|Failed to load resource/i.test(line));
 record("no unexpected console errors", fatal.slice(0, 5), (list) => list.length === 0);

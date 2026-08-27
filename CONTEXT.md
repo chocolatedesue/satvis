@@ -206,6 +206,22 @@ discussion; sharpen them here when they drift.
   Several can be live at once: the url carries a comma-joined _list_ of patterns, so
   a link is a whole scene of constellations rather than one
   (`docs/adr/0007-orbit-lab.md`).
+- **Sun-synchronous inclination**: the inclination that makes a circular orbit at a
+  given altitude precess its node at the sun's own 0.9856°/day, so its angle to the
+  sun holds all year. Always retrograde, because only a retrograde node turns the
+  right way. Computed by inverting the secular J₂ precession
+  (`sunSyncInclinationDeg`) — the inverse of what `isSunSynchronous` reads off an
+  element set.
+- **Dawn–dusk plane**: a sun-synchronous plane whose ascending node is held 90° from
+  the sun in right ascension, along the terminator. The orientation that maximises β,
+  and so the only one that can be always sunlit; turn the same orbit a quarter turn
+  to **noon–midnight** and it gets the deepest eclipses instead. The difference is one
+  number — the pattern's `raanOffsetDeg` — and nothing else.
+- **Always-sunlit band**: the altitudes at which a dawn–dusk orbit never enters the
+  Earth's shadow, 1610–3080 km as this model computes it. A band and not a floor:
+  the shadow's half-angle falls with altitude, but sun-synchrony demands an ever
+  steeper inclination, which caps β — so the two curves cross twice. No flown
+  dawn–dusk mission is inside it (`docs/adr/0007-orbit-lab.md`).
 - **ν (nu)**: the fraction of the solar disc _not_ covered by the Earth, as seen
   from one satellite. 0 is umbra, 1 is full sun, between is penumbra. Eclipse as a
   continuous quantity rather than a boolean, from satellite.js's conical shadow
