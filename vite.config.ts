@@ -19,6 +19,16 @@ const buildDate = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 let buildSha = "dev";
 try {
   buildSha = execSync("git rev-parse --short HEAD").toString().trim();
+  // A sha alone names the commit that was checked out, not the tree that was
+  // built — so a build from a modified working tree ships content no commit
+  // contains while reporting a commit that does not contain it. That is not
+  // hypothetical: the LAB-89 deployment reported `c56b1d6` while carrying the
+  // plane-and-slot labelling committed two minutes later, which read from the
+  // outside as "the feature was never deployed". The stamp is the only thing
+  // making a deployment auditable, so it says when it cannot be trusted.
+  if (execSync("git status --porcelain").toString().trim() !== "") {
+    buildSha += "-dirty";
+  }
 } catch {
   // not a git checkout (e.g. tarball build)
 }
