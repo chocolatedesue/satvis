@@ -55,7 +55,7 @@
     </label>
     <label class="orbitLab__field">
       <span>Pipeline stages</span>
-      <select :value="migrationStages" @change="migrationStages = Number(($event.target as HTMLSelectElement).value)">
+      <select class="orbitLab__stages" :value="migrationStages" @change="migrationStages = Number(($event.target as HTMLSelectElement).value)">
         <option v-for="count in PIPELINE_STAGE_CHOICES" :key="count" :value="count">{{ count }}</option>
       </select>
     </label>
@@ -142,7 +142,7 @@
 
     <label class="orbitLab__field">
       <span>Preset</span>
-      <select :value="presetIndex" @change="applyPreset(Number(($event.target as HTMLSelectElement).value))">
+      <select class="orbitLab__preset" :value="presetIndex" @change="applyPreset(Number(($event.target as HTMLSelectElement).value))">
         <option :value="-1">Custom</option>
         <option v-for="(preset, index) in WALKER_PRESETS" :key="preset.label" :value="index">{{ preset.label }}</option>
       </select>

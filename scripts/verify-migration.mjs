@@ -193,28 +193,34 @@ await evaluate("(() => { window.cc.viewer.clock.multiplier = 4000; window.cc.vie
 
 let sawMigrating = false;
 let sawStalled = false;
+let sawAllPowered = false;
 let maxMigrations = 0;
 let logLength = 0;
 const hosts = new Set();
 const stagesThatMoved = new Set();
-const deadline = Date.now() + 60_000;
+// Run until the pipeline has been seen in *both* states, not for a fixed window: the
+// ledger's fraction is only meaningful once some time has been attributed each way,
+// and how soon that happens depends on where the stages were placed.
+const deadline = Date.now() + 120_000;
 while (Date.now() < deadline) {
   const status = await evaluate("window.cc.migrationStatus");
   if (status?.phase === "migrating") sawMigrating = true;
-  if (status?.serving === false) sawStalled = true;
+  if (status?.poweredStages === status?.stages?.length) sawAllPowered = true;
+  else sawStalled = true;
   if (typeof status?.migrations === "number") maxMigrations = Math.max(maxMigrations, status.migrations);
   if (Array.isArray(status?.log)) {
     logLength = Math.max(logLength, status.log.length);
     for (const event of status.log) stagesThatMoved.add(event.stage);
   }
   for (const stage of status?.stages ?? []) if (stage.hostName) hosts.add(stage.hostName);
-  if (sawMigrating && maxMigrations >= 2 && logLength >= 2) break;
+  if (sawMigrating && sawStalled && sawAllPowered && maxMigrations >= 1 && logLength >= 1) break;
   await sleep(400);
 }
 
 record("a migration is observed in flight (packet moving over the ISL)", sawMigrating, (v) => v === true);
 record("migrations complete (stages land on new hosts)", maxMigrations, (v) => v >= 1);
 record("the stages visit more satellites than the pipeline is long", hosts.size, (v) => v > STAGES);
+record("the pipeline is seen with every stage powered", sawAllPowered, (v) => v === true);
 record("the pipeline is seen stalled — the all-stages-at-once condition does fail", sawStalled, (v) => v === true);
 record("the migration log records completed migrations", logLength, (v) => v >= 1);
 

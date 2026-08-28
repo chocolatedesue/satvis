@@ -309,8 +309,12 @@ only by distance. Two things follow, and they are what the demo is for:
 
 - **The pipeline serves only while every stage has power at the same instant.** That
   conjunction, not any one satellite's eclipse, is the cost. The panel's _All stages powered_
-  reading is the resulting ceiling, measured over simulated time — for four stages on the
-  two-orbit scene it lands near 40%, against roughly half the time for a single satellite.
+  reading is the resulting ceiling, measured over simulated time. It sits well under a single
+  satellite's lit fraction, but it is a **live reading of the window you are watching, not a
+  published constant** — on short observations of the two-orbit scene it ranges from a few
+  percent to about 40%, because a window shorter than the β cycle is not a stable estimate. A
+  quotable figure wants the kind of offline sweep `pnpm energy-report` does for the
+  single-satellite case.
 - **Stages get stranded.** With one stage per satellite and line of sight required, the naive
   policy runs out of room: a dark host with no free lit satellite in view has nowhere to go,
   and the stage is drawn red and labelled `STRANDED`.

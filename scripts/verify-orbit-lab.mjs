@@ -442,7 +442,7 @@ await until("window.cc.cameraMode === 'Inertial'", "the inertial frame again");
 // ── Generating a Walker pattern ──────────────────────────────────────────────
 // Back to the minimal preset, so the checks below start from a known form.
 await evaluate(`(() => {
-  const select = document.querySelector('.orbitLab__field select');
+  const select = document.querySelector('.orbitLab__preset');
   const index = [...select.options].findIndex((option) => /Minimal 6\\/3\\/1/.test(option.textContent));
   select.value = String(index - 1);
   select.dispatchEvent(new Event('change'));
@@ -482,7 +482,7 @@ await send("Page.captureScreenshot", { format: "png" }).then(({ data }) => write
 // frames a second, so the larger pattern is a rendering-throughput question this
 // runner cannot answer. What is being checked here is the physics and the wiring.
 await evaluate(`(() => {
-  const select = document.querySelector('.orbitLab__field select');
+  const select = document.querySelector('.orbitLab__preset');
   const index = [...select.options].findIndex((option) => /Starlink shell 5/.test(option.textContent));
   select.value = String(index - 1);
   select.dispatchEvent(new Event('change'));
