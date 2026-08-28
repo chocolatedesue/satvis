@@ -10,10 +10,14 @@ import { ionAccessToken } from "./config/ion";
 import { getConfigPreset } from "./config/presets";
 import { CesiumController } from "./modules/CesiumController";
 import { createViewer } from "./modules/createViewer";
+import { applyMigrationScene, applySunSyncScene, applyTwoOrbitScene, type ClockControl, isDemoName } from "./modules/demoScenes";
 import { startSceneSync } from "./modules/sceneSync";
 import { DeviceDetect } from "./modules/util/DeviceDetect";
+import { representativeAlwaysSunlitAltitudeKm } from "./modules/util/sunSynchronous";
 import piniaUrlSync from "./modules/util/urlSync";
 import { router, setupRouterGuards } from "./router";
+import { useCesiumStore } from "./stores/cesium";
+import { useSatStore } from "./stores/sat";
 
 declare global {
   interface Window {
@@ -60,6 +64,36 @@ app.use(router);
 app.use(ui);
 
 app.mount("#app");
+
+// `?demo=` opens straight into a demo scene, clock and all — the one thing a plain
+// shared link cannot carry, because the clock rate is live viewer state and not in
+// the url (see docs/adr/0001). Read once from the url and applied here so no panel
+// need be open; the store writes it makes then round-trip to the url the normal
+// way, so the address bar ends up self-describing and the `?demo=` shorthand is
+// gone on the next navigation.
+{
+  const requested = new URLSearchParams(window.location.search).get("demo");
+  if (isDemoName(requested)) {
+    const satStore = useSatStore();
+    const cesiumStore = useCesiumStore();
+    const clock: ClockControl = {
+      setMultiplier: (value) => {
+        cc.viewer.clockViewModel.multiplier = value;
+      },
+      play: () => {
+        cc.viewer.clockViewModel.shouldAnimate = true;
+      },
+    };
+    if (requested === "migration") {
+      applyMigrationScene(satStore, cesiumStore, clock);
+    } else if (requested === "sso") {
+      applySunSyncScene(satStore, cesiumStore, clock, representativeAlwaysSunlitAltitudeKm() ?? 1760);
+    } else {
+      applyTwoOrbitScene(satStore, cesiumStore, clock);
+    }
+    cc.viewer.scene.requestRender();
+  }
+}
 
 // The loading screen in index.html has served its purpose once the globe is up.
 // Faded rather than cut, so the handover reads as the screen resolving; removed

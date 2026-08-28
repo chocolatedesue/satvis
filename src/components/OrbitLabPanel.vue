@@ -356,6 +356,7 @@ import {
 } from "../config/illumination";
 import { PIPELINE_STAGE_CHOICES, stageColor } from "../config/migration";
 import { CAMERA_MODES } from "../config/viewModes";
+import { applyMigrationScene, applySunSyncScene, applyTwoOrbitScene, type ClockControl, DEMO_MULTIPLIER } from "../modules/demoScenes";
 import { illuminationTimeline } from "../modules/util/illumination";
 import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, maxReachableBetaDeg } from "../modules/util/orbitDesign";
 import {
@@ -418,16 +419,17 @@ const CAMERA_MODE_LABEL: Record<string, string> = {
   Inertial: "Inertial — orbit still, Earth turns",
 };
 
-/**
- * How fast the demo runs the clock.
- *
- * A 550 km orbit takes 95.6 minutes, which at 1× is a scene where nothing appears to
- * happen: the whole point of colouring by illumination is watching a satellite cross
- * a boundary, and at real time that is a 30-minute wait. 60× puts an orbit at about
- * a minute and a half, slow enough to follow one satellite and fast enough that the
- * eclipse entry arrives while someone is still looking.
- */
-const DEMO_MULTIPLIER = 60;
+// The demo scenes are shared with the `?demo=` startup path (modules/demoScenes).
+// The panel drives the clock through useViewerClock; the startup path drives the
+// ClockViewModel directly. Both reach the scenes through this small control.
+const clockControl: ClockControl = {
+  setMultiplier: (value) => clock.setMultiplier(value),
+  play: () => {
+    if (!clock.playing.value) {
+      clock.togglePlaying();
+    }
+  },
+};
 
 // The form's own copy: a pattern is only handed to the globe when Generate is
 // pressed, so a half-typed T never becomes a constellation. Seeded from the url's
@@ -594,28 +596,10 @@ function addPattern(): void {
  */
 function twoOrbitDemo(): void {
   const preset = WALKER_PRESETS[0] as (typeof WALKER_PRESETS)[number];
+  // Fill the form too, so the numbers on screen match the scene. The scene itself
+  // is applied by the shared helper that the `?demo=` link also uses.
   Object.assign(draft, preset.params);
-  walker.value = [encodeWalker(preset.params)];
-  pointColorMode.value = "illumination";
-  // Big enough to read a colour off, which 5 px is not — and this scene is twenty
-  // satellites, not ten thousand, so nothing is hidden under them.
-  pointSize.value = "large";
-  const components = new Set([...satStore.enabledComponents, "Point", "Illumination arc"]);
-  // The labels are noise on twenty satellites whose names are 20 characters long.
-  components.delete("Label");
-  satStore.enabledComponents = [...components];
-  const kept = satStore.enabledTags.filter((tag) => !isWalkerTag(tag));
-  satStore.setActivation({ enabledTags: [...kept, walkerTagFor(preset.params)] });
-  // Last, and the part that makes the rest worth looking at: without motion this is
-  // a still picture of a state nobody watched change.
-  // The frame the orbit is actually fixed in. Earth-fixed makes a stationary orbit
-  // look like it is sweeping past the globe, which is the one thing this scene is
-  // meant to show is not happening.
-  cameraMode.value = "Inertial";
-  clock.setMultiplier(DEMO_MULTIPLIER);
-  if (!clock.playing.value) {
-    clock.togglePlaying();
-  }
+  applyTwoOrbitScene(satStore, cesiumStore, clockControl);
 }
 
 /**
@@ -628,14 +612,9 @@ function twoOrbitDemo(): void {
  * adds: a workload that hops to a lit neighbour each time its host goes dark.
  */
 function migrationDemo(): void {
-  twoOrbitDemo();
-  // Just the two orbits — a clean stage for the migration, not the default
-  // catalog layered on top. twoOrbitDemo keeps whatever else was active (it does
-  // not want to disrupt a scene someone built); the migration story reads best
-  // against exactly the two planes it hops between, so this narrows to them.
   const preset = WALKER_PRESETS[0] as (typeof WALKER_PRESETS)[number];
-  satStore.setActivation({ enabledTags: [walkerTagFor(preset.params)], enabledSatellites: [], disabledSatellites: [] });
-  migration.value = true;
+  Object.assign(draft, preset.params);
+  applyMigrationScene(satStore, cesiumStore, clockControl);
 }
 function useSunSyncInclination(): void {
   const inclinationDeg = ssoFacts.value.inclinationDeg;
@@ -658,32 +637,12 @@ function useSunSyncInclination(): void {
 function sunSyncDemo(): void {
   const epoch = new Date(WALKER_EPOCH_ISO);
   const dawnDusk = sunSyncWalkerParams({ altitudeKm: alwaysSunlitAltitude, total: 12, plane: "dawn-dusk" }, epoch);
-  const noonMidnight = sunSyncWalkerParams({ altitudeKm: alwaysSunlitAltitude, total: 12, plane: "noon-midnight" }, epoch);
-  if (!dawnDusk || !noonMidnight) {
-    return;
+  if (dawnDusk) {
+    // Fill the form with the dawn–dusk numbers to match; the scene is applied by
+    // the shared helper.
+    Object.assign(draft, dawnDusk);
   }
-  Object.assign(draft, dawnDusk);
-  walker.value = [encodeWalker(dawnDusk), encodeWalker(noonMidnight)];
-  pointColorMode.value = "illumination";
-  pointSize.value = "large";
-  // The orbit normal, not the zenith: a dawn–dusk plane sits nearly face-on to the
-  // sun, so a zenith panel is edge-on all the way round and every satellite reads
-  // `sunlit_edge` — true, and it buries the eclipse story this demo is about. The
-  // orbit normal is also the axis a real dawn–dusk spacecraft points its panel along.
-  panelAxis.value = "normal";
-  const components = new Set([...satStore.enabledComponents, "Point", "Illumination arc"]);
-  components.delete("Label");
-  satStore.enabledComponents = [...components];
-  const kept = satStore.enabledTags.filter((tag) => !isWalkerTag(tag));
-  satStore.setActivation({ enabledTags: [...kept, walkerTagFor(dawnDusk), walkerTagFor(noonMidnight)] });
-  // The frame the orbit is actually fixed in. Earth-fixed makes a stationary orbit
-  // look like it is sweeping past the globe, which is the one thing this scene is
-  // meant to show is not happening.
-  cameraMode.value = "Inertial";
-  clock.setMultiplier(DEMO_MULTIPLIER);
-  if (!clock.playing.value) {
-    clock.togglePlaying();
-  }
+  applySunSyncScene(satStore, cesiumStore, clockControl, alwaysSunlitAltitude);
 }
 
 /** Leave the records in the catalog and stop drawing them — the tag is the switch. */
