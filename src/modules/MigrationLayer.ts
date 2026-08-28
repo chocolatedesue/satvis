@@ -21,9 +21,9 @@ import {
   DEFAULT_PIPELINE_STAGES,
   ISL_GBPS,
   MAX_SIM_STEP_SECONDS,
-  MIGRATION_ANIMATION_MS,
+  MIGRATION_ANIMATION_SIM_SECONDS,
   MIGRATION_COLOR,
-  MIGRATION_EVAL_MS,
+  MIGRATION_EVAL_SIM_SECONDS,
   MIGRATION_LOG_LENGTH,
   stageColor,
 } from "../config/migration";
@@ -33,6 +33,7 @@ import {
   decideStageMigration,
   distanceKm,
   emptyLedger,
+  flightProgress,
   type MigrationEvent,
   type MigrationHost,
   type MigrationLedger,
@@ -56,6 +57,15 @@ export interface MigrationStageStatus {
   to?: string;
   linkKm?: number;
   transferSeconds?: number;
+  /**
+   * How far the packet has got along the link, 0–1, while `phase` is `migrating`;
+   * undefined otherwise.
+   *
+   * Measured in simulated time, so it advances with the clock multiplier and holds
+   * still while the clock is paused — which is what makes the sim anchoring
+   * observable from outside the layer, for the panel and for the browser check.
+   */
+  progress?: number;
   /** Whether this stage's host currently has power. */
   powered: boolean;
   /** The hue this stage is drawn in, so the table and the globe agree. */
@@ -85,6 +95,8 @@ export interface MigrationStatus {
   islGbps: number;
   linkKm?: number;
   transferSeconds?: number;
+  /** The moving stage's progress along its link, 0–1, when one is in flight. */
+  progress?: number;
   /** Completed migrations since the demo was switched on, across all stages. */
   migrations: number;
   /** How many stages the pipeline is cut into. */
@@ -106,7 +118,12 @@ export interface MigrationStatus {
 interface Flight {
   from: string;
   to: string;
-  startWallMs: number;
+  /**
+   * Simulated instant the packet left, in ms, against which its progress along the
+   * link is measured. Simulated rather than wall-clock so the flight shares the
+   * clock with the satellites — see MIGRATION_ANIMATION_SIM_SECONDS.
+   */
+  startSimMs: number;
   cost: TransferCost;
   linkKm: number;
   /** Simulated instant the migration was decided, for the event log. */
@@ -168,7 +185,8 @@ export class MigrationLayer {
 
   #removeTick: (() => void) | undefined;
 
-  #lastEvalMs = 0;
+  /** Simulated time the migration decision last ran, for throttling it. */
+  #lastEvalSimMs: number | undefined;
 
   #ledger: MigrationLedger = emptyLedger();
 
@@ -212,6 +230,7 @@ export class MigrationLayer {
     this.#ledger = emptyLedger();
     this.#log = [];
     this.#lastSimMs = undefined;
+    this.#lastEvalSimMs = undefined;
     this.#status = this.#idleStatus();
     this.#viewer.scene.requestRender();
   }
@@ -236,6 +255,7 @@ export class MigrationLayer {
     this.#ledger = emptyLedger();
     this.#log = [];
     this.#lastSimMs = undefined;
+    this.#lastEvalSimMs = undefined;
     this.#buildStages();
     this.#viewer.scene.requestRender();
   }
@@ -324,9 +344,9 @@ export class MigrationLayer {
   }
 
   #tick(): void {
-    const nowWall = performance.now();
     const time = this.#viewer.clock.currentTime;
     const date = JulianDate.toDate(time);
+    const simMs = date.getTime();
     const hosts = this.#hostsAt(date, time);
 
     if (hosts.length < 2 || this.#stages.length === 0) {
@@ -345,13 +365,15 @@ export class MigrationLayer {
       this.#replaceMissingStages(hosts);
     }
 
-    // Land any in-flight migration whose packet has arrived, on the wall clock.
+    // Land any in-flight migration whose packet has arrived — on the simulation
+    // clock, the same one the packet is drawn against, so a stage lands where the dot
+    // is seen to touch down whatever the multiplier is.
     for (const stage of this.#stages) {
       const flight = stage.flight;
       if (!flight) {
         continue;
       }
-      if ((nowWall - flight.startWallMs) / MIGRATION_ANIMATION_MS >= 1) {
+      if (flightProgress(flight.startSimMs, simMs, MIGRATION_ANIMATION_SIM_SECONDS).arrived) {
         stage.hostName = flight.to;
         stage.flight = undefined;
         this.#ledger = recordMigration(this.#ledger, this.#kvGigabytes, flight.cost);
@@ -362,15 +384,18 @@ export class MigrationLayer {
       }
     }
 
-    // Decide only every MIGRATION_EVAL_MS — a migration is a state change a person
-    // reads, not a per-frame animation.
-    if (nowWall - this.#lastEvalMs >= MIGRATION_EVAL_MS) {
-      this.#lastEvalMs = nowWall;
-      this.#decideAll(hosts, nowWall, date);
+    // Decide only every MIGRATION_EVAL_SIM_SECONDS of simulated time — a migration is
+    // a state change a person reads, not a per-frame animation, and throttling it on
+    // the clock rather than on wall time keeps the pipeline's reaction time a property
+    // of the orbit instead of the playback rate. Compared on magnitude so a scrub in
+    // either direction just re-decides rather than latching the throttle shut.
+    if (this.#lastEvalSimMs === undefined || Math.abs(simMs - this.#lastEvalSimMs) >= MIGRATION_EVAL_SIM_SECONDS * 1000) {
+      this.#lastEvalSimMs = simMs;
+      this.#decideAll(hosts, simMs, date);
     }
 
     this.#accrueTime(date, hosts);
-    this.#status = this.#composeStatus(hosts);
+    this.#status = this.#composeStatus(hosts, simMs);
     this.#viewer.scene.requestRender();
   }
 
@@ -398,7 +423,7 @@ export class MigrationLayer {
   }
 
   /** Ask the model about every stage that is not already in flight. */
-  #decideAll(hosts: readonly MigrationHost[], nowWall: number, date: Date): void {
+  #decideAll(hosts: readonly MigrationHost[], simMs: number, date: Date): void {
     for (const stage of this.#stages) {
       if (stage.flight) {
         stage.phase = "migrating";
@@ -414,7 +439,7 @@ export class MigrationLayer {
           stage.flight = {
             from: host.name,
             to: decision.target.name,
-            startWallMs: nowWall,
+            startSimMs: simMs,
             cost: transferCost(this.#kvGigabytes, ISL_GBPS, linkKm),
             linkKm,
             decidedAt: date.toISOString(),
@@ -435,14 +460,15 @@ export class MigrationLayer {
    * orbit. `accrueTime` drops jumps, which is what makes scrubbing the clock safe.
    *
    * Accrued on `#allPowered` rather than on `#serving`: whether a packet is
-   * mid-flight is an *animation* state, and the animation's duration is wall-clock
-   * anchored (MIGRATION_ANIMATION_MS), so counting flights as stalled here would
-   * make the served fraction a function of the clock multiplier — at 4000× a 2.2 s
-   * animation swallows 8800 simulated seconds and the fraction collapses to zero.
-   * What the ledger measures instead is pure geometry: how much simulated time every
-   * stage had power at once. The transfers' real cost is accounted separately, in
-   * `transferSeconds`, from the computed link arithmetic rather than from the
-   * animation.
+   * mid-flight is an *animation* state. Since LAB-89 the animation runs on the
+   * simulation clock, so counting flights here would no longer make the fraction a
+   * function of the multiplier — but it would still be wrong, because
+   * MIGRATION_ANIMATION_SIM_SECONDS is an illustrative 30 simulated seconds against a
+   * computed transfer of ~0.17 s, so charging it as stalled time would overstate the
+   * cost of migrating by some 180×. What the ledger measures instead is pure
+   * geometry: how much simulated time every stage had power at once. The transfers'
+   * real cost is accounted separately, in `transferSeconds`, from the link arithmetic
+   * rather than from the animation.
    */
   #accrueTime(date: Date, hosts: readonly MigrationHost[]): void {
     const simMs = date.getTime();
@@ -472,14 +498,14 @@ export class MigrationLayer {
    *
    * The instantaneous badge rather than the accounting measure (see `#accrueTime`):
    * a stage mid-migration is genuinely down, because a naive migration has no
-   * handshake overlap — but the on-screen flight lasts an animation, not the
-   * computed 160 ms, so this drives the readout and not the ledger.
+   * handshake overlap — but the on-screen flight lasts an illustrative 30 simulated
+   * seconds, not the computed 170 ms, so this drives the readout and not the ledger.
    */
   #serving(hosts: readonly MigrationHost[]): boolean {
     return this.#allPowered(hosts) && this.#stages.every((stage) => !stage.flight);
   }
 
-  #composeStatus(hosts: readonly MigrationHost[]): MigrationStatus {
+  #composeStatus(hosts: readonly MigrationHost[], simMs: number): MigrationStatus {
     const stages: MigrationStageStatus[] = this.#stages.map((stage) => ({
       index: stage.index,
       phase: stage.phase,
@@ -488,6 +514,7 @@ export class MigrationLayer {
       to: stage.flight?.to,
       linkKm: stage.flight?.linkKm,
       transferSeconds: stage.flight?.cost.totalSeconds,
+      progress: stage.flight ? flightProgress(stage.flight.startSimMs, simMs, MIGRATION_ANIMATION_SIM_SECONDS).fraction : undefined,
       powered: hosts.find((host) => host.name === stage.hostName)?.hasPower === true,
       color: stageColor(stage.index),
       reason: stage.reason,
@@ -513,6 +540,7 @@ export class MigrationLayer {
       to: moving?.to,
       linkKm: moving?.linkKm,
       transferSeconds: moving?.transferSeconds,
+      progress: moving?.progress,
       reason: serving ? `All ${stages.length} stages powered — pipeline serving.` : (lead?.reason ?? `${powered}/${stages.length} stages powered — pipeline stalled.`),
       kvGigabytes: this.#kvGigabytes,
       islGbps: ISL_GBPS,
@@ -537,7 +565,15 @@ export class MigrationLayer {
     return from && to ? [from, to] : [];
   }
 
-  /** Where `stage`'s packet is: along the link while migrating, else on its host. */
+  /**
+   * Where `stage`'s packet is: along the link while migrating, else on its host.
+   *
+   * The fraction comes from `time` — the instant Cesium is drawing — and not from
+   * `performance.now()`, which is what made the packet crawl at one fixed speed
+   * however fast the clock was running (LAB-89). Reading the frame's own simulated
+   * time also keeps the dot consistent with the two endpoints, which are sampled from
+   * that same instant.
+   */
   #packetPosition(stage: StageState, time: JulianDate): Cartesian3 | undefined {
     const flight = stage.flight;
     if (flight) {
@@ -546,7 +582,7 @@ export class MigrationLayer {
       if (!from || !to) {
         return undefined;
       }
-      const fraction = (performance.now() - flight.startWallMs) / MIGRATION_ANIMATION_MS;
+      const { fraction } = flightProgress(flight.startSimMs, JulianDate.toDate(time).getTime(), MIGRATION_ANIMATION_SIM_SECONDS);
       const point: Vec3 = lerp({ x: from.x, y: from.y, z: from.z }, { x: to.x, y: to.y, z: to.z }, fraction);
       return new Cartesian3(point.x, point.y, point.z);
     }

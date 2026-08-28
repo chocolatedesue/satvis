@@ -24,23 +24,44 @@ export const DEFAULT_KV_GIGABYTES = 2;
 export const ISL_GBPS = 100;
 
 /**
- * How long the packet takes to cross the link on screen, in wall-clock ms.
+ * How long the packet takes to cross the link on screen, in **simulated** seconds.
  *
- * Decoupled from the real transfer time on purpose. The real transfer is ~160 ms
- * and the demo clock runs at 60×, so a faithful animation would be a flicker no
- * one could follow. This is the illustrative travel time; the *computed* transfer
- * seconds ride alongside as text, which is where the physics is told honestly.
+ * Two separate decisions live in this one number, and conflating them was the bug
+ * LAB-89 fixed.
+ *
+ * *Simulated* rather than wall-clock, because everything else on screen moves on
+ * the simulation clock: at 60× the satellites cross a terminator in a wall second,
+ * and a packet pinned to `performance.now()` crawled across the link at the same
+ * speed no matter where the multiplier was set. Anchoring the flight to the clock
+ * makes the whole scene one timebase — wind the clock up and migrations get quicker,
+ * pause it and the packet stops mid-link, exactly as a viewer expects.
+ *
+ * *30 seconds* rather than the real transfer time, because the real transfer is
+ * ~0.17 s (2 GB over 100 Gbps, plus light travel) and nobody can watch that. So the
+ * dot is illustrative — ~180× slower than the physics — while the *computed*
+ * transfer seconds ride alongside as text, which is where the cost is told honestly.
+ * At the demo's 60× that is half a wall second; wound to thousands of × it is under
+ * a frame, which is the right answer for a clock running that fast.
  */
-export const MIGRATION_ANIMATION_MS = 2200;
+export const MIGRATION_ANIMATION_SIM_SECONDS = 30;
 
 /**
- * How often the migration decision is re-evaluated, in wall-clock ms.
+ * How often the migration decision is re-evaluated, in **simulated** seconds.
  *
- * A migration is a state change a person reads, not an animation — a third of a
- * second is well under the cadence at which the host's illumination visibly turns
- * over and far above the cost of one memoized illumination lookup per satellite.
+ * A migration is a state change a person reads, not a per-frame animation, so the
+ * decision is throttled — but throttled on the simulation clock for the same reason
+ * the flight is. On a wall-clock throttle the pipeline's reaction time was a
+ * function of the multiplier: a third of a wall second is 0.3 simulated seconds at
+ * 1× and 20 simulated *minutes* at 4000×, so winding the clock up left stages
+ * sitting dark for a fifth of an orbit before anyone asked them to move — and the
+ * served fraction, which is supposed to describe the orbit, moved with the playback
+ * rate.
+ *
+ * Five simulated seconds is far below any illumination change worth reacting to, and
+ * above one frame at everyday multipliers; past ~300× it falls under a frame and the
+ * decision simply runs every frame, which is as prompt as the clock allows.
  */
-export const MIGRATION_EVAL_MS = 300;
+export const MIGRATION_EVAL_SIM_SECONDS = 5;
 
 /**
  * The colours the migration overlay draws in, as CSS hex so both the globe

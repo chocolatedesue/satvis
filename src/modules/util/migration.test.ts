@@ -9,6 +9,7 @@ import {
   distanceKm,
   EARTH_RADIUS_KM,
   emptyLedger,
+  flightProgress,
   hasLineOfSight,
   initialHost,
   lerp,
@@ -376,5 +377,63 @@ describe("the ledger", () => {
     expect(allPoweredFraction(emptyLedger())).toBeUndefined();
     const ledger = accrueTime(accrueTime(emptyLedger(), 30, true, 3600), 10, false, 3600);
     expect(allPoweredFraction(ledger)).toBeCloseTo(0.75, 9);
+  });
+});
+
+/**
+ * The bug LAB-89 fixed: the packet's progress used to be measured against
+ * `performance.now()`, so the migration crossed the link at one fixed wall-clock
+ * speed while the satellites around it moved at 60× or 4000×. These tests pin the
+ * property that replaces it — progress is a function of *simulated* time only, so
+ * whatever the multiplier, the same simulated interval is the same fraction of the
+ * way across.
+ */
+describe("a packet's progress along its link", () => {
+  const DURATION = 30;
+
+  it("is the elapsed simulated time as a share of the animation's simulated duration", () => {
+    expect(flightProgress(0, 0, DURATION)).toEqual({ fraction: 0, arrived: false });
+    expect(flightProgress(0, 7500, DURATION)).toEqual({ fraction: 0.25, arrived: false });
+    expect(flightProgress(1_000_000, 1_015_000, DURATION)).toEqual({ fraction: 0.5, arrived: false });
+  });
+
+  it("does not care what the clock multiplier is — only how much simulated time passed", () => {
+    // The same simulated interval, whether the clock crossed it in 15 wall seconds
+    // at 1× or in 4 wall milliseconds at 4000×, is the same distance along the link.
+    // That equality is exactly what a wall-clock anchor could not give.
+    const halfway = flightProgress(0, 15_000, DURATION);
+    expect(halfway.fraction).toBeCloseTo(0.5, 12);
+    expect(flightProgress(500_000, 515_000, DURATION).fraction).toBeCloseTo(halfway.fraction, 12);
+  });
+
+  it("holds still while the clock is paused", () => {
+    // A paused clock reports the same instant every frame, so the packet stops
+    // mid-link rather than sailing on under its own wall-clock steam.
+    const first = flightProgress(0, 9000, DURATION);
+    expect(flightProgress(0, 9000, DURATION)).toEqual(first);
+    expect(first.arrived).toBe(false);
+  });
+
+  it("arrives once the simulated duration is up, and never overshoots the link", () => {
+    expect(flightProgress(0, 30_000, DURATION)).toEqual({ fraction: 1, arrived: true });
+    // A high multiplier crosses the whole duration inside one frame. Landing is the
+    // right answer; reporting a fraction of 3 and drawing the packet past the target
+    // is not.
+    expect(flightProgress(0, 90_000, DURATION)).toEqual({ fraction: 1, arrived: true });
+  });
+
+  it("lands a flight the clock was scrubbed or rewound across, rather than stranding it", () => {
+    // Rewound behind the departure, or run backwards: there is no honest position on
+    // the link for negative elapsed time. Clamping to 0 would leave the stage
+    // migrating for ever, because nothing else completes a flight.
+    expect(flightProgress(10_000, 4000, DURATION)).toEqual({ fraction: 1, arrived: true });
+    expect(flightProgress(Number.NaN, 0, DURATION)).toEqual({ fraction: 1, arrived: true });
+    expect(flightProgress(0, Number.POSITIVE_INFINITY, DURATION)).toEqual({ fraction: 1, arrived: true });
+  });
+
+  it("treats a zero or nonsense duration as an instant hop", () => {
+    expect(flightProgress(0, 0, 0)).toEqual({ fraction: 1, arrived: true });
+    expect(flightProgress(0, 0, -5)).toEqual({ fraction: 1, arrived: true });
+    expect(flightProgress(0, 0, Number.NaN)).toEqual({ fraction: 1, arrived: true });
   });
 });

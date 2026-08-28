@@ -187,40 +187,130 @@ record(
   (s) => s.serving === s.all,
 );
 
-// Wind the clock forward hard so hosts cross into shadow within a few wall seconds
-// instead of a real orbit, and watch the model migrate.
+// The migration animation rides the simulation clock (LAB-89): the packet covers
+// MIGRATION_ANIMATION_SIM_SECONDS of simulated time crossing the link, so winding the
+// multiplier up makes migrations quicker in wall time and pausing stops them dead.
+//
+// That property is checked by *stepping the clock by hand* rather than by winding the
+// multiplier up and watching, because how many frames a flight spans is a function of
+// the frame rate: 30 simulated seconds at 60× is half a wall second, which is under
+// one frame in headless software rendering, and at 4000× a flight is over inside a
+// frame on any hardware. Driving `clock.currentTime` with the clock paused removes
+// the frame rate from the question entirely and asserts the actual invariant —
+// progress is elapsed simulated time over the animation's simulated duration — which
+// is what makes the visible speed follow the multiplier.
+/** config/migration MIGRATION_ANIMATION_SIM_SECONDS — the animation's simulated duration. */
+const ANIMATION_SIM_SECONDS = 30;
+/** A step of a third of the way across the link, in simulated seconds. */
+const THIRD = ANIMATION_SIM_SECONDS / 3;
+
+const stepped = await evaluate(
+  "(async () => {" +
+    "  const clock = window.cc.viewer.clock;" +
+    "  const JulianDate = clock.currentTime.constructor;" +
+    "  clock.shouldAnimate = false;" +
+    // Two frames per step: the layer's tick runs off clock.onTick, and the status the
+    // panel and this check read is recomposed there.
+    "  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));" +
+    "  const advance = async (seconds) => { clock.currentTime = JulianDate.addSeconds(clock.currentTime, seconds, new JulianDate()); await frame(); };" +
+    "  const stages = () => window.cc.migrationStatus?.stages ?? [];" +
+    "  const flying = () => stages().find((s) => s.phase === 'migrating' && typeof s.progress === 'number');" +
+    // Jump forward in coarse strides until a host loses power and its stage takes off.
+    // A stride longer than the animation is fine: the flight is created and reported
+    // within the tick that decides it, so it is seen at the start of its crossing.
+    "  let found; const strides = [];" +
+    "  for (let step = 0; step < 400 && !found; step += 1) { await advance(120); found = flying(); strides.push(step); }" +
+    "  if (!found) { clock.shouldAnimate = false; return { error: 'no stage took off in 400 strides of the clock' }; }" +
+    "  const of = () => stages().find((s) => s.index === found.index) ?? {};" +
+    "  const destination = of().to;" +
+    "  const trace = [{ advanced: 0, progress: of().progress, phase: of().phase, host: of().hostName }];" +
+    // Three strides across the link, with the clock standing still in the middle: the
+    // moving samples pin progress to simulated time, the still ones pin that a paused
+    // clock freezes the packet where it is.
+    `  for (const seconds of [${THIRD}, ${THIRD}, 0, 0, ${THIRD}]) { await advance(seconds); trace.push({ advanced: seconds, progress: of().progress, phase: of().phase, host: of().hostName }); }` +
+    "  clock.shouldAnimate = false;" +
+    "  return { stage: found.index, from: found.from, destination, strides: strides.length, trace };" +
+    "})()",
+);
+
+record("a migration is observed in flight (packet moving over the ISL)", stepped?.trace?.[0] ?? stepped, (t) => t?.phase === "migrating" && t.progress >= 0 && t.progress < 1);
+
+record(
+  "the packet advances by the simulated time elapsed, over the animation's simulated duration",
+  stepped?.trace?.map((sample) => sample.progress),
+  // A third of the animation's simulated seconds is a third of the way across, twice
+  // over — regardless of how long those simulated seconds took to pass on the wall
+  // clock, which is the whole of the fix. Anchored to `performance.now()` these
+  // samples would barely move, since the clock is paused and only being nudged.
+  (p) => Array.isArray(p) && p.length === 6 && Math.abs(p[0] - 0) < 0.02 && Math.abs(p[1] - 1 / 3) < 0.02 && Math.abs(p[2] - 2 / 3) < 0.02,
+);
+
+record(
+  "the packet lands on its destination exactly when the simulated duration is up",
+  stepped ? { destination: stepped.destination, last: stepped.trace?.at(-1) } : null,
+  // The third third completes the crossing, so the stage is no longer in flight and is
+  // sitting on the satellite the link pointed at. The landing shares the packet's
+  // timebase, so what a viewer sees touch down is when the ledger records the hop.
+  (s) => s !== null && typeof s.destination === "string" && s.last?.phase !== "migrating" && s.last?.progress == null && s.last?.host === s.destination,
+);
+
+record(
+  "a paused clock freezes the packet mid-link instead of letting it sail on",
+  stepped?.trace?.slice(2, 5).map((sample) => sample.progress),
+  // The user-visible complaint that opened LAB-89, at its starkest: nothing moves
+  // while the clock is not moving. Two frames pass per sample and the packet has to
+  // still be mid-link, not at 0 and not landed.
+  (p) => Array.isArray(p) && p.length === 3 && p[0] > 0 && p[0] < 1 && p[1] === p[0] && p[2] === p[0],
+);
+
+// Now let the clock run hard so hosts cross into shadow within a few wall seconds
+// instead of a real orbit, and let the ledger fill.
 await evaluate("(() => { window.cc.viewer.clock.multiplier = 4000; window.cc.viewer.clock.shouldAnimate = true; return true; })()");
 
-let sawMigrating = false;
 let sawStalled = false;
 let sawAllPowered = false;
 let maxMigrations = 0;
 let logLength = 0;
+let accounted = 0;
 const hosts = new Set();
 const stagesThatMoved = new Set();
-// Run until the ledger has actually attributed time *both* ways, rather than for a
-// fixed window: the fraction is only meaningful once it has, and how soon that
-// happens depends on where the stages were placed. Watching the ledger directly
-// rather than a proxy — an earlier version checked `poweredStages === stages.length`,
-// which is trivially true for the empty pre-placement status and let the loop break
-// before the pipeline had ever been fully lit.
+// Run until the ledger has attributed time *both* ways over a run long enough to mean
+// something, rather than for a fixed window: the fraction is only meaningful once it
+// has, and how soon that happens depends on where the stages were placed. Watching the
+// ledger directly rather than a proxy — an earlier version checked
+// `poweredStages === stages.length`, which is trivially true for the empty
+// pre-placement status and let the loop break before the pipeline had ever been fully
+// lit.
+//
+// The simulated-seconds floor matters as much as the both-ways condition: the clock
+// stepping above already accrues a few hundred seconds, so without it the loop breaks
+// on its first poll and the served fraction is one arbitrary sliver of one orbit.
+// Five orbits at 550 km is a sample whose fraction is about the geometry.
+const ENOUGH_SIM_SECONDS = 30_000;
 const deadline = Date.now() + 180_000;
 while (Date.now() < deadline) {
   const status = await evaluate("window.cc.migrationStatus");
-  if (status?.phase === "migrating") sawMigrating = true;
   if (status?.ledger?.allPoweredSeconds > 0) sawAllPowered = true;
   if (status?.ledger?.stalledSeconds > 0) sawStalled = true;
+  accounted = (status?.ledger?.allPoweredSeconds ?? 0) + (status?.ledger?.stalledSeconds ?? 0);
   if (typeof status?.migrations === "number") maxMigrations = Math.max(maxMigrations, status.migrations);
   if (Array.isArray(status?.log)) {
     logLength = Math.max(logLength, status.log.length);
-    for (const event of status.log) stagesThatMoved.add(event.stage);
+    // The log is where the hops are recorded, and is the honest source for which
+    // satellites the pipeline has visited — polling `stages[].hostName` only sees
+    // whichever hosts a stage happened to be sitting on when the poll landed, and at
+    // 4000× that undersamples badly.
+    for (const event of status.log) {
+      stagesThatMoved.add(event.stage);
+      hosts.add(event.from);
+      hosts.add(event.to);
+    }
   }
   for (const stage of status?.stages ?? []) if (stage.hostName) hosts.add(stage.hostName);
-  if (sawMigrating && sawStalled && sawAllPowered && maxMigrations >= 1 && logLength >= 1) break;
+  if (sawStalled && sawAllPowered && maxMigrations >= 1 && logLength >= 1 && accounted >= ENOUGH_SIM_SECONDS) break;
   await sleep(400);
 }
 
-record("a migration is observed in flight (packet moving over the ISL)", sawMigrating, (v) => v === true);
 record("migrations complete (stages land on new hosts)", maxMigrations, (v) => v >= 1);
 record("the stages visit more satellites than the pipeline is long", hosts.size, (v) => v > STAGES);
 record("the pipeline is seen with every stage powered", sawAllPowered, (v) => v === true);
@@ -266,7 +356,7 @@ console.log("log (newest first):", JSON.stringify(readout?.log?.slice(0, 3)));
 // Screenshot for the record.
 const shot = await send("Page.captureScreenshot", { format: "png" });
 writeFileSync(`${OUT}/migration.png`, Buffer.from(shot.data, "base64"));
-writeFileSync(`${OUT}/report.json`, JSON.stringify({ checks, readout, maxMigrations, hostsVisited: [...hosts], stagesThatMoved: [...stagesThatMoved] }, null, 2));
+writeFileSync(`${OUT}/report.json`, JSON.stringify({ checks, readout, stepped, maxMigrations, hostsVisited: [...hosts], stagesThatMoved: [...stagesThatMoved] }, null, 2));
 
 const failed = checks.filter((c) => !c.ok);
 if (consoleErrors.length) console.log(`\nconsole errors (${consoleErrors.length}):\n` + consoleErrors.slice(0, 10).join("\n"));

@@ -130,6 +130,48 @@ export function lerp(a: Vec3, b: Vec3, fraction: number): Vec3 {
   };
 }
 
+/** How far along its link a packet is, and whether it has got there. */
+export interface FlightProgress {
+  /** Position along the link, 0 at the source and 1 on arrival. Never outside that. */
+  fraction: number;
+  /** True once the flight is over and the stage should be landed on its destination. */
+  arrived: boolean;
+}
+
+/**
+ * How far a flight that left at `startSimMs` has got by `currentSimMs`, given an
+ * on-screen duration of `durationSimSeconds`.
+ *
+ * All three are **simulated** milliseconds/seconds, read from the demo clock rather
+ * than from `performance.now()`. That is the whole point (LAB-89): the packet then
+ * moves in the same timebase as the satellites it is flying between, so the clock's
+ * multiplier speeds the migration up exactly as it speeds the orbit up, and pausing
+ * freezes the packet mid-link instead of letting it sail on.
+ *
+ * The clock is not a monotonic source, though — the time controls can pause it,
+ * scrub it, jump it or run it backwards — so the three degenerate cases are answered
+ * here rather than left to overflow a fraction on screen:
+ *
+ * - **Paused**: the elapsed simulated time stops growing, so the fraction holds and
+ *   the packet sits still. Nothing special needed; it falls out of the arithmetic.
+ * - **Scrubbed or jumped forward**: the fraction passes 1 in one step and the flight
+ *   is simply `arrived`. An animation cannot be replayed across a jump the pipeline
+ *   did not live through, and landing is the only state that leaves the stage
+ *   somewhere real.
+ * - **Rewound behind the departure** (a scrub back, or a negative multiplier): the
+ *   elapsed time goes negative, which has no position on the link, so the flight is
+ *   landed too. Clamping to 0 instead would look tidier and strand the stage
+ *   mid-migration forever, since nothing else ever completes it.
+ */
+export function flightProgress(startSimMs: number, currentSimMs: number, durationSimSeconds: number): FlightProgress {
+  const elapsedSeconds = (currentSimMs - startSimMs) / 1000;
+  if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0 || !(durationSimSeconds > 0)) {
+    return { fraction: 1, arrived: true };
+  }
+  const fraction = elapsedSeconds / durationSimSeconds;
+  return fraction >= 1 ? { fraction: 1, arrived: true } : { fraction, arrived: false };
+}
+
 /** What a single transfer costs, broken into the two terms that make it up. */
 export interface TransferCost {
   /** Time to push the bytes onto the link: KV size / bandwidth. */
@@ -381,10 +423,12 @@ export function poweredStageCount(stages: readonly StagePlacement[], hosts: read
  * orbit.
  *
  * The time split is deliberately about **power geometry only**: whether a packet
- * happens to be mid-animation is not part of it, because the animation's length is
- * wall-clock anchored and would otherwise make the fraction a function of the clock
- * multiplier. The transfers' own cost is `transferSeconds`, computed from the link
- * arithmetic.
+ * happens to be mid-animation is not part of it. The flight now runs on the
+ * simulation clock like everything else, so counting it would at least be
+ * multiplier-independent — but its 30 simulated seconds are an illustrative duration
+ * some 180× the real transfer, so charging them as stalled time would overstate what
+ * migrating costs by the same factor. The transfers' actual cost is
+ * `transferSeconds`, computed from the link arithmetic.
  */
 export interface MigrationLedger {
   /** Completed stage migrations. */

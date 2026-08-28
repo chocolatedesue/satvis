@@ -71,9 +71,10 @@
       migrations' own cost is the link time beside it.
     </p>
     <p class="orbitLab__note">
-      The travelling dot is illustrative — its on-screen duration is an animation, not the transfer. The <strong>transfer time</strong> is the real cost:
-      {{ migrationStatus?.kvGigabytes ?? 2 }} GB serialised across the link plus one-way light travel. Elapsed times are <strong>simulated</strong> seconds, not wall clock, so they
-      describe the orbit rather than the playback rate.
+      The travelling dot is illustrative — it crosses the link in {{ MIGRATION_ANIMATION_SIM_SECONDS }} <strong>simulated</strong> seconds, so it rides the clock below: wind the
+      multiplier up and migrations finish sooner, pause and the packet stops mid-link. That duration is an animation, not the transfer. The <strong>transfer time</strong> is the
+      real cost: {{ migrationStatus?.kvGigabytes ?? 2 }} GB serialised across the link plus one-way light travel, some two orders of magnitude quicker than the dot. Elapsed times
+      are <strong>simulated</strong> seconds, not wall clock, so they describe the orbit rather than the playback rate.
     </p>
 
     <table v-if="migrationStatus?.active && migrationStatus.stages.length > 0" class="orbitLab__facts">
@@ -354,7 +355,7 @@ import {
   type IlluminationState,
   type PanelAxis,
 } from "../config/illumination";
-import { PIPELINE_STAGE_CHOICES, stageColor } from "../config/migration";
+import { MIGRATION_ANIMATION_SIM_SECONDS, PIPELINE_STAGE_CHOICES, stageColor } from "../config/migration";
 import { CAMERA_MODES } from "../config/viewModes";
 import { applyMigrationScene, applySunSyncScene, applyTwoOrbitScene, type ClockControl, DEMO_MULTIPLIER } from "../modules/demoScenes";
 import { illuminationTimeline } from "../modules/util/illumination";
