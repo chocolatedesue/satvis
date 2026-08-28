@@ -94,6 +94,8 @@ export interface SceneTarget {
   setTime(time: string): void;
   /** Turn the naive KV-cache migration overlay on or off. */
   setMigration(on: boolean): void;
+  /** Re-cut the migration demo's pipeline into `count` stages. */
+  setMigrationStages(count: number): void;
 }
 
 export function startSceneSync(cc: SceneTarget): void {
@@ -450,6 +452,18 @@ export function startSceneSync(cc: SceneTarget): void {
   // The naive migration overlay. Store-to-globe like the walker generator above:
   // a boolean in the url, a layer on the globe. Immediate, so `?mig=true` is in
   // force from the first frame.
+  // The pipeline length, registered before the overlay switch below so that with
+  // both watchers `immediate`, the count is recorded first and a link carrying
+  // `?mig=true&migst=6` builds the layer at six stages rather than building it at
+  // four and rebuilding a moment later.
+  watch(
+    () => satStore.migrationStages,
+    (count) => {
+      cc.setMigrationStages(count);
+    },
+    { immediate: true },
+  );
+
   watch(
     () => satStore.migration,
     (on) => {

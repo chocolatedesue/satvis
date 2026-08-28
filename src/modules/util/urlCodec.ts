@@ -62,6 +62,26 @@ export function boolean(): FieldKind<boolean> {
   };
 }
 
+/**
+ * A closed set of numbers, written in the url as decimal digits.
+ *
+ * The numeric sibling of `enumString`, and closed for the same reason: an open
+ * number would let `?migst=10000` ask the globe for ten thousand pipeline stages.
+ * Membership is checked on both sides, so a value the store somehow holds outside
+ * the set is dropped from the url rather than written back as a link that will not
+ * parse.
+ */
+export function numberChoice(values: readonly number[]): FieldKind<number> {
+  const member = (v: unknown): v is number => typeof v === "number" && values.includes(v);
+  return {
+    parse: (raw) => {
+      const parsed = Number(raw);
+      return raw.trim() !== "" && member(parsed) ? ok(parsed) : FAIL;
+    },
+    format: (value) => (member(value) ? ok(String(value)) : FAIL),
+  };
+}
+
 const LIST_SEPARATOR = ",";
 
 function splitList(raw: string): string[] {

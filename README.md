@@ -290,6 +290,44 @@ with the share spent in each state — two rather than one, because one orbit ca
 changes between them. Reasoning and alternatives are in
 `docs/adr/0007-orbit-lab.md`.
 
+### Naive KV-cache live migration
+
+The **"KV-cache migration demo"** button puts an inference pipeline on the constellation. It
+is cut into four stages (1–8 from the panel, `?migst=`), each holding its own 2 GB KV cache on
+its own satellite — one stage per satellite, drawn as a haloed dot in the stage's colour. The
+moment a host loses power, that stage's cache is live-migrated over one 100 Gbps
+inter-satellite link to the nearest satellite that still has power, is not already running a
+stage, and is **in line of sight**. URL-synced as `?mig=true`.
+
+"Loses power" is the distinction the whole fork exists to name: not just eclipse, but
+`sunlit_back` — the panel turned away from the sun while the satellite is still in daylight.
+An eclipse-only model migrates far too late.
+
+The policy is **naive** on purpose, as the baseline LAB-47 improves on: one link, one hop, no
+handshake overlap, no incremental KV patching, no contention for the link, and a target chosen
+only by distance. Two things follow, and they are what the demo is for:
+
+- **The pipeline serves only while every stage has power at the same instant.** That
+  conjunction, not any one satellite's eclipse, is the cost. The panel's _All stages powered_
+  reading is the resulting ceiling, measured over simulated time — for four stages on the
+  two-orbit scene it lands near 40%, against roughly half the time for a single satellite.
+- **Stages get stranded.** With one stage per satellite and line of sight required, the naive
+  policy runs out of room: a dark host with no free lit satellite in view has nowhere to go,
+  and the stage is drawn red and labelled `STRANDED`.
+
+Three numbers are honest arithmetic rather than animation. The **transfer time** is the KV
+cache serialised across the link (2 GB / 100 Gbps = 160 ms) plus one-way light travel over the
+measured chord. The **link length** is the true chord between the two satellites, constrained
+so it never passes through the Earth — at 550 km the longest link with line of sight is about
+5,014 km, and before that constraint the "nearest powered" rule cheerfully picked satellites
+11,000 km away on the far side of the planet. The **ledger** counts simulated seconds, not wall
+clock, so it describes the orbit and not the playback rate; the travelling dot's on-screen
+duration is a fixed animation and is deliberately not part of the accounting.
+
+`node scripts/verify-migration.mjs <base-url> <out-dir>` checks all of it in headless
+Chromium: the placement, the per-stage entities, that a migration is caught in flight, that
+the pipeline is seen stalled, and that every link respects line of sight.
+
 ### Satellite metadata
 
 Static per-satellite facts are keyed by NORAD id in one satellite table with two

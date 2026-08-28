@@ -3,8 +3,9 @@ import { computed, ref } from "vue";
 
 import { POINT_SIZES, SATELLITE_COMPONENTS, type PointSize } from "../config/components";
 import { DEFAULT_POINT_PAINT, PANEL_AXES, POINT_COLOR_MODES, type PanelAxis, type PointColorMode } from "../config/illumination";
+import { DEFAULT_PIPELINE_STAGES, PIPELINE_STAGE_CHOICES } from "../config/migration";
 import { sameValue } from "../modules/util/equality";
-import { boolean, closedStringList, enumString, groundStationList, plainString, stringList, tildeEscapedStringList } from "../modules/util/urlCodec";
+import { boolean, closedStringList, enumString, groundStationList, numberChoice, plainString, stringList, tildeEscapedStringList } from "../modules/util/urlCodec";
 
 export interface SerializedGroundStation {
   lat: number;
@@ -61,6 +62,12 @@ export const useSatStore = defineStore(
     // belongs to neither — see modules/MigrationLayer.ts. URL-synced so a link
     // can open straight into the migration demo.
     const migration = ref(false);
+
+    // How many stages the migration demo's pipeline is cut into. URL-synced beside
+    // `mig` because the stage count is the knob that changes what the demo argues:
+    // one stage restates the fleet's dark fraction, four make the pipeline's
+    // all-stages-at-once serving condition the thing you watch fail.
+    const migrationStages = ref<number>(DEFAULT_PIPELINE_STAGES);
 
     // Activation is one invariant cluster — see CONTEXT.md. Held privately and
     // exposed read-only so every writer goes through setActivation and the
@@ -173,6 +180,7 @@ export const useSatStore = defineStore(
       panelAxis,
       walker,
       migration,
+      migrationStages,
       enabledTags,
       enabledSatellites,
       disabledSatellites,
@@ -200,6 +208,7 @@ export const useSatStore = defineStore(
         { name: "panelAxis", url: "panel", kind: enumString(PANEL_AXES) },
         { name: "walker", url: "walker", kind: stringList() },
         { name: "migration", url: "mig", kind: boolean() },
+        { name: "migrationStages", url: "migst", kind: numberChoice(PIPELINE_STAGE_CHOICES) },
       ],
       // Guarded keys are read-only, so the url goes through the same actions as
       // every other writer; the triple is applied in one call to keep it

@@ -1,9 +1,46 @@
 import { describe, expect, it } from "vitest";
 
-import { chooseTarget, decideMigration, distanceKm, initialHost, lerp, type MigrationHost, noPower, SPEED_OF_LIGHT_KM_S, transferCost, type Vec3 } from "./migration";
+import {
+  accrueTime,
+  chooseTarget,
+  chooseTargetExcluding,
+  decideMigration,
+  decideStageMigration,
+  distanceKm,
+  EARTH_RADIUS_KM,
+  emptyLedger,
+  hasLineOfSight,
+  initialHost,
+  lerp,
+  type MigrationHost,
+  noPower,
+  placeStages,
+  pipelineServing,
+  poweredStageCount,
+  recordMigration,
+  allPoweredFraction,
+  SPEED_OF_LIGHT_KM_S,
+  transferCost,
+  type Vec3,
+} from "./migration";
 
 const at = (name: string, position: Vec3, hasPower: boolean): MigrationHost => ({ name, position, hasPower });
 const km = (x: number): Vec3 => ({ x: x * 1000, y: 0, z: 0 });
+
+/**
+ * A point on a 550 km circular orbit, `degrees` around from the +x axis, in metres.
+ *
+ * The `km` helper above puts points on a ray out of the origin, which is Earth's
+ * centre — fine for pure distance arithmetic, but any test touching line of sight
+ * needs positions that are actually in orbit, or the segment starts inside the
+ * planet and every link is occluded.
+ */
+const ORBIT_RADIUS_M = 6921 * 1000;
+const orbit = (degrees: number): Vec3 => ({
+  x: ORBIT_RADIUS_M * Math.cos((degrees * Math.PI) / 180),
+  y: ORBIT_RADIUS_M * Math.sin((degrees * Math.PI) / 180),
+  z: 0,
+});
 
 describe("noPower", () => {
   it("treats only the two lit-panel states as powered", () => {
@@ -130,5 +167,214 @@ describe("initialHost", () => {
 
   it("is undefined for an empty fleet", () => {
     expect(initialHost([])).toBeUndefined();
+  });
+});
+
+describe("hasLineOfSight", () => {
+  it("sees a close neighbour on the same side of the Earth", () => {
+    expect(hasLineOfSight(orbit(0), orbit(20))).toBe(true);
+  });
+
+  it("is blocked by the Earth for a satellite diametrically opposite", () => {
+    expect(hasLineOfSight(orbit(0), orbit(180))).toBe(false);
+  });
+
+  it("is blocked for the ~11,000 km chord the naive nearest-powered rule used to pick", () => {
+    // 2*R*sin(θ/2) at θ ≈ 108° is ~11,200 km, and that chord passes ~4,060 km from
+    // the centre — the case the migration log exposed.
+    expect(distanceKm(orbit(0), orbit(108))).toBeGreaterThan(11_000);
+    expect(hasLineOfSight(orbit(0), orbit(108))).toBe(false);
+  });
+
+  it("is symmetric", () => {
+    expect(hasLineOfSight(orbit(30), orbit(150))).toBe(hasLineOfSight(orbit(150), orbit(30)));
+  });
+
+  it("does not call a near pair blocked by the far limb — closest approach is clamped to the segment", () => {
+    expect(hasLineOfSight(orbit(0), orbit(2))).toBe(true);
+  });
+
+  it("treats a satellite against itself as visible rather than dividing by zero", () => {
+    expect(hasLineOfSight(orbit(0), orbit(0))).toBe(true);
+  });
+
+  it("refuses a grazing link that would cross the atmosphere", () => {
+    // A chord whose closest approach is 6400 km: above the solid Earth (6371 km) but
+    // inside the 80 km margin, so refused with the margin and allowed without it.
+    const grazing = (Math.acos(6400 / 6921) * 2 * 180) / Math.PI;
+    expect(hasLineOfSight(orbit(0), orbit(grazing), 80)).toBe(false);
+    expect(hasLineOfSight(orbit(0), orbit(grazing), 0)).toBe(true);
+  });
+
+  it("puts the blocking sphere at Earth's mean radius", () => {
+    expect(EARTH_RADIUS_KM).toBe(6371);
+  });
+});
+
+describe("chooseTargetExcluding", () => {
+  const host = at("host", orbit(0), false);
+
+  it("skips a lit candidate another stage already occupies", () => {
+    const target = chooseTargetExcluding(host, [at("near", orbit(10), true), at("far", orbit(40), true)], new Set(["near"]));
+    expect(target?.name).toBe("far");
+  });
+
+  it("picks the nearest in-view lit candidate when nothing is taken", () => {
+    expect(chooseTargetExcluding(host, [at("far", orbit(40), true), at("near", orbit(10), true)], new Set())?.name).toBe("near");
+  });
+
+  it("returns undefined when every lit candidate is taken", () => {
+    expect(chooseTargetExcluding(host, [at("a", orbit(10), true), at("b", orbit(20), true)], new Set(["a", "b"]))).toBeUndefined();
+  });
+
+  it("refuses a lit candidate the Earth is in the way of, preferring one in view", () => {
+    const occluded = at("occluded", orbit(170), true);
+    const visible = at("visible", orbit(40), true);
+    expect(chooseTargetExcluding(host, [occluded, visible], new Set())?.name).toBe("visible");
+  });
+
+  it("returns undefined when the only lit candidate is behind the Earth", () => {
+    expect(chooseTargetExcluding(host, [at("occluded", orbit(170), true)], new Set())).toBeUndefined();
+  });
+});
+
+describe("decideStageMigration", () => {
+  it("holds while the stage's host is powered", () => {
+    expect(decideStageMigration("H", [at("H", orbit(0), true), at("N", orbit(10), true)], new Set()).action).toBe("hold");
+  });
+
+  it("migrates to the nearest free lit satellite in view", () => {
+    const hosts = [at("H", orbit(0), false), at("taken", orbit(5), true), at("free", orbit(20), true)];
+    const decision = decideStageMigration("H", hosts, new Set(["taken"]));
+    expect(decision.action).toBe("migrate");
+    expect(decision.target?.name).toBe("free");
+  });
+
+  it("strands the stage when every lit satellite belongs to a sibling", () => {
+    const hosts = [at("H", orbit(0), false), at("taken", orbit(5), true)];
+    expect(decideStageMigration("H", hosts, new Set(["taken"])).action).toBe("stranded");
+  });
+
+  it("strands the stage when the only lit satellite is behind the Earth", () => {
+    const hosts = [at("H", orbit(0), false), at("across", orbit(180), true)];
+    expect(decideStageMigration("H", hosts, new Set()).action).toBe("stranded");
+  });
+
+  it("reports an unplaced stage as stranded rather than throwing", () => {
+    expect(decideStageMigration(undefined, [at("N", orbit(10), true)], new Set()).action).toBe("stranded");
+  });
+});
+
+describe("placeStages", () => {
+  const fleet = [at("dark", km(0), false), at("lit1", km(10), true), at("lit2", km(20), true)];
+
+  it("gives every stage a distinct host", () => {
+    const stages = placeStages(2, fleet);
+    expect(stages.map((stage) => stage.hostName)).toEqual(["lit1", "lit2"]);
+  });
+
+  it("numbers the stages in pipeline order", () => {
+    expect(placeStages(3, fleet).map((stage) => stage.index)).toEqual([0, 1, 2]);
+  });
+
+  it("falls back to unpowered satellites once the lit ones run out", () => {
+    expect(placeStages(3, fleet).map((stage) => stage.hostName)).toEqual(["lit1", "lit2", "dark"]);
+  });
+
+  it("leaves a stage unplaced rather than co-locating when the fleet is too small", () => {
+    expect(placeStages(2, [at("only", km(0), true)]).map((stage) => stage.hostName)).toEqual(["only", undefined]);
+  });
+});
+
+describe("pipelineServing", () => {
+  const hosts = [at("lit", km(0), true), at("lit2", km(10), true), at("dark", km(20), false)];
+
+  it("serves only when every stage sits on a powered satellite", () => {
+    expect(
+      pipelineServing(
+        [
+          { index: 0, hostName: "lit" },
+          { index: 1, hostName: "lit2" },
+        ],
+        hosts,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not serve when one stage is dark — the conjunction is the point", () => {
+    expect(
+      pipelineServing(
+        [
+          { index: 0, hostName: "lit" },
+          { index: 1, hostName: "dark" },
+        ],
+        hosts,
+      ),
+    ).toBe(false);
+  });
+
+  it("does not serve when a stage is unplaced", () => {
+    expect(pipelineServing([{ index: 0, hostName: undefined }], hosts)).toBe(false);
+  });
+
+  it("does not serve an empty pipeline", () => {
+    expect(pipelineServing([], hosts)).toBe(false);
+  });
+});
+
+describe("poweredStageCount", () => {
+  const hosts = [at("lit", km(0), true), at("dark", km(10), false)];
+
+  it("counts the stages whose hosts have power", () => {
+    expect(
+      poweredStageCount(
+        [
+          { index: 0, hostName: "lit" },
+          { index: 1, hostName: "dark" },
+          { index: 2, hostName: undefined },
+        ],
+        hosts,
+      ),
+    ).toBe(1);
+  });
+});
+
+describe("the ledger", () => {
+  it("starts empty", () => {
+    expect(emptyLedger()).toEqual({ migrations: 0, gigabytesMoved: 0, transferSeconds: 0, stalledSeconds: 0, allPoweredSeconds: 0 });
+  });
+
+  it("adds a migration's bytes and its cost", () => {
+    const ledger = recordMigration(emptyLedger(), 2, transferCost(2, 100, 0));
+    expect(ledger.migrations).toBe(1);
+    expect(ledger.gigabytesMoved).toBe(2);
+    expect(ledger.transferSeconds).toBeCloseTo(0.16, 9);
+  });
+
+  it("accumulates across migrations without mutating the input", () => {
+    const first = emptyLedger();
+    const second = recordMigration(first, 2, transferCost(2, 100, 0));
+    const third = recordMigration(second, 2, transferCost(2, 100, 0));
+    expect(first.migrations).toBe(0);
+    expect(third.gigabytesMoved).toBe(4);
+  });
+
+  it("attributes elapsed simulated time to serving or stalling", () => {
+    const served = accrueTime(emptyLedger(), 10, true, 3600);
+    expect(served).toMatchObject({ allPoweredSeconds: 10, stalledSeconds: 0 });
+    expect(accrueTime(served, 5, false, 3600)).toMatchObject({ allPoweredSeconds: 10, stalledSeconds: 5 });
+  });
+
+  it("drops a clock jump rather than counting it as time the pipeline lived through", () => {
+    const ledger = emptyLedger();
+    expect(accrueTime(ledger, 7200, true, 3600)).toBe(ledger);
+    expect(accrueTime(ledger, -30, true, 3600)).toBe(ledger);
+    expect(accrueTime(ledger, Number.NaN, true, 3600)).toBe(ledger);
+  });
+
+  it("reports the served fraction, and withholds it before any time is accounted", () => {
+    expect(allPoweredFraction(emptyLedger())).toBeUndefined();
+    const ledger = accrueTime(accrueTime(emptyLedger(), 30, true, 3600), 10, false, 3600);
+    expect(allPoweredFraction(ledger)).toBeCloseTo(0.75, 9);
   });
 });

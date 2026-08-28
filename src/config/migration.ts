@@ -57,3 +57,46 @@ export const MIGRATION_COLOR = {
   packet: "#ffffff",
   stranded: "#d55e00",
 } as const;
+
+/**
+ * How many stages the demo pipeline is cut into.
+ *
+ * Four is the smallest number that makes the pipeline's defining property visible:
+ * the pipeline serves only while *every* stage has power, so four stages need four
+ * coincidences at once. One stage would just restate the fleet's dark fraction;
+ * four turns it into the conjunction that actually bounds served time.
+ */
+export const DEFAULT_PIPELINE_STAGES = 4;
+
+/** The stage counts the panel offers. Bounded by what stays readable on the globe. */
+export const PIPELINE_STAGE_CHOICES = [1, 2, 4, 6, 8] as const;
+
+/**
+ * Per-stage hues for the host halos and links, so a reader can follow one stage
+ * through a migration rather than seeing four interchangeable dots.
+ *
+ * Deliberately not the illumination palette (that vocabulary means power state) and
+ * not the five illumination hues — these are Okabe–Ito entries chosen to stay
+ * distinguishable against both the lit globe and space, and to cycle if someone asks
+ * for more stages than there are colours.
+ */
+export const STAGE_COLORS = ["#56b4e9", "#e69f00", "#cc79a7", "#f0e442", "#0072b2", "#d55e00", "#009e73", "#999999"] as const;
+
+/** The hue stage `index` draws in, cycling when the pipeline is longer than the palette. */
+export function stageColor(index: number): string {
+  return STAGE_COLORS[index % STAGE_COLORS.length] as string;
+}
+
+/**
+ * The largest jump in simulated time still counted as continuous playback, in
+ * seconds.
+ *
+ * The ledger accrues served and stalled time from the clock, and the clock can be
+ * scrubbed, reversed or jumped by the time controls. At 4000× — what the browser
+ * check winds to — one 60 fps frame is already ~67 simulated seconds, so the cutoff
+ * has to sit well above that while still rejecting a scrub across hours.
+ */
+export const MAX_SIM_STEP_SECONDS = 3600;
+
+/** How many completed migrations the event log keeps. */
+export const MIGRATION_LOG_LENGTH = 6;

@@ -5,14 +5,20 @@
 // the panel reads it out — and none of the three should own the arithmetic.
 //
 // "Naive" is a deliberate scope, matching what LAB-47 asked for as its baseline: a
-// single pipeline stage holds a KV cache on one satellite; the moment that host
-// stops being able to power its compute (it enters the Earth's shadow, or its
-// panel turns away from the sun — the `sunlit_back` state this whole fork exists
-// to name), the stage is live-migrated to the nearest satellite that still has
-// power, over one inter-satellite link. No handshake overlap, no incremental KV
-// patching, no multi-hop routing, no contention for the link — those are the
-// improvements the algorithm line (LAB-47/70) is for. This is the floor they
-// improve on, and the thing the visual makes watchable.
+// pipeline stage holds a KV cache on one satellite; the moment that host stops
+// being able to power its compute (it enters the Earth's shadow, or its panel turns
+// away from the sun — the `sunlit_back` state this whole fork exists to name), the
+// stage is live-migrated to the nearest satellite that still has power, over one
+// inter-satellite link. No handshake overlap, no incremental KV patching, no
+// multi-hop routing, no contention for the link — those are the improvements the
+// algorithm line (LAB-47/70) is for. This is the floor they improve on, and the
+// thing the visual makes watchable.
+//
+// The module has two layers. The first answers the single-workload question
+// (`decideMigration` and the geometry it needs). The second, below it, is the
+// pipeline: several stages at once, one per satellite, where the pipeline serves
+// only while every stage has power — that conjunction, not any one stage, is what
+// makes the naive policy expensive.
 //
 // The unit here is metres and seconds, and the only frame assumption is that the
 // two positions handed to `distanceKm` are in the *same* frame — the caller reads
@@ -42,6 +48,51 @@ export interface MigrationHost {
 
 /** km/s. Light in vacuum — the ISL propagation floor. */
 export const SPEED_OF_LIGHT_KM_S = 299792.458;
+
+/** km. Earth's mean radius, the sphere an inter-satellite link cannot see through. */
+export const EARTH_RADIUS_KM = 6371;
+
+/**
+ * Whether two satellites can see each other, or whether the Earth is between them.
+ *
+ * The constraint the naive model was missing and could not have noticed on its own:
+ * picking the *nearest powered* satellite by straight-line distance happily selects
+ * one on the other side of the planet. At 550 km altitude two satellites 11,000 km
+ * apart have a chord whose closest approach to Earth's centre is about 4,060 km —
+ * deep inside the planet — so the "link" the animation drew was through rock.
+ *
+ * The test is the closest approach of the *segment* to the origin, which is where
+ * both frames agree: the Earth is centred on the origin in the fixed frame and in
+ * the inertial frame alike, so the same check is valid for whichever frame the
+ * caller sampled positions in.
+ *
+ * `marginKm` raises the sphere to keep a grazing link honest — a ray skimming the
+ * limb passes through the atmosphere, where an optical ISL does not work. Default 80
+ * km, roughly the top of the mesosphere.
+ */
+export function hasLineOfSight(a: Vec3, b: Vec3, marginKm: number = 80): boolean {
+  const blocking = EARTH_RADIUS_KM + marginKm;
+  // Work in km so the radius comparison is direct.
+  const ax = a.x / 1000;
+  const ay = a.y / 1000;
+  const az = a.z / 1000;
+  const dx = b.x / 1000 - ax;
+  const dy = b.y / 1000 - ay;
+  const dz = b.z / 1000 - az;
+  const lengthSquared = dx * dx + dy * dy + dz * dz;
+  if (lengthSquared === 0) {
+    return true;
+  }
+  // Projection of the origin onto the line, clamped to the segment: the closest
+  // approach has to be *between* the satellites to occlude the link. Clamping is
+  // what stops a pair on the same side of the Earth being called blocked by the
+  // far limb.
+  const t = Math.min(1, Math.max(0, -(ax * dx + ay * dy + az * dz) / lengthSquared));
+  const cx = ax + dx * t;
+  const cy = ay + dy * t;
+  const cz = az + dz * t;
+  return Math.sqrt(cx * cx + cy * cy + cz * cz) >= blocking;
+}
 
 /**
  * Whether an illumination state means the compute node cannot be powered.
@@ -184,4 +235,222 @@ export function decideMigration(hostName: string | undefined, hosts: readonly Mi
  */
 export function initialHost(hosts: readonly MigrationHost[]): MigrationHost | undefined {
   return hosts.find((host) => host.hasPower) ?? hosts[0];
+}
+
+// ---------------------------------------------------------------------------
+// A pipeline of stages, rather than one workload
+// ---------------------------------------------------------------------------
+//
+// The single-workload model above answers "where should this KV cache live". An
+// inference pipeline asks a harder question, and it is the one LAB-47 actually
+// cares about: a decode pipeline is cut into stages, every stage holds its own KV
+// cache on its own satellite, and the pipeline only produces tokens while *every*
+// stage has power at the same instant. One stage in shadow stalls all of them.
+//
+// That is why the stage count matters rather than being decoration: with one
+// workload the fleet's ~45% dark fraction is the whole story, but a 4-stage
+// pipeline needs four coincidences at once, so the same per-satellite dark
+// fraction buys far less served time. `pipelineServing` is where that shows up,
+// and the ledger is what turns it into a number.
+
+/**
+ * One pipeline stage and the satellite currently holding its KV cache.
+ *
+ * `hostName` is undefined only before the stage has been placed, or after its host
+ * left the scene — the layer re-places it on the next evaluation.
+ */
+export interface StagePlacement {
+  /** 0-based position in the pipeline. Stage order is fixed; hosts move. */
+  index: number;
+  hostName?: string;
+}
+
+/**
+ * `chooseTarget`, but refusing satellites another stage already occupies, and any
+ * the Earth is in the way of.
+ *
+ * One stage per satellite. Not a physical law — a satellite could in principle
+ * hold two stages — but it is the placement the pipeline story needs: co-locating
+ * every stage on one satellite would make the pipeline a single point of failure
+ * and would make the visual a single dot. Excluding taken hosts is also what
+ * spreads the stages across orbital planes, which is the thing worth looking at.
+ *
+ * Line of sight matters just as much and is easier to get wrong: "nearest powered"
+ * by raw chord length will pick a satellite on the far side of the planet, and the
+ * link drawn to it goes straight through the Earth. `hasLineOfSight` is what keeps
+ * the chosen hop one something could actually make.
+ */
+export function chooseTargetExcluding(source: MigrationHost, candidates: readonly MigrationHost[], taken: ReadonlySet<string>): MigrationHost | undefined {
+  let best: MigrationHost | undefined;
+  let bestKm = Infinity;
+  for (const candidate of candidates) {
+    if (candidate.name === source.name || !candidate.hasPower || taken.has(candidate.name)) {
+      continue;
+    }
+    if (!hasLineOfSight(source.position, candidate.position)) {
+      continue;
+    }
+    const km = distanceKm(source.position, candidate.position);
+    if (km < bestKm) {
+      bestKm = km;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+/**
+ * `decideMigration` for one stage of a pipeline, given the hosts its siblings hold.
+ *
+ * Same three answers as the single-workload model, with one difference: a lit
+ * neighbour already carrying another stage is not a candidate. So `stranded` here
+ * means "dark, and every lit satellite is either mine already or someone else's" —
+ * a scarcity the single-workload model cannot express, and one of the two ways the
+ * naive policy visibly runs out of room.
+ */
+export function decideStageMigration(hostName: string | undefined, hosts: readonly MigrationHost[], taken: ReadonlySet<string>): MigrationDecision {
+  const host = hosts.find((candidate) => candidate.name === hostName);
+  if (!host) {
+    return { action: "stranded", reason: "Stage is unplaced." };
+  }
+  if (host.hasPower) {
+    return { action: "hold", reason: `${host.name} is powered — no migration needed.` };
+  }
+  const target = chooseTargetExcluding(host, hosts, taken);
+  if (!target) {
+    return { action: "stranded", reason: `${host.name} lost power and no free lit neighbour is in view — stage stranded.` };
+  }
+  return { action: "migrate", target, reason: `${host.name} lost power — migrating to ${target.name}.` };
+}
+
+/**
+ * Put `count` stages on distinct powered satellites, in list order.
+ *
+ * Powered first so the pipeline starts in a serving state where possible; falls
+ * back to unpowered satellites once the lit ones run out, so a pipeline longer
+ * than the lit fleet still places every stage (and immediately reports itself
+ * stalled, which is the honest answer rather than a missing stage). Deterministic
+ * for a fixed host order, which the browser check depends on.
+ */
+export function placeStages(count: number, hosts: readonly MigrationHost[]): StagePlacement[] {
+  const taken = new Set<string>();
+  const stages: StagePlacement[] = [];
+  const inPowerOrder = [...hosts.filter((host) => host.hasPower), ...hosts.filter((host) => !host.hasPower)];
+  for (let index = 0; index < count; index += 1) {
+    const free = inPowerOrder.find((host) => !taken.has(host.name));
+    if (free) {
+      taken.add(free.name);
+    }
+    stages.push({ index, hostName: free?.name });
+  }
+  return stages;
+}
+
+/**
+ * Whether the pipeline is producing tokens right now.
+ *
+ * True only when every stage sits on a satellite that currently has power. A stage
+ * mid-migration is not serving either — the caller passes `false` for it by
+ * leaving its host unpowered or by excluding it, whichever matches the phase it is
+ * drawing. This is the whole reason a pipeline is harder than a workload: the
+ * serving condition is a conjunction over stages, so it fails far more often than
+ * any single stage does.
+ */
+export function pipelineServing(stages: readonly StagePlacement[], hosts: readonly MigrationHost[]): boolean {
+  if (stages.length === 0) {
+    return false;
+  }
+  return stages.every((stage) => {
+    const host = hosts.find((candidate) => candidate.name === stage.hostName);
+    return host?.hasPower === true;
+  });
+}
+
+/** How many of the pipeline's stages currently sit on a powered satellite. */
+export function poweredStageCount(stages: readonly StagePlacement[], hosts: readonly MigrationHost[]): number {
+  return stages.filter((stage) => hosts.find((candidate) => candidate.name === stage.hostName)?.hasPower === true).length;
+}
+
+/**
+ * What the naive policy has cost since the demo was switched on.
+ *
+ * Kept as a value rather than mutable counters so the panel can read a consistent
+ * snapshot, and so the accounting is testable without a globe. Seconds are
+ * *simulated* seconds throughout — the demo clock runs at 60× or more, and a cost
+ * measured in wall time would be an artefact of the playback rate, not of the
+ * orbit.
+ *
+ * The time split is deliberately about **power geometry only**: whether a packet
+ * happens to be mid-animation is not part of it, because the animation's length is
+ * wall-clock anchored and would otherwise make the fraction a function of the clock
+ * multiplier. The transfers' own cost is `transferSeconds`, computed from the link
+ * arithmetic.
+ */
+export interface MigrationLedger {
+  /** Completed stage migrations. */
+  migrations: number;
+  /** KV cache actually pushed across links, in GB. */
+  gigabytesMoved: number;
+  /** Summed transfer cost of those migrations, in seconds of link time. */
+  transferSeconds: number;
+  /** Simulated seconds at least one stage lacked power, so the pipeline could not run. */
+  stalledSeconds: number;
+  /** Simulated seconds every stage had power at once. */
+  allPoweredSeconds: number;
+}
+
+export function emptyLedger(): MigrationLedger {
+  return { migrations: 0, gigabytesMoved: 0, transferSeconds: 0, stalledSeconds: 0, allPoweredSeconds: 0 };
+}
+
+/** The ledger with one completed migration of `kvGigabytes` costing `cost` added. */
+export function recordMigration(ledger: MigrationLedger, kvGigabytes: number, cost: TransferCost): MigrationLedger {
+  return {
+    ...ledger,
+    migrations: ledger.migrations + 1,
+    gigabytesMoved: ledger.gigabytesMoved + kvGigabytes,
+    transferSeconds: ledger.transferSeconds + cost.totalSeconds,
+  };
+}
+
+/**
+ * The ledger with `simSeconds` of elapsed simulated time attributed by whether
+ * every stage had power.
+ *
+ * A negative or absurd delta is dropped rather than trusted: the demo clock can be
+ * scrubbed, reversed or jumped by the time controls, and a jump is not time the
+ * pipeline lived through. `maxStepSeconds` is the largest delta still treated as
+ * continuous playback.
+ */
+export function accrueTime(ledger: MigrationLedger, simSeconds: number, allPowered: boolean, maxStepSeconds: number): MigrationLedger {
+  if (!Number.isFinite(simSeconds) || simSeconds <= 0 || simSeconds > maxStepSeconds) {
+    return ledger;
+  }
+  return allPowered ? { ...ledger, allPoweredSeconds: ledger.allPoweredSeconds + simSeconds } : { ...ledger, stalledSeconds: ledger.stalledSeconds + simSeconds };
+}
+
+/**
+ * The fraction of accounted simulated time every stage had power at once — the
+ * pipeline's ceiling on served time.
+ *
+ * A ceiling rather than the served fraction itself, because the transfers eat into
+ * it: `transferSeconds` is what the migrations cost inside this window. Undefined
+ * before any time has been accounted, so the panel can withhold a percentage rather
+ * than print a confident 0% for a demo that has not started.
+ */
+export function allPoweredFraction(ledger: MigrationLedger): number | undefined {
+  const total = ledger.allPoweredSeconds + ledger.stalledSeconds;
+  return total > 0 ? ledger.allPoweredSeconds / total : undefined;
+}
+
+/** One completed migration, kept for the event log the panel prints. */
+export interface MigrationEvent {
+  /** Stage index that moved. */
+  stage: number;
+  from: string;
+  to: string;
+  linkKm: number;
+  transferSeconds: number;
+  /** Simulated time the migration was decided, as an ISO instant. */
+  at: string;
 }

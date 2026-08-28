@@ -29,6 +29,7 @@ import { currentPosition } from "../composables/useGeolocation";
 import { usePostHog } from "../composables/usePostHog";
 import { useToastProxy } from "../composables/useToastProxy";
 import { parseLayer } from "../config/layers";
+import { DEFAULT_PIPELINE_STAGES } from "../config/migration";
 import { MSAA_RATES, PIXEL_RATIOS, msaaSamplesFor, resolutionScaleFor } from "../config/rendering";
 import { STAR_MAPS, type StarMapSources, starMapSources } from "../config/starMaps";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
@@ -130,6 +131,9 @@ export class CesiumController {
   sats!: SatelliteManager;
 
   #migration: MigrationLayer | undefined;
+
+  /** The pipeline length the overlay is (or will be) built with. See setMigrationStages. */
+  #migrationStages: number = DEFAULT_PIPELINE_STAGES;
 
   skyView!: SkyView;
 
@@ -647,12 +651,24 @@ export class CesiumController {
   setMigration(on: boolean): void {
     if (on) {
       if (!this.#migration) {
-        this.#migration = new MigrationLayer(this.viewer, this.sats);
+        this.#migration = new MigrationLayer(this.viewer, this.sats, undefined, this.#migrationStages);
       }
       this.#migration.start();
     } else {
       this.#migration?.stop();
     }
+  }
+
+  /**
+   * How many stages the migration demo's pipeline is cut into.
+   *
+   * Remembered here as well as on the layer so the count set before the overlay is
+   * first switched on (by a url, say) is the count the layer is built with, rather
+   * than being applied only from the second change onwards.
+   */
+  setMigrationStages(count: number): void {
+    this.#migrationStages = count;
+    this.#migration?.setStageCount(count);
   }
 
   /** What the migration overlay is doing, for the panel's readout. */

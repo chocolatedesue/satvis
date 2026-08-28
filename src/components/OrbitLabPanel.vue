@@ -53,45 +53,92 @@
       <span class="slider"></span>
       Show migration overlay
     </label>
+    <label class="orbitLab__field">
+      <span>Pipeline stages</span>
+      <select :value="migrationStages" @change="migrationStages = Number(($event.target as HTMLSelectElement).value)">
+        <option v-for="count in PIPELINE_STAGE_CHOICES" :key="count" :value="count">{{ count }}</option>
+      </select>
+    </label>
     <p class="orbitLab__note">
-      A single inference-pipeline stage holds a {{ migrationStatus?.kvGigabytes ?? 2 }} GB KV cache on one satellite (the
-      <span class="orbitLab__swatch" :style="{ backgroundColor: MIGRATION_COLOR.host }"></span> host). The moment that host loses power — it enters the Earth's shadow, or its panel
-      turns away from the sun (<code>sunlit_back</code>) — the cache is live-migrated over one {{ migrationStatus?.islGbps ?? 100 }} Gbps inter-satellite link to the nearest
-      satellite that still has power. Naive: one link, one hop, no overlap — the baseline LAB-47 improves on.
+      An inference pipeline is cut into {{ migrationStatus?.stageCount ?? migrationStages }} stages, each holding its own {{ migrationStatus?.kvGigabytes ?? 2 }} GB KV cache on its
+      own satellite — one stage per satellite, drawn as a haloed dot in the stage's colour. The moment a host loses power — it enters the Earth's shadow, or its panel turns away
+      from the sun (<code>sunlit_back</code>) — that stage's cache is live-migrated over one {{ migrationStatus?.islGbps ?? 100 }} Gbps inter-satellite link to the nearest
+      satellite that still has power and is not already running a stage. Naive: one link, one hop, no overlap, no incremental patching — the baseline LAB-47 improves on.
     </p>
     <p class="orbitLab__note">
-      The travelling dot is illustrative; the <strong>transfer time</strong> in the table is the real cost — {{ migrationStatus?.kvGigabytes ?? 2 }} GB serialised across the link
-      plus one-way light travel.
+      The pipeline only produces tokens while <strong>every</strong> stage has power at the same instant, so its ceiling falls well below any single satellite's lit fraction — that
+      conjunction, not one satellite's eclipse, is what the naive policy costs. <strong>All stages powered</strong> below is that ceiling, measured over simulated time; the
+      migrations' own cost is the link time beside it.
     </p>
+    <p class="orbitLab__note">
+      The travelling dot is illustrative — its on-screen duration is an animation, not the transfer. The <strong>transfer time</strong> is the real cost:
+      {{ migrationStatus?.kvGigabytes ?? 2 }} GB serialised across the link plus one-way light travel. Elapsed times are <strong>simulated</strong> seconds, not wall clock, so they
+      describe the orbit rather than the playback rate.
+    </p>
+
+    <table v-if="migrationStatus?.active && migrationStatus.stages.length > 0" class="orbitLab__facts">
+      <tbody>
+        <tr v-for="stage in migrationStatus.stages" :key="stage.index">
+          <td class="orbitLab__factName">
+            <span class="orbitLab__swatch" :style="{ backgroundColor: stage.color }"></span>
+            S{{ stage.index + 1 }}
+          </td>
+          <td class="orbitLab__factValue">
+            <template v-if="stage.phase === 'migrating'">{{ stage.from }} → {{ stage.to }} ({{ ((stage.transferSeconds ?? 0) * 1000).toFixed(0) }} ms)</template>
+            <template v-else-if="stage.phase === 'stranded'">stranded on {{ stage.hostName ?? "—" }}</template>
+            <template v-else>{{ stage.hostName ?? "—" }}{{ stage.powered ? "" : " (dark)" }}</template>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
     <table v-if="migrationStatus?.active" class="orbitLab__facts">
       <tbody>
         <tr>
-          <td class="orbitLab__factName">State</td>
-          <td class="orbitLab__factValue">{{ migrationPhase }}</td>
+          <td class="orbitLab__factName">Pipeline</td>
+          <td class="orbitLab__factValue">
+            {{ migrationStatus.serving ? "serving" : "stalled" }} · {{ migrationStatus.poweredStages }}/{{ migrationStatus.stages.length }} stages powered
+          </td>
+        </tr>
+        <tr v-if="migrationStatus.allPoweredFraction !== undefined">
+          <td class="orbitLab__factName">All stages powered</td>
+          <td class="orbitLab__factValue">
+            {{ pct(migrationStatus.allPoweredFraction) }} of {{ simDuration(migrationStatus.ledger.allPoweredSeconds + migrationStatus.ledger.stalledSeconds) }}
+          </td>
         </tr>
         <tr>
-          <td class="orbitLab__factName">Workload host</td>
-          <td class="orbitLab__factValue">{{ migrationStatus.hostName ?? "—" }}</td>
+          <td class="orbitLab__factName">Migrations</td>
+          <td class="orbitLab__factValue">{{ migrationStatus.migrations }}</td>
         </tr>
-        <tr v-if="migrationStatus.phase === 'migrating'">
-          <td class="orbitLab__factName">Migrating</td>
-          <td class="orbitLab__factValue">{{ migrationStatus.from }} → {{ migrationStatus.to }}</td>
+        <tr v-if="migrationStatus.ledger.migrations > 0">
+          <td class="orbitLab__factName">KV moved</td>
+          <td class="orbitLab__factValue">
+            {{ migrationStatus.ledger.gigabytesMoved.toFixed(0) }} GB in {{ (migrationStatus.ledger.transferSeconds * 1000).toFixed(0) }} ms of link time
+          </td>
         </tr>
         <tr v-if="migrationStatus.linkKm !== undefined">
-          <td class="orbitLab__factName">ISL length</td>
+          <td class="orbitLab__factName">ISL in flight</td>
           <td class="orbitLab__factValue">{{ migrationStatus.linkKm.toFixed(0) }} km</td>
-        </tr>
-        <tr v-if="migrationStatus.transferSeconds !== undefined">
-          <td class="orbitLab__factName">Transfer time</td>
-          <td class="orbitLab__factValue">{{ (migrationStatus.transferSeconds * 1000).toFixed(0) }} ms</td>
-        </tr>
-        <tr>
-          <td class="orbitLab__factName">Migrations so far</td>
-          <td class="orbitLab__factValue">{{ migrationStatus.migrations }}</td>
         </tr>
       </tbody>
     </table>
     <p v-if="migrationStatus?.active" class="orbitLab__note">{{ migrationStatus.reason }}</p>
+
+    <template v-if="migrationStatus?.active && migrationStatus.log.length > 0">
+      <div class="toolbarTitle">Migration log</div>
+      <table class="orbitLab__facts">
+        <tbody>
+          <tr v-for="(event, index) in migrationStatus.log" :key="`${event.at}-${event.stage}-${index}`">
+            <td class="orbitLab__factName">{{ clockOf(event.at) }}</td>
+            <td class="orbitLab__factValue">
+              <span class="orbitLab__swatch" :style="{ backgroundColor: stageColor(event.stage) }"></span>
+              S{{ event.stage + 1 }} {{ event.from }} → {{ event.to }} · {{ event.linkKm.toFixed(0) }} km · {{ (event.transferSeconds * 1000).toFixed(0) }} ms
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="orbitLab__note">Newest first, at the simulated time the migration was decided.</p>
+    </template>
 
     <label class="orbitLab__field">
       <span>Preset</span>
@@ -305,7 +352,7 @@ import {
   type IlluminationState,
   type PanelAxis,
 } from "../config/illumination";
-import { MIGRATION_COLOR } from "../config/migration";
+import { PIPELINE_STAGE_CHOICES, stageColor } from "../config/migration";
 import { CAMERA_MODES } from "../config/viewModes";
 import { illuminationTimeline } from "../modules/util/illumination";
 import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, maxReachableBetaDeg } from "../modules/util/orbitDesign";
@@ -351,7 +398,7 @@ const STRIP_ORBITS = 2;
 
 const cc = useController();
 const satStore = useSatStore();
-const { pointColorMode, pointSize, panelAxis, walker, migration } = storeToRefs(satStore);
+const { pointColorMode, pointSize, panelAxis, walker, migration, migrationStages } = storeToRefs(satStore);
 
 // The clock is live viewer state rather than store state (see useViewerClock), and
 // this is the seam the clock deck writes it through — so the demo writes it the same
@@ -668,11 +715,28 @@ const selected = ref<SelectedReadout | undefined>(undefined);
 /** What the migration overlay is doing, polled with everything else. */
 const migrationStatus = ref(cc.migrationStatus);
 
-/** A friendly label for the current migration phase. */
-const migrationPhase = computed(() => {
-  const phase = migrationStatus.value?.phase;
-  return phase === "migrating" ? "migrating" : phase === "stranded" ? "stranded — no lit neighbour" : "holding";
-});
+/**
+ * A span of simulated time, in the largest unit that keeps it readable.
+ *
+ * The demo runs at 60× and the browser check winds to 4000×, so the accounted span
+ * crosses from seconds to hours within a session — printing raw seconds throughout
+ * would make the served fraction's denominator unreadable exactly when it gets
+ * interesting.
+ */
+function simDuration(seconds: number): string {
+  if (seconds < 90) {
+    return `${seconds.toFixed(0)} s`;
+  }
+  if (seconds < 5400) {
+    return `${(seconds / 60).toFixed(1)} min`;
+  }
+  return `${(seconds / 3600).toFixed(1)} h`;
+}
+
+/** The wall-clock time of an ISO instant, to the second — the log's left column. */
+function clockOf(iso: string): string {
+  return iso.slice(11, 19);
+}
 
 /**
  * Which satellite the readout is about: the selected one, else the tracked one.
