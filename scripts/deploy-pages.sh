@@ -56,13 +56,19 @@ echo "checking the credential on $DEPLOY_HOST ..."
 "${SSH[@]}" "CF_ACCOUNT_ID=$CF_ACCOUNT_ID bash -s" <<'REMOTE'
 set -euo pipefail
 token="${CLOUDFLARE_API_TOKEN:-}"
+if [[ -z "$token" && -r "$HOME/.secrets/cloudflare-pages.env" ]]; then
+  # The canonical place, following the convention the asset table already uses for
+  # every other credential: the secret lives in a 0600 file on the host and the
+  # table records only where it is.
+  token="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$HOME/.secrets/cloudflare-pages.env" | head -1 | tr -d "\"' ")"
+fi
 if [[ -z "$token" ]]; then
-  # The token lives in the shell profile, which returns early for a
-  # non-interactive shell — so the one line is sourced rather than the file.
+  # Older location: the shell profile, which returns early for a non-interactive
+  # shell — so the one line is sourced rather than the file.
   token="$(sed -n 's/^export CLOUDFLARE_API_TOKEN=//p' "$HOME/.bashrc" 2>/dev/null | head -1 | tr -d "\"' ")"
 fi
 if [[ -z "$token" ]]; then
-  echo "no CLOUDFLARE_API_TOKEN found in the environment or ~/.bashrc" >&2
+  echo "no CLOUDFLARE_API_TOKEN in the environment, ~/.secrets/cloudflare-pages.env, or ~/.bashrc" >&2
   exit 2
 fi
 # Account-owned tokens verify per account; `/user/tokens/verify` rejects them by
@@ -72,13 +78,26 @@ body="$(curl -sS --max-time 30 -H "Authorization: Bearer $token" \
 status="$(printf %s "$body" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')"
 id="$(printf %s "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 expires="$(printf %s "$body" | sed -n 's/.*"expires_on":"\([^"]*\)".*/\1/p')"
-echo "token id=${id:-?} status=${status:-unknown} expires_on=${expires:-none}"
+if [[ -n "$status" ]]; then
+  # Cloudflare knows this token: it answers with the token's own id and state, so
+  # `expired` is distinguishable from a scope problem.
+  echo "token id=${id:-?} status=$status expires_on=${expires:-none}"
+else
+  # No status means Cloudflare did not recognise the value as a token for this
+  # account at all — a different failure from an expired one, and worth saying so,
+  # because wrangler renders both as the same `Authentication error`.
+  echo "token NOT RECOGNISED for account $CF_ACCOUNT_ID"
+  echo "  cloudflare said: $(printf %s "$body" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')"
+  echo "  (an expired token would instead report its id and status=expired here)"
+  status="unrecognised"
+fi
 if [[ "$status" != "active" ]]; then
   echo "" >&2
-  echo "This token cannot deploy. Renew it in the Cloudflare dashboard" >&2
-  echo "(My Profile / Account API Tokens -> the token above -> extend expiry, or" >&2
-  echo "create a new one with Pages:Edit on account $CF_ACCOUNT_ID), then update" >&2
-  echo "CLOUDFLARE_API_TOKEN. Nothing was uploaded." >&2
+  echo "This token cannot deploy. Create or renew one in the Cloudflare dashboard:" >&2
+  echo "  Account API Tokens (or My Profile / API Tokens) -> Pages:Edit on account" >&2
+  echo "  $CF_ACCOUNT_ID. A usable value is 40 chars, or 'cfat_' + 48." >&2
+  echo "Then put it in ~/.secrets/cloudflare-pages.env as CLOUDFLARE_API_TOKEN=..." >&2
+  echo "Nothing was uploaded." >&2
   exit 3
 fi
 REMOTE
@@ -91,7 +110,14 @@ for project in $PAGES_PROJECTS; do
   "${SSH[@]}" "DEPLOY_DIR=$DEPLOY_DIR PROJECT=$project BRANCH=$PAGES_BRANCH WRANGLER=$WRANGLER CF_ACCOUNT_ID=$CF_ACCOUNT_ID bash -s" <<'REMOTE'
 set -euo pipefail
 export CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID"
-export CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-$(sed -n 's/^export CLOUDFLARE_API_TOKEN=//p' "$HOME/.bashrc" | head -1 | tr -d "\"' ")}"
+if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+  if [[ -r "$HOME/.secrets/cloudflare-pages.env" ]]; then
+    CLOUDFLARE_API_TOKEN="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$HOME/.secrets/cloudflare-pages.env" | head -1 | tr -d "\"' ")"
+  else
+    CLOUDFLARE_API_TOKEN="$(sed -n 's/^export CLOUDFLARE_API_TOKEN=//p' "$HOME/.bashrc" | head -1 | tr -d "\"' ")"
+  fi
+fi
+export CLOUDFLARE_API_TOKEN
 cd "$HOME/$DEPLOY_DIR"
 npx -y "$WRANGLER" pages deploy . --project-name "$PROJECT" --branch "$BRANCH"
 REMOTE
