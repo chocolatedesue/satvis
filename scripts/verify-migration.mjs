@@ -29,6 +29,7 @@ const chromium = spawn(
     "--use-gl=angle",
     "--use-angle=swiftshader",
     "--hide-scrollbars",
+    ...(process.env.VERIFY_PROXY ? [`--proxy-server=${process.env.VERIFY_PROXY}`, "--proxy-bypass-list=<-loopback>"] : []),
     "--window-size=1440,900",
     `--remote-debugging-port=${PORT}`,
     `--user-data-dir=${mkdtempSync(`${tmpdir()}/satvis-mig-`)}`,
