@@ -416,10 +416,10 @@ await until("!!document.querySelector('canvas')", "the Cesium canvas on the demo
 // check failed, not abort the run with a timeout — that is the difference between
 // "the demo link places the pipeline wrongly" and no answer at all.
 const settled = async (expression, timeoutMs) => {
-  const deadline = Date.now() + timeoutMs;
+  const limit = Date.now() + timeoutMs;
   for (;;) {
     if (await evaluate(expression)) return true;
-    if (Date.now() > deadline) return false;
+    if (Date.now() > limit) return false;
     await sleep(250);
   }
 };
