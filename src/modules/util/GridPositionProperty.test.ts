@@ -205,4 +205,44 @@ describe("GridPositionProperty", () => {
     // Clamped to what is held rather than padded with zeroes.
     expect(property.rawPositions(-5, 100)).toHaveLength(10);
   });
+
+  // A window whose grid is anchored far from its samples, on a step that is not a
+  // whole number of seconds — which is what a real two-orbit window is: the ISS one
+  // sits at index -1974 on a 46.335 s step. Asking `samplesBetween` for the window's
+  // own end times went index -> time -> index, and the last quotient came back as
+  // -1735.0000000000002, which `Math.floor` took to -1736. One sample vanished, from
+  // the end, only for some steps, while `length` went on counting it.
+  describe("all of a window offset on a fractional step", () => {
+    const ISS_STEP = 46.33513181736176;
+    const window = (step: number): GridPositionProperty => {
+      const property = new GridPositionProperty();
+      property.reset(ANCHOR_MS, step);
+      property.add(-1974, ramp(-1974, 240));
+      return property;
+    };
+
+    test("holds every sample it says it holds", () => {
+      const property = window(ISS_STEP);
+      expect(property.allSamples().times).toHaveLength(property.length);
+      expect(property.allSamples().positions).toHaveLength(property.length);
+    });
+
+    test("ends on its own last index, not one short of it", () => {
+      const property = window(ISS_STEP);
+      const samples = property.allSamples();
+      expect(JulianDate.equals(samples.times[0]!, property.timeAt(property.firstIndex))).toBe(true);
+      expect(JulianDate.equals(samples.times.at(-1)!, property.timeAt(property.firstIndex + property.length - 1))).toBe(true);
+    });
+
+    // Agreement between the two reads is what the second frame's backfill rests on:
+    // it reads the window and must cover exactly the instants the window reports.
+    test("agrees with the index-addressed read of the same window", () => {
+      const property = window(ISS_STEP);
+      expect(property.allSamples().positions).toHaveLength(property.rawPositions().length);
+    });
+
+    test("is unaffected on a whole-second step, where the round trip happened to survive", () => {
+      expect(window(45).allSamples().times).toHaveLength(240);
+    });
+  });
 });

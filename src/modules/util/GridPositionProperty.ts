@@ -380,14 +380,21 @@ export class GridPositionProperty {
    * `SampledPositionProperty` costs.
    */
   samplesBetween(from: JulianDate, to: JulianDate): { times: JulianDate[]; positions: Cartesian3[] } {
-    const times: JulianDate[] = [];
-    const positions: Cartesian3[] = [];
     if (this.#count === 0 || this.#stepSeconds <= 0) {
-      return { times, positions };
+      return { times: [], positions: [] };
     }
     const first = Math.max(this.indexAtOrAfter(from), this.#firstIndex);
     const last = Math.min(Math.floor(JulianDate.secondsDifference(to, this.#anchor) / this.#stepSeconds), this.#firstIndex + this.#count - 1);
-    for (let index = first; index <= last; index += 1) {
+    return this.#samplesForIndices(first, last);
+  }
+
+  /** The `(time, position)` pairs for an inclusive index range, clamped to what is held. */
+  #samplesForIndices(first: number, last: number): { times: JulianDate[]; positions: Cartesian3[] } {
+    const times: JulianDate[] = [];
+    const positions: Cartesian3[] = [];
+    const from = Math.max(first, this.#firstIndex);
+    const to = Math.min(last, this.#firstIndex + this.#count - 1);
+    for (let index = from; index <= to; index += 1) {
       const at = (index - this.#firstIndex) * 3;
       times.push(this.timeAt(index));
       positions.push(new Cartesian3(this.#positions[at] as number, this.#positions[at + 1] as number, this.#positions[at + 2] as number));
@@ -395,8 +402,28 @@ export class GridPositionProperty {
     return { times, positions };
   }
 
+  /**
+   * Every sample held, with the times they sit at.
+   *
+   * Built from the index range rather than by handing `samplesBetween` the window's
+   * own end times, because that round trip — index to time and back to index — is
+   * not lossless. With a fractional step (46.335… s for a two-orbit ISS window)
+   * `secondsDifference(lastTime, anchor) / step` came back as -1735.0000000000002,
+   * and `Math.floor` turned that into -1736: the final sample was dropped, silently
+   * and only for some steps. `length` counts the sample, so the window reported one
+   * more than any backfill built from it contained, and the fixed and inertial
+   * frames ended up covering different instants — the thing the backfill exists to
+   * guarantee.
+   *
+   * `samplesBetween` keeps `ceil`/`floor`: for a real time range, "at or after
+   * `from`, at or before `to`" is the wanted meaning. It is only asking it about
+   * one's own endpoints that is a question one already knows the answer to.
+   */
   allSamples(): { times: JulianDate[]; positions: Cartesian3[] } {
-    return this.samplesBetween(this.timeAt(this.#firstIndex), this.timeAt(this.#firstIndex + Math.max(0, this.#count - 1)));
+    if (this.#count === 0 || this.#stepSeconds <= 0) {
+      return { times: [], positions: [] };
+    }
+    return this.#samplesForIndices(this.#firstIndex, this.#firstIndex + this.#count - 1);
   }
 
   equals(other?: GridPositionProperty): boolean {
