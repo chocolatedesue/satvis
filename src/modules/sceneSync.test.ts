@@ -115,6 +115,7 @@ function fakeTarget() {
       calls.morphedTo.push(mode);
     },
     setTime: () => {},
+    setMigration: () => {},
   };
 
   return { target, calls, catalog, unavailableStarMaps };

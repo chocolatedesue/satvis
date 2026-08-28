@@ -4,7 +4,7 @@ import { computed, ref } from "vue";
 import { POINT_SIZES, SATELLITE_COMPONENTS, type PointSize } from "../config/components";
 import { DEFAULT_POINT_PAINT, PANEL_AXES, POINT_COLOR_MODES, type PanelAxis, type PointColorMode } from "../config/illumination";
 import { sameValue } from "../modules/util/equality";
-import { closedStringList, enumString, groundStationList, plainString, stringList, tildeEscapedStringList } from "../modules/util/urlCodec";
+import { boolean, closedStringList, enumString, groundStationList, plainString, stringList, tildeEscapedStringList } from "../modules/util/urlCodec";
 
 export interface SerializedGroundStation {
   lat: number;
@@ -54,6 +54,13 @@ export const useSatStore = defineStore(
     const pointSize = ref<PointSize>(DEFAULT_POINT_PAINT.size);
     const panelAxis = ref<PanelAxis>(DEFAULT_POINT_PAINT.panelAxis);
     const walker = ref<string[]>([]);
+
+    // The naive KV-cache live-migration overlay: one workload hopping between
+    // satellites as its host loses power. A free boolean rather than a satellite
+    // component, because a migration is a relation between two satellites and
+    // belongs to neither — see modules/MigrationLayer.ts. URL-synced so a link
+    // can open straight into the migration demo.
+    const migration = ref(false);
 
     // Activation is one invariant cluster — see CONTEXT.md. Held privately and
     // exposed read-only so every writer goes through setActivation and the
@@ -165,6 +172,7 @@ export const useSatStore = defineStore(
       pointSize,
       panelAxis,
       walker,
+      migration,
       enabledTags,
       enabledSatellites,
       disabledSatellites,
@@ -191,6 +199,7 @@ export const useSatStore = defineStore(
         { name: "pointSize", url: "psize", kind: enumString(POINT_SIZES) },
         { name: "panelAxis", url: "panel", kind: enumString(PANEL_AXES) },
         { name: "walker", url: "walker", kind: stringList() },
+        { name: "migration", url: "mig", kind: boolean() },
       ],
       // Guarded keys are read-only, so the url goes through the same actions as
       // every other writer; the triple is applied in one call to keep it

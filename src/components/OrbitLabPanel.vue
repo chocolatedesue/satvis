@@ -46,6 +46,53 @@
       shadow, the noon–midnight one is eclipsed for a third of every orbit. Same altitude, same inclination — a quarter turn of the plane apart.
     </p>
 
+    <div class="toolbarTitle">KV-cache live migration</div>
+    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="migrationDemo">KV-cache migration demo</button>
+    <label class="toolbarSwitch">
+      <input type="checkbox" :checked="migration" @change="migration = ($event.target as HTMLInputElement).checked" />
+      <span class="slider"></span>
+      Show migration overlay
+    </label>
+    <p class="orbitLab__note">
+      A single inference-pipeline stage holds a {{ migrationStatus?.kvGigabytes ?? 2 }} GB KV cache on one satellite (the
+      <span class="orbitLab__swatch" :style="{ backgroundColor: MIGRATION_COLOR.host }"></span> host). The moment that host loses power — it enters the Earth's shadow, or its panel
+      turns away from the sun (<code>sunlit_back</code>) — the cache is live-migrated over one {{ migrationStatus?.islGbps ?? 100 }} Gbps inter-satellite link to the nearest
+      satellite that still has power. Naive: one link, one hop, no overlap — the baseline LAB-47 improves on.
+    </p>
+    <p class="orbitLab__note">
+      The travelling dot is illustrative; the <strong>transfer time</strong> in the table is the real cost — {{ migrationStatus?.kvGigabytes ?? 2 }} GB serialised across the link
+      plus one-way light travel.
+    </p>
+    <table v-if="migrationStatus?.active" class="orbitLab__facts">
+      <tbody>
+        <tr>
+          <td class="orbitLab__factName">State</td>
+          <td class="orbitLab__factValue">{{ migrationPhase }}</td>
+        </tr>
+        <tr>
+          <td class="orbitLab__factName">Workload host</td>
+          <td class="orbitLab__factValue">{{ migrationStatus.hostName ?? "—" }}</td>
+        </tr>
+        <tr v-if="migrationStatus.phase === 'migrating'">
+          <td class="orbitLab__factName">Migrating</td>
+          <td class="orbitLab__factValue">{{ migrationStatus.from }} → {{ migrationStatus.to }}</td>
+        </tr>
+        <tr v-if="migrationStatus.linkKm !== undefined">
+          <td class="orbitLab__factName">ISL length</td>
+          <td class="orbitLab__factValue">{{ migrationStatus.linkKm.toFixed(0) }} km</td>
+        </tr>
+        <tr v-if="migrationStatus.transferSeconds !== undefined">
+          <td class="orbitLab__factName">Transfer time</td>
+          <td class="orbitLab__factValue">{{ (migrationStatus.transferSeconds * 1000).toFixed(0) }} ms</td>
+        </tr>
+        <tr>
+          <td class="orbitLab__factName">Migrations so far</td>
+          <td class="orbitLab__factValue">{{ migrationStatus.migrations }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <p v-if="migrationStatus?.active" class="orbitLab__note">{{ migrationStatus.reason }}</p>
+
     <label class="orbitLab__field">
       <span>Preset</span>
       <select :value="presetIndex" @change="applyPreset(Number(($event.target as HTMLSelectElement).value))">
@@ -258,6 +305,7 @@ import {
   type IlluminationState,
   type PanelAxis,
 } from "../config/illumination";
+import { MIGRATION_COLOR } from "../config/migration";
 import { CAMERA_MODES } from "../config/viewModes";
 import { illuminationTimeline } from "../modules/util/illumination";
 import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, maxReachableBetaDeg } from "../modules/util/orbitDesign";
@@ -303,7 +351,7 @@ const STRIP_ORBITS = 2;
 
 const cc = useController();
 const satStore = useSatStore();
-const { pointColorMode, pointSize, panelAxis, walker } = storeToRefs(satStore);
+const { pointColorMode, pointSize, panelAxis, walker, migration } = storeToRefs(satStore);
 
 // The clock is live viewer state rather than store state (see useViewerClock), and
 // this is the seam the clock deck writes it through — so the demo writes it the same
@@ -521,7 +569,25 @@ function twoOrbitDemo(): void {
   }
 }
 
-/** Put the computed sun-synchronous inclination into the form, leaving the rest alone. */
+/**
+ * The two-orbit demo, plus the naive KV-cache live-migration overlay on top.
+ *
+ * Builds on twoOrbitDemo rather than repeating it: the migration story needs
+ * exactly the scene that demo sets up — a handful of satellites, coloured by
+ * illumination, in the inertial frame, with the clock moving so a host crosses
+ * into shadow while someone watches. Turning the overlay on is the one thing this
+ * adds: a workload that hops to a lit neighbour each time its host goes dark.
+ */
+function migrationDemo(): void {
+  twoOrbitDemo();
+  // Just the two orbits — a clean stage for the migration, not the default
+  // catalog layered on top. twoOrbitDemo keeps whatever else was active (it does
+  // not want to disrupt a scene someone built); the migration story reads best
+  // against exactly the two planes it hops between, so this narrows to them.
+  const preset = WALKER_PRESETS[0] as (typeof WALKER_PRESETS)[number];
+  satStore.setActivation({ enabledTags: [walkerTagFor(preset.params)], enabledSatellites: [], disabledSatellites: [] });
+  migration.value = true;
+}
 function useSunSyncInclination(): void {
   const inclinationDeg = ssoFacts.value.inclinationDeg;
   if (inclinationDeg !== undefined) {
@@ -599,6 +665,15 @@ interface SelectedReadout {
 
 const selected = ref<SelectedReadout | undefined>(undefined);
 
+/** What the migration overlay is doing, polled with everything else. */
+const migrationStatus = ref(cc.migrationStatus);
+
+/** A friendly label for the current migration phase. */
+const migrationPhase = computed(() => {
+  const phase = migrationStatus.value?.phase;
+  return phase === "migrating" ? "migrating" : phase === "stranded" ? "stranded — no lit neighbour" : "holding";
+});
+
 /**
  * Which satellite the readout is about: the selected one, else the tracked one.
  *
@@ -622,6 +697,7 @@ function subjectSatellite() {
  */
 function refresh(): void {
   const date = JulianDate.toDate(cc.viewer.clock.currentTime);
+  migrationStatus.value = cc.migrationStatus;
   const axis = panelAxis.value;
   const counts: Partial<Record<IlluminationState, number>> = {};
   let total = 0;

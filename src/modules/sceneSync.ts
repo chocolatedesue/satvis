@@ -92,6 +92,8 @@ export interface SceneTarget {
   releaseCameraMode(): void;
   morphTo(mode: string): void;
   setTime(time: string): void;
+  /** Turn the naive KV-cache migration overlay on or off. */
+  setMigration(on: boolean): void;
 }
 
 export function startSceneSync(cc: SceneTarget): void {
@@ -443,6 +445,17 @@ export function startSceneSync(cc: SceneTarget): void {
       }
     },
     { deep: true, immediate: true },
+  );
+
+  // The naive migration overlay. Store-to-globe like the walker generator above:
+  // a boolean in the url, a layer on the globe. Immediate, so `?mig=true` is in
+  // force from the first frame.
+  watch(
+    () => satStore.migration,
+    (on) => {
+      cc.setMigration(on);
+    },
+    { immediate: true },
   );
 
   const desired = (): DesiredScene => ({

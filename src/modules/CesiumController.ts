@@ -43,6 +43,7 @@ import {
   terrainProviders,
   terrainProviderNames as visibleTerrainProviderNames,
 } from "./CesiumLayerProviders";
+import { MigrationLayer, type MigrationStatus } from "./MigrationLayer";
 import { cesiumSceneMode } from "./satelliteGraphics";
 import { SatelliteManager } from "./SatelliteManager";
 import { SkyInteraction } from "./SkyInteraction";
@@ -127,6 +128,8 @@ export class CesiumController {
   minimalUI: boolean;
 
   sats!: SatelliteManager;
+
+  #migration: MigrationLayer | undefined;
 
   skyView!: SkyView;
 
@@ -632,6 +635,29 @@ export class CesiumController {
     this.viewer.clock.startTime = JulianDate.fromIso8601(dayjs.utc(start).toISOString());
     this.viewer.clock.stopTime = JulianDate.fromIso8601(dayjs.utc(stop).toISOString());
     this.viewer.clock.currentTime = JulianDate.fromIso8601(dayjs.utc(current).toISOString());
+  }
+
+  /**
+   * Turn the naive KV-cache migration overlay on or off.
+   *
+   * Built lazily and torn down on the way off, so a session that never opens the
+   * demo never adds its entities or its per-tick handler. The layer itself owns
+   * the four entities and the clock subscription (see MigrationLayer).
+   */
+  setMigration(on: boolean): void {
+    if (on) {
+      if (!this.#migration) {
+        this.#migration = new MigrationLayer(this.viewer, this.sats);
+      }
+      this.#migration.start();
+    } else {
+      this.#migration?.stop();
+    }
+  }
+
+  /** What the migration overlay is doing, for the panel's readout. */
+  get migrationStatus(): MigrationStatus | undefined {
+    return this.#migration?.status;
   }
 
   createInputHandler(): void {
