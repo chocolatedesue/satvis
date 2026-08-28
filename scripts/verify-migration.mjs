@@ -106,6 +106,25 @@ async function until(expression, label, timeoutMs = 90_000) {
   }
 }
 
+/**
+ * Poll `expression` until `ok` accepts it, then return whatever it last saw.
+ *
+ * For reads whose subject is built lazily — a satellite's component entities appear as
+ * the satellite is enabled, not when the overlay reports it placed — so a single sample
+ * races the build. It passes locally against a loopback server and fails against a
+ * deployment behind a proxy, which is the worst way for a check to be wrong. Returning
+ * the last value rather than throwing keeps a genuine failure legible in the report.
+ */
+async function sampleUntil(expression, ok, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  for (;;) {
+    last = await evaluate(expression);
+    if (ok(last) || Date.now() > deadline) return last;
+    await sleep(250);
+  }
+}
+
 const checks = [];
 function record(name, actual, expectation) {
   const ok = expectation(actual);
@@ -173,29 +192,35 @@ record(
 
 record("the status readout reports a valid phase", await evaluate("window.cc.migrationStatus?.phase"), (p) => ["holding", "migrating", "stranded"].includes(p));
 
+const haloLabelled = (texts) => Array.isArray(texts) && texts.length === STAGES && texts.every((text) => /^S\d+ · P\d+-\d+/.test(text ?? ""));
+
 record(
   "each stage's halo says which satellite it is on — plane and slot, not just the stage number",
-  await evaluate(
+  await sampleUntil(
     "(() => { const t = window.cc.viewer.clock.currentTime;" +
       " return window.cc.viewer.entities.values.filter((e) => /^Migration host S/.test(e.name)).map((e) => e.label?.text?.getValue(t)); })()",
+    haloLabelled,
   ),
   // `S2 · P01-07`: the stage, then the two numbers that place its satellite in the
   // constellation. The stage number alone left four interchangeable tags moving over a
   // fleet of twenty with no way to tell which satellite any of them was on.
-  (texts) => Array.isArray(texts) && texts.length === STAGES && texts.every((text) => /^S\d+ · P\d+-\d+/.test(text ?? "")),
+  haloLabelled,
 );
+
+const fleetLabelled = (l) => l?.total === 20 && l.tagged === l.total;
 
 record(
   "every satellite in the fleet is labelled by its plane and slot",
-  await evaluate(
+  await sampleUntil(
     "(() => { const t = window.cc.viewer.clock.currentTime;" +
       " const texts = window.cc.viewer.entities.values.filter((e) => e.label && !/^Migration/.test(e.name ?? ''))" +
       "   .map((e) => e.label.text?.getValue?.(t));" +
       " return { total: texts.length, tagged: texts.filter((x) => /^P\\d+-\\d+$/.test(x ?? '')).length, sample: texts.slice(0, 3) }; })()",
+    fleetLabelled,
   ),
   // The whole fleet, not just the four hosts: the demo turns labels on now that a label
   // is six characters rather than the pattern's full name repeated twenty times.
-  (l) => l.total === 20 && l.tagged === l.total,
+  fleetLabelled,
 );
 
 record(
