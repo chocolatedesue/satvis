@@ -14,7 +14,7 @@ import { applyMigrationScene, applySunSyncScene, applyTwoOrbitScene, type ClockC
 import { startSceneSync } from "./modules/sceneSync";
 import { DeviceDetect } from "./modules/util/DeviceDetect";
 import { representativeAlwaysSunlitAltitudeKm } from "./modules/util/sunSynchronous";
-import piniaUrlSync from "./modules/util/urlSync";
+import piniaUrlSync, { whenHydrated } from "./modules/util/urlSync";
 import { router, setupRouterGuards } from "./router";
 import { useCesiumStore } from "./stores/cesium";
 import { useSatStore } from "./stores/sat";
@@ -74,6 +74,8 @@ app.mount("#app");
 {
   const requested = new URLSearchParams(window.location.search).get("demo");
   if (isDemoName(requested)) {
+    // Created before the wait, because whenHydrated() only promises about stores
+    // registered by the time it is called.
     const satStore = useSatStore();
     const cesiumStore = useCesiumStore();
     const clock: ClockControl = {
@@ -84,14 +86,25 @@ app.mount("#app");
         cc.viewer.clockViewModel.shouldAnimate = true;
       },
     };
-    if (requested === "migration") {
-      applyMigrationScene(satStore, cesiumStore, clock);
-    } else if (requested === "sso") {
-      applySunSyncScene(satStore, cesiumStore, clock, representativeAlwaysSunlitAltitudeKm() ?? 1760);
-    } else {
-      applyTwoOrbitScene(satStore, cesiumStore, clock);
-    }
-    cc.viewer.scene.requestRender();
+    // After the url has been read, not before. Url-sync hydrates on
+    // `router.isReady()` — a microtask after this file's top level — and hydration
+    // applies the route's preset before reading the query. Applying the scene
+    // first meant the default preset's own `enabledTags` (`["Weather"]`) landed on
+    // top of the scene's walker tag, so `?demo=migration` opened with the weather
+    // group active and placed the pipeline on geostationary weather satellites
+    // instead of the two planes the demo is about. Everything the preset does not
+    // name survived, which is why this read as a half-applied scene rather than as
+    // no scene at all.
+    void whenHydrated().then(() => {
+      if (requested === "migration") {
+        applyMigrationScene(satStore, cesiumStore, clock);
+      } else if (requested === "sso") {
+        applySunSyncScene(satStore, cesiumStore, clock, representativeAlwaysSunlitAltitudeKm() ?? 1760);
+      } else {
+        applyTwoOrbitScene(satStore, cesiumStore, clock);
+      }
+      cc.viewer.scene.requestRender();
+    });
   }
 }
 

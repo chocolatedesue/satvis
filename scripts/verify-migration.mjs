@@ -403,6 +403,62 @@ record(
 console.log("ledger:", JSON.stringify(readout?.ledger), "all-stages-powered fraction:", readout?.allPoweredFraction);
 console.log("log (newest first):", JSON.stringify(readout?.log?.slice(0, 3)));
 
+// Everything above drove the scene through the panel button. The shareable link is
+// a second, independent way in, and it broke without any of the above noticing: the
+// scene was applied before url-sync read the route's preset, so the preset's own
+// `enabledTags` (["Weather"]) replaced the walker tag and the pipeline was placed on
+// geostationary weather satellites while the clock, camera and overlay all looked
+// right. Checked here, on a fresh document load, because the failure was in what
+// startup does unprompted — nothing a click can reach.
+await send("Page.navigate", { url: `${BASE}/?demo=migration` });
+await until("!!document.querySelector('canvas')", "the Cesium canvas on the demo link");
+// Settled, not asserted: a deployment where the link is broken should report which
+// check failed, not abort the run with a timeout — that is the difference between
+// "the demo link places the pipeline wrongly" and no answer at all.
+const settled = async (expression, timeoutMs) => {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await evaluate(expression)) return true;
+    if (Date.now() > deadline) return false;
+    await sleep(250);
+  }
+};
+await settled("window.cc?.migrationStatus?.active === true", 60_000);
+await settled(`window.cc.migrationStatus?.stages?.length === ${STAGES}`, 60_000);
+await settled("window.cc.sats.activeSatellites.length === 20", 60_000);
+
+const fromLink = await evaluate(`({
+  overlayActive: window.cc.migrationStatus?.active === true,
+  satellites: window.cc.sats.activeSatellites.length,
+  hosts: (window.cc.migrationStatus?.stages ?? []).map((s) => s.hostName),
+  walker: new URLSearchParams(location.search).get('walker'),
+  tags: new URLSearchParams(location.search).get('tags'),
+  mig: new URLSearchParams(location.search).get('mig'),
+  camera: window.cc.cameraMode,
+  multiplier: window.cc.viewer.clock.multiplier,
+  animating: window.cc.viewer.clock.shouldAnimate,
+})`);
+
+record(
+  "the demo link alone places the pipeline on the demo's own constellation",
+  { overlay: fromLink.overlayActive, satellites: fromLink.satellites, hosts: fromLink.hosts },
+  (s) => s.overlay === true && s.satellites === 20 && s.hosts.length === STAGES && s.hosts.every((host) => /^W\S+ P\d+-\d+$/.test(host ?? "")),
+);
+
+record(
+  "the demo link alone runs the clock, in the inertial frame",
+  { camera: fromLink.camera, multiplier: fromLink.multiplier, animating: fromLink.animating },
+  (s) => s.camera === "Inertial" && s.multiplier >= 60 && s.animating === true,
+);
+
+// The shorthand is not the state: whoever copies the address bar out of this tab
+// should get the scene, not another `?demo=` that has to be re-derived.
+record(
+  "the demo link writes the scene it applied back into the url",
+  { walker: fromLink.walker, tags: fromLink.tags, mig: fromLink.mig },
+  (s) => s.walker === "53:20/2/1@550~180" && s.tags === "Walker 53:20/2/1@550~180" && s.mig === "true",
+);
+
 // Screenshot for the record.
 const shot = await send("Page.captureScreenshot", { format: "png" });
 writeFileSync(`${OUT}/migration.png`, Buffer.from(shot.data, "base64"));

@@ -48,6 +48,10 @@ interface Registration {
   // Preset-merged values, captured at hydration. Undefined until then, which
   // is also how we know this store's parameters must not be rewritten yet.
   defaults?: Record<string, unknown>;
+  // This store's url read, so a caller that must not race it can wait. Kept on
+  // the registration rather than in a second collection, so there is nothing to
+  // keep in step with the registry.
+  hydrated: Promise<void>;
 }
 
 // Every synced store, so one write can rebuild the whole query. Without this
@@ -240,10 +244,11 @@ function createUrlSync({ options, store }: PiniaPluginContext): void {
     specs: urlsync.config,
     apply: urlsync.apply,
     qualified: qualify(store.$id, urlsync.config),
+    // Assigned below: the registration has to exist before hydrate can be named.
+    hydrated: Promise.resolve(),
   };
+  entry.hydrated = router.isReady().then(() => hydrate(entry, router));
   registry.set(store.$id, entry);
-
-  void router.isReady().then(() => hydrate(entry, router));
 
   // Watch the synced values rather than $subscribe: guarded keys are exposed
   // as computeds over private refs, and a private ref is not part of $state, so
@@ -263,3 +268,20 @@ function createUrlSync({ options, store }: PiniaPluginContext): void {
 }
 
 export default createUrlSync;
+
+/**
+ * Resolves once every store registered by the time of the call has read the url.
+ *
+ * Hydration is deliberately deferred to `router.isReady()`, which puts it a
+ * microtask after the module top level that mounts the app — so anything wanting
+ * to set store state *as if a user had* must wait, or the url read lands on top
+ * of it. `?demo=` is that caller: see src/app.ts.
+ *
+ * The promise is about stores registered *now*, not about some future complete
+ * set, because there is no such moment — stores are created on first use. A
+ * caller therefore creates the stores it cares about before calling this, which
+ * is also the only way to state a gate that cannot silently miss one.
+ */
+export function whenHydrated(): Promise<void> {
+  return Promise.all([...registry.values()].map((entry) => entry.hydrated)).then(() => undefined);
+}

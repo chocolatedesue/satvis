@@ -8,7 +8,7 @@ import { createMemoryHistory, createRouter, type Router } from "vue-router";
 
 import { useCesiumStore } from "../../stores/cesium";
 import { useSatStore } from "../../stores/sat";
-import piniaUrlSync from "./urlSync";
+import piniaUrlSync, { whenHydrated } from "./urlSync";
 
 // Writes reach the url through router.push/replace, which are async.
 const flush = async (): Promise<void> => {
@@ -91,5 +91,71 @@ describe("owned parameters", () => {
     useSatStore().catalogRevision += 1;
     await flush();
     expect(router.currentRoute.value.fullPath).toBe(before);
+  });
+});
+
+// What `?demo=` depends on. A demo scene is store state applied by the app itself
+// rather than by a user, so it races the one writer that also acts unprompted:
+// hydration, which applies the route's preset and then the query. These pin the
+// order, because getting it wrong does not fail loudly — it half-applies the
+// scene, leaving everything the preset does not name in place.
+describe("hydration ordering", () => {
+  // Mount without waiting for hydration, so a caller can write in the window
+  // between the app mounting and the url being read.
+  function mountUnhydrated(initial: string, preset: Record<string, Record<string, unknown>> = {}): Router {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/", component: {} }] });
+    const pinia = createPinia();
+    pinia.use(({ store }) => {
+      store.router = markRaw(router);
+      store.customConfig = markRaw(preset);
+    });
+    pinia.use(piniaUrlSync);
+    createApp({}).use(pinia);
+    setActivePinia(pinia);
+    void router.replace(initial);
+    useSatStore();
+    useCesiumStore();
+    return router;
+  }
+
+  // The `?demo=migration` bug, as a test: the default route's preset names
+  // `enabledTags`, so a scene applied before the url is read loses exactly its
+  // activation and keeps everything else — which is why the demo opened with the
+  // weather group active and the pipeline placed on geostationary satellites.
+  test("a scene applied before hydration loses the keys the preset names", async () => {
+    mountUnhydrated("/?demo=migration", { sat: { enabledTags: ["Weather"] } });
+    const satStore = useSatStore();
+    satStore.setActivation({ enabledTags: ["Walker 53:20/2/1@550~180"] });
+    satStore.walker = ["53:20/2/1@550~180"];
+    await flush();
+    expect(satStore.enabledTags).toEqual(["Weather"]);
+    // The half-applied half: the preset does not name `walker`, so it survives —
+    // the pattern is in the form while none of its satellites are switched on.
+    expect(satStore.walker).toEqual(["53:20/2/1@550~180"]);
+  });
+
+  test("whenHydrated defers a scene until the preset and the url have been read", async () => {
+    const router = mountUnhydrated("/?demo=migration", { sat: { enabledTags: ["Weather"] } });
+    const satStore = useSatStore();
+    await whenHydrated();
+    satStore.setActivation({ enabledTags: ["Walker 53:20/2/1@550~180"] });
+    satStore.walker = ["53:20/2/1@550~180"];
+    await flush();
+    expect(satStore.enabledTags).toEqual(["Walker 53:20/2/1@550~180"]);
+    expect(satStore.walker).toEqual(["53:20/2/1@550~180"]);
+    // And the scene round-trips to the url, so the address bar describes what is
+    // on screen rather than only the shorthand that asked for it.
+    expect(router.currentRoute.value.query.tags).toBe("Walker 53:20/2/1@550~180");
+    expect(router.currentRoute.value.query.walker).toBe("53:20/2/1@550~180");
+  });
+
+  test("whenHydrated covers a store created before the call, not only the first one", async () => {
+    const router = mountUnhydrated("/", {});
+    await whenHydrated();
+    // Hydration is what captures the defaults a write is compared against; a
+    // store still unhydrated would refuse to write to the url at all.
+    useCesiumStore().cameraMode = "Inertial";
+    await flush();
+    expect(router.currentRoute.value.query.camera).toBe("Inertial");
   });
 });
