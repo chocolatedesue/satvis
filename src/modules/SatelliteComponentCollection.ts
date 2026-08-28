@@ -46,6 +46,7 @@ import { illuminationRing, sunGeometry } from "./util/illumination";
 import type { PassPredictorSource } from "./util/passSource";
 import type { PolylineBatch } from "./util/PolylineBatch";
 import type { TrajectorySampler } from "./util/sampleSource";
+import { planeSlotOf } from "./util/walkerDelta";
 
 type SatelliteComponentName = string;
 
@@ -573,7 +574,13 @@ export class SatelliteComponentCollection {
   // meant to identify.
   createLabel(): void {
     const label = new LabelGraphics({
-      text: this.props.name,
+      // Generated constellation satellites are labelled by the two numbers that place
+      // them — plane and slot — rather than by their full name. The rest of that name
+      // is the pattern they came from, which is identical for every satellite in the
+      // scene, so repeating it twenty times says nothing and costs the width that
+      // would have shown which satellite this is. A real catalogued satellite has no
+      // plane or slot and keeps its name.
+      text: planeSlotOf(this.props.name) ?? this.props.name,
       font: "13px Arial",
       fillColor: POINT_COLOR.LEO,
       style: LabelStyle.FILL_AND_OUTLINE,

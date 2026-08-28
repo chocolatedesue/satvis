@@ -42,9 +42,13 @@ export const DEMO_NAMES = ["two-orbit", "sso", "migration"] as const;
 export type DemoName = (typeof DEMO_NAMES)[number];
 
 function withIlluminationComponents(satStore: SatStore): void {
-  const components = new Set([...satStore.enabledComponents, "Point", "Illumination arc"]);
-  // Twenty 20-character names are noise, not labels.
-  components.delete("Label");
+  // Labels are on: a generated satellite is labelled by its plane and slot (`P01-07`,
+  // six characters — see SatelliteComponentCollection.createLabel), which is what makes
+  // "which satellite is that" answerable from the picture rather than only from the
+  // migration table. They were suppressed here while the label was the satellite's full
+  // name, where twenty repetitions of the same pattern prefix were noise rather than
+  // labels.
+  const components = new Set([...satStore.enabledComponents, "Point", "Illumination arc", "Label"]);
   satStore.enabledComponents = [...components];
 }
 

@@ -280,6 +280,33 @@ export function walkerNamePrefix(params: WalkerDeltaParams): string {
 }
 
 /**
+ * The plane-and-slot tag out of a generated satellite name, or undefined if the name
+ * does not carry one.
+ *
+ * The two numbers that actually place a satellite in a Walker constellation: which
+ * orbital plane, and which slot along that plane. `walkerDeltaRecords` writes them
+ * into every name it generates (`… P01-07`), and this reads them back — deliberately
+ * kept next to the producer, so the format has one definition and a change to the
+ * naming cannot leave a parser elsewhere quietly matching the old shape.
+ *
+ * Returned verbatim rather than reformatted: the tag a reader sees on the globe, in
+ * the migration tables and in the satellite's own name should be one string, not
+ * three spellings of it.
+ *
+ * Undefined for a real catalogued satellite, which has no plane or slot to report —
+ * a Walker pattern is a shape someone asked for, and `ISS (ZARYA)` is not in one. The
+ * caller decides what to show instead, since what reads well depends on the space it
+ * has.
+ */
+export function planeSlotOf(name: string | undefined): string | undefined {
+  if (!name) {
+    return undefined;
+  }
+  const match = /(?:^|\s)(P\d+-\d+)$/.exec(name);
+  return match?.[1];
+}
+
+/**
  * Where a pattern's satnums start, as a function of the pattern itself.
  *
  * Not a constant, because satnum is an identity and not just a label: the

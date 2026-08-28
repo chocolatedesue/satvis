@@ -46,6 +46,7 @@ import {
   type TransferCost,
   type Vec3,
 } from "./util/migration";
+import { planeSlotOf } from "./util/walkerDelta";
 
 /** What one pipeline stage is doing, for the panel's per-stage row. */
 export interface MigrationStageStatus {
@@ -590,6 +591,33 @@ export class MigrationLayer {
   }
 
   /**
+   * What a stage's halo says on the globe.
+   *
+   * The stage number alone answered "which stage" and left "which satellite"
+   * unanswerable from the picture — four identical `S1`…`S4` tags moving over a fleet
+   * of twenty. So the label carries the two numbers that place a satellite in the
+   * constellation as well: its plane and its slot within that plane, the tag already
+   * in the satellite's own name and in the migration tables.
+   *
+   * While a stage is in flight the label reads `from → to`, because that is the
+   * moment the numbers earn their place: the packet is between two satellites and
+   * which plane it is crossing into is the thing worth reading. A real catalogued
+   * satellite has no plane or slot, so its name stands in.
+   */
+  #labelText(stage: StageState): string {
+    const tag = `S${stage.index + 1}`;
+    const named = (host: string | undefined) => planeSlotOf(host) ?? host;
+    const flight = stage.flight;
+    if (flight) {
+      return `${tag} · ${named(flight.from)} → ${named(flight.to)}`;
+    }
+    if (!stage.hostName) {
+      return tag;
+    }
+    return stage.phase === "stranded" ? `${tag} · ${named(stage.hostName)} · STRANDED` : `${tag} · ${named(stage.hostName)}`;
+  }
+
+  /**
    * The four entities drawing one stage, in the order they should be added.
    *
    * Named with the stage number so the entity list is readable and the browser
@@ -616,7 +644,7 @@ export class MigrationLayer {
         outlineWidth: 2,
       }),
       label: new LabelGraphics({
-        text: new CallbackProperty(() => (stage.phase === "stranded" ? `${label} STRANDED` : label), false),
+        text: new CallbackProperty(() => this.#labelText(stage), false),
         font: "12px sans-serif",
         fillColor: Color.WHITE,
         style: LabelStyle.FILL_AND_OUTLINE,

@@ -372,6 +372,7 @@ import {
   encodeWalker,
   MAX_WALKER_SATELLITES,
   meanMotionRevPerDay,
+  planeSlotOf,
   satsPerPlane,
   isWalkerTag,
   validateWalkerDelta,
@@ -703,10 +704,18 @@ function simDuration(seconds: number): string {
  * names are long enough that the plane-and-slot part — the only part that differs
  * between rows, and the only part that says which plane a stage sits in — was the
  * part being clipped off the right edge.
+ *
+ * Read with the same parser the globe labels use (`planeSlotOf`), so a stage's tag is
+ * one string wherever it appears. The trailing-token fallback is for a real
+ * catalogued satellite, which has no plane or slot to name.
  */
 function shortHost(name: string | undefined): string {
   if (!name) {
     return "—";
+  }
+  const tag = planeSlotOf(name);
+  if (tag) {
+    return tag;
   }
   const lastSpace = name.lastIndexOf(" ");
   return lastSpace === -1 ? name : name.slice(lastSpace + 1);

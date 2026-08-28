@@ -174,6 +174,31 @@ record(
 record("the status readout reports a valid phase", await evaluate("window.cc.migrationStatus?.phase"), (p) => ["holding", "migrating", "stranded"].includes(p));
 
 record(
+  "each stage's halo says which satellite it is on — plane and slot, not just the stage number",
+  await evaluate(
+    "(() => { const t = window.cc.viewer.clock.currentTime;" +
+      " return window.cc.viewer.entities.values.filter((e) => /^Migration host S/.test(e.name)).map((e) => e.label?.text?.getValue(t)); })()",
+  ),
+  // `S2 · P01-07`: the stage, then the two numbers that place its satellite in the
+  // constellation. The stage number alone left four interchangeable tags moving over a
+  // fleet of twenty with no way to tell which satellite any of them was on.
+  (texts) => Array.isArray(texts) && texts.length === STAGES && texts.every((text) => /^S\d+ · P\d+-\d+/.test(text ?? "")),
+);
+
+record(
+  "every satellite in the fleet is labelled by its plane and slot",
+  await evaluate(
+    "(() => { const t = window.cc.viewer.clock.currentTime;" +
+      " const texts = window.cc.viewer.entities.values.filter((e) => e.label && !/^Migration/.test(e.name ?? ''))" +
+      "   .map((e) => e.label.text?.getValue?.(t));" +
+      " return { total: texts.length, tagged: texts.filter((x) => /^P\\d+-\\d+$/.test(x ?? '')).length, sample: texts.slice(0, 3) }; })()",
+  ),
+  // The whole fleet, not just the four hosts: the demo turns labels on now that a label
+  // is six characters rather than the pattern's full name repeated twenty times.
+  (l) => l.total === 20 && l.tagged === l.total,
+);
+
+record(
   "the pipeline reports whether it is serving, and how many stages have power",
   await evaluate("(() => { const s = window.cc.migrationStatus; return { serving: s?.serving, powered: s?.poweredStages, stages: s?.stages.length }; })()"),
   (s) => typeof s.serving === "boolean" && Number.isInteger(s.powered) && s.powered <= s.stages,

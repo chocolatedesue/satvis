@@ -7,6 +7,7 @@ import {
   encodeWalker,
   MAX_WALKER_SATELLITES,
   meanMotionRevPerDay,
+  planeSlotOf,
   satsPerPlane,
   validateWalkerDelta,
   isWalkerTag,
@@ -114,6 +115,58 @@ describe("walkerDeltaRecords", () => {
   it("names each satellite by its plane and slot", () => {
     const records = walkerDeltaRecords(minimal, EPOCH);
     expect(records.map((record) => ommOf(record).OBJECT_NAME)).toEqual(["WALKER P01-01", "WALKER P01-02", "WALKER P02-01", "WALKER P02-02", "WALKER P03-01", "WALKER P03-02"]);
+  });
+
+  it("means what it says: the plane number in a name is that satellite's plane, and the slot its position along it", () => {
+    // The names are what a reader on the globe navigates by, so the two numbers have
+    // to agree with the geometry rather than merely being sequential. Checked against
+    // the elements: every satellite tagged P02 shares one RAAN, that RAAN is the
+    // second one round the span, and the slot numbers rise with along-track position
+    // inside the plane.
+    const records = walkerDeltaRecords(minimal, EPOCH);
+    const tagged = records.map((record) => {
+      const omm = ommOf(record);
+      const [, plane, slot] = /P(\d+)-(\d+)$/.exec(String(omm.OBJECT_NAME)) ?? [];
+      return { plane: Number(plane), slot: Number(slot), raan: Number(omm.RA_OF_ASC_NODE), anomaly: Number(omm.MEAN_ANOMALY) };
+    });
+
+    const raanOfPlane = new Map<number, number[]>();
+    for (const satellite of tagged) {
+      raanOfPlane.set(satellite.plane, [...(raanOfPlane.get(satellite.plane) ?? []), satellite.raan]);
+    }
+    // One plane, one RAAN — a satellite named P02 is not in some other plane.
+    for (const raans of raanOfPlane.values()) {
+      expect(new Set(raans).size).toBe(1);
+    }
+    // And plane 1, 2, 3 are the first, second and third round the span, in order.
+    expect([...raanOfPlane.keys()].toSorted((a, b) => a - b).map((plane) => raanOfPlane.get(plane)?.[0])).toEqual([0, 120, 240]);
+
+    // Within a plane the slots ascend along-track from the first one.
+    for (const plane of raanOfPlane.keys()) {
+      const bySlot = tagged.filter((satellite) => satellite.plane === plane).toSorted((a, b) => a.slot - b.slot);
+      const first = bySlot[0]?.anomaly ?? 0;
+      const offsets = bySlot.map((satellite) => (satellite.anomaly - first + 360) % 360);
+      expect(offsets).toEqual(offsets.toSorted((a, b) => a - b));
+      expect(bySlot.map((satellite) => satellite.slot)).toEqual([1, 2]);
+    }
+  });
+
+  it("reads the plane and slot back out of a generated name", () => {
+    const records = walkerDeltaRecords(minimal, EPOCH);
+    expect(records.map((record) => planeSlotOf(String(ommOf(record).OBJECT_NAME)))).toEqual(["P01-01", "P01-02", "P02-01", "P02-02", "P03-01", "P03-02"]);
+    // The long real prefix a pattern actually generates under, not just the test one.
+    expect(planeSlotOf(`${walkerNamePrefix(starlinkShell1)} P07-22`)).toBe("P07-22");
+  });
+
+  it("reports no plane or slot for a name that has none", () => {
+    // A real catalogued satellite is not in a Walker pattern, so there is nothing to
+    // report and the caller has to say something else. Anchored at the end of the
+    // name, so a plane-slot-shaped fragment mid-name is not mistaken for the tag.
+    expect(planeSlotOf("ISS (ZARYA)")).toBeUndefined();
+    expect(planeSlotOf("STARLINK-1007")).toBeUndefined();
+    expect(planeSlotOf("WALKER P01-01 DEB")).toBeUndefined();
+    expect(planeSlotOf(undefined)).toBeUndefined();
+    expect(planeSlotOf("")).toBeUndefined();
   });
 });
 
