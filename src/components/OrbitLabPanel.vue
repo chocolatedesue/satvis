@@ -84,9 +84,11 @@
             S{{ stage.index + 1 }}
           </td>
           <td class="orbitLab__factValue">
-            <template v-if="stage.phase === 'migrating'">{{ stage.from }} → {{ stage.to }} ({{ ((stage.transferSeconds ?? 0) * 1000).toFixed(0) }} ms)</template>
-            <template v-else-if="stage.phase === 'stranded'">stranded on {{ stage.hostName ?? "—" }}</template>
-            <template v-else>{{ stage.hostName ?? "—" }}{{ stage.powered ? "" : " (dark)" }}</template>
+            <template v-if="stage.phase === 'migrating'"
+              >{{ shortHost(stage.from) }} → {{ shortHost(stage.to) }} ({{ ((stage.transferSeconds ?? 0) * 1000).toFixed(0) }} ms)</template
+            >
+            <template v-else-if="stage.phase === 'stranded'">{{ shortHost(stage.hostName) }} · stranded</template>
+            <template v-else>{{ shortHost(stage.hostName) }}{{ stage.powered ? "" : " · dark" }}</template>
           </td>
         </tr>
       </tbody>
@@ -132,7 +134,7 @@
             <td class="orbitLab__factName">{{ clockOf(event.at) }}</td>
             <td class="orbitLab__factValue">
               <span class="orbitLab__swatch" :style="{ backgroundColor: stageColor(event.stage) }"></span>
-              S{{ event.stage + 1 }} {{ event.from }} → {{ event.to }} · {{ event.linkKm.toFixed(0) }} km · {{ (event.transferSeconds * 1000).toFixed(0) }} ms
+              S{{ event.stage + 1 }} {{ shortHost(event.from) }} → {{ shortHost(event.to) }} · {{ event.linkKm.toFixed(0) }} km · {{ (event.transferSeconds * 1000).toFixed(0) }} ms
             </td>
           </tr>
         </tbody>
@@ -733,6 +735,23 @@ function simDuration(seconds: number): string {
   return `${(seconds / 3600).toFixed(1)} h`;
 }
 
+/**
+ * A satellite's name without its constellation prefix: `P02-07` rather than
+ * `W53:20/2/1@550~180 P02-07`.
+ *
+ * The migration tables are two narrow columns in a side panel, and the generated
+ * names are long enough that the plane-and-slot part — the only part that differs
+ * between rows, and the only part that says which plane a stage sits in — was the
+ * part being clipped off the right edge.
+ */
+function shortHost(name: string | undefined): string {
+  if (!name) {
+    return "—";
+  }
+  const lastSpace = name.lastIndexOf(" ");
+  return lastSpace === -1 ? name : name.slice(lastSpace + 1);
+}
+
 /** The wall-clock time of an ISO instant, to the second — the log's left column. */
 function clockOf(iso: string): string {
   return iso.slice(11, 19);
@@ -991,6 +1010,9 @@ watch(panelAxis, () => refresh());
 
 .orbitLab__factName {
   width: 100%;
+  /* The migration tables put a colour swatch beside a short label here; without
+     this the two wrap onto separate lines in the panel's narrow column. */
+  white-space: nowrap;
 }
 
 .orbitLab__factValue {

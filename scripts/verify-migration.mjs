@@ -198,15 +198,18 @@ let maxMigrations = 0;
 let logLength = 0;
 const hosts = new Set();
 const stagesThatMoved = new Set();
-// Run until the pipeline has been seen in *both* states, not for a fixed window: the
-// ledger's fraction is only meaningful once some time has been attributed each way,
-// and how soon that happens depends on where the stages were placed.
-const deadline = Date.now() + 120_000;
+// Run until the ledger has actually attributed time *both* ways, rather than for a
+// fixed window: the fraction is only meaningful once it has, and how soon that
+// happens depends on where the stages were placed. Watching the ledger directly
+// rather than a proxy — an earlier version checked `poweredStages === stages.length`,
+// which is trivially true for the empty pre-placement status and let the loop break
+// before the pipeline had ever been fully lit.
+const deadline = Date.now() + 180_000;
 while (Date.now() < deadline) {
   const status = await evaluate("window.cc.migrationStatus");
   if (status?.phase === "migrating") sawMigrating = true;
-  if (status?.poweredStages === status?.stages?.length) sawAllPowered = true;
-  else sawStalled = true;
+  if (status?.ledger?.allPoweredSeconds > 0) sawAllPowered = true;
+  if (status?.ledger?.stalledSeconds > 0) sawStalled = true;
   if (typeof status?.migrations === "number") maxMigrations = Math.max(maxMigrations, status.migrations);
   if (Array.isArray(status?.log)) {
     logLength = Math.max(logLength, status.log.length);
