@@ -16,7 +16,7 @@
 import type { useCesiumStore } from "../stores/cesium";
 import type { useSatStore } from "../stores/sat";
 import { sunSyncWalkerParams } from "./util/sunSynchronous";
-import { encodeWalker, isWalkerTag, WALKER_EPOCH_ISO, WALKER_PRESETS, walkerTagFor } from "./util/walkerDelta";
+import { encodeWalker, WALKER_EPOCH_ISO, WALKER_PRESETS, walkerTagFor } from "./util/walkerDelta";
 
 type SatStore = ReturnType<typeof useSatStore>;
 type CesiumStore = ReturnType<typeof useCesiumStore>;
@@ -53,6 +53,26 @@ function withIlluminationComponents(satStore: SatStore): void {
 }
 
 /**
+ * Show exactly the patterns a demo generates, and nothing else.
+ *
+ * Every demo is a scene, and a scene says what is on screen as much as it says how
+ * it is drawn — it already overrides the colouring, the point size, the camera and
+ * the clock. Leaving the route's own activation in place alongside meant the default
+ * preset's `Weather` group — 73 real satellites — stayed layered under the handful
+ * the demo is about. That was tolerable while labels were off. It stopped being so
+ * once labels went on: a generated satellite labels as `P01-07`, but a catalogued
+ * one falls back to its full name, so the globe filled with overlapping
+ * `HIMAWARI-8` / `TIANMU-1 21` / `DMSP 5D-3 F17 (USA 191)` and the two planes the
+ * scene exists to show were the hardest thing on it to find.
+ *
+ * The migration demo always did this narrowing for its own reasons; the other two
+ * wanted it just as much and did not say so.
+ */
+function showOnly(satStore: SatStore, tags: string[]): void {
+  satStore.setActivation({ enabledTags: tags, enabledSatellites: [], disabledSatellites: [] });
+}
+
+/**
  * Two orbital planes 90° apart, ten satellites each, coloured by illumination and
  * watched in the inertial frame with the clock moving. The simplest scene the
  * orbit lab exists to show.
@@ -63,22 +83,18 @@ export function applyTwoOrbitScene(satStore: SatStore, cesiumStore: CesiumStore,
   satStore.pointColorMode = "illumination";
   satStore.pointSize = "large";
   withIlluminationComponents(satStore);
-  const kept = satStore.enabledTags.filter((tag) => !isWalkerTag(tag));
-  satStore.setActivation({ enabledTags: [...kept, walkerTagFor(preset.params)] });
+  showOnly(satStore, [walkerTagFor(preset.params)]);
   cesiumStore.cameraMode = "Inertial";
   clock.setMultiplier(DEMO_MULTIPLIER);
   clock.play();
 }
 
 /**
- * The two-orbit scene plus the naive KV-cache migration overlay, narrowed to just
- * those two planes so the migration reads against exactly the satellites it hops
- * between rather than the default catalog layered on top.
+ * The two-orbit scene plus the naive KV-cache migration overlay, over exactly the
+ * satellites it hops between.
  */
 export function applyMigrationScene(satStore: SatStore, cesiumStore: CesiumStore, clock: ClockControl): void {
   applyTwoOrbitScene(satStore, cesiumStore, clock);
-  const preset = WALKER_PRESETS[0] as (typeof WALKER_PRESETS)[number];
-  satStore.setActivation({ enabledTags: [walkerTagFor(preset.params)], enabledSatellites: [], disabledSatellites: [] });
   satStore.migration = true;
 }
 
@@ -101,8 +117,7 @@ export function applySunSyncScene(satStore: SatStore, cesiumStore: CesiumStore, 
   // sunlit_edge — which buries the eclipse story this demo is about.
   satStore.panelAxis = "normal";
   withIlluminationComponents(satStore);
-  const kept = satStore.enabledTags.filter((tag) => !isWalkerTag(tag));
-  satStore.setActivation({ enabledTags: [...kept, walkerTagFor(dawnDusk), walkerTagFor(noonMidnight)] });
+  showOnly(satStore, [walkerTagFor(dawnDusk), walkerTagFor(noonMidnight)]);
   cesiumStore.cameraMode = "Inertial";
   clock.setMultiplier(DEMO_MULTIPLIER);
   clock.play();
