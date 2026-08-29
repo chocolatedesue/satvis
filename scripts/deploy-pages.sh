@@ -3,13 +3,21 @@
 # holds the credential.
 #
 # This exists because the failure mode is not "deploy failed" but "deploy failed
-# for a reason wrangler will not tell you". A Cloudflare account-owned token
-# (`cfat_…`) that has passed its expiry answers every wrangler command with
-# `Authentication error [10000]` on the real endpoint and `Invalid access token
-# [9109]` on `/accounts` — which reads as a permissions or account-id problem and
-# sends you looking in the wrong place. Cloudflare will say plainly that the token
-# expired, but only if you ask the verify endpoint. So that is asked first, and
-# its answer is printed, before anything is uploaded.
+# for a reason wrangler will not tell you". Cloudflare has three credential shapes
+# and the prefix is the only thing that says which you hold:
+#
+#   cfk_   Global API Key    — authenticates with CLOUDFLARE_EMAIL + CLOUDFLARE_API_KEY
+#   cfut_  User API Token    — bearer
+#   cfat_  Account API Token — bearer
+#   (pre-2026 tokens are unprefixed 40-character strings, still bearer)
+#   https://developers.cloudflare.com/fundamentals/api/get-started/token-formats/
+#
+# Send a cfk_ key as a bearer token and every endpoint answers `Invalid API Token`
+# / `Authentication error`, which reads as an expired or under-scoped token and
+# sends you looking in the wrong place entirely. An expired token is also
+# indistinguishable from an unrecognised one through wrangler. Cloudflare will say
+# plainly which it is, but only if the right endpoint is asked with the right
+# scheme. So that is asked first, and its answer printed, before anything uploads.
 #
 # Two projects, one artifact: `lab58-inertial-frame` is a strict superset of
 # `lab58-orbit-lab`, so both Pages projects serve the same build. Deploying only
@@ -55,21 +63,56 @@ esac
 echo "checking the credential on $DEPLOY_HOST ..."
 "${SSH[@]}" "CF_ACCOUNT_ID=$CF_ACCOUNT_ID bash -s" <<'REMOTE'
 set -euo pipefail
+secrets="$HOME/.secrets/cloudflare-pages.env"
+[[ -r "$secrets" ]] && . "$secrets"
+
+# Which of the three credential shapes is in hand. The prefix says: `cfk_` is a
+# Global API Key and authenticates with email + key headers; `cfut_`/`cfat_` and the
+# pre-2026 unprefixed 40-character strings are tokens and use a bearer header.
+# https://developers.cloudflare.com/fundamentals/api/get-started/token-formats/
+key="${CLOUDFLARE_API_KEY:-}"
+email="${CLOUDFLARE_EMAIL:-}"
 token="${CLOUDFLARE_API_TOKEN:-}"
-if [[ -z "$token" && -r "$HOME/.secrets/cloudflare-pages.env" ]]; then
-  # The canonical place, following the convention the asset table already uses for
-  # every other credential: the secret lives in a 0600 file on the host and the
-  # table records only where it is.
-  token="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$HOME/.secrets/cloudflare-pages.env" | head -1 | tr -d "\"' ")"
+
+if [[ -n "$key" && -n "$email" ]]; then
+  body="$(curl -sS --max-time 30 -H "X-Auth-Email: $email" -H "X-Auth-Key: $key" \
+    "https://api.cloudflare.com/client/v4/user")"
+  if ! printf %s "$body" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+    echo "Global API Key rejected for $email" >&2
+    echo "  cloudflare said: $(printf %s "$body" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')" >&2
+    echo "  9103 means the key and the email do not go together — check both." >&2
+    echo "Nothing was uploaded." >&2
+    exit 3
+  fi
+  echo "global API key OK for $email"
+  # Access is a separate question from authenticity: the key is user-wide, so
+  # confirm this account's Pages is actually reachable before uploading to it.
+  projects="$(curl -sS --max-time 30 -H "X-Auth-Email: $email" -H "X-Auth-Key: $key" \
+    "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/pages/projects")"
+  if ! printf %s "$projects" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+    echo "key authenticates but cannot read Pages on account $CF_ACCOUNT_ID" >&2
+    echo "  cloudflare said: $(printf %s "$projects" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')" >&2
+    exit 3
+  fi
+  echo "pages reachable on account $CF_ACCOUNT_ID"
+  exit 0
 fi
+
 if [[ -z "$token" ]]; then
   # Older location: the shell profile, which returns early for a non-interactive
   # shell — so the one line is sourced rather than the file.
   token="$(sed -n 's/^export CLOUDFLARE_API_TOKEN=//p' "$HOME/.bashrc" 2>/dev/null | head -1 | tr -d "\"' ")"
 fi
 if [[ -z "$token" ]]; then
-  echo "no CLOUDFLARE_API_TOKEN in the environment, ~/.secrets/cloudflare-pages.env, or ~/.bashrc" >&2
+  echo "no credential found: set CLOUDFLARE_EMAIL+CLOUDFLARE_API_KEY (cfk_) or" >&2
+  echo "CLOUDFLARE_API_TOKEN (cfut_/cfat_) in ~/.secrets/cloudflare-pages.env" >&2
   exit 2
+fi
+if [[ "$token" == cfk_* ]]; then
+  echo "CLOUDFLARE_API_TOKEN holds a cfk_ value, which is a Global API Key, not a token." >&2
+  echo "It will never authenticate as a bearer token. Set it as CLOUDFLARE_API_KEY" >&2
+  echo "alongside CLOUDFLARE_EMAIL instead." >&2
+  exit 3
 fi
 # Account-owned tokens verify per account; `/user/tokens/verify` rejects them by
 # design, which is not evidence of anything.
@@ -109,15 +152,19 @@ for project in $PAGES_PROJECTS; do
   echo "deploying $project ..."
   "${SSH[@]}" "DEPLOY_DIR=$DEPLOY_DIR PROJECT=$project BRANCH=$PAGES_BRANCH WRANGLER=$WRANGLER CF_ACCOUNT_ID=$CF_ACCOUNT_ID bash -s" <<'REMOTE'
 set -euo pipefail
+secrets="$HOME/.secrets/cloudflare-pages.env"
+[[ -r "$secrets" ]] && . "$secrets"
 export CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID"
-if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-  if [[ -r "$HOME/.secrets/cloudflare-pages.env" ]]; then
-    CLOUDFLARE_API_TOKEN="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$HOME/.secrets/cloudflare-pages.env" | head -1 | tr -d "\"' ")"
-  else
-    CLOUDFLARE_API_TOKEN="$(sed -n 's/^export CLOUDFLARE_API_TOKEN=//p' "$HOME/.bashrc" | head -1 | tr -d "\"' ")"
-  fi
+if [[ -n "${CLOUDFLARE_API_KEY:-}" && -n "${CLOUDFLARE_EMAIL:-}" ]]; then
+  # Global API Key: wrangler reads this pair as its legacy global auth. The token
+  # variable has to stay unset — wrangler prefers a token when both are present, and
+  # a cfk_ value is not one.
+  unset CLOUDFLARE_API_TOKEN
+  export CLOUDFLARE_EMAIL CLOUDFLARE_API_KEY
+elif [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+  CLOUDFLARE_API_TOKEN="$(sed -n 's/^export CLOUDFLARE_API_TOKEN=//p' "$HOME/.bashrc" | head -1 | tr -d "\"' ")"
+  export CLOUDFLARE_API_TOKEN
 fi
-export CLOUDFLARE_API_TOKEN
 cd "$HOME/$DEPLOY_DIR"
 npx -y "$WRANGLER" pages deploy . --project-name "$PROJECT" --branch "$BRANCH"
 REMOTE
