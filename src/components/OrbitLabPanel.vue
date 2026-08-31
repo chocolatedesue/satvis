@@ -48,6 +48,7 @@
 
     <div class="toolbarTitle">KV-cache live migration</div>
     <button type="button" class="orbitLab__button orbitLab__button--wide" @click="migrationDemo">KV-cache migration demo</button>
+    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="walker25Demo">25x4 fleet migration demo</button>
     <label class="toolbarSwitch">
       <input type="checkbox" :checked="migration" @change="migration = ($event.target as HTMLInputElement).checked" />
       <span class="slider"></span>
@@ -357,7 +358,7 @@ import {
 } from "../config/illumination";
 import { MIGRATION_ANIMATION_SIM_SECONDS, PIPELINE_STAGE_CHOICES, stageColor } from "../config/migration";
 import { CAMERA_MODES } from "../config/viewModes";
-import { applyMigrationScene, applySunSyncScene, applyTwoOrbitScene, type ClockControl, DEMO_MULTIPLIER } from "../modules/demoScenes";
+import { applyMigrationScene, applySunSyncScene, applyTwoOrbitScene, applyWalker25Scene, type ClockControl, DEMO_MULTIPLIER } from "../modules/demoScenes";
 import { illuminationTimeline } from "../modules/util/illumination";
 import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, maxReachableBetaDeg } from "../modules/util/orbitDesign";
 import {
@@ -617,6 +618,11 @@ function migrationDemo(): void {
   const preset = WALKER_PRESETS[0] as (typeof WALKER_PRESETS)[number];
   Object.assign(draft, preset.params);
   applyMigrationScene(satStore, cesiumStore, clockControl);
+}
+function walker25Demo(): void {
+  const params = { total: 100, planes: 25, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 };
+  Object.assign(draft, params);
+  applyWalker25Scene(satStore, cesiumStore, clockControl);
 }
 function useSunSyncInclination(): void {
   const inclinationDeg = ssoFacts.value.inclinationDeg;

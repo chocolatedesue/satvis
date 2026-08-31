@@ -16,7 +16,7 @@
 import type { useCesiumStore } from "../stores/cesium";
 import type { useSatStore } from "../stores/sat";
 import { sunSyncWalkerParams } from "./util/sunSynchronous";
-import { encodeWalker, WALKER_EPOCH_ISO, WALKER_PRESETS, walkerTagFor } from "./util/walkerDelta";
+import { encodeWalker, WALKER_EPOCH_ISO, WALKER_PRESETS, walkerTagFor, type WalkerDeltaParams } from "./util/walkerDelta";
 
 type SatStore = ReturnType<typeof useSatStore>;
 type CesiumStore = ReturnType<typeof useCesiumStore>;
@@ -38,7 +38,7 @@ export interface ClockControl {
 export const DEMO_MULTIPLIER = 60;
 
 /** The names `?demo=` understands. */
-export const DEMO_NAMES = ["two-orbit", "sso", "migration"] as const;
+export const DEMO_NAMES = ["two-orbit", "sso", "migration", "walker25"] as const;
 export type DemoName = (typeof DEMO_NAMES)[number];
 
 function withIlluminationComponents(satStore: SatStore): void {
@@ -96,6 +96,25 @@ export function applyTwoOrbitScene(satStore: SatStore, cesiumStore: CesiumStore,
 export function applyMigrationScene(satStore: SatStore, cesiumStore: CesiumStore, clock: ClockControl): void {
   applyTwoOrbitScene(satStore, cesiumStore, clock);
   satStore.migration = true;
+}
+
+/**
+ * The migration overlay over a larger fleet: 25 planes x 4 satellites, the
+ * scenario the KV-cache line asks for. Same two-orbit look — illumination
+ * colouring, labels, large points, inertial frame, 60x clock — but spread over
+ * enough planes that an eclipse is always happening somewhere.
+ */
+export function applyWalker25Scene(satStore: SatStore, cesiumStore: CesiumStore, clock: ClockControl): void {
+  const params: WalkerDeltaParams = { total: 100, planes: 25, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 };
+  satStore.walker = [encodeWalker(params)];
+  satStore.pointColorMode = "illumination";
+  satStore.pointSize = "large";
+  withIlluminationComponents(satStore);
+  showOnly(satStore, [walkerTagFor(params)]);
+  cesiumStore.cameraMode = "Inertial";
+  satStore.migration = true;
+  clock.setMultiplier(DEMO_MULTIPLIER);
+  clock.play();
 }
 
 /**
