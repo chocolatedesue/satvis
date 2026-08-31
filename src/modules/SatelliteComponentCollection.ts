@@ -13,6 +13,7 @@ import {
   EntityView,
   GeometryInstance,
   HeadingPitchRange,
+  HeadingPitchRoll,
   HeightReference,
   HorizontalOrigin,
   JulianDate,
@@ -28,6 +29,7 @@ import {
   PolylineGlowMaterialProperty,
   PolylineGraphics,
   SceneMode,
+  Transforms,
   VelocityOrientationProperty,
 } from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
@@ -302,7 +304,23 @@ export class SatelliteComponentCollection {
       viewFrom: new Cartesian3(0, -3600000, 4200000),
     });
     if (moving) {
-      entity.orientation = new VelocityOrientationProperty(position);
+      if (componentName === "3D model") {
+        // Constant pitch rotation for the 3D model (sat-model-rotation POC 5862a96):
+        // a fixed -30 deg/s, enough to read the ADCS rotation in the migration demo.
+        entity.orientation = new CallbackProperty((time) => {
+          if (!time) {
+            return undefined;
+          }
+          const positionNow = position.getValue(time);
+          if (!positionNow) {
+            return undefined;
+          }
+          const hpr = new HeadingPitchRoll(0, -CesiumMath.toRadians(30) * time.secondsOfDay, 0);
+          return Transforms.headingPitchRollQuaternion(positionNow, hpr);
+        }, false);
+      } else {
+        entity.orientation = new VelocityOrientationProperty(position);
+      }
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (entity as any)[entityKey] = entityValue;
