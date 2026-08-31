@@ -3,6 +3,7 @@ import {
   CallbackProperty,
   Cartesian3,
   Color,
+  ColorMaterialProperty,
   Entity,
   JulianDate,
   LabelGraphics,
@@ -184,6 +185,14 @@ export class MigrationLayer {
 
   #stages: StageState[] = [];
 
+  /**
+   * The pipeline drawn as a chain between consecutive stage hosts. Owned here
+   * rather than on a stage because a segment belongs to two stages: it is the
+   * inter-satellite link the workload crosses, and it is on screen whether or
+   * not anything is in flight across it right now.
+   */
+  #pipelineLinks: Entity[] = [];
+
   #removeTick: (() => void) | undefined;
 
   /** Simulated time the migration decision last ran, for throttling it. */
@@ -271,9 +280,51 @@ export class MigrationLayer {
       }
       this.#stages.push(stage);
     }
+    this.#buildPipelineLinks();
+  }
+
+  /**
+   * One standing segment per consecutive pair of stages.
+   *
+   * Without these the pipeline is four haloes drifting over a fleet, and nothing
+   * says which satellite runs the stage before or after any other — the hop is
+   * only legible for the thirty simulated seconds its own link is drawn. Drawing
+   * the whole chain makes the pipeline's shape readable at a glance, and makes a
+   * hop look like what it is: one segment of that chain lighting up.
+   */
+  #buildPipelineLinks(): void {
+    for (let index = 0; index + 1 < this.#stageCount; index += 1) {
+      const hue = Color.fromCssColorString(stageColor(index));
+      const link = new Entity({
+        name: `Pipeline link S${index + 1}-S${index + 2}`,
+        polyline: new PolylineGraphics({
+          positions: new CallbackProperty((time?: JulianDate) => this.#pipelinePositions(index, index + 1, time ?? this.#viewer.clock.currentTime), false),
+          width: 2,
+          material: new ColorMaterialProperty(hue.withAlpha(0.55)),
+          // Straight chord between the two satellites, not draped on the globe.
+          arcType: undefined,
+        }),
+      });
+      this.#pipelineLinks.push(link);
+      this.#viewer.entities.add(link);
+    }
+  }
+
+  /**
+   * The endpoints of the segment joining two stage hosts, or [] while either is
+   * unplaced — a stage has no host until the pipeline is first laid out.
+   */
+  #pipelinePositions(fromIndex: number, toIndex: number, time: JulianDate): Cartesian3[] {
+    const from = this.#positionAt(this.#stages[fromIndex]?.hostName, time);
+    const to = this.#positionAt(this.#stages[toIndex]?.hostName, time);
+    return from && to ? [from, to] : [];
   }
 
   #teardownStages(): void {
+    for (const link of this.#pipelineLinks) {
+      this.#viewer.entities.remove(link);
+    }
+    this.#pipelineLinks = [];
     for (const stage of this.#stages) {
       for (const entity of stage.entities) {
         this.#viewer.entities.remove(entity);

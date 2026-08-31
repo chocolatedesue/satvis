@@ -183,6 +183,21 @@ record(
 );
 
 record(
+  "the pipeline is drawn as a standing chain between consecutive stage hosts",
+  await sampleUntil(
+    "(() => { const t = window.cc.viewer.clock.currentTime;" +
+    " const links = window.cc.viewer.entities.values.filter((e) => /^Pipeline link S/.test(e.name));" +
+    " const drawn = links.filter((e) => (e.polyline?.positions?.getValue(t) ?? []).length === 2);" +
+    " return { names: links.map((e) => e.name), drawn: drawn.length }; })()",
+    (v) => v && v.drawn >= STAGES - 1,
+  ),
+  // One segment per consecutive pair, on screen whether or not a hop is in flight:
+  // without it the pipeline is four haloes with nothing saying which satellite runs
+  // the stage before or after which.
+  (v) => v.names.length === STAGES - 1 && v.drawn === STAGES - 1,
+);
+
+record(
   "each stage's entities are named after it",
   await evaluate(
     "['Migration host S1','Migration link S1','Migration target S1','Migrating KV cache S1','Migration host S4','Migrating KV cache S4'].filter((n) => window.cc.viewer.entities.values.some((e) => e.name === n))",
