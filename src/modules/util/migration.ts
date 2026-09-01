@@ -308,8 +308,7 @@ export interface StagePlacement {
 }
 
 /**
- * `chooseTarget`, but refusing satellites another stage already occupies, and any
- * the Earth is in the way of.
+ * `chooseTarget`, but refusing satellites another stage already occupies.
  *
  * One stage per satellite. Not a physical law — a satellite could in principle
  * hold two stages — but it is the placement the pipeline story needs: co-locating
@@ -317,28 +316,37 @@ export interface StagePlacement {
  * and would make the visual a single dot. Excluding taken hosts is also what
  * spreads the stages across orbital planes, which is the thing worth looking at.
  *
- * Line of sight matters just as much and is easier to get wrong: "nearest powered"
- * by raw chord length will pick a satellite on the far side of the planet, and the
- * link drawn to it goes straight through the Earth. `hasLineOfSight` is what keeps
- * the chosen hop one something could actually make.
+ * Line of sight is preferred but not required. "Nearest powered" by raw chord
+ * length will pick a satellite on the far side of the planet, and the link drawn
+ * to it goes straight through the Earth — so a candidate still in view is chosen
+ * ahead of an occluded one. But a powered neighbour is not always in view at all:
+ * with a zenith panel the powered set is the sunlit face of the fleet, so a
+ * satellite that has just gone dark sees every lit neighbour over the far limb.
+ * Refusing that hop would strand the stage on a dark (`sunlit_back`) node for
+ * half an orbit, which the illumination vocabulary exists to call wrong. So the
+ * fallback is the nearest powered satellite, occluded or not, and `stranded` is
+ * reserved for when no powered satellite is free at all.
  */
 export function chooseTargetExcluding(source: MigrationHost, candidates: readonly MigrationHost[], taken: ReadonlySet<string>): MigrationHost | undefined {
-  let best: MigrationHost | undefined;
-  let bestKm = Infinity;
+  let nearestInView: MigrationHost | undefined;
+  let nearestInViewKm = Infinity;
+  let nearest: MigrationHost | undefined;
+  let nearestKm = Infinity;
   for (const candidate of candidates) {
     if (candidate.name === source.name || !candidate.hasPower || taken.has(candidate.name)) {
       continue;
     }
-    if (!hasLineOfSight(source.position, candidate.position)) {
-      continue;
-    }
     const km = distanceKm(source.position, candidate.position);
-    if (km < bestKm) {
-      bestKm = km;
-      best = candidate;
+    if (km < nearestKm) {
+      nearestKm = km;
+      nearest = candidate;
+    }
+    if (hasLineOfSight(source.position, candidate.position) && km < nearestInViewKm) {
+      nearestInViewKm = km;
+      nearestInView = candidate;
     }
   }
-  return best;
+  return nearestInView ?? nearest;
 }
 
 /**
@@ -346,9 +354,11 @@ export function chooseTargetExcluding(source: MigrationHost, candidates: readonl
  *
  * Same three answers as the single-workload model, with one difference: a lit
  * neighbour already carrying another stage is not a candidate. So `stranded` here
- * means "dark, and every lit satellite is either mine already or someone else's" —
- * a scarcity the single-workload model cannot express, and one of the two ways the
- * naive policy visibly runs out of room.
+ * means "dark, and every powered satellite is either mine already or someone
+ * else's" — a scarcity the single-workload model cannot express, and one of the two
+ * ways the naive policy visibly runs out of room. Line of sight no longer strands a
+ * stage on its own; an occluded hop is still made rather than sitting dark (see
+ * `chooseTargetExcluding`).
  */
 export function decideStageMigration(hostName: string | undefined, hosts: readonly MigrationHost[], taken: ReadonlySet<string>): MigrationDecision {
   const host = hosts.find((candidate) => candidate.name === hostName);
@@ -360,7 +370,7 @@ export function decideStageMigration(hostName: string | undefined, hosts: readon
   }
   const target = chooseTargetExcluding(host, hosts, taken);
   if (!target) {
-    return { action: "stranded", reason: `${host.name} lost power and no free lit neighbour is in view — stage stranded.` };
+    return { action: "stranded", reason: `${host.name} lost power and no powered satellite is free — stage stranded.` };
   }
   return { action: "migrate", target, reason: `${host.name} lost power — migrating to ${target.name}.` };
 }

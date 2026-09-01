@@ -234,8 +234,8 @@ describe("chooseTargetExcluding", () => {
     expect(chooseTargetExcluding(host, [occluded, visible], new Set())?.name).toBe("visible");
   });
 
-  it("returns undefined when the only lit candidate is behind the Earth", () => {
-    expect(chooseTargetExcluding(host, [at("occluded", orbit(170), true)], new Set())).toBeUndefined();
+  it("falls back to an occluded lit candidate rather than returning none", () => {
+    expect(chooseTargetExcluding(host, [at("occluded", orbit(170), true)], new Set())?.name).toBe("occluded");
   });
 });
 
@@ -256,9 +256,11 @@ describe("decideStageMigration", () => {
     expect(decideStageMigration("H", hosts, new Set(["taken"])).action).toBe("stranded");
   });
 
-  it("strands the stage when the only lit satellite is behind the Earth", () => {
+  it("migrates to the only lit satellite even when it is behind the Earth", () => {
     const hosts = [at("H", orbit(0), false), at("across", orbit(180), true)];
-    expect(decideStageMigration("H", hosts, new Set()).action).toBe("stranded");
+    const decision = decideStageMigration("H", hosts, new Set());
+    expect(decision.action).toBe("migrate");
+    expect(decision.target?.name).toBe("across");
   });
 
   it("reports an unplaced stage as stranded rather than throwing", () => {
