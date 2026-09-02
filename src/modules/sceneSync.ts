@@ -96,6 +96,8 @@ export interface SceneTarget {
   setMigration(on: boolean): void;
   /** Re-cut the migration demo's pipeline into `count` stages. */
   setMigrationStages(count: number): void;
+  /** Turn the stable-constellation link overlay on or off. */
+  setLinks(on: boolean): void;
 }
 
 export function startSceneSync(cc: SceneTarget): void {
@@ -468,6 +470,14 @@ export function startSceneSync(cc: SceneTarget): void {
     () => satStore.migration,
     (on) => {
       cc.setMigration(on);
+    },
+    { immediate: true },
+  );
+
+  watch(
+    () => satStore.links,
+    (on) => {
+      cc.setLinks(on);
     },
     { immediate: true },
   );

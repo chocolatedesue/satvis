@@ -37,8 +37,22 @@ export interface ClockControl {
  */
 export const DEMO_MULTIPLIER = 60;
 
+/**
+ * How fast the shells demo runs the clock.
+ *
+ * The story there is not one orbit but the *relative* motion between shells, and
+ * that is slower: the 550 km shell laps a 1200 km one once every ~12.6 simulated
+ * hours (the synodic period of their two orbital rates), and the two same-period
+ * high shells drift apart in node by a couple of degrees of RAAN per simulated day
+ * through J2. At 600× — a ladder rung — a full lap of the low shell past the high
+ * ones takes about 76 s and the node drift of the high pair creeps along visibly,
+ * where 60× would make both glacial. One orbit at 550 km is then 9.6 s, which is
+ * fast but still countable.
+ */
+export const SHELLS_MULTIPLIER = 600;
+
 /** The names `?demo=` understands. */
-export const DEMO_NAMES = ["two-orbit", "sso", "migration", "walker25"] as const;
+export const DEMO_NAMES = ["two-orbit", "sso", "migration", "walker25", "shells"] as const;
 export type DemoName = (typeof DEMO_NAMES)[number];
 
 function withIlluminationComponents(satStore: SatStore): void {
@@ -139,6 +153,54 @@ export function applySunSyncScene(satStore: SatStore, cesiumStore: CesiumStore, 
   showOnly(satStore, [walkerTagFor(dawnDusk), walkerTagFor(noonMidnight)]);
   cesiumStore.cameraMode = "Inertial";
   clock.setMultiplier(DEMO_MULTIPLIER);
+  clock.play();
+}
+
+/**
+ * Three Walker shells stacked in one scene — the scene for "what do different
+ * constellation regimes do to each other", which no single pattern can show.
+ *
+ * The shells are chosen so every pair demonstrates a different kind of relative
+ * motion:
+ *
+ * - **53° / 550 km vs the two high shells** — an altitude difference, so different
+ *   periods, so the low shell continuously laps the high ones in the inertial frame.
+ *   This is the fast, unmistakable motion: a full relative revolution every ~12.6
+ *   simulated hours.
+ * - **70° / 1200 km vs 97.6° / 1200 km** — the same period (same altitude), so they
+ *   hold their along-track lock forever, but their inclinations differ, so J2
+ *   precesses their nodes at different rates: retrograde for the 70° shell, slightly
+ *   progressive for the 97.6° one. Their crossing seam migrates a couple of degrees
+ *   of RAAN per simulated day — the slow motion a multi-inclination fleet really
+ *   spends station-keeping on, since nothing here holds that seam for free.
+ *
+ * Within each shell the Walker pattern is as rigid as ever: equal periods keep the
+ * plane rings and the phasing exact. What moves is shell against shell, which is
+ * the point — a constellation is stable *inside* a shell by construction, and
+ * stable *between* shells only where the design says so.
+ */
+export function applyShellsScene(satStore: SatStore, cesiumStore: CesiumStore, clock: ClockControl): void {
+  // The low shell flies 10 per plane, not 6: a ring link's chord clears the
+  // Earth only when a·cos(π/S) > R, which at 550 km asks for S ≥ 8 — the
+  // derivation script's study 1 shows a 550 km S = 6 ring occluded 100% of the
+  // time. The high shells keep S = 6, which clears at 1200 km with room to
+  // spare.
+  const shells: WalkerDeltaParams[] = [
+    { total: 40, planes: 4, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 },
+    { total: 24, planes: 4, phasing: 1, inclinationDeg: 70, altitudeKm: 1200, raanSpanDeg: 360 },
+    { total: 24, planes: 4, phasing: 1, inclinationDeg: 97.6, altitudeKm: 1200, raanSpanDeg: 360 },
+  ];
+  satStore.walker = shells.map(encodeWalker);
+  satStore.pointColorMode = "illumination";
+  satStore.pointSize = "large";
+  withIlluminationComponents(satStore);
+  showOnly(satStore, shells.map(walkerTagFor));
+  // The topology overlay is half of what this scene argues: the rings hold
+  // their length while the inter-plane links breathe, and both move with the
+  // shells against each other.
+  satStore.links = true;
+  cesiumStore.cameraMode = "Inertial";
+  clock.setMultiplier(SHELLS_MULTIPLIER);
   clock.play();
 }
 

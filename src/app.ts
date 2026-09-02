@@ -10,7 +10,7 @@ import { ionAccessToken } from "./config/ion";
 import { getConfigPreset } from "./config/presets";
 import { CesiumController } from "./modules/CesiumController";
 import { createViewer } from "./modules/createViewer";
-import { applyMigrationScene, applySunSyncScene, applyTwoOrbitScene, applyWalker25Scene, type ClockControl, isDemoName } from "./modules/demoScenes";
+import { applyMigrationScene, applyShellsScene, applySunSyncScene, applyTwoOrbitScene, applyWalker25Scene, type ClockControl, isDemoName } from "./modules/demoScenes";
 import { startSceneSync } from "./modules/sceneSync";
 import { DeviceDetect } from "./modules/util/DeviceDetect";
 import { representativeAlwaysSunlitAltitudeKm } from "./modules/util/sunSynchronous";
@@ -102,6 +102,8 @@ app.mount("#app");
         applyWalker25Scene(satStore, cesiumStore, clock);
       } else if (requested === "sso") {
         applySunSyncScene(satStore, cesiumStore, clock, representativeAlwaysSunlitAltitudeKm() ?? 1760);
+      } else if (requested === "shells") {
+        applyShellsScene(satStore, cesiumStore, clock);
       } else {
         applyTwoOrbitScene(satStore, cesiumStore, clock);
       }

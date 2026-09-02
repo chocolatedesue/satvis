@@ -24,7 +24,7 @@
     <p class="orbitLab__note">
       An orbit plane is fixed in <em>inertial</em> space, not in the rotating Earth's — once launched it does not follow the ground round. So in the <strong>Inertial</strong> frame
       the orbit holds still and the Earth turns underneath it, which is what actually happens; in <strong>Earth-fixed</strong> the ground holds still and the same stationary orbit
-      appears to sweep past. Both demos below open in the inertial frame.
+      appears to sweep past. Every demo below opens in the inertial frame.
     </p>
 
     <button type="button" class="orbitLab__button orbitLab__button--wide" @click="twoOrbitDemo">Two-orbit demo</button>
@@ -44,6 +44,25 @@
     <p class="orbitLab__note">
       Two sun-synchronous orbits at <strong>{{ alwaysSunlitAltitude }} km</strong>, differing only in how their plane faces the sun: the dawn–dusk one never enters the Earth's
       shadow, the noon–midnight one is eclipsed for a third of every orbit. Same altitude, same inclination — a quarter turn of the plane apart.
+    </p>
+
+    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="shellsDemo">Stacked-shells demo</button>
+    <p class="orbitLab__note">
+      Three Walker shells at once — 4 planes of 10 at <strong>53° / 550 km</strong>, 4 planes of 6 at <strong>70° / 1200 km</strong> and <strong>97.6° / 1200 km</strong> — with the
+      clock at {{ SHELLS_MULTIPLIER }}×. Each shell is rigid inside itself; what moves is shell against shell. The 550 km one laps the two higher shells (a full relative revolution
+      about every 76 s at this speed), while the two same-period high shells hold their along-track lock and drift apart in node instead, their crossing seam creeping a couple of
+      degrees of RAAN per simulated day.
+    </p>
+
+    <label class="toolbarSwitch">
+      <input type="checkbox" :checked="links" @change="links = ($event.target as HTMLInputElement).checked" />
+      <span class="slider"></span>
+      Show constellation links
+    </label>
+    <p class="orbitLab__note">
+      Wires every generated Walker satellite into the topology the derivation script picked: <span style="color: #34d399">green ring links</span> inside each plane hold their
+      length to within a part in a thousand, <span style="color: #a78bfa">violet inter-plane links</span> breathe as their planes cross, a link that passes behind the Earth is
+      hidden rather than drawn through it, and the Walker Star seam is never wired — its endpoints sweep past each other at twice orbital rate.
     </p>
 
     <div class="toolbarTitle">KV-cache live migration</div>
@@ -358,7 +377,16 @@ import {
 } from "../config/illumination";
 import { MIGRATION_ANIMATION_SIM_SECONDS, PIPELINE_STAGE_CHOICES, stageColor } from "../config/migration";
 import { CAMERA_MODES } from "../config/viewModes";
-import { applyMigrationScene, applySunSyncScene, applyTwoOrbitScene, applyWalker25Scene, type ClockControl, DEMO_MULTIPLIER } from "../modules/demoScenes";
+import {
+  applyMigrationScene,
+  applyShellsScene,
+  applySunSyncScene,
+  applyTwoOrbitScene,
+  applyWalker25Scene,
+  type ClockControl,
+  DEMO_MULTIPLIER,
+  SHELLS_MULTIPLIER,
+} from "../modules/demoScenes";
 import { illuminationTimeline } from "../modules/util/illumination";
 import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, maxReachableBetaDeg } from "../modules/util/orbitDesign";
 import {
@@ -404,7 +432,7 @@ const STRIP_ORBITS = 2;
 
 const cc = useController();
 const satStore = useSatStore();
-const { pointColorMode, pointSize, panelAxis, walker, migration, migrationStages } = storeToRefs(satStore);
+const { pointColorMode, pointSize, panelAxis, walker, migration, migrationStages, links } = storeToRefs(satStore);
 
 // The clock is live viewer state rather than store state (see useViewerClock), and
 // this is the seam the clock deck writes it through — so the demo writes it the same
@@ -651,6 +679,20 @@ function sunSyncDemo(): void {
     Object.assign(draft, dawnDusk);
   }
   applySunSyncScene(satStore, cesiumStore, clockControl, alwaysSunlitAltitude);
+}
+
+/**
+ * The stacked-shells demo: three Walker shells at once, watched from the outside.
+ *
+ * Three patterns rather than one, because the thing being shown is *relative*
+ * motion — what a difference in period does (the low shell laps the high ones) and
+ * what a difference in inclination does when the period is shared (a node drift that
+ * nothing in the model removes). The form keeps the first shell's numbers, since it
+ * holds one pattern's worth of fields and three patterns' worth of scene.
+ */
+function shellsDemo(): void {
+  Object.assign(draft, { total: 24, planes: 4, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 });
+  applyShellsScene(satStore, cesiumStore, clockControl);
 }
 
 /** Leave the records in the catalog and stop drawing them — the tag is the switch. */

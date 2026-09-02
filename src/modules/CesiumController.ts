@@ -44,6 +44,7 @@ import {
   terrainProviders,
   terrainProviderNames as visibleTerrainProviderNames,
 } from "./CesiumLayerProviders";
+import { ConstellationLinksLayer } from "./ConstellationLinksLayer";
 import { MigrationLayer, type MigrationStatus } from "./MigrationLayer";
 import { cesiumSceneMode } from "./satelliteGraphics";
 import { SatelliteManager } from "./SatelliteManager";
@@ -131,6 +132,8 @@ export class CesiumController {
   sats!: SatelliteManager;
 
   #migration: MigrationLayer | undefined;
+
+  #links: ConstellationLinksLayer | undefined;
 
   /** The pipeline length the overlay is (or will be) built with. See setMigrationStages. */
   #migrationStages: number = DEFAULT_PIPELINE_STAGES;
@@ -656,6 +659,24 @@ export class CesiumController {
       this.#migration.start();
     } else {
       this.#migration?.stop();
+    }
+  }
+
+  /**
+   * Turn the stable-constellation link overlay on or off.
+   *
+   * The layer re-derives its graph from the active generated satellites
+   * whenever that set changes, so there is no configuration to remember here —
+   * which shells fly is the store's business, and the wiring follows them.
+   */
+  setLinks(on: boolean): void {
+    if (on) {
+      if (!this.#links) {
+        this.#links = new ConstellationLinksLayer(this.viewer, this.sats);
+      }
+      this.#links.start();
+    } else {
+      this.#links?.stop();
     }
   }
 

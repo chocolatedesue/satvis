@@ -69,6 +69,14 @@ export const useSatStore = defineStore(
     // all-stages-at-once serving condition the thing you watch fail.
     const migrationStages = ref<number>(DEFAULT_PIPELINE_STAGES);
 
+    // The stable-constellation link overlay: every generated Walker satellite
+    // wired into the topology scripts/derive-isl-topology.mjs derived — rings
+    // inside each plane, same-slot links between same-rotating planes, the
+    // Walker Star seam dropped, nothing across shells. URL-synced like `mig`
+    // because a shared link is the whole scene: which shells fly and how they
+    // are wired belong together.
+    const links = ref(false);
+
     // Activation is one invariant cluster — see CONTEXT.md. Held privately and
     // exposed read-only so every writer goes through setActivation and the
     // three lists cannot drift out of step with each other.
@@ -180,6 +188,7 @@ export const useSatStore = defineStore(
       panelAxis,
       walker,
       migration,
+      links,
       migrationStages,
       enabledTags,
       enabledSatellites,
@@ -209,6 +218,7 @@ export const useSatStore = defineStore(
         { name: "walker", url: "walker", kind: stringList() },
         { name: "migration", url: "mig", kind: boolean() },
         { name: "migrationStages", url: "migst", kind: numberChoice(PIPELINE_STAGE_CHOICES) },
+        { name: "links", url: "links", kind: boolean() },
       ],
       // Guarded keys are read-only, so the url goes through the same actions as
       // every other writer; the triple is applied in one call to keep it
