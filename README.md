@@ -171,6 +171,30 @@ cron — including metadata enrichment — and writes a static snapshot into
 `/api/groups.json`; if that fails it falls back to the static `data/gp/`
 snapshot, so all presets keep working without the worker.
 
+### GitHub Pages
+
+`.github/workflows/deploy-pages.yml` builds and publishes that worker-less shape
+to `https://<owner>.github.io/<repo>/` on every push to `main` (and on
+`workflow_dispatch`). It needs no Vite configuration for the subpath: `base: ""`
+already emits relative asset urls, and `upload-pages-artifact` serves the build
+as-is with no Jekyll pass. The workflow enables the Pages site itself on its
+first run (`configure-pages` with `enablement: true`); on a **fork**, GitHub
+disables workflows until the owner presses the button once under
+_Actions → I understand my workflows, go ahead and enable them_.
+
+Two things are worse there than on Cloudflare Pages, by construction rather than
+by neglect:
+
+- **The globe is capped at imagery level 2**, because `data/imagery/` levels 3–5
+  come from `pnpm update-imagery`, which needs docker.
+- **`/ot` 404s**, because it resolves through a `_redirects` 200 rewrite that
+  only Cloudflare performs. Every other entry point is a real file the MPA build
+  emits.
+
+The `pnpm update-gp` step is deliberately non-fatal: CelesTrak firewalls by IP,
+and a refused download should cost the real satellites rather than the deploy —
+a Walker constellation the orbit lab generates needs no catalog at all.
+
 ### Offline base map
 
 The `NaturalEarth` layer — the default base map, and the one that keeps the globe
