@@ -10,7 +10,8 @@
   - 同轨固定环链（Rigid Intra-plane Ring Links，极低距离波动 $CV \approx 0.001$）；
   - 异轨同槽平滑链路（Same-slot Inter-plane Links，规避跨接异动）；
   - 剔除 Walker Star 逆向缝合面（Drop Seam，消除相对高速擦肩而过的链路抖动）；
-  - 同周期集群刚性几何约束（Solid Bonds），异周期自动标识漂移（Dashed Bonds）。
+  - 同周期集群刚性几何约束（Solid Bonds），异周期自动标识漂移（Dashed Bonds）；
+  - **多轨道（多壳层）稳定布局**：不同壳层之间不存在刚性静止解，稳定的可达上界是"周期性回归"——先用 J2 进动率匹配锁住轨道面，再用沿迹速率共振锁住相位回归周期。
 - **提高日照区 GPU 利用率 (Maximize GPU Utilization in Sunlit Zone)**：
   - 太空计算载荷依赖太阳翼供电，仅在光照区（`sunlit_on` / `sunlit_edge`）全功率运行，地影/背光区（`umbra` / `penumbra` / `sunlit_back`）断电停摆；
   - **被动掉电迁移 (Naive Reactive)**：掉电后才被动换星，导致管线频繁停摆（日照区 GPU 实际有效利用率仅 30%~45%）；
@@ -35,6 +36,12 @@
 - [x] **前端 UI 面板与场景同步**:
   - 在 Orbit Lab 面板中提供预判式策略切换与实时指标展示（Sunlit GPU utilization、Pipeline Status、各阶段状态）；
   - 接入 URL 响应式同步（`migpol`, `mig`, `migst`, `links`, `mark`）。
+- [x] **多轨道（多壳层）稳定布局求解 (Multi-Shell Stable Layout Solver)**:
+  - 建立壳层间稳定性的两条闭式判据：J2 升交点进动率匹配（`cos i₂ = cos i₁ · (a₂/a₁)^(7/2)`，锁定轨道面相对排布）与沿迹角速率小整数共振（锁定相位回归周期）；
+  - 证明"两个不同壳层不可能刚性静止"（冻结相位需同高度、冻结轨道面需同倾角，两者同时成立即同一壳层），因此稳定的定义应为**周期性回归**而非静止；
+  - 实现伴随壳层求解器 `resonantCompanion` 与全域搜索 `searchStableShellLayouts`（含共进动高度天花板 1632 km @ 53°/550 km）；
+  - SGP4 实测验证（`scripts/derive-isl-topology.ts` 研究 7–10）：设计壳层缝隙漂移 0.005°/天（对照组 5.21°/天），一个回归周期后 **99.7%** 卫星找到同一跨壳伙伴（对照组 79.3%）；
+  - 五档壳层配对判定（`rigid` / `repeating` / `phase-locked` / `node-locked` / `drifting`）接入标记集群连线样式、拓扑跨壳桥接链路与 Orbit Lab 面板。
 - [x] **自动化测试与质量保障**:
   - 全量单元测试（1014 个前端测试 + 36 个 Worker 测试全部通过）；
   - 静态检查（`pnpm lint` 0 error, 0 warning）；
@@ -44,6 +51,8 @@
 
 ## 3. Next Steps / TODO (后续待办与进阶方向)
 
+- [ ] **跨壳接触时刻表 (Precomputed Cross-Shell Contact Schedule)**:
+  - 回归周期已经证明跨壳几何是周期函数，下一步是把它变成可用的时刻表：对 `repeating` 壳层对预计算一个周期内的全部跨壳可见窗口，之后按周期复用，让迁移目标选择从"每帧搜索"变成"查表"。
 - [ ] **多跳星间路由寻径 (Multi-hop ISL Routing)**:
   - 当前换星为单跳直连（Single-hop LOS）；当直连目标受地球物理遮挡时，可基于 Dijkstra / Floyd 算法规划经由中继星的 2 跳/3 跳最短路由。
 - [ ] **增量 KV-Cache 传输优化 (Incremental Differential Patching)**:

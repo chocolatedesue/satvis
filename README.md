@@ -19,7 +19,7 @@ The sky view trades the globe for a ground-level camera aimed by your phone's co
 - Add OpenStreetMap buildings to the globe, or Google's photorealistic tiles under the sky view
 - Generate a Walker Delta or Walker Star constellation from its `i: T/P/F` specification and fly it beside the real catalog, with every per-satellite visual the real ones get
 - Wire the generated constellation into the stable inter-satellite topology a propagation derivation picks — rigid intra-plane rings, same-slot inter-plane links, the Walker Star seam dropped — and mark a small cluster of satellites, bonded pairwise even across shells, to watch its geometry hold or shear
-- Stack several shells in one scene (`?demo=shells`) with the clock fast enough that the relative motion between them is the thing you see
+- Stack several shells in one scene (`?demo=shells`) with the clock fast enough that the relative motion between them is the thing you see, and design a second shell that holds against the first (`?demo=stable-shells`) instead of shearing away from it
 - Colour satellites by what the sun is doing to them — eclipse (ν) _and_ solar panel incidence (κ) — as a point colour, and as the orbit line itself cut into sunlit, penumbra and back-sun arcs
 - Read one satellite's eclipse and back-sun budget over its next two orbits, as percentages and as a strip of colour
 - Share the exact view you are looking at as a link: the url carries the satellites, the components, the ground station and the map layers
@@ -310,6 +310,11 @@ are the story:
 - The **Walker Star seam is never wired**: across it the planes counter-rotate, the
   same-slot pair sweeps past itself at twice orbital rate, and a link there would flicker
   from 1.5 to 14 thousand km. Iridium closes its seam; so does the derivation.
+- **Sky-blue bridge links** are the one thing drawn _between_ two patterns, and only when the
+  pair is rigid: same altitude and same inclination means equal mean motion and equal node
+  rate, so every offset between them is frozen. That pair is one shell flown as two patterns
+  — a second RAAN offset, a phased sub-constellation — and it is wired as one, each plane to
+  the plane of the other pattern nearest it in right ascension.
 
 These are not tastes but the output of `scripts/derive-isl-topology.mjs`, which flies the
 patterns with SGP4 and scores every candidate wiring on length discipline and
@@ -332,19 +337,56 @@ stability by eye exactly where the auto-topology deliberately says nothing. When
 between two marked satellites passes behind the Earth, the bond dims to quarter opacity
 rather than disappearing, preserving the visual cluster relation across the entire orbit.
 
-Stability across orbits is real, and the bond's line style is the verdict: **solid** means
-both members share a period (equal altitude), so the pair never parts — the derivation
-measured a same-period cross-inclination pair whose per-orbit distance maxima repeat
-unchanged for ten straight orbits. **Dashed** means the periods differ, and the bond drifts
-through its synodic cycle without settling. A column holds its geometry for as long as the
-constellation flies; a cross-shell cluster shows one solid edge holding while the dashed
-edges shear away from it.
+Stability across orbits is real, and the bond's line style is the verdict: **solid** means the
+pair's geometry comes back, **dashed** means it does not. Which of the five things it is doing
+— `rigid`, `repeating`, `phase-locked`, `node-locked` or `drifting` — is on the bond's own
+entity, and in the panel's pairwise table. A column holds its geometry for as long as the
+constellation flies; a cross-shell cluster shows the solid edges holding while the dashed ones
+shear away from them.
 
 **The "Stacked-shells demo"** puts all of it on screen at once: three shells (53° / 550 km,
 70° / 1200 km, 97.6° / 1200 km), the topology wired, one satellite per shell marked, and the
 clock at 600× so the low shell laps the high ones about every 76 seconds while the amber
 triangle shears. The low shell flies 10 per plane on purpose — a ring link clears the Earth
 only when `a·cos(π/S) > R`, which at 550 km asks for at least 8 satellites per plane.
+
+### Multi-shell layout: the second shell that holds
+
+Those three shells shear because nobody designed them not to. **No two distinct shells can be
+rigid** — freezing the phases wants an equal period, which wants an equal altitude; freezing
+the planes wants an equal node rate, which at equal altitude wants an equal inclination; both
+at once is the same shell. So a multi-shell layout is designed for _return_ instead, in two
+closed-form steps:
+
+1. **Match the node rates.** `Ω̇ = −(3/2) J₂ n (Rₑ/a)² cos i`, so the companion's inclination
+   follows its altitude directly: `cos i₂ = cos i₁ · (a₂/a₁)^(7/2)`. The planes then hold
+   their arrangement instead of shearing.
+2. **Close the along-track cycle.** Pick the altitude so `u̇₁ : u̇₂` is a small-integer ratio,
+   and the whole configuration returns every `p` orbits of one shell against `q` of the other.
+
+The **Multi-shell layout** section of the orbit lab does both from whatever is in its form,
+reports the answer, and **Add the companion shell** puts it on the globe beside the reference:
+
+```
+# a 53° / 550 km shell and the 8:7 companion designed to hold against it
+https://satvis.space/?demo=stable-shells
+```
+
+Against a 53° / 550 km reference the search returns 6:5 at 1455.8 km / 22.30° (returning every
+9.56 h), 7:6 at 1308.1 km / 30.05°, 8:7 at 1201.9 km / 34.47° (12.75 h) and so on. It stops at
+a **co-precession ceiling of 1632 km**: above that no inclination precesses slowly enough to
+keep up, which is why the short cycles are unavailable. The price of the lock is inclination —
+a companion node-locked to 53° / 550 km has to fly at 34.5° by the time it reaches 1200 km.
+
+`scripts/derive-isl-topology.ts` (studies 7–10) flies the result with SGP4 rather than
+asserting it. The designed companion's seam shears at **0.005°/day** against 5.21°/day for a
+97.6° shell at the same altitude, and one repeat cycle later **99.7%** of satellites find the
+same cross-shell partner at a median range change of 4 km — against **79.3%** and 398 km for
+the shell that was picked rather than solved. The script also refines the pair against the
+propagator (1199.2 km at 34.685°), which is the last 0.2° a secular model cannot see.
+`?demo=stable-shells` flies the reference, the designed companion and a 97.6° control together,
+so the solid bond returning to its shape and the dashed one wandering are on screen at once.
+Reasoning and numbers: `docs/adr/0009-multi-shell-layouts.md`.
 
 ### Multi-satellite Space Compute & Live Migration (多星协同与日照区 GPU 利用率优化)
 

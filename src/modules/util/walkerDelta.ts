@@ -307,6 +307,38 @@ export function planeSlotOf(name: string | undefined): string | undefined {
 }
 
 /**
+ * The same fleet shape flown at a different orbit: the reference pattern's planes,
+ * phasing and RAAN spread, moved to another altitude and inclination.
+ *
+ * What a companion shell is, once `./shellLayout.ts` has decided *which* orbit it
+ * should occupy: the layout search answers "where", and a constellation still has
+ * to say how many satellites go there. Same plane count and same spread, because a
+ * companion that does not match the reference's plane structure is a second
+ * constellation rather than a second shell of one; at least as many satellites per
+ * plane as the reference, and never fewer than `minPerPlane`, which is how the
+ * ring-chord rule (`minSatellitesPerRing`) gets a say — a shell whose own rings run
+ * through the ground is not one anyone would fly.
+ *
+ * Undefined when the result is not a buildable pattern, which is the same check
+ * the panel's form makes, for the same reason.
+ */
+export function walkerPatternAt(reference: WalkerDeltaParams, orbit: { altitudeKm: number; inclinationDeg: number }, minPerPlane = 1): WalkerDeltaParams | undefined {
+  const perPlane = Math.max(satsPerPlane(reference), minPerPlane);
+  const params: WalkerDeltaParams = {
+    total: perPlane * reference.planes,
+    planes: reference.planes,
+    phasing: reference.phasing,
+    // Three decimals is what the wire form keeps, so what is generated is what the
+    // url round-trips rather than something rounded behind the reader's back.
+    inclinationDeg: Number(orbit.inclinationDeg.toFixed(3)),
+    altitudeKm: Number(orbit.altitudeKm.toFixed(3)),
+    raanSpanDeg: reference.raanSpanDeg,
+    ...(reference.raanOffsetDeg === undefined ? {} : { raanOffsetDeg: reference.raanOffsetDeg }),
+  };
+  return validateWalkerDelta(params).ok ? params : undefined;
+}
+
+/**
  * Where a pattern's satnums start, as a function of the pattern itself.
  *
  * Not a constant, because satnum is an identity and not just a label: the

@@ -4,8 +4,9 @@
 // never linked.
 import { describe, expect, test } from "vitest";
 
-import { constellationLinks, parseMarkToken, parseWalkerSatellite, resolveMarks, wrapPlanesAgree, type LinkEndpoint } from "./constellationLinks";
-import { walkerNamePrefix, type WalkerDeltaParams } from "./walkerDelta";
+import { constellationLinks, parseMarkToken, parseWalkerSatellite, planeRaanDeg, planesAgree, resolveMarks, wrapPlanesAgree, type LinkEndpoint } from "./constellationLinks";
+import { resonantCompanion } from "./shellLayout";
+import { encodeWalker, walkerNamePrefix, walkerPatternAt, type WalkerDeltaParams } from "./walkerDelta";
 
 const DELTA: WalkerDeltaParams = { total: 24, planes: 4, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 };
 const STAR: WalkerDeltaParams = { total: 66, planes: 6, phasing: 2, inclinationDeg: 86.4, altitudeKm: 780, raanSpanDeg: 180 };
@@ -35,6 +36,18 @@ describe("parseWalkerSatellite", () => {
   test("undefined for a real catalogued satellite", () => {
     expect(parseWalkerSatellite("ISS (ZARYA)")).toBeUndefined();
     expect(parseWalkerSatellite("W P01-01")).toBeUndefined();
+  });
+});
+
+describe("planeRaanDeg", () => {
+  test("spreads a Delta's planes evenly from its offset", () => {
+    expect(planeRaanDeg(DELTA, 0)).toBe(0);
+    expect(planeRaanDeg(DELTA, 2)).toBe(180);
+    expect(planeRaanDeg({ ...DELTA, raanOffsetDeg: 270 }, 2)).toBe(90);
+  });
+
+  test("a Star spreads its planes over its own span", () => {
+    expect(planeRaanDeg(STAR, 3)).toBe(90);
   });
 });
 
@@ -84,6 +97,29 @@ describe("resolveMarks", () => {
     const { bonds } = resolveMarks(["1-1@53:24/4/1@550", "1-1@53:24/4/1@1200"], [...fleet(DELTA), ...fleet(higher)]);
     expect(bonds).toHaveLength(1);
   });
+
+  test("a bond carries the layout verdict its two orbits earn", () => {
+    // Same shell: rigid, and the bond comes back every orbit.
+    const withinShell = resolveMarks(["1-1@53:24/4/1@550", "2-1@53:24/4/1@550"], fleet(DELTA)).bonds[0];
+    expect(withinShell).toMatchObject({ verdict: "rigid", returns: true });
+
+    // The stacked-shells demo's two 1200 km shells: phases frozen, planes shearing.
+    const seventy: WalkerDeltaParams = { ...DELTA, altitudeKm: 1200, inclinationDeg: 70 };
+    const polar: WalkerDeltaParams = { ...DELTA, altitudeKm: 1200, inclinationDeg: 97.6 };
+    const sameAltitude = resolveMarks(["1-1@70:24/4/1@1200", "1-1@97.6:24/4/1@1200"], [...fleet(seventy), ...fleet(polar)]).bonds[0];
+    expect(sameAltitude).toMatchObject({ verdict: "phase-locked", returns: true });
+
+    // A shell picked for its altitude alone: nothing about the pair repeats.
+    const acrossShells = resolveMarks(["1-1@53:24/4/1@550", "1-1@97.6:24/4/1@1200"], [...fleet(DELTA), ...fleet(polar)]).bonds[0];
+    expect(acrossShells).toMatchObject({ verdict: "drifting", returns: false });
+  });
+
+  test("a designed companion bonds as repeating, and holds", () => {
+    const layout = resonantCompanion({ altitudeKm: 550, inclinationDeg: 53 }, 8, 7) as NonNullable<ReturnType<typeof resonantCompanion>>;
+    const companion = walkerPatternAt(DELTA, layout, layout.minPerPlane) as WalkerDeltaParams;
+    const { bonds } = resolveMarks([`1-1@${encodeWalker(DELTA)}`, `1-1@${encodeWalker(companion)}`], [...fleet(DELTA), ...fleet(companion)]);
+    expect(bonds[0]).toMatchObject({ verdict: "repeating", returns: true });
+  });
 });
 
 describe("constellationLinks", () => {
@@ -102,15 +138,50 @@ describe("constellationLinks", () => {
     expect(links.filter((l) => l.kind === "inter")).toHaveLength(55);
   });
 
-  test("two patterns are never linked to each other", () => {
+  test("two shells are never linked to each other", () => {
     const higher: WalkerDeltaParams = { ...DELTA, altitudeKm: 1200 };
     const links = constellationLinks([...fleet(DELTA), ...fleet(higher)]);
     expect(links.filter((l) => l.kind === "intra")).toHaveLength(48);
     expect(links.filter((l) => l.kind === "inter")).toHaveLength(48);
+    expect(links.filter((l) => l.kind === "bridge")).toHaveLength(0);
     for (const link of links) {
       const sameShell = link.a.split(" ")[0] === link.b.split(" ")[0];
       expect(sameShell).toBe(true);
     }
+  });
+
+  test("a node-locked companion is still two shells, and still unwired", () => {
+    // Its schedule repeats; its partner does not. Only a frozen offset earns a link.
+    const layout = resonantCompanion({ altitudeKm: 550, inclinationDeg: 53 }, 8, 7) as NonNullable<ReturnType<typeof resonantCompanion>>;
+    const companion = walkerPatternAt(DELTA, layout, layout.minPerPlane) as WalkerDeltaParams;
+    const links = constellationLinks([...fleet(DELTA), ...fleet(companion)]);
+    expect(links.filter((l) => l.kind === "bridge")).toHaveLength(0);
+  });
+
+  test("two patterns at one altitude and inclination are bridged as the single shell they are", () => {
+    // The sun-synchronous demo's shape: the same orbit twice, a quarter turn of
+    // right ascension apart. Equal mean motion and equal node rate, so the offset
+    // between them never moves — there is nothing an inter-plane link has that a
+    // link across this pair lacks.
+    const dawn: WalkerDeltaParams = { total: 6, planes: 2, phasing: 0, inclinationDeg: 97.6, altitudeKm: 1200, raanSpanDeg: 360 };
+    const dusk: WalkerDeltaParams = { ...dawn, raanOffsetDeg: 90 };
+    const links = constellationLinks([...fleet(dawn), ...fleet(dusk)]);
+    const bridges = links.filter((l) => l.kind === "bridge");
+    // Each of the two patterns' planes bridges to the one nearest it in RAAN, and
+    // both slots of that plane pair are wired: 2 plane pairs x 3 slots.
+    expect(bridges).toHaveLength(6);
+    for (const bridge of bridges) {
+      expect(bridge.a.split(" ")[0]).not.toBe(bridge.b.split(" ")[0]);
+    }
+  });
+
+  test("a bridge across counter-rotating planes is dropped like any other", () => {
+    // Two near-polar patterns 180° apart in RAAN: the planes oppose, and same-slot
+    // satellites sweep past each other at twice orbital rate.
+    const first: WalkerDeltaParams = { total: 4, planes: 1, phasing: 0, inclinationDeg: 89, altitudeKm: 1200, raanSpanDeg: 360 };
+    const second: WalkerDeltaParams = { ...first, raanOffsetDeg: 180 };
+    expect(planesAgree(89, 180)).toBe(false);
+    expect(constellationLinks([...fleet(first), ...fleet(second)]).filter((l) => l.kind === "bridge")).toHaveLength(0);
   });
 
   test("a partial pattern links only what is flying, and the ring closes over it", () => {

@@ -1,4 +1,5 @@
 import {
+  ArcType,
   CallbackPositionProperty,
   CallbackProperty,
   Cartesian3,
@@ -24,7 +25,9 @@ import { planeSlotOf } from "./util/walkerDelta";
  * The stable-constellation link overlay: every generated Walker satellite on
  * screen wired into the topology scripts/derive-isl-topology.mjs derived —
  * rigid rings inside each plane, same-slot links between planes that rotate
- * the same way, nothing across the Walker Star seam, nothing across shells.
+ * the same way, nothing across the Walker Star seam, nothing across shells, and
+ * bridges across the one cross-pattern case whose offsets are frozen: a pair
+ * sharing an altitude and an inclination, which is one shell in two pieces.
  *
  * The layer is deliberately mechanical: the topology rules live in
  * util/constellationLinks.ts (Cesium-free, tested), and this class only wires
@@ -39,11 +42,12 @@ import { planeSlotOf } from "./util/walkerDelta";
  *   for the migration overlay, checked per link on a slow cadence since the
  *   occlusion state changes far more slowly than the positions do.
  *
- * Real ISL colours would be one hue; two are used because the two families are
+ * Real ISL colours would be one hue; three are used because the families are
  * the story: the intra-plane rings never change length (the derivation measured
  * CV ≈ 0.001), the inter-plane links breathe with the plane geometry (CV
  * ≈ 0.14–0.27) — watching them swell and slacken as planes cross is watching
- * why the same-slot pairing is the design that holds.
+ * why the same-slot pairing is the design that holds — and a bridge is the same
+ * relation reaching across two patterns that turned out to be one shell.
  *
  * On top of the auto-topology, a **marked cluster** (`setMarks`) names a small
  * fleet of satellites to watch as a unit: each member carries an amber halo and
@@ -84,6 +88,8 @@ export class ConstellationLinksLayer {
   static readonly INTRA_COLOR = Color.fromCssColorString("#34d399");
 
   static readonly INTER_COLOR = Color.fromCssColorString("#a78bfa");
+
+  static readonly BRIDGE_COLOR = Color.fromCssColorString("#38bdf8");
 
   static readonly MARK_COLOR = Color.fromCssColorString("#fbbf24");
 
@@ -197,10 +203,12 @@ export class ConstellationLinksLayer {
       if (this.#bondEntities.has(key)) {
         continue;
       }
-      // Solid for a bond whose members share a period — the distance envelope
-      // repeats every orbit and the pair never parts. Dashed for one whose
-      // members drift through their synodic cycle without bound. The line
-      // style is the stability verdict, so it reads without the panel.
+      // Solid for a bond whose geometry comes back — the distance envelope
+      // repeats and the pair never parts, whether because the two orbits are
+      // rigid, phase-locked or on a repeat cycle. Dashed for one whose members
+      // slide through their synodic cycle without bound. The line style is
+      // shellLayout's verdict, so it reads without the panel; the verdict's own
+      // word is on the entity, for a reader who wants which of the five it is.
       //
       // The colour reads the occlusion state, because a bond is a relation and
       // not a live link: it does not stop existing while the Earth is between
@@ -211,7 +219,7 @@ export class ConstellationLinksLayer {
       // overlay exists to prevent.
       const occludedColor = new CallbackProperty(() => (this.#visible.get(key) === false ? hue.withAlpha(0.25) : hue), false);
       const entity = new Entity({
-        name: `Marked bond ${bond.a} ↔ ${bond.b}${bond.samePeriod ? "" : " (drifting)"}`,
+        name: `Marked bond ${bond.a} ↔ ${bond.b} (${bond.verdict})`,
         polyline: new PolylineGraphics({
           positions: new CallbackProperty((time?: JulianDate) => {
             const at = time ?? this.#viewer.clock.currentTime;
@@ -220,11 +228,16 @@ export class ConstellationLinksLayer {
             return pa && pb ? [pa, pb] : [];
           }, false),
           width: 3,
-          material: bond.samePeriod
+          material: bond.returns
             ? new PolylineGlowMaterialProperty({ glowPower: 0.3, color: occludedColor })
             : new PolylineDashMaterialProperty({ color: occludedColor, dashLength: 18 }),
           // Straight chord between the two satellites, not draped on the globe.
-          arcType: undefined,
+          // ArcType.NONE explicitly: PolylineGraphics reads an undefined arcType
+          // as its default, which is GEODESIC — so "undefined" asked for the
+          // draped arc rather than for no arc, and a pair that happened to be
+          // near-antipodal threw out of EllipsoidGeodesic.setEndPoints and
+          // stopped the whole scene rendering.
+          arcType: ArcType.NONE,
         }),
       });
       this.#bondEntities.set(key, entity);
@@ -279,10 +292,9 @@ export class ConstellationLinksLayer {
       if (this.#entities.has(key)) {
         continue;
       }
-      const intra = link.kind === "intra";
-      const hue = intra ? ConstellationLinksLayer.INTRA_COLOR : ConstellationLinksLayer.INTER_COLOR;
+      const hue = LINK_COLOR[link.kind](ConstellationLinksLayer);
       const entity = new Entity({
-        name: `${intra ? "Ring" : "Inter-plane"} link ${link.a} ↔ ${link.b}`,
+        name: `${LINK_LABEL[link.kind]} link ${link.a} ↔ ${link.b}`,
         polyline: new PolylineGraphics({
           positions: new CallbackProperty((time?: JulianDate) => {
             const at = time ?? this.#viewer.clock.currentTime;
@@ -290,10 +302,11 @@ export class ConstellationLinksLayer {
             const b = this.#positionAt(link.b, at);
             return a && b ? [a, b] : [];
           }, false),
-          width: intra ? 1.5 : 2,
+          width: link.kind === "intra" ? 1.5 : 2,
           material: new PolylineGlowMaterialProperty({ glowPower: 0.2, color: hue }),
-          // Straight chord between the two satellites, not draped on the globe.
-          arcType: undefined,
+          // Straight chord, not draped on the globe — see the bond above on why
+          // this is ArcType.NONE rather than undefined.
+          arcType: ArcType.NONE,
         }),
       });
       this.#entities.set(key, entity);
@@ -334,3 +347,12 @@ export class ConstellationLinksLayer {
     }
   }
 }
+
+/** What each link family is called on its entity, and the hue it is drawn in. */
+const LINK_LABEL: Record<SatelliteLink["kind"], string> = { intra: "Ring", inter: "Inter-plane", bridge: "Cross-pattern" };
+
+const LINK_COLOR: Record<SatelliteLink["kind"], (layer: typeof ConstellationLinksLayer) => Color> = {
+  intra: (layer) => layer.INTRA_COLOR,
+  inter: (layer) => layer.INTER_COLOR,
+  bridge: (layer) => layer.BRIDGE_COLOR,
+};

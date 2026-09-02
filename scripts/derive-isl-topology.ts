@@ -350,3 +350,344 @@ console.log("== study 6: can a cluster span orbits at all? marked-pair distance 
   );
   console.log("(same period: the envelope repeats, the pair never parts. different period: the maxima wander without bound)");
 }
+
+// ---------------------------------------------------------------------------
+// Studies 7-10 — multi-shell layouts: which second shell holds against the first
+//
+// Studies 1-6 stayed inside one shell, and study 3 stopped at "different shells
+// drift". That was a measurement of the *shells that were tried*, not a law, and
+// src/modules/util/shellLayout.ts is the law it was missing: two shells hold a
+// fixed relative arrangement when their nodes precess at the same rate, and they
+// return to the same relative phase when their along-track rates are in a
+// small-integer ratio. Both are closed form, and both are checked here against
+// the propagator rather than against themselves.
+// ---------------------------------------------------------------------------
+
+import {
+  coPrecessingCeilingKm,
+  coPrecessingInclinationDeg,
+  minSatellitesPerRing,
+  resonantCompanion,
+  searchStableShellLayouts,
+  shellPairLayout,
+  shellRates,
+  type ShellOrbit,
+} from "../src/modules/util/shellLayout.ts";
+
+/** The reference shell every layout study is measured against. */
+const REFERENCE: ShellOrbit = { altitudeKm: 550, inclinationDeg: 53 };
+
+/** The pattern shape the layout studies fly: 4 planes, enough per plane for the rings to clear the ground. */
+function shellPattern(orbit: ShellOrbit): WalkerDeltaParams {
+  const perPlane = Math.max(minSatellitesPerRing(orbit.altitudeKm), 6);
+  return { total: perPlane * 4, planes: 4, phasing: 1, inclinationDeg: orbit.inclinationDeg, altitudeKm: orbit.altitudeKm, raanSpanDeg: 360 };
+}
+
+function satrecsOf(params: WalkerDeltaParams): Array<{ name: string; satrec: ReturnType<typeof json2satrec> }> {
+  return walkerDeltaRecords(params, EPOCH, "W", 900000)
+    .filter((record) => record.kind === "omm")
+    .map((record) => ({ name: record.omm.OBJECT_NAME, satrec: json2satrec(record.omm) }));
+}
+
+/**
+ * The right ascension of a satellite's orbit plane, read off the propagated
+ * state vector rather than off the element set: `Ω = atan2(hₓ, −h_y)` from the
+ * angular momentum `h = r × v`. This is what makes the node rate a *measurement*
+ * — SGP4 is free to disagree with the secular formula, and study 8 is where it
+ * says by how much.
+ */
+function measuredRaanDeg(satrec: ReturnType<typeof json2satrec>, at: Date): number | undefined {
+  const state = propagate(satrec, at);
+  if (!state?.position || !state.velocity) {
+    return undefined;
+  }
+  const r = state.position;
+  const v = state.velocity;
+  const hx = r.y * v.z - r.z * v.y;
+  const hy = r.z * v.x - r.x * v.z;
+  return ((((Math.atan2(hx, -hy) * 180) / Math.PI) % 360) + 360) % 360;
+}
+
+/** The node rate SGP4 actually flies, in degrees a day, over `days` of propagation. */
+function measuredNodeRateDegPerDay(orbit: ShellOrbit, days = 30, samples = 240): number {
+  const { satrec } = satrecsOf(shellPattern(orbit))[0]!;
+  let previous = measuredRaanDeg(satrec, EPOCH) ?? 0;
+  let unwrapped = previous;
+  for (let sample = 1; sample <= samples; sample += 1) {
+    const current = measuredRaanDeg(satrec, new Date(EPOCH.getTime() + (sample * days * 86400000) / samples));
+    if (current === undefined) {
+      continue;
+    }
+    let step = current - previous;
+    while (step > 180) {
+      step -= 360;
+    }
+    while (step < -180) {
+      step += 360;
+    }
+    unwrapped += step;
+    previous = current;
+  }
+  const start = measuredRaanDeg(satrec, EPOCH) ?? 0;
+  return (unwrapped - start) / days;
+}
+
+/**
+ * The argument of latitude — the angle from the ascending node to the satellite,
+ * in its own orbit plane. For a circular orbit this *is* the along-track
+ * position, and its rate is what decides when two shells return to the same
+ * relative phase.
+ */
+function measuredArgumentOfLatitudeDeg(satrec: ReturnType<typeof json2satrec>, at: Date): number | undefined {
+  const state = propagate(satrec, at);
+  if (!state?.position || !state.velocity) {
+    return undefined;
+  }
+  const r = state.position;
+  const v = state.velocity;
+  const h = { x: r.y * v.z - r.z * v.y, y: r.z * v.x - r.x * v.z, z: r.x * v.y - r.y * v.x };
+  // The node line is ẑ × h, and h × node completes the in-plane frame.
+  const node = { x: -h.y, y: h.x, z: 0 };
+  const across = { x: h.y * node.z - h.z * node.y, y: h.z * node.x - h.x * node.z, z: h.x * node.y - h.y * node.x };
+  const along = node.x * r.x + node.y * r.y;
+  const perpendicular = (across.x * r.x + across.y * r.y + across.z * r.z) / Math.hypot(across.x, across.y, across.z);
+  return ((((Math.atan2(perpendicular, along / Math.hypot(node.x, node.y)) * 180) / Math.PI) % 360) + 360) % 360;
+}
+
+/** The along-track rate SGP4 actually flies, in degrees a day. */
+function measuredAlongTrackRateDegPerDay(orbit: ShellOrbit, days = 2, samples = 4000): number {
+  const { satrec } = satrecsOf(shellPattern(orbit))[0]!;
+  let previous = measuredArgumentOfLatitudeDeg(satrec, EPOCH) ?? 0;
+  let travelled = 0;
+  for (let sample = 1; sample <= samples; sample += 1) {
+    const current = measuredArgumentOfLatitudeDeg(satrec, new Date(EPOCH.getTime() + (sample * days * 86400000) / samples));
+    if (current === undefined) {
+      continue;
+    }
+    let step = current - previous;
+    while (step > 180) {
+      step -= 360;
+    }
+    while (step < -180) {
+      step += 360;
+    }
+    travelled += step;
+    previous = current;
+  }
+  return travelled / days;
+}
+
+/**
+ * The designed companion, closed against the propagator.
+ *
+ * The secular model gets the altitude to within a few km and the inclination to
+ * within a tenth of a degree, and neither error is negligible at the scale the
+ * layout is a claim about: a part in two thousand of along-track rate is a degree
+ * of phase per repeat cycle, which is 130 km of "the same place". So the two
+ * conditions are re-solved against SGP4 itself — altitude for the resonance,
+ * inclination for the node lock — alternating, because each moves the other a
+ * little. This is what a design does that a derivation cannot: the closed form
+ * says where to look, the propagator says where it is.
+ */
+function refineAgainstSgp4(seed: ShellOrbit, referenceRevolutions: number, companionRevolutions: number): ShellOrbit {
+  const wantedRate = (measuredAlongTrackRateDegPerDay(REFERENCE) * companionRevolutions) / referenceRevolutions;
+  const referenceNodeRate = measuredNodeRateDegPerDay(REFERENCE);
+  let altitudeKm = seed.altitudeKm;
+  let inclinationDeg = seed.inclinationDeg;
+  for (let pass = 0; pass < 3; pass += 1) {
+    // Altitude for the resonance: along-track rate falls with altitude.
+    let low = altitudeKm - 40;
+    let high = altitudeKm + 40;
+    for (let step = 0; step < 22; step += 1) {
+      const middle = (low + high) / 2;
+      if (measuredAlongTrackRateDegPerDay({ altitudeKm: middle, inclinationDeg }) > wantedRate) {
+        low = middle;
+      } else {
+        high = middle;
+      }
+    }
+    altitudeKm = (low + high) / 2;
+    // Inclination for the node lock: a node precesses more slowly the steeper it flies.
+    let shallow = Math.max(0, inclinationDeg - 2);
+    let steep = Math.min(180, inclinationDeg + 2);
+    for (let step = 0; step < 22; step += 1) {
+      const middle = (shallow + steep) / 2;
+      if (referenceNodeRate - measuredNodeRateDegPerDay({ altitudeKm, inclinationDeg: middle }) > 0) {
+        shallow = middle;
+      } else {
+        steep = middle;
+      }
+    }
+    inclinationDeg = (shallow + steep) / 2;
+  }
+  return { altitudeKm, inclinationDeg };
+}
+
+console.log("");
+console.log("== study 7: which second shell can hold against 53:.../4/1@550? ==");
+{
+  const rates = shellRates(REFERENCE);
+  console.log(`  reference node rate ${rates.nodeRateDegPerDay.toFixed(4)} deg/day, period ${rates.periodMinutes.toFixed(2)} min`);
+  console.log(`  co-precession ceiling: ${coPrecessingCeilingKm(REFERENCE).toFixed(0)} km — above it no inclination precesses slowly enough to keep up`);
+  console.log(["cycle", "altitude km", "inclination", "repeat h", "slip °/cyc", "min S/plane"].map((h) => h.padEnd(14)).join(""));
+  for (const layout of searchStableShellLayouts(REFERENCE, { limit: 8 })) {
+    console.log(
+      [
+        `${layout.resonance.referenceRevolutions}:${layout.resonance.companionRevolutions}`,
+        layout.altitudeKm.toFixed(1),
+        `${layout.inclinationDeg.toFixed(3)}°`,
+        layout.resonance.repeatHours.toFixed(3),
+        layout.resonance.slipDegPerCycle.toExponential(1),
+        String(layout.minPerPlane),
+      ]
+        .map((cell) => cell.padEnd(14))
+        .join(""),
+    );
+  }
+  console.log("(every row is node-locked to the reference by construction; the cycle is what the along-track ratio buys)");
+}
+
+const DESIGNED = resonantCompanion(REFERENCE, 8, 7);
+
+console.log("");
+console.log("== study 8: does the node lock survive SGP4? 30 days of propagated right ascension ==");
+{
+  if (!DESIGNED) {
+    console.log("  no 8:7 companion — nothing to measure");
+  } else {
+    const designed: ShellOrbit = { altitudeKm: DESIGNED.altitudeKm, inclinationDeg: DESIGNED.inclinationDeg };
+    const candidates: Array<[string, ShellOrbit]> = [
+      ["designed 8:7 companion", designed],
+      ["same inclination @ 1200", { altitudeKm: 1200, inclinationDeg: 53 }],
+      ["the shells demo's 97.6 @ 1200", { altitudeKm: 1200, inclinationDeg: 97.6 }],
+      ["the shells demo's 70 @ 1200", { altitudeKm: 1200, inclinationDeg: 70 }],
+    ];
+    const referenceRate = measuredNodeRateDegPerDay(REFERENCE);
+    console.log(`  reference measured node rate ${referenceRate.toFixed(5)} deg/day (secular model: ${shellRates(REFERENCE).nodeRateDegPerDay.toFixed(5)})`);
+    console.log(["companion", "predicted °/d", "measured °/d", "shear °/d", "seam holds"].map((h) => h.padEnd(30)).join(""));
+    for (const [label, orbit] of candidates) {
+      const shear = referenceRate - measuredNodeRateDegPerDay(orbit);
+      const days = Math.abs(1 / shear);
+      console.log(
+        [
+          label,
+          shellPairLayout(REFERENCE, orbit).nodeShearDegPerDay.toFixed(5),
+          measuredNodeRateDegPerDay(orbit).toFixed(5),
+          shear.toFixed(5),
+          `${days.toFixed(days < 10 ? 2 : 0)} d/deg`,
+        ]
+          .map((cell) => cell.padEnd(30))
+          .join(""),
+      );
+    }
+    const refined = refineAgainstSgp4(designed, 8, 7);
+    console.log(
+      `  secular design ${designed.altitudeKm.toFixed(1)} km / ${designed.inclinationDeg.toFixed(3)}°` +
+        ` -> SGP4-refined ${refined.altitudeKm.toFixed(1)} km / ${refined.inclinationDeg.toFixed(3)}°` +
+        ` (${(refined.altitudeKm - designed.altitudeKm).toFixed(1)} km, ${(refined.inclinationDeg - designed.inclinationDeg).toFixed(3)}°)`,
+    );
+    console.log(`  refined shear ${(referenceRate - measuredNodeRateDegPerDay(refined)).toFixed(5)} deg/day — the lock the design asked for, closed against the propagator`);
+  }
+}
+
+console.log("");
+console.log("== study 9: does the configuration come back? cross-shell nearest neighbour, one repeat cycle apart ==");
+{
+  if (!DESIGNED) {
+    console.log("  no 8:7 companion — nothing to measure");
+  } else {
+    const cycleSeconds = DESIGNED.resonance.repeatHours * 3600;
+    const step = 120;
+    const samples = Math.floor(cycleSeconds / step);
+    const low = satrecsOf(shellPattern(REFERENCE));
+    const secular: ShellOrbit = { altitudeKm: DESIGNED.altitudeKm, inclinationDeg: DESIGNED.inclinationDeg };
+    const refined = refineAgainstSgp4(secular, 8, 7);
+    const contenders: Array<[string, ShellOrbit]> = [
+      ["8:7 refined", refined],
+      ["8:7 secular", secular],
+      ["same inclination @ 1200", { altitudeKm: 1200, inclinationDeg: 53 }],
+      ["shells demo's 97.6 @ 1200", { altitudeKm: 1200, inclinationDeg: 97.6 }],
+    ];
+    console.log(["companion", "same partner", "range drift km", "median km"].map((h) => h.padEnd(28)).join(""));
+    for (const [label, orbit] of contenders) {
+      const high = satrecsOf(shellPattern(orbit));
+      let same = 0;
+      let compared = 0;
+      const drift: number[] = [];
+      for (let sample = 0; sample < samples; sample += 1) {
+        const now = new Date(EPOCH.getTime() + sample * step * 1000);
+        const later = new Date(now.getTime() + cycleSeconds * 1000);
+        for (const source of low) {
+          const before = nearestIn(source.satrec, high, now);
+          const after = nearestIn(source.satrec, high, later);
+          if (!before || !after) {
+            continue;
+          }
+          compared += 1;
+          if (before.name === after.name) {
+            same += 1;
+          }
+          drift.push(Math.abs(before.km - after.km));
+        }
+      }
+      const sorted = drift.toSorted((a, b) => a - b);
+      const mean = drift.reduce((a, b) => a + b, 0) / drift.length;
+      console.log(
+        [label, `${((same / compared) * 100).toFixed(1)}%`, mean.toFixed(0), (sorted[Math.floor(sorted.length / 2)] ?? Number.NaN).toFixed(0)]
+          .map((cell) => cell.padEnd(28))
+          .join(""),
+      );
+    }
+    console.log("(one cycle later, does each satellite find the same partner at the same range? a repeating layout says yes and a drifting one cannot)");
+  }
+}
+
+/** The nearest satellite of `fleet` to `source` at `at`, by chord. */
+function nearestIn(
+  source: ReturnType<typeof json2satrec>,
+  fleet: Array<{ name: string; satrec: ReturnType<typeof json2satrec> }>,
+  at: Date,
+): { name: string; km: number } | undefined {
+  const here = propagate(source, at)?.position;
+  if (!here) {
+    return undefined;
+  }
+  let best: { name: string; km: number } | undefined;
+  for (const { name, satrec } of fleet) {
+    const there = propagate(satrec, at)?.position;
+    if (!there) {
+      continue;
+    }
+    const km = chord(here, there);
+    if (!best || km < best.km) {
+      best = { name, km };
+    }
+  }
+  return best;
+}
+
+console.log("");
+console.log("== study 10: what a co-precessing companion costs — inclination against altitude ==");
+{
+  console.log(["altitude km", "co-prec i", "period min", "node °/d", "vs reference"].map((h) => h.padEnd(14)).join(""));
+  for (const altitudeKm of [400, 550, 700, 900, 1100, 1300, 1500, 1600]) {
+    const inclinationDeg = coPrecessingInclinationDeg(REFERENCE, altitudeKm);
+    if (inclinationDeg === undefined) {
+      console.log(`${String(altitudeKm).padEnd(14)}— above the ceiling`);
+      continue;
+    }
+    const rates = shellRates({ altitudeKm, inclinationDeg });
+    console.log(
+      [
+        String(altitudeKm),
+        `${inclinationDeg.toFixed(2)}°`,
+        rates.periodMinutes.toFixed(2),
+        rates.nodeRateDegPerDay.toFixed(4),
+        shellPairLayout(REFERENCE, { altitudeKm, inclinationDeg }).verdict,
+      ]
+        .map((cell) => cell.padEnd(14))
+        .join(""),
+    );
+  }
+  console.log("(the price of the lock is inclination: a companion at 1200 km has to fly at 34.5°, which is coverage a 53° shell already had)");
+}

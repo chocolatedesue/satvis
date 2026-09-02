@@ -10,8 +10,19 @@ import { createMemoryHistory, createRouter } from "vue-router";
 
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
-import { applyMigrationScene, applyShellsScene, applySunSyncScene, applyTwoOrbitScene, type ClockControl, DEMO_MULTIPLIER, SHELLS_MULTIPLIER } from "./demoScenes";
-import { decodeWalker, isWalkerTag } from "./util/walkerDelta";
+import {
+  applyMigrationScene,
+  applyShellsScene,
+  applyStableShellsScene,
+  applySunSyncScene,
+  applyTwoOrbitScene,
+  type ClockControl,
+  DEMO_MULTIPLIER,
+  SHELLS_MULTIPLIER,
+  STABLE_REFERENCE,
+} from "./demoScenes";
+import { shellPairLayout } from "./util/shellLayout";
+import { decodeWalker, encodeWalker, isWalkerTag } from "./util/walkerDelta";
 
 /** Records what the scene did to the clock, which is not store state. */
 function clockSpy(): ClockControl & { multiplier?: number; played: boolean } {
@@ -170,6 +181,51 @@ describe("demo scenes", () => {
       expect(low).toBeDefined();
       // a·cos(π/S) > R: at 550 km the derivation asks for S ≥ 8 per plane.
       expect(Math.round(low!.total / low!.planes)).toBeGreaterThanOrEqual(8);
+    });
+  });
+
+  describe("stable shells", () => {
+    function applyStable() {
+      const s = stores();
+      const clock = clockSpy();
+      applyStableShellsScene(s.satStore, s.cesiumStore, clock);
+      return { s, clock };
+    }
+
+    test("flies the reference, a designed companion and a control", () => {
+      const { s } = applyStable();
+      expect(s.satStore.walker).toHaveLength(3);
+      expect(s.satStore.walker[0]).toBe(encodeWalker(STABLE_REFERENCE));
+      expect(s.satStore.enabledTags.every((tag) => isWalkerTag(tag))).toBe(true);
+    });
+
+    test("the companion is node-locked and resonant; the control is neither", () => {
+      const { s } = applyStable();
+      const [reference, companion, control] = (s.satStore.walker as string[]).map((wire) => decodeWalker(wire)!);
+      expect(shellPairLayout(reference!, companion!).verdict).toBe("repeating");
+      expect(shellPairLayout(reference!, control!).verdict).toBe("drifting");
+      // The whole point of the pairing: same altitude band, opposite verdicts.
+      expect(Math.abs(companion!.altitudeKm - control!.altitudeKm)).toBeLessThan(50);
+    });
+
+    test("the repeat cycle is the one the derivation quotes", () => {
+      const { s } = applyStable();
+      const [reference, companion] = (s.satStore.walker as string[]).map((wire) => decodeWalker(wire)!);
+      const resonance = shellPairLayout(reference!, companion!).resonance;
+      expect(resonance).toMatchObject({ referenceRevolutions: 8, companionRevolutions: 7 });
+      expect(resonance!.repeatHours).toBeCloseTo(12.7, 1);
+    });
+
+    test("marks one satellite per shell, so the two verdicts are drawn side by side", () => {
+      const { s } = applyStable();
+      expect(s.satStore.marks).toHaveLength(3);
+      expect(s.satStore.links).toBe(true);
+    });
+
+    test("runs at the shells multiplier, which puts a repeat cycle at about 76 s", () => {
+      const { clock } = applyStable();
+      expect(clock.multiplier).toBe(SHELLS_MULTIPLIER);
+      expect(clock.played).toBe(true);
     });
   });
 });

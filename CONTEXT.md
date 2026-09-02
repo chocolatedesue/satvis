@@ -262,9 +262,14 @@ discussion; sharpen them here when they drift.
   periods never settle). Green and violet distinguish the two families, because
   rigid versus breathing is the story the drawing tells. Links whose chord
   passes behind the Earth are hidden, not drawn through it — the same standard
-  the migration overlay sets. Rules in `constellationLinks.ts`; the derivation
-  they come from is `scripts/derive-isl-topology.ts`
-  (`docs/adr/0008-constellation-links.md`).
+  the migration overlay sets. Sky-blue **bridge links** are the one exception to
+  "nothing between patterns": two patterns sharing an altitude _and_ an
+  inclination have equal mean motion and equal node rate, so every offset
+  between them is frozen — one shell in two pieces, wired as one, each plane to
+  the plane of the other pattern nearest it in right ascension. Rules in
+  `constellationLinks.ts`; the derivation they come from is
+  `scripts/derive-isl-topology.ts` (`docs/adr/0008-constellation-links.md`,
+  narrowed by `0009`).
 - **Marked cluster**: a small fleet named to be watched as a unit, as
   `<plane>-<slot>@<wire>` tokens in the `mark=` url parameter. Each active
   member carries an amber halo and its slot label; every marked pair is bonded
@@ -272,10 +277,35 @@ discussion; sharpen them here when they drift.
   because the point of marking is to test stability by eye exactly where the
   auto-topology deliberately says nothing. A same-slot column across one shell's
   planes flies as a rigid ladder; a same-slot satellite from each of three shells
-  shears open as the periods slip. Bonds are styled by the verdict the
-  derivation measured: solid for members sharing a period (the distance
-  envelope repeats every orbit; the pair never parts), dashed for members whose
-  periods differ (the bond drifts without bound). Bonds dim to quarter opacity when
+  shears open as the periods slip. Bonds are styled by the **shell-pair
+  verdict** (below): solid where the pair's geometry comes back — `rigid`,
+  `repeating` or `phase-locked` — and dashed where it does not, `node-locked` or
+  `drifting`. Bonds dim to quarter opacity when
   their chord passes behind the Earth rather than disappearing, keeping the cluster relation
   visible throughout the orbit. Members that are not currently active contribute nothing and
   join when switched on.
+- **Shell-pair verdict**: what two shells do to each other, from two secular
+  rates and nothing else (`shellLayout.ts`). The node rate
+  `Ω̇ = −(3/2) J₂ n (Rₑ/a)² cos i` decides whether their planes hold an
+  arrangement; the along-track rate `u̇ = n[1 + J₂ (Rₑ/a)² (6cos²i − 3/2)]`
+  decides whether their phases return. Five outcomes: `rigid` (equal period and
+  equal node rate — one shell in two patterns), `repeating` (node-locked with
+  the along-track rates in a small-integer ratio, so the whole configuration
+  returns every repeat cycle), `phase-locked` (equal period, planes shearing),
+  `node-locked` (planes held, phases sliding forever) and `drifting` (neither).
+  No two _distinct_ shells are rigid — freezing the phases wants equal altitude,
+  freezing the planes then wants equal inclination — so a designed multi-shell
+  layout aims at `repeating`.
+- **Co-precession ceiling**: the highest altitude that can still be node-locked
+  to a given shell, `a₁·|cos i₁|^(−2/7) − Rₑ`. 1632 km for a 53° / 550 km shell:
+  above it no inclination precesses slowly enough to keep up. The reason the
+  short repeat cycles (2:1, 3:2) are unavailable to a mid-inclination reference,
+  and the reason the price of a lock is inclination — a companion node-locked to
+  53° / 550 km flies at 34.5° by the time it reaches 1200 km.
+- **Repeat cycle**: how long a `repeating` pair takes to return to the same
+  relative configuration — `p` orbits of one shell against `q` of the other.
+  Every cross-shell range and every contact window repeats on it, so a schedule
+  computed once holds forever, which is the whole point of designing a layout
+  rather than picking one. The derivation measures 99.7% of satellites finding
+  the same cross-shell partner one cycle later for the designed pair, against
+  79.3% for a shell chosen for its coverage (`docs/adr/0009-multi-shell-layouts.md`).

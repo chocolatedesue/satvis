@@ -29,16 +29,24 @@
 //   this graph. The test is the dot product of the two planes' orbit normals —
 //   same hemisphere, keep; opposed, drop.
 //
-// - **Nothing between patterns.** Two different Walker patterns are different
-//   shells; unless their altitudes coincide the periods differ, the along-track
-//   offset drifts monotonically, and the nearest satellite across the shells
-//   changes forever (measured churn 0.20 per sample, never settling). Each
-//   pattern is linked within itself and left there.
+// - **Between patterns, only where the pair is rigid.** Two different Walker
+//   patterns are usually different shells: unless their altitudes coincide the
+//   periods differ, the along-track offset drifts monotonically, and the nearest
+//   satellite across the shells changes forever (measured churn 0.20 per sample,
+//   never settling). The exception `./shellLayout.ts` names is a pair that shares
+//   an altitude *and* an inclination — equal mean motion and equal node rate, so
+//   every offset between them is frozen. That is not two shells, it is one shell
+//   flown as two patterns (a second RAAN offset, a phased sub-constellation), and
+//   it is wired as one: each plane bridges to the nearest plane of the other
+//   pattern, same slot, subject to the same counter-rotation test the wrap link
+//   gets. Everything else — including a node-locked, resonant companion, whose
+//   *schedule* repeats but whose partner does not — stays unwired.
 //
 // The graph is rebuilt from whatever subset of each pattern is currently
 // active: a pattern with missing satellites links the ones it has, closing the
 // ring over the active slots rather than the nominal ones.
 
+import { configurationReturns, shellPairLayout, type ShellPairVerdict } from "./shellLayout";
 import { decodeWalker, type WalkerDeltaParams } from "./walkerDelta";
 
 /** One end of a link: the satellite's catalog name plus where it sits in its pattern. */
@@ -52,9 +60,16 @@ export interface LinkEndpoint {
   slot: number;
 }
 
-/** One undirected link between two active satellites. */
+/**
+ * One undirected link between two active satellites.
+ *
+ * `intra` runs round a plane's ring, `inter` between neighbouring planes of one
+ * pattern, and `bridge` between two patterns that share an altitude and an
+ * inclination — the one cross-pattern case whose geometry is frozen rather than
+ * merely bounded (`./shellLayout.ts`, verdict `rigid`).
+ */
 export interface SatelliteLink {
-  kind: "intra" | "inter";
+  kind: "intra" | "inter" | "bridge";
   a: string;
   b: string;
 }
@@ -105,13 +120,19 @@ export interface MarkedBond {
   a: string;
   b: string;
   /**
-   * Whether the two members share a period (equal altitude, so equal mean
-   * motion). Same-period bonds hold their phase forever and repeat their
-   * distance envelope every orbit; different-period bonds drift through their
-   * synodic cycle without bound. Drawn solid versus dashed, because that is
-   * the one distinction a viewer is asked to read off the cluster.
+   * What the two members' orbits do to each other, from `./shellLayout.ts`:
+   * `rigid`, `repeating`, `phase-locked`, `node-locked` or `drifting`. Carried
+   * whole because it is the verdict the cluster exists to test, and a reader who
+   * hovers the bond deserves the word rather than the bit.
    */
-  samePeriod: boolean;
+  verdict: ShellPairVerdict;
+  /**
+   * Whether that verdict is one whose geometry comes back — solid versus dashed,
+   * because that is the one distinction a line style can carry. A same-period
+   * pair holds its distance envelope every orbit; a node-locked or drifting one
+   * slides through its synodic cycle without ever settling.
+   */
+  returns: boolean;
 }
 
 export function resolveMarks(tokens: readonly string[], satellites: readonly LinkEndpoint[]): { members: LinkEndpoint[]; bonds: MarkedBond[] } {
@@ -130,13 +151,16 @@ export function resolveMarks(tokens: readonly string[], satellites: readonly Lin
       members.push(member);
     }
   }
-  const altitudeOf = new Map(members.map((member) => [member.name, decodeWalker(member.wire)?.altitudeKm]));
+  const orbitOf = new Map(members.map((member) => [member.name, decodeWalker(member.wire)]));
   const bonds: MarkedBond[] = [];
   for (let a = 0; a < members.length; a += 1) {
     for (let b = a + 1; b < members.length; b += 1) {
-      const first = altitudeOf.get(members[a]!.name);
-      const second = altitudeOf.get(members[b]!.name);
-      bonds.push({ a: members[a]!.name, b: members[b]!.name, samePeriod: first !== undefined && first === second });
+      const first = orbitOf.get(members[a]!.name);
+      const second = orbitOf.get(members[b]!.name);
+      // A member whose wire will not decode has no orbit to compare, so the bond
+      // claims nothing: drawn, dashed, and honest about knowing nothing.
+      const verdict: ShellPairVerdict = first && second ? shellPairLayout(first, second).verdict : "drifting";
+      bonds.push({ a: members[a]!.name, b: members[b]!.name, verdict, returns: configurationReturns(verdict) });
     }
   }
   return { members, bonds };
@@ -166,6 +190,35 @@ export function parseWalkerSatellite(name: string): LinkEndpoint | undefined {
 }
 
 /**
+ * Whether two orbit planes of the same inclination, `gapDeg` of right ascension
+ * apart, circulate the same way.
+ *
+ * The orbit normal of a plane at RAAN Ω and inclination i is
+ * `(sinΩ·sin i, −cosΩ·sin i, cos i)`, so two planes ΔΩ apart have
+ * `sin²i·cos ΔΩ + cos²i` between their normals: positive means satellites in the
+ * two planes circulate the same way (constant along-track offsets, stable
+ * same-slot links); negative means they sweep past each other at twice orbital
+ * rate — the Walker Star seam, and no place for a link.
+ */
+export function planesAgree(inclinationDeg: number, gapDeg: number): boolean {
+  const radians = (gapDeg * Math.PI) / 180;
+  const inclination = (inclinationDeg * Math.PI) / 180;
+  return Math.sin(inclination) ** 2 * Math.cos(radians) + Math.cos(inclination) ** 2 > 0;
+}
+
+/** Where a pattern's plane sits in absolute right ascension. */
+export function planeRaanDeg(params: WalkerDeltaParams, plane: number): number {
+  const raan = (params.raanOffsetDeg ?? 0) + (plane * params.raanSpanDeg) / params.planes;
+  return ((raan % 360) + 360) % 360;
+}
+
+/** The right-ascension gap between two planes, the short way round: 0° to 180°. */
+function raanGapDeg(first: number, second: number): number {
+  const gap = Math.abs(((first - second) % 360) + 360) % 360;
+  return gap > 180 ? 360 - gap : gap;
+}
+
+/**
  * Whether the wrap pair of planes (last to first) rotates the same way.
  *
  * The orbit normal of a plane at RAAN Ω and inclination i is
@@ -180,11 +233,7 @@ export function parseWalkerSatellite(name: string): LinkEndpoint | undefined {
  * itself, so the wrap link is the same as any other inter-plane link.
  */
 export function wrapPlanesAgree(params: WalkerDeltaParams): boolean {
-  const wrapGapDeg = 360 - params.raanSpanDeg + params.raanSpanDeg / params.planes;
-  const radians = (wrapGapDeg * Math.PI) / 180;
-  const inclination = (params.inclinationDeg * Math.PI) / 180;
-  const dot = Math.sin(inclination) ** 2 * Math.cos(radians) + Math.cos(inclination) ** 2;
-  return dot > 0;
+  return planesAgree(params.inclinationDeg, 360 - params.raanSpanDeg + params.raanSpanDeg / params.planes);
 }
 
 /**
@@ -262,6 +311,89 @@ export function constellationLinks(satellites: readonly LinkEndpoint[]): Satelli
           const other = first.get(slot);
           if (other !== undefined) {
             links.push({ kind: "inter", a: name, b: other });
+          }
+        }
+      }
+    }
+  }
+  links.push(...bridgeLinks(byPattern));
+  return links;
+}
+
+/**
+ * The links between patterns that are the same shell in two pieces.
+ *
+ * Two patterns at the same altitude and the same inclination have the same mean
+ * motion and the same J₂ node rate, so every offset between them — along-track
+ * and in right ascension — is frozen for good (`./shellLayout.ts` calls the pair
+ * `rigid`). There is then nothing to distinguish a link across the pair from an
+ * inter-plane link inside one of them, and the fleet is wired as the one shell it
+ * is: each plane to the plane of the other pattern nearest it in right ascension,
+ * same slot, dropped when the two planes counter-rotate.
+ *
+ * Nearest rather than every pair, because a shell's inter-plane links go to
+ * neighbours: linking every plane of A to every plane of B would wire the far
+ * side of the sky to the near one and call the resulting thicket a topology.
+ *
+ * Nothing here fires for the ordinary two-shell case — different altitudes are
+ * different periods, and no fixed wiring survives that. What it does fire for is
+ * the case the old "nothing between patterns" rule got wrong: the sun-synchronous
+ * demo's dawn–dusk and noon–midnight planes, or any pattern generated a second
+ * time at another RAAN offset.
+ */
+function bridgeLinks(byPattern: Map<string, Map<number, Map<number, string>>>): SatelliteLink[] {
+  const families = new Map<string, string[]>();
+  for (const wire of byPattern.keys()) {
+    const params = decodeWalker(wire);
+    if (!params) {
+      continue;
+    }
+    const key = `${params.altitudeKm}#${params.inclinationDeg}`;
+    const family = families.get(key);
+    if (family) {
+      family.push(wire);
+    } else {
+      families.set(key, [wire]);
+    }
+  }
+  const links: SatelliteLink[] = [];
+  const wired = new Set<string>();
+  for (const wires of families.values()) {
+    if (wires.length < 2) {
+      continue;
+    }
+    for (let a = 0; a < wires.length; a += 1) {
+      for (let b = a + 1; b < wires.length; b += 1) {
+        const here = decodeWalker(wires[a]!);
+        const there = decodeWalker(wires[b]!);
+        const herePlanes = byPattern.get(wires[a]!);
+        const therePlanes = byPattern.get(wires[b]!);
+        if (!here || !there || !herePlanes || !therePlanes) {
+          continue;
+        }
+        for (const [plane, slots] of herePlanes) {
+          let nearest: number | undefined;
+          let nearestGap = Infinity;
+          for (const other of therePlanes.keys()) {
+            const gap = raanGapDeg(planeRaanDeg(here, plane), planeRaanDeg(there, other));
+            if (gap < nearestGap) {
+              nearestGap = gap;
+              nearest = other;
+            }
+          }
+          if (nearest === undefined || !planesAgree(here.inclinationDeg, nearestGap)) {
+            continue;
+          }
+          const key = `${wires[a]}#${plane}|${wires[b]}#${nearest}`;
+          if (wired.has(key)) {
+            continue;
+          }
+          wired.add(key);
+          for (const [slot, name] of slots) {
+            const other = therePlanes.get(nearest)?.get(slot);
+            if (other !== undefined) {
+              links.push({ kind: "bridge", a: name, b: other });
+            }
           }
         }
       }

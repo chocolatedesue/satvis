@@ -1,7 +1,9 @@
 // Headless-Chromium check for the constellation-links overlay and marked clusters,
 // over CDP with no puppeteer. Drives a *built* deployment: opens the stacked-shells
-// demo and asserts ring entities, inter-plane entities, marked halos and amber bonds
-// (both solid same-period and dashed drifting) are built, visible, and dimmed on occlusion.
+// demo and the stable-layout demo, and asserts ring entities, inter-plane entities,
+// marked halos and amber bonds are built, visible, dimmed on occlusion, and styled by
+// the shell-pair verdict their two orbits earn — solid where the geometry returns
+// (`phase-locked`, `repeating`), dashed where it does not (`drifting`).
 //
 //   pnpm build && (cd dist && python3 -m http.server 8791) &
 //   node scripts/verify-links.mjs http://127.0.0.1:8791 /tmp/links-out
@@ -110,24 +112,39 @@ await send("Runtime.enable");
 
 // Every run starts from a fresh browser profile (mkdtempSync user-data-dir), so
 // there is no service worker and no precache to strip.
-await send("Page.navigate", { url: `${BASE}/?demo=shells` });
-
-let controllerUp = false;
-for (let attempt = 0; attempt < 3 && !controllerUp; attempt += 1) {
-  try {
-    await until(`document.readyState === "complete"`, "page load", 90_000);
-    await until(`Boolean(window.cc && window.cc.viewer && window.cc.viewer.entities)`, "app controller", 60_000);
-    controllerUp = true;
-  } catch (error) {
-    const state = await evaluate(`({ ready: document.readyState, cc: Boolean(window.cc), url: location.href })`).catch(() => "evaluate failed too");
-    console.log(`attempt ${attempt} failed: ${error.message}`);
-    console.log(`  page state: ${JSON.stringify(state)}`);
-    console.log(`  console errors so far: ${consoleErrors.slice(-5).join(" | ") || "none"}`);
-    if (attempt === 2) throw new Error("app controller never came up after 3 attempts", { cause: error });
-    await send("Page.navigate", { url: `${BASE}/?demo=shells&retry=${attempt}` });
-    await sleep(2000);
+async function openDemo(demo) {
+  await send("Page.navigate", { url: `${BASE}/?demo=${demo}` });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await until(`document.readyState === "complete"`, "page load", 90_000);
+      await until(`Boolean(window.cc && window.cc.viewer && window.cc.viewer.entities)`, "app controller", 60_000);
+      return;
+    } catch (error) {
+      const state = await evaluate(`({ ready: document.readyState, cc: Boolean(window.cc), url: location.href })`).catch(() => "evaluate failed too");
+      console.log(`attempt ${attempt} failed: ${error.message}`);
+      console.log(`  page state: ${JSON.stringify(state)}`);
+      console.log(`  console errors so far: ${consoleErrors.slice(-5).join(" | ") || "none"}`);
+      if (attempt === 2) throw new Error(`app controller never came up after 3 attempts on ?demo=${demo}`, { cause: error });
+      await send("Page.navigate", { url: `${BASE}/?demo=${demo}&retry=${attempt}` });
+      await sleep(2000);
+    }
   }
 }
+
+/** Every marked bond's verdict and line style, read off the live entities. */
+const BOND_STYLES = `(() => {
+  const entities = [...(window.cc?.viewer?.entities?.values ?? [])];
+  const bonds = entities.filter((e) => (e.name || "").startsWith("Marked bond"));
+  const time = window.cc?.viewer?.clock?.currentTime;
+  return bonds.map((e) => ({
+    name: (e.name || "").replace("Marked bond ", ""),
+    verdict: (/\\(([a-z-]+)\\)$/.exec(e.name || "") ?? [])[1] ?? "unknown",
+    dashed: e.polyline?.material?.getType?.(time) === "PolylineDash",
+    alpha: e.polyline?.material?.color?.getValue?.(time)?.alpha,
+  }));
+})()`;
+
+await openDemo("shells");
 
 await until(
   `(() => {
@@ -164,22 +181,32 @@ const report = await evaluate(`(() => {
 
 console.log("links report:", JSON.stringify(report, null, 2));
 
-const bondStyles = await evaluate(`(() => {
-  const entities = [...(window.cc?.viewer?.entities?.values ?? [])];
-  const bonds = entities.filter((e) => (e.name || "").startsWith("Marked bond"));
-  const time = window.cc?.viewer?.clock?.currentTime;
-  return bonds.map((e) => ({
-    name: (e.name || "").replace("Marked bond ", ""),
-    drifting: (e.name || "").includes("drifting"),
-    dashed: e.polyline?.material?.getType?.(time) === "PolylineDash",
-    alpha: e.polyline?.material?.color?.getValue?.(time)?.alpha,
-  }));
-})()`);
+const bondStyles = await evaluate(BOND_STYLES);
 
 console.log("bond styles and occlusion alpha:", JSON.stringify(bondStyles, null, 2));
 
-const solidBonds = bondStyles.filter((b) => !b.drifting).length;
-const dashedBonds = bondStyles.filter((b) => b.drifting).length;
+// The stacked-shells demo's three shells: the two 1200 km ones share a period
+// (phase-locked, solid), and each of them drifts against the 550 km one (dashed).
+const solidBonds = bondStyles.filter((b) => !b.dashed).length;
+const dashedBonds = bondStyles.filter((b) => b.dashed).length;
+const shellsVerdicts = bondStyles.map((b) => b.verdict).toSorted();
+
+// The stable-layout demo is the same picture with the middle shell designed
+// rather than picked: its bond to the reference is `repeating` and solid, and
+// the control's two bonds are `drifting` and dashed.
+await openDemo("stable-shells");
+await until(
+  `(() => {
+    const entities = [...(window.cc?.viewer?.entities?.values ?? [])];
+    const bonds = entities.filter((e) => (e.name || "").startsWith("Marked bond"));
+    return bonds.length === 3 && bonds.every((b) => b.show === true);
+  })()`,
+  "stable-shells bonds built and settled",
+);
+const stableBonds = await evaluate(BOND_STYLES);
+console.log("stable-shells bond styles:", JSON.stringify(stableBonds, null, 2));
+const stableVerdicts = stableBonds.map((b) => b.verdict).toSorted();
+const stableSolid = stableBonds.filter((b) => !b.dashed);
 
 const ok =
   report.rings >= 88 &&
@@ -190,12 +217,16 @@ const ok =
   report.bonds === 3 &&
   report.bondVisible === 3 &&
   solidBonds === 1 &&
-  dashedBonds === 2;
+  dashedBonds === 2 &&
+  shellsVerdicts.join(",") === "drifting,drifting,phase-locked" &&
+  stableVerdicts.join(",") === "drifting,drifting,repeating" &&
+  stableSolid.length === 1 &&
+  stableSolid[0]?.verdict === "repeating";
 
-// Screenshot for the record
+// Screenshot for the record — the stable-layout scene, which is the page that is open.
 const shot = await send("Page.captureScreenshot", { format: "png" });
 writeFileSync(`${OUT}/links.png`, Buffer.from(shot.data, "base64"));
-writeFileSync(`${OUT}/report.json`, JSON.stringify({ report, bondStyles, ok }, null, 2));
+writeFileSync(`${OUT}/report.json`, JSON.stringify({ report, bondStyles, stableBonds, ok }, null, 2));
 
 if (consoleErrors.length) {
   console.log(`console errors (${consoleErrors.length}):`);

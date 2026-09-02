@@ -79,6 +79,61 @@
       cluster relation visible throughout the orbit.
     </p>
 
+    <div class="toolbarTitle">Multi-shell layout</div>
+    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="stableShellsDemo">Stable-layout demo</button>
+    <p class="orbitLab__note">
+      One shell, the companion designed to hold against it, and a companion that was not. Nothing rigid exists between two different shells — freezing the phases wants an equal
+      period, freezing the planes wants an equal node rate, and both at once is the same shell — so a layout is designed for <em>return</em> instead: match the node rates so the
+      planes hold their arrangement, then pick the altitude so the along-track rates land in a small-integer ratio and the whole configuration comes back on a cycle. The derivation
+      measures 99.7% of satellites finding the same cross-shell partner one cycle later, against 79% for a shell picked for its coverage alone.
+    </p>
+    <table class="orbitLab__facts">
+      <tbody>
+        <tr title="How fast the J₂ bulge turns this orbit's node — two shells hold a fixed plane arrangement only where these agree">
+          <td class="orbitLab__factName">Node rate, this shell</td>
+          <td class="orbitLab__factValue">{{ nodeDrift }}</td>
+        </tr>
+        <tr title="Above this altitude no inclination precesses slowly enough to keep up with this shell's node">
+          <td class="orbitLab__factName">Co-precession ceiling</td>
+          <td class="orbitLab__factValue">{{ layoutCeiling }}</td>
+        </tr>
+        <tr v-if="bestLayout" title="The companion whose configuration returns soonest: its node rate matches, and its along-track rate is in a whole-number ratio">
+          <td class="orbitLab__factName">Best companion</td>
+          <td class="orbitLab__factValue">{{ bestCompanionText }}</td>
+        </tr>
+        <tr v-if="bestLayout" title="How long the two shells take to return to the same relative configuration — every range and every contact window repeats on it">
+          <td class="orbitLab__factName">Repeat cycle</td>
+          <td class="orbitLab__factValue">{{ bestCycleText }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!bestCompanionWire || patterns.includes(bestCompanionWire)" @click="addCompanionShell">
+      Add the companion shell
+    </button>
+    <p class="orbitLab__note">
+      Solved from the form's altitude and inclination: the companion's inclination comes from <code>cos i₂ = cos i₁ · (a₂/a₁)^(7/2)</code>, which is where the node rates agree, and
+      its altitude from the resonance that closes the cycle. Secular J₂, so the propagator wants about a tenth of a degree more — <code>scripts/derive-isl-topology.ts</code>
+      refines both against SGP4 and prints the correction. The price of the lock is inclination: the higher the companion, the shallower it has to fly.
+    </p>
+
+    <template v-if="layoutVerdicts.length > 0">
+      <table class="orbitLab__facts">
+        <tbody>
+          <tr v-for="row in layoutVerdicts" :key="row.key" :title="row.detail">
+            <td class="orbitLab__factName">
+              <code>{{ row.pair }}</code>
+            </td>
+            <td class="orbitLab__factValue">{{ row.verdict }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="orbitLab__note">
+        Every pair of generated patterns, by what it does to the other: <strong>rigid</strong> (one shell in two pieces — every offset frozen, and the only case the topology
+        bridges across in <span style="color: #38bdf8">blue</span>), <strong>repeating</strong> (planes locked, phases returning on a cycle), <strong>phase-locked</strong> (equal
+        period, planes shearing), <strong>node-locked</strong> (planes held, phases sliding forever) and <strong>drifting</strong> (neither).
+      </p>
+    </template>
+
     <div class="toolbarTitle">Multi-satellite compute & live migration</div>
     <button type="button" class="orbitLab__button orbitLab__button--wide" @click="migrationDemo">KV-cache & GPU migration demo</button>
     <button type="button" class="orbitLab__button orbitLab__button--wide" @click="walker25Demo">25x4 fleet migration demo</button>
@@ -406,15 +461,18 @@ import { CAMERA_MODES } from "../config/viewModes";
 import {
   applyMigrationScene,
   applyShellsScene,
+  applyStableShellsScene,
   applySunSyncScene,
   applyTwoOrbitScene,
   applyWalker25Scene,
   type ClockControl,
   DEMO_MULTIPLIER,
   SHELLS_MULTIPLIER,
+  STABLE_REFERENCE,
 } from "../modules/demoScenes";
 import { illuminationTimeline } from "../modules/util/illumination";
 import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, maxReachableBetaDeg } from "../modules/util/orbitDesign";
+import { coPrecessingCeilingKm, searchStableShellLayouts, shellPairLayout } from "../modules/util/shellLayout";
 import {
   alwaysSunlitAltitudeBandKm,
   alwaysSunlitVerdict,
@@ -433,6 +491,7 @@ import {
   validateWalkerDelta,
   WALKER_PRESETS,
   WALKER_EPOCH_ISO,
+  walkerPatternAt,
   walkerTagFor,
   type WalkerDeltaParams,
 } from "../modules/util/walkerDelta";
@@ -591,6 +650,75 @@ const ssoVerdictNote = computed(() =>
 
 // The band and the altitude the demo uses. Constant for the session, so computed once
 // rather than per keystroke.
+/**
+ * The layout facts for the shell in the form: how far a companion can be pushed
+ * before no inclination keeps up, and the best companion inside that reach.
+ *
+ * Recomputed as the form changes, which is affordable because none of it
+ * propagates anything — the whole answer is two closed-form rates and a
+ * bisection over an altitude (`shellLayout.ts`).
+ */
+const layoutCeiling = computed(() => {
+  const ceiling = coPrecessingCeilingKm(draft);
+  return Number.isFinite(ceiling) ? `${ceiling.toFixed(0)} km` : "none — a polar shell matches at any altitude";
+});
+
+const bestLayout = computed(() => (validation.value.ok ? searchStableShellLayouts(draft, { limit: 1 })[0] : undefined));
+
+const bestCompanionText = computed(() => {
+  const layout = bestLayout.value;
+  return layout ? `${layout.altitudeKm.toFixed(0)} km at ${layout.inclinationDeg.toFixed(2)}°` : "—";
+});
+
+const bestCycleText = computed(() => {
+  const layout = bestLayout.value;
+  return layout ? `${layout.resonance.repeatHours.toFixed(2)} h — ${layout.resonance.referenceRevolutions} orbits to its ${layout.resonance.companionRevolutions}` : "—";
+});
+
+/** The companion pattern the button would add: the layout, flown in the form's own fleet shape. */
+const bestCompanion = computed(() => {
+  const layout = bestLayout.value;
+  return layout && validation.value.ok ? walkerPatternAt(draft, layout, layout.minPerPlane) : undefined;
+});
+
+const bestCompanionWire = computed(() => {
+  const companion = bestCompanion.value;
+  return companion ? encodeWalker(companion) : "";
+});
+
+/**
+ * What every pair of generated patterns does to the other.
+ *
+ * Pairwise rather than a single verdict, because "is this fleet stable" is not a
+ * question a multi-shell fleet has one answer to: the stable-layout demo flies a
+ * pair that repeats and a pair that drifts at the same time, and the table is
+ * where they are told apart without waiting for the picture to show it.
+ */
+const layoutVerdicts = computed(() => {
+  const shells = patterns.value.flatMap((wireForm) => {
+    const params = decodeWalker(wireForm);
+    return params ? [{ wire: wireForm, params }] : [];
+  });
+  const rows: Array<{ key: string; pair: string; verdict: string; detail: string }> = [];
+  for (let a = 0; a < shells.length; a += 1) {
+    for (let b = a + 1; b < shells.length; b += 1) {
+      const first = shells[a] as (typeof shells)[number];
+      const second = shells[b] as (typeof shells)[number];
+      const layout = shellPairLayout(first.params, second.params);
+      const cycle = layout.verdict === "repeating" && layout.resonance ? ` every ${layout.resonance.repeatHours.toFixed(1)} h` : "";
+      rows.push({
+        key: `${first.wire}|${second.wire}`,
+        pair: `${first.params.inclinationDeg}°/${first.params.altitudeKm} ↔ ${second.params.inclinationDeg}°/${second.params.altitudeKm}`,
+        verdict: `${layout.verdict}${cycle}`,
+        detail: `node shear ${layout.nodeShearDegPerDay.toFixed(4)}°/day (a degree of seam every ${
+          Number.isFinite(layout.seamHoldDays) ? layout.seamHoldDays.toFixed(1) : "∞"
+        } days), period ratio ${layout.periodRatio.toFixed(4)}`,
+      });
+    }
+  }
+  return rows;
+});
+
 const band = alwaysSunlitAltitudeBandKm();
 const sunlitBand = band ? `${band.lowestKm} and ${band.highestKm} km` : "no altitude";
 const alwaysSunlitAltitude = representativeAlwaysSunlitAltitudeKm() ?? 1760;
@@ -719,6 +847,41 @@ function sunSyncDemo(): void {
 function shellsDemo(): void {
   Object.assign(draft, { total: 24, planes: 4, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 });
   applyShellsScene(satStore, cesiumStore, clockControl);
+}
+
+/**
+ * The stable-layout demo: the stacked-shells scene with the middle shell designed
+ * rather than picked.
+ *
+ * The form keeps the reference shell's numbers, so the layout facts above the
+ * button describe the shell the scene is built around — press it and the "best
+ * companion" row is the shell that just appeared beside it.
+ */
+function stableShellsDemo(): void {
+  Object.assign(draft, STABLE_REFERENCE);
+  applyStableShellsScene(satStore, cesiumStore, clockControl);
+}
+
+/**
+ * Add the companion the layout search picked, beside what is already flying.
+ *
+ * Add rather than replace: a companion shell is only meaningful next to the shell
+ * it was solved against, and the pairwise verdict table below is what it is for.
+ * The form's own pattern is generated first if it is not already on screen, since
+ * a companion to nothing is just another shell.
+ */
+function addCompanionShell(): void {
+  const companion = bestCompanion.value;
+  if (!companion || !validation.value.ok) {
+    return;
+  }
+  const companionWire = encodeWalker(companion);
+  const wires = patterns.value.includes(wire.value) ? [...patterns.value] : [...patterns.value, wire.value];
+  const tags = new Set(satStore.enabledTags);
+  tags.add(walkerTagFor(draft));
+  tags.add(walkerTagFor(companion));
+  walker.value = [...wires, companionWire];
+  satStore.setActivation({ enabledTags: [...tags] });
 }
 
 /** Leave the records in the catalog and stop drawing them — the tag is the switch. */

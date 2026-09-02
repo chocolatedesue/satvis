@@ -1,4 +1,5 @@
 import {
+  ArcType,
   CallbackPositionProperty,
   CallbackProperty,
   Cartesian3,
@@ -330,7 +331,12 @@ export class MigrationLayer {
           width: 2,
           material: new ColorMaterialProperty(hue.withAlpha(0.55)),
           // Straight chord between the two satellites, not draped on the globe.
-          arcType: undefined,
+          // ArcType.NONE explicitly: PolylineGraphics reads an undefined arcType
+          // as its default, which is GEODESIC — so "undefined" asked for the
+          // draped arc rather than for no arc, and a pair that happened to be
+          // near-antipodal threw out of EllipsoidGeodesic.setEndPoints and
+          // stopped the whole scene rendering.
+          arcType: ArcType.NONE,
         }),
       });
       this.#pipelineLinks.push(link);
@@ -748,8 +754,9 @@ export class MigrationLayer {
         positions: new CallbackProperty((time?: JulianDate) => this.#linkPositions(stage, time ?? this.#viewer.clock.currentTime), false),
         width: 3,
         material: new PolylineGlowMaterialProperty({ glowPower: 0.25, color: hue }),
-        // Straight chord between the two satellites, not draped on the globe.
-        arcType: undefined,
+        // Straight chord, not draped on the globe — see the note above on why
+        // this is ArcType.NONE rather than undefined.
+        arcType: ArcType.NONE,
       }),
     });
 

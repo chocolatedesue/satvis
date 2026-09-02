@@ -15,8 +15,9 @@
 
 import type { useCesiumStore } from "../stores/cesium";
 import type { useSatStore } from "../stores/sat";
+import { resonantCompanion } from "./util/shellLayout";
 import { sunSyncWalkerParams } from "./util/sunSynchronous";
-import { encodeWalker, WALKER_EPOCH_ISO, WALKER_PRESETS, walkerTagFor, type WalkerDeltaParams } from "./util/walkerDelta";
+import { encodeWalker, WALKER_EPOCH_ISO, WALKER_PRESETS, walkerPatternAt, walkerTagFor, type WalkerDeltaParams } from "./util/walkerDelta";
 
 type SatStore = ReturnType<typeof useSatStore>;
 type CesiumStore = ReturnType<typeof useCesiumStore>;
@@ -52,7 +53,7 @@ export const DEMO_MULTIPLIER = 60;
 export const SHELLS_MULTIPLIER = 600;
 
 /** The names `?demo=` understands. */
-export const DEMO_NAMES = ["two-orbit", "sso", "migration", "walker25", "shells"] as const;
+export const DEMO_NAMES = ["two-orbit", "sso", "migration", "walker25", "shells", "stable-shells"] as const;
 export type DemoName = (typeof DEMO_NAMES)[number];
 
 function withIlluminationComponents(satStore: SatStore): void {
@@ -206,6 +207,67 @@ export function applyShellsScene(satStore: SatStore, cesiumStore: CesiumStore, c
   // never draws, so the cluster makes the cross-shell shear directly
   // watchable: two of its members share a period and hold together, the third
   // laps them, and the amber triangle slowly shears open.
+  satStore.marks = shells.map((shell) => `1-1@${encodeWalker(shell)}`);
+  cesiumStore.cameraMode = "Inertial";
+  clock.setMultiplier(SHELLS_MULTIPLIER);
+  clock.play();
+}
+
+/**
+ * The reference shell every stable-layout scene is built around, and the
+ * companion the layout search picks for it.
+ *
+ * 53° / 550 km because it is the shell the rest of the app already opens with,
+ * and 8:7 because it is the resonance whose companion lands nearest the 1200 km
+ * altitude the stacked-shells demo already uses — the two scenes are then the
+ * same picture with one number changed, which is what makes the comparison
+ * legible. `searchStableShellLayouts` will offer shorter cycles (6:5 at 1456 km,
+ * 7:6 at 1308 km); this one is the familiar altitude.
+ */
+export const STABLE_REFERENCE: WalkerDeltaParams = { total: 40, planes: 4, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 };
+
+/** The reference, its designed companion, and a shell picked the way the stacked-shells demo picks one. */
+export function stableShellPatterns(): WalkerDeltaParams[] | undefined {
+  const layout = resonantCompanion(STABLE_REFERENCE, 8, 7);
+  const companion = layout && walkerPatternAt(STABLE_REFERENCE, layout, layout.minPerPlane);
+  // The control: same altitude band, inclination chosen for coverage rather than
+  // for the node rate. Everything the designed companion holds, this one loses.
+  const control = walkerPatternAt(STABLE_REFERENCE, { altitudeKm: 1200, inclinationDeg: 97.6 }, 6);
+  return companion && control ? [STABLE_REFERENCE, companion, control] : undefined;
+}
+
+/**
+ * The stable-layout scene: one shell, the companion designed to hold against it,
+ * and a companion that was not.
+ *
+ * The stacked-shells demo shows what two shells picked for their own sakes do to
+ * each other — they shear, and the marked triangle opens without bound. This one
+ * shows the alternative, which is a design rather than an accident: the middle
+ * shell's inclination is solved so its node precesses at exactly the reference's
+ * rate, and its altitude is solved so it turns 7 times for the reference's 8. The
+ * planes then hold their arrangement and the phases come back every 12.7
+ * simulated hours — the derivation measures 99.7% of satellites finding the same
+ * cross-shell partner a cycle later, against 79% for the shell that was not
+ * designed (`scripts/derive-isl-topology.ts`, studies 7-10).
+ *
+ * The marked cluster is where the difference is visible without reading a number:
+ * one satellite from each shell, bonded pairwise. The bond to the designed
+ * companion is drawn solid — its geometry returns — and the bond to the control
+ * is dashed, and wanders. At {@link SHELLS_MULTIPLIER} the repeat cycle takes
+ * about 76 s, so the solid bond visibly comes back to the same shape while the
+ * dashed one never does.
+ */
+export function applyStableShellsScene(satStore: SatStore, cesiumStore: CesiumStore, clock: ClockControl): void {
+  const shells = stableShellPatterns();
+  if (!shells) {
+    return;
+  }
+  satStore.walker = shells.map(encodeWalker);
+  satStore.pointColorMode = "illumination";
+  satStore.pointSize = "large";
+  withIlluminationComponents(satStore);
+  showOnly(satStore, shells.map(walkerTagFor));
+  satStore.links = true;
   satStore.marks = shells.map((shell) => `1-1@${encodeWalker(shell)}`);
   cesiumStore.cameraMode = "Inertial";
   clock.setMultiplier(SHELLS_MULTIPLIER);

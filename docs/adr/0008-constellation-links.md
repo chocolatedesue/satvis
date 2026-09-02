@@ -34,7 +34,9 @@ changes). The rules that survived are encoded in `constellationLinks.ts`:
   identity churn. Iridium closes its seam for the same reason.
 - **Nothing between patterns.** Different shells with different periods drift through each
   other monotonically; the nearest satellite across shells never settles (churn 0.20 per
-  sample, no convergence).
+  sample, no convergence). _Narrowed by `0009`: a pair sharing an altitude **and** an
+  inclination has equal mean motion and equal node rate, so every offset between it is
+  frozen — that pair is one shell in two patterns, and is bridged._
 
 The graph is rebuilt from whatever subset of each pattern is currently active, and a link
 whose chord passes behind the Earth is hidden rather than drawn through it — the same
@@ -65,6 +67,10 @@ turns it off.
   than a live link, so when its chord passes behind the planet it dims to quarter opacity
   rather than disappearing. A holding cluster never looks like it falls apart once per orbit,
   while the dimming still signals when line of sight is broken.
+- The "nothing between patterns" rule was read as a fact about shells and is a fact about
+  shells nobody designed to hold together. `docs/adr/0009-multi-shell-layouts.md` designs the
+  ones that do — match the node rates, then close the along-track cycle — and narrows this
+  ADR's cross-pattern rule to the rigid case.
 - A marked pair **can** span orbits and still hold: equal altitude means equal period, and
   the derivation measured a same-period cross-inclination pair whose per-orbit distance
   maxima repeat unchanged (3620, 3617, 3621 … km) while a different-period pair wanders
