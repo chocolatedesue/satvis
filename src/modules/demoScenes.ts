@@ -104,12 +104,13 @@ export function applyTwoOrbitScene(satStore: SatStore, cesiumStore: CesiumStore,
 }
 
 /**
- * The two-orbit scene plus the naive KV-cache migration overlay, over exactly the
+ * The two-orbit scene plus the live KV-cache migration overlay, over exactly the
  * satellites it hops between.
  */
 export function applyMigrationScene(satStore: SatStore, cesiumStore: CesiumStore, clock: ClockControl): void {
   applyTwoOrbitScene(satStore, cesiumStore, clock);
   satStore.migration = true;
+  satStore.links = true;
 }
 
 /**
@@ -127,6 +128,7 @@ export function applyWalker25Scene(satStore: SatStore, cesiumStore: CesiumStore,
   showOnly(satStore, [walkerTagFor(params)]);
   cesiumStore.cameraMode = "Inertial";
   satStore.migration = true;
+  satStore.links = true;
   clock.setMultiplier(DEMO_MULTIPLIER);
   clock.play();
 }

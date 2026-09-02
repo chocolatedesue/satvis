@@ -145,7 +145,7 @@ await evaluate("document.querySelectorAll('#toolbarLeft .toolbarButtons button')
 await until("!!document.querySelector('.orbitLab')", "the orbit lab panel");
 
 // One click: the migration demo.
-await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /KV-cache migration demo/.test(b.textContent)).click()");
+await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /KV-cache.*migration demo/i.test(b.textContent)).click()");
 await until("/mig=true/.test(window.location.search)", "the migration flag in the url");
 
 record(

@@ -25,6 +25,8 @@
 // both from the same trajectory sampler at the same instant, so a fixed-frame pair
 // and an inertial-frame pair both give the true chord between the satellites.
 
+import type { MigrationPolicy } from "../../config/migration";
+
 /** A position in whatever frame the caller is working in, in metres. */
 export interface Vec3 {
   x: number;
@@ -39,11 +41,15 @@ export interface Vec3 {
  * `sunlit_edge` are powered, everything else (umbra, penumbra, panel facing away)
  * is not. Folding it to a boolean here keeps this module free of the illumination
  * vocabulary — the caller maps the state, `noPower` is the shared definition.
+ *
+ * `lookaheadPower` is the predicted power state after the lookahead window (e.g. 90s),
+ * enabling predictive pre-eclipse handoffs before solar power is lost.
  */
 export interface MigrationHost {
   name: string;
   position: Vec3;
   hasPower: boolean;
+  lookaheadPower?: boolean;
 }
 
 /** km/s. Light in vacuum — the ISL propagation floor. */
@@ -316,35 +322,56 @@ export interface StagePlacement {
  * and would make the visual a single dot. Excluding taken hosts is also what
  * spreads the stages across orbital planes, which is the thing worth looking at.
  *
- * Line of sight is preferred but not required. "Nearest powered" by raw chord
- * length will pick a satellite on the far side of the planet, and the link drawn
- * to it goes straight through the Earth — so a candidate still in view is chosen
- * ahead of an occluded one. But a powered neighbour is not always in view at all:
- * with a zenith panel the powered set is the sunlit face of the fleet, so a
- * satellite that has just gone dark sees every lit neighbour over the far limb.
- * Refusing that hop would strand the stage on a dark (`sunlit_back`) node for
- * half an orbit, which the illumination vocabulary exists to call wrong. So the
- * fallback is the nearest powered satellite, occluded or not, and `stranded` is
- * reserved for when no powered satellite is free at all.
+ * When `preferLookahead` is true (predictive policy), candidates that are both
+ * currently powered AND predicted to stay powered in the lookahead window are
+ * strongly prioritized, followed by line-of-sight in-view candidates, followed
+ * by shortest chord distance.
  */
-export function chooseTargetExcluding(source: MigrationHost, candidates: readonly MigrationHost[], taken: ReadonlySet<string>): MigrationHost | undefined {
+export function chooseTargetExcluding(
+  source: MigrationHost,
+  candidates: readonly MigrationHost[],
+  taken: ReadonlySet<string>,
+  preferLookahead: boolean = false,
+): MigrationHost | undefined {
+  let bestLookaheadInView: MigrationHost | undefined;
+  let bestLookaheadInViewKm = Infinity;
+  let bestLookahead: MigrationHost | undefined;
+  let bestLookaheadKm = Infinity;
   let nearestInView: MigrationHost | undefined;
   let nearestInViewKm = Infinity;
   let nearest: MigrationHost | undefined;
   let nearestKm = Infinity;
+
   for (const candidate of candidates) {
     if (candidate.name === source.name || !candidate.hasPower || taken.has(candidate.name)) {
       continue;
     }
     const km = distanceKm(source.position, candidate.position);
+    const inView = hasLineOfSight(source.position, candidate.position);
+
     if (km < nearestKm) {
       nearestKm = km;
       nearest = candidate;
     }
-    if (hasLineOfSight(source.position, candidate.position) && km < nearestInViewKm) {
+    if (inView && km < nearestInViewKm) {
       nearestInViewKm = km;
       nearestInView = candidate;
     }
+
+    if (preferLookahead && candidate.lookaheadPower !== false) {
+      if (km < bestLookaheadKm) {
+        bestLookaheadKm = km;
+        bestLookahead = candidate;
+      }
+      if (inView && km < bestLookaheadInViewKm) {
+        bestLookaheadInViewKm = km;
+        bestLookaheadInView = candidate;
+      }
+    }
+  }
+
+  if (preferLookahead) {
+    return bestLookaheadInView ?? nearestInView ?? bestLookahead ?? nearest;
   }
   return nearestInView ?? nearest;
 }
@@ -352,27 +379,48 @@ export function chooseTargetExcluding(source: MigrationHost, candidates: readonl
 /**
  * `decideMigration` for one stage of a pipeline, given the hosts its siblings hold.
  *
- * Same three answers as the single-workload model, with one difference: a lit
- * neighbour already carrying another stage is not a candidate. So `stranded` here
- * means "dark, and every powered satellite is either mine already or someone
- * else's" — a scarcity the single-workload model cannot express, and one of the two
- * ways the naive policy visibly runs out of room. Line of sight no longer strands a
- * stage on its own; an occluded hop is still made rather than sitting dark (see
- * `chooseTargetExcluding`).
+ * Two policies:
+ * - "predictive" (default): Proactive illumination-aware pre-handoff before entering
+ *   shadow. If the current host is powered now but predicted to lose power in the
+ *   lookahead window, it initiates migration before entering darkness. This eliminates
+ *   pipeline stalls and maximizes GPU compute utilization in the sunlit zone.
+ * - "naive": Reactive migration only after power is completely lost (eclipse/shadow).
  */
-export function decideStageMigration(hostName: string | undefined, hosts: readonly MigrationHost[], taken: ReadonlySet<string>): MigrationDecision {
+export function decideStageMigration(
+  hostName: string | undefined,
+  hosts: readonly MigrationHost[],
+  taken: ReadonlySet<string>,
+  policy: MigrationPolicy = "predictive",
+): MigrationDecision {
   const host = hosts.find((candidate) => candidate.name === hostName);
   if (!host) {
     return { action: "stranded", reason: "Stage is unplaced." };
   }
+
+  // Predictive policy: proactive handoff while still powered, before entering eclipse
+  if (policy === "predictive" && host.hasPower && host.lookaheadPower === false) {
+    const target = chooseTargetExcluding(host, hosts, taken, true);
+    if (target) {
+      return {
+        action: "migrate",
+        target,
+        reason: `${host.name} approaching eclipse — predictive handoff to ${target.name} preserves GPU compute.`,
+      };
+    }
+    // No free target yet for predictive handoff; keep holding on current host while power lasts
+    return { action: "hold", reason: `${host.name} is powered (approaching eclipse; holding until handoff candidate is free).` };
+  }
+
   if (host.hasPower) {
     return { action: "hold", reason: `${host.name} is powered — no migration needed.` };
   }
-  const target = chooseTargetExcluding(host, hosts, taken);
+
+  // Host has lost power (or reactive naive mode)
+  const target = chooseTargetExcluding(host, hosts, taken, policy === "predictive");
   if (!target) {
     return { action: "stranded", reason: `${host.name} lost power and no powered satellite is free — stage stranded.` };
   }
-  return { action: "migrate", target, reason: `${host.name} lost power — migrating to ${target.name}.` };
+  return { action: "migrate", target, reason: `${host.name} lost power — reactive migration to ${target.name}.` };
 }
 
 /**

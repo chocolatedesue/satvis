@@ -19,6 +19,7 @@ import type { Viewer } from "@cesium/widgets";
 import type { PanelAxis } from "../config/illumination";
 import {
   DEFAULT_KV_GIGABYTES,
+  DEFAULT_MIGRATION_POLICY,
   DEFAULT_PIPELINE_STAGES,
   ISL_GBPS,
   MAX_SIM_STEP_SECONDS,
@@ -26,6 +27,8 @@ import {
   MIGRATION_COLOR,
   MIGRATION_EVAL_SIM_SECONDS,
   MIGRATION_LOG_LENGTH,
+  MIGRATION_PREDICTIVE_LOOKAHEAD_SIM_SECONDS,
+  type MigrationPolicy,
   stageColor,
 } from "../config/migration";
 import type { SatelliteManager } from "./SatelliteManager";
@@ -70,6 +73,8 @@ export interface MigrationStageStatus {
   progress?: number;
   /** Whether this stage's host currently has power. */
   powered: boolean;
+  /** Whether this stage's host is predicted to have power in the lookahead window. */
+  lookaheadPowered?: boolean;
   /** The hue this stage is drawn in, so the table and the globe agree. */
   color: string;
   reason: string;
@@ -87,6 +92,8 @@ export interface MigrationStageStatus {
  */
 export interface MigrationStatus {
   active: boolean;
+  /** Current migration policy. */
+  policy: MigrationPolicy;
   /** `migrating` if any stage is in flight, else `stranded` if any is stuck, else `holding`. */
   phase: "holding" | "migrating" | "stranded";
   hostName?: string;
@@ -183,6 +190,8 @@ export class MigrationLayer {
 
   #stageCount: number;
 
+  #policy: MigrationPolicy;
+
   #stages: StageState[] = [];
 
   /**
@@ -207,16 +216,35 @@ export class MigrationLayer {
 
   #status: MigrationStatus;
 
-  constructor(viewer: Viewer, sats: SatelliteManager, kvGigabytes: number = DEFAULT_KV_GIGABYTES, stageCount: number = DEFAULT_PIPELINE_STAGES) {
+  constructor(
+    viewer: Viewer,
+    sats: SatelliteManager,
+    kvGigabytes: number = DEFAULT_KV_GIGABYTES,
+    stageCount: number = DEFAULT_PIPELINE_STAGES,
+    policy: MigrationPolicy = DEFAULT_MIGRATION_POLICY,
+  ) {
     this.#viewer = viewer;
     this.#sats = sats;
     this.#kvGigabytes = kvGigabytes;
     this.#stageCount = stageCount;
+    this.#policy = policy;
     this.#status = this.#idleStatus();
   }
 
   get status(): MigrationStatus {
     return this.#status;
+  }
+
+  /** Set migration strategy: predictive (pre-eclipse handoff) vs naive (reactive). */
+  setPolicy(policy: MigrationPolicy): void {
+    if (policy === this.#policy) {
+      return;
+    }
+    this.#policy = policy;
+    this.#lastEvalSimMs = undefined; // re-evaluate immediately on policy switch
+    if (this.#removeTick) {
+      this.#viewer.scene.requestRender();
+    }
   }
 
   /** The panel axis the migration reasons on. Fixed — see the class comment. */
@@ -336,6 +364,7 @@ export class MigrationLayer {
   #idleStatus(): MigrationStatus {
     return {
       active: false,
+      policy: this.#policy,
       phase: "holding",
       reason: "Migration demo is off.",
       kvGigabytes: this.#kvGigabytes,
@@ -361,16 +390,19 @@ export class MigrationLayer {
   /** Every active satellite as a migration host, at `date`. */
   #hostsAt(date: Date, time: JulianDate): MigrationHost[] {
     const hosts: MigrationHost[] = [];
+    const lookaheadDate = new Date(date.getTime() + MIGRATION_PREDICTIVE_LOOKAHEAD_SIM_SECONDS * 1000);
     for (const sat of this.#sats.activeSatellites) {
       const position = sat.props.trajectory.position(time);
       const illumination = sat.props.illumination(date, MigrationLayer.AXIS);
       if (!position || !illumination) {
         continue;
       }
+      const lookaheadIllumination = sat.props.illumination(lookaheadDate, MigrationLayer.AXIS);
       hosts.push({
         name: sat.props.name,
         position: { x: position.x, y: position.y, z: position.z },
         hasPower: illumination.state === "sunlit_on" || illumination.state === "sunlit_edge",
+        lookaheadPower: lookaheadIllumination ? lookaheadIllumination.state === "sunlit_on" || lookaheadIllumination.state === "sunlit_edge" : undefined,
       });
     }
     return hosts;
@@ -482,7 +514,7 @@ export class MigrationLayer {
         stage.reason = `Migrating ${this.#kvGigabytes} GB: ${stage.flight.from} → ${stage.flight.to}.`;
         continue;
       }
-      const decision = decideStageMigration(stage.hostName, hosts, this.#takenBySiblings(stage));
+      const decision = decideStageMigration(stage.hostName, hosts, this.#takenBySiblings(stage), this.#policy);
       stage.reason = decision.reason;
       if (decision.action === "migrate" && decision.target) {
         const host = hosts.find((candidate) => candidate.name === stage.hostName);
@@ -568,6 +600,7 @@ export class MigrationLayer {
       transferSeconds: stage.flight?.cost.totalSeconds,
       progress: stage.flight ? flightProgress(stage.flight.startSimMs, simMs, MIGRATION_ANIMATION_SIM_SECONDS).fraction : undefined,
       powered: hosts.find((host) => host.name === stage.hostName)?.hasPower === true,
+      lookaheadPowered: hosts.find((host) => host.name === stage.hostName)?.lookaheadPower,
       color: stageColor(stage.index),
       reason: stage.reason,
     }));
@@ -586,6 +619,7 @@ export class MigrationLayer {
 
     return {
       active: true,
+      policy: this.#policy,
       phase,
       hostName: lead?.hostName ?? stages[0]?.hostName,
       from: moving?.from,

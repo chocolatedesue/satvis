@@ -79,8 +79,8 @@
       cluster relation visible throughout the orbit.
     </p>
 
-    <div class="toolbarTitle">KV-cache live migration</div>
-    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="migrationDemo">KV-cache migration demo</button>
+    <div class="toolbarTitle">Multi-satellite compute & live migration</div>
+    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="migrationDemo">KV-cache & GPU migration demo</button>
     <button type="button" class="orbitLab__button orbitLab__button--wide" @click="walker25Demo">25x4 fleet migration demo</button>
     <label class="toolbarSwitch">
       <input type="checkbox" :checked="migration" @change="migration = ($event.target as HTMLInputElement).checked" />
@@ -93,22 +93,30 @@
         <option v-for="count in PIPELINE_STAGE_CHOICES" :key="count" :value="count">{{ count }}</option>
       </select>
     </label>
+    <div class="orbitLab__radios">
+      <label class="toolbarSwitch">
+        <input type="radio" name="orbitLabMigrationPolicy" value="predictive" :checked="migrationPolicy === 'predictive'" @change="migrationPolicy = 'predictive'" />
+        <span class="slider"></span>
+        Predictive (Pre-eclipse handoff · High GPU uptime)
+      </label>
+      <label class="toolbarSwitch">
+        <input type="radio" name="orbitLabMigrationPolicy" value="naive" :checked="migrationPolicy === 'naive'" @change="migrationPolicy = 'naive'" />
+        <span class="slider"></span>
+        Reactive (Post-failure · Naive baseline)
+      </label>
+    </div>
     <p class="orbitLab__note">
       An inference pipeline is cut into {{ migrationStatus?.stageCount ?? migrationStages }} stages, each holding its own {{ migrationStatus?.kvGigabytes ?? 2 }} GB KV cache on its
-      own satellite — one stage per satellite, drawn as a haloed dot in the stage's colour. The moment a host loses power — it enters the Earth's shadow, or its panel turns away
-      from the sun (<code>sunlit_back</code>) — that stage's cache is live-migrated over one {{ migrationStatus?.islGbps ?? 100 }} Gbps inter-satellite link to the nearest
-      satellite that still has power and is not already running a stage. Naive: one link, one hop, no overlap, no incremental patching — the baseline LAB-47 improves on.
+      own satellite — one stage per satellite, connected via stable inter-satellite links (ISLs). Space GPUs rely on solar power, which is only available in the sunlit zone.
     </p>
     <p class="orbitLab__note">
-      The pipeline only produces tokens while <strong>every</strong> stage has power at the same instant, so its ceiling falls well below any single satellite's lit fraction — that
-      conjunction, not one satellite's eclipse, is what the naive policy costs. <strong>All stages powered</strong> below is that ceiling, measured over simulated time; the
-      migrations' own cost is the link time beside it.
+      <strong>Predictive mode</strong> (Recommended) uses orbit geometry and illumination lookahead to proactively hand off workloads across ISLs <em>before</em> entering eclipse,
+      eliminating pipeline stalls and keeping GPU compute utilization near 100%. <strong>Reactive mode</strong> waits until power is lost, causing pipeline stalls at every shadow
+      crossing.
     </p>
     <p class="orbitLab__note">
-      The travelling dot is illustrative — it crosses the link in {{ MIGRATION_ANIMATION_SIM_SECONDS }} <strong>simulated</strong> seconds, so it rides the clock below: wind the
-      multiplier up and migrations finish sooner, pause and the packet stops mid-link. That duration is an animation, not the transfer. The <strong>transfer time</strong> is the
-      real cost: {{ migrationStatus?.kvGigabytes ?? 2 }} GB serialised across the link plus one-way light travel, some two orders of magnitude quicker than the dot. Elapsed times
-      are <strong>simulated</strong> seconds, not wall clock, so they describe the orbit rather than the playback rate.
+      The pipeline only produces tokens while <strong>every</strong> stage has power simultaneously. <strong>Sunlit GPU utilization</strong> below measures that all-powered serving
+      uptime over simulated time.
     </p>
 
     <table v-if="migrationStatus?.active && migrationStatus.stages.length > 0" class="orbitLab__facts">
@@ -123,7 +131,7 @@
               >{{ shortHost(stage.from) }} → {{ shortHost(stage.to) }} ({{ ((stage.transferSeconds ?? 0) * 1000).toFixed(0) }} ms)</template
             >
             <template v-else-if="stage.phase === 'stranded'">{{ shortHost(stage.hostName) }} · stranded</template>
-            <template v-else>{{ shortHost(stage.hostName) }}{{ stage.powered ? "" : " · dark" }}</template>
+            <template v-else>{{ shortHost(stage.hostName) }}{{ stage.powered ? (stage.lookaheadPowered === false ? " · near eclipse" : " · sunlit") : " · dark" }}</template>
           </td>
         </tr>
       </tbody>
@@ -132,13 +140,17 @@
     <table v-if="migrationStatus?.active" class="orbitLab__facts">
       <tbody>
         <tr>
-          <td class="orbitLab__factName">Pipeline</td>
+          <td class="orbitLab__factName">Pipeline Status</td>
           <td class="orbitLab__factValue">
-            {{ migrationStatus.serving ? "serving" : "stalled" }} · {{ migrationStatus.poweredStages }}/{{ migrationStatus.stages.length }} stages powered
+            {{ migrationStatus.serving ? "serving (computing)" : "stalled" }} · {{ migrationStatus.poweredStages }}/{{ migrationStatus.stages.length }} stages powered
           </td>
         </tr>
+        <tr>
+          <td class="orbitLab__factName">Policy</td>
+          <td class="orbitLab__factValue">{{ migrationStatus.policy === "predictive" ? "Predictive handoff" : "Reactive baseline" }}</td>
+        </tr>
         <tr v-if="migrationStatus.allPoweredFraction !== undefined">
-          <td class="orbitLab__factName">All stages powered</td>
+          <td class="orbitLab__factName">Sunlit GPU utilization</td>
           <td class="orbitLab__factValue">
             {{ pct(migrationStatus.allPoweredFraction) }} of {{ simDuration(migrationStatus.ledger.allPoweredSeconds + migrationStatus.ledger.stalledSeconds) }}
           </td>
@@ -389,7 +401,7 @@ import {
   type IlluminationState,
   type PanelAxis,
 } from "../config/illumination";
-import { MIGRATION_ANIMATION_SIM_SECONDS, PIPELINE_STAGE_CHOICES, stageColor } from "../config/migration";
+import { PIPELINE_STAGE_CHOICES, stageColor } from "../config/migration";
 import { CAMERA_MODES } from "../config/viewModes";
 import {
   applyMigrationScene,
@@ -446,7 +458,7 @@ const STRIP_ORBITS = 2;
 
 const cc = useController();
 const satStore = useSatStore();
-const { pointColorMode, pointSize, panelAxis, walker, migration, migrationStages, links, marks } = storeToRefs(satStore);
+const { pointColorMode, pointSize, panelAxis, walker, migration, migrationStages, migrationPolicy, links, marks } = storeToRefs(satStore);
 
 // The clock is live viewer state rather than store state (see useViewerClock), and
 // this is the seam the clock deck writes it through — so the demo writes it the same

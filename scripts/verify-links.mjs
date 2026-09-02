@@ -131,7 +131,7 @@ for (let attempt = 0; attempt < 3 && !controllerUp; attempt += 1) {
 
 await until(
   `(() => {
-    const entities = [...window.cc.viewer.entities.values];
+    const entities = [...(window.cc?.viewer?.entities?.values ?? [])];
     const rings = entities.filter((e) => (e.name || "").startsWith("Ring link"));
     const inters = entities.filter((e) => (e.name || "").startsWith("Inter-plane link"));
     const halos = entities.filter((e) => (e.name || "").startsWith("Marked satellite"));
@@ -142,14 +142,14 @@ await until(
 );
 
 const report = await evaluate(`(() => {
-  const entities = [...window.cc.viewer.entities.values];
+  const entities = [...(window.cc?.viewer?.entities?.values ?? [])];
   const rings = entities.filter((e) => (e.name || "").startsWith("Ring link"));
   const inters = entities.filter((e) => (e.name || "").startsWith("Inter-plane link"));
   const halos = entities.filter((e) => (e.name || "").startsWith("Marked satellite"));
   const bonds = entities.filter((e) => (e.name || "").startsWith("Marked bond"));
   const visible = entities.filter((e) => (e.name || "").includes("link") && e.show === true);
   const bondVisible = bonds.filter((e) => e.show === true).length;
-  const sample = (inters[0] || rings[0])?.polyline?.positions?.getValue(window.cc.viewer.clock.currentTime) ?? [];
+  const sample = (inters[0] || rings[0])?.polyline?.positions?.getValue(window.cc?.viewer?.clock?.currentTime) ?? [];
   return {
     rings: rings.length,
     inters: inters.length,
@@ -165,9 +165,9 @@ const report = await evaluate(`(() => {
 console.log("links report:", JSON.stringify(report, null, 2));
 
 const bondStyles = await evaluate(`(() => {
-  const entities = [...window.cc.viewer.entities.values];
+  const entities = [...(window.cc?.viewer?.entities?.values ?? [])];
   const bonds = entities.filter((e) => (e.name || "").startsWith("Marked bond"));
-  const time = window.cc.viewer.clock.currentTime;
+  const time = window.cc?.viewer?.clock?.currentTime;
   return bonds.map((e) => ({
     name: (e.name || "").replace("Marked bond ", ""),
     drifting: (e.name || "").includes("drifting"),

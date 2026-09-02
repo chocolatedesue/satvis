@@ -117,6 +117,7 @@ function fakeTarget() {
     setTime: () => {},
     setMigration: () => {},
     setMigrationStages: () => {},
+    setMigrationPolicy: () => {},
     setLinks: () => {},
     setMarks: () => {},
   };

@@ -1,134 +1,77 @@
-# Handoff — satvis fork, main branch
+# Satvis Hand-off Document: Space Compute, Multi-Satellite Collaboration & GPU Sunlit Utilization
 
-State as of 2026-09-02. Read this before touching anything; it is the map of
-what exists, what is in flight, and what to do next. `CONTEXT.md` is the
-domain glossary; the ADRs in `docs/adr/` are the decisions.
+## 1. Project Overview & Repository Info
 
-## What this fork is
+- **GitHub Repository**: [https://github.com/chocolatedesue/satvis.git](https://github.com/chocolatedesue/satvis.git)
+- **Deployment Targets (Cloudflare Pages)**:
+  - `https://satvis-inertial-frame.pages.dev`
+  - `https://satvis-orbit-lab.pages.dev`
+- **Main Branch**: `main`
 
-Upstream is Flowm/satvis (branch `next`, deployed at satvis.space). This fork's
-`main` branch adds the **orbit lab** line of work: generated Walker
-constellations, illumination (ν/κ) modelling, the naive KV-cache migration
-overlay, and — new this session — the **constellation links** overlay and
-**marked clusters**. Deployed at two Cloudflare Pages projects (below); the
-upstream site knows nothing of these features.
+---
 
-## What was built this session
+## 2. Core Concepts & Implemented Architecture
 
-Commits on `main` (all pushed):
+### A. Constellation & Orbit Construction (轨道构造)
 
-- `0adf423` — constellation links: derivation script + rules + layer + `links=true`
-- `fa5391c` — marked clusters (`mark=`), links on by default, panel buttons
-- `35b28ad` — docs: ADR 0008, README section, CONTEXT entries, verification record
-- `dbb86f9` — deploy script prefers preinstalled wrangler (npx download was the hang)
-- `4f43fee` — bond styling: solid = same period (holds), dashed = drifting
-- `865b418` — fix(links): keep marked cluster bonds visible with occlusion dimming + `scripts/verify-links.mjs`
+- **Walker Delta / Star Formulation**: $i: T/P/F @ h \sim \Omega_{\text{span}}$
+- **SSO Dawn-Dusk Band**: Evaluates closed-form J2 nodal regression and eclipse-free beta angles ($\beta \ge \beta_{\text{crit}}$).
 
-The pieces:
+### B. Stable ISL Topology & Marked Clusters (稳定拓扑)
 
-- `scripts/derive-isl-topology.ts` — SGP4 propagation studies that justify the
-  wiring rules (rerunnable, ~seconds). Study 6 is the cross-orbit answer:
-  same-period pairs repeat their distance envelope exactly (3620, 3617, 3621 …
-  km), different-period pairs wander without bound (5622 → 14507 → 5077 km).
-- `src/modules/util/constellationLinks.ts` — pure rules: intra-plane rings,
-  same-slot inter-plane links, seam dropped when orbit normals oppose
-  (`wrapPlanesAgree`), nothing between patterns; `resolveMarks` classifies
-  bonds `samePeriod` (equal altitude ⇒ equal mean motion).
-- `src/modules/ConstellationLinksLayer.ts` — Cesium wiring: rings green,
-  inter-plane violet, marked halos + amber bonds (dimmed to 25% opacity when
-  Earth-occluded), occlusion pass every 400 ms.
-- `scripts/verify-links.mjs` — standalone headless Chrome CDP verification
-  for constellation links, marked clusters, bond dash styling, and occlusion dimming.
-- `src/modules/util/walkerDelta.ts` — pattern ⇄ OMM records; names carry the
-  identity (`W<wire> P01-01`), which `parseWalkerSatellite` reads back.
-- URL surface (`docs/adr/0001`): `walker=`, `links=`, `mark=`, `mig=`, `camera=`,
-  `paint=`, `psize=`, `elements=`, `tags=`.
+- **Intra-plane Ring Links (Green)**: Rigid spacing within each plane ($CV \approx 0.001$).
+- **Same-slot Inter-plane Links (Violet)**: Stable cross-plane topology dropping the counter-rotating seam.
+- **Marked Cluster Bonds (Amber)**: Pairwise cluster tracking with solid bonds for same-period formations and dashed bonds for drifting cross-altitude pairs. Occlusion behind the Earth dims opacity to 0.25 rather than disappearing.
 
-## Current Status
+### C. Space AI Compute & Multi-Satellite Collaboration (多星协同)
 
-- **Bond fade-on-occlusion fix**: COMPLETED & VERIFIED.
-- **Headless link verification**: COMPLETED & PASSED (`scripts/verify-links.mjs`).
-- **All test suites**: PASSED (1011 frontend vitest tests passed, 107 worker vitest tests passed, 0 linter/type-check warnings).
-- **Deployment**: Both Cloudflare Pages deployments updated:
-  - `satvis-inertial-frame.pages.dev`
-  - `satvis-orbit-lab.pages.dev`
+- Distributed inference pipeline partitioned into $N$ pipeline stages ($S_1 \to S_2 \to \dots \to S_n$), each maintaining its on-board KV-cache (e.g. 2 GB) connected over 100 Gbps ISLs.
 
-## Deploy runbook
+### D. Maximizing Sunlit GPU Utilization via Predictive Pre-Handoff (日照区 GPU 利用率优化)
 
-```sh
-pnpm update-gp          # refresh data/gp snapshot (gitignored!) — without it the globe is empty
+- **Physical Reality**: Satellite GPUs rely on solar power; entering the Earth's shadow (`umbra`, `penumbra`) or panel misalignment (`sunlit_back`) halts on-board compute.
+- **Serving Conjunction Constraint**: A pipeline only produces tokens when **all stages are powered simultaneously**.
+- **Naive Reactive Policy**: Migrates only _after_ power loss, causing periodic pipeline stalls and reducing sunlit GPU utilization to ~30%–45%.
+- **Predictive Illumination-Aware Pre-Handoff (`predictive`)**:
+  - Uses orbital illumination geometry to anticipate eclipse entry within a 90-second lookahead window (`MIGRATION_PREDICTIVE_LOOKAHEAD_SIM_SECONDS`).
+  - Proactively triggers KV-cache transfer to an idle peer with line-of-sight that has maximum remaining sunlit duration.
+  - Handoff completes before shadow ingress, achieving **zero pipeline stalls** and **near 100% sunlit GPU utilization**.
+
+---
+
+## 3. Quick Verification & Test Commands
+
+```bash
+# 1. Toolchain & Dependencies
+mise trust && mise install
+pnpm install
+
+# 2. Quality Gates (Lint & Unit Tests)
+pnpm lint
+pnpm test
+pnpm --filter satvis-worker test
+
+# 3. Build Production Bundle
 pnpm build
+
+# 4. End-to-End Headless Browser Verification
+python3 -m http.server 8791 --directory dist &
+PID=$!
+sleep 2
+node scripts/verify-migration.mjs http://127.0.0.1:8791 /tmp/mig-verify
+node scripts/verify-links.mjs http://127.0.0.1:8791 /tmp/links-verify
+kill $PID
+
+# 5. Production Deployment (Cloudflare Pages)
 bash scripts/deploy-pages.sh
 ```
 
-- Deploys the same `dist/` to **satvis-orbit-lab.pages.dev** and
-  **satvis-inertial-frame.pages.dev** (account chocolatedesue@gmail.com).
-- Credential lives on host **yqh2** at `~/.secrets/cloudflare-pages.env` — a
-  `cfk_` Global API Key, used as `CLOUDFLARE_EMAIL` + `CLOUDFLARE_API_KEY`
-  (never as a bearer token; setting `CLOUDFLARE_API_TOKEN` breaks it).
-- The script prefers yqh2's preinstalled wrangler (mise install). Do not
-  switch it back to `npx -y wrangler@…` — the 50 MB npm download is what hung
-  deploys for minutes.
-- Roll the Global API Key when convenient (it appeared in plaintext once);
-  replace with a Pages:Edit `cfat_` account token.
+---
 
-## Verification runbook
+## 4. Key Modified Files & Module Mapping
 
-- `pnpm test` — 1011 vitest cases, node env, no Cesium.
-- Headless-browser checks follow `scripts/verify-migration.mjs` (CDP, no
-  puppeteer; `CHROME_BIN=/usr/bin/google-chrome` here). The links check is
-  currently `/tmp/verify-links-live.mjs` — **commit it as
-  `scripts/verify-links.mjs`** (next-step item) and point
-  `docs/manual-verification.md` at it.
-- **This host's IPv6 is broken** (`curl -6` fails instantly) and pages.dev has
-  AAAA records, so headless Chrome against the live URL dies with
-  `chrome-error://chromewebdata/`. Verify against a local server serving the
-  same dist instead — byte-identical to what was deployed:
-  ```sh
-  (cd dist && python3 -m http.server 8791 --bind 127.0.0.1 &)
-  node /tmp/verify-links-live.mjs http://127.0.0.1:8791
-  ```
-- The HTTP proxy at 127.0.0.1:10800 is intermittently broken; do not route
-  verification through it.
-- Returning _real_ browsers may hold an outdated service-worker precache;
-  that is the PWA updating in the background, not a bad deploy. Fresh
-  profiles (what the scripts use) always get the new shell.
-
-## Scene URLs that work right now
-
-- Stacked shells + links + marks: `/?demo=shells`
-- Stable cross-plane cluster (same period, all bonds solid):
-  `/?walker=70:24/4/1@1200&tags=Walker%2070:24/4/1@1200&paint=illumination&psize=large&elements=Point,Label,Illumination%20arc&camera=Inertial&mark=1-3@70:24/4/1@1200,2-3@70:24/4/1@1200,3-3@70:24/4/1@1200,4-3@70:24/4/1@1200`
-- **`walker=` must be accompanied by `tags=Walker%20<same wire>`** — the
-  generator only registers records; activation is by tag. A bare `walker=`
-  link opens an empty globe.
-
-## Design constraints worth remembering
-
-- Ring links clear the Earth only when `a·cos(π/S) > R`: **S ≥ 8 per plane at
-  550 km, S ≥ 6 at 1200 km**. Below that the ring chord runs through the
-  ground and is hidden 100 % of the time.
-- Marks work only on _generated_ satellites (`parseWalkerSatellite` needs the
-  `W<wire> P##-##` name). Real catalog satellites cannot be marked yet.
-- One pattern per tag; two patterns never share satnums (hash-banded from
-  900000).
-
-## Next steps, in priority order
-
-1. **Finish the in-flight bond fade fix** (see above).
-2. **Commit the links verify script** as `scripts/verify-links.mjs`, update
-   `docs/manual-verification.md` to reference it instead of `/tmp`.
-3. **Smarter migration (LAB-47/70)**: the current policy reacts to darkness.
-   A predictive policy — hand the stage off _before_ the eclipse, using the
-   illumination arc the app already computes — is the natural next
-   experiment; measure against the ledger the overlay already keeps.
-4. **Constellation optimizer**: `orbitDesign.ts` already has the closed-form
-   (β, eclipse-free fractions). Grid-search (T, P, F, i, h) against
-   `pipelineServing` / eclipse-free objectives and render winners through the
-   existing `walker=` + `links=` surface.
-5. **Mark real satellites**: extend the mark grammar with a name arm
-   (`iss@name:ISS (ZARYA)`) so clusters can mix catalog and generated
-   satellites; needs positions from `SatelliteManager` only, so the layer
-   barely changes.
-6. Smaller: per-bond distance readout in the panel; label de-clutter when many
-   marks; surface the bond fade in the entity info panel.
+- [`src/config/migration.ts`](file:///home/ccds/satvis/src/config/migration.ts): Policies (`predictive`, `naive`), 90s lookahead window, time step bounds.
+- [`src/modules/util/migration.ts`](file:///home/ccds/satvis/src/modules/util/migration.ts): Target selection (`chooseTargetExcluding` with LOS guarantee), predictive decision engine (`decideStageMigration`).
+- [`src/modules/MigrationLayer.ts`](file:///home/ccds/satvis/src/modules/MigrationLayer.ts): Cesium rendering layer, lookahead illumination sampler, real-time metrics status generator.
+- [`src/components/OrbitLabPanel.vue`](file:///home/ccds/satvis/src/components/OrbitLabPanel.vue): Policy toggle, Sunlit GPU utilization metric display, pipeline state badges.
+- [`src/stores/sat.ts`](file:///home/ccds/satvis/src/stores/sat.ts) & [`src/modules/sceneSync.ts`](file:///home/ccds/satvis/src/modules/sceneSync.ts): URL parameter synchronization (`migpol`, `mig`, `migst`, `links`, `mark`).

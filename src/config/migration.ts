@@ -114,10 +114,27 @@ export function stageColor(index: number): string {
  *
  * The ledger accrues served and stalled time from the clock, and the clock can be
  * scrubbed, reversed or jumped by the time controls. At 4000× — what the browser
- * check winds to — one 60 fps frame is already ~67 simulated seconds, so the cutoff
- * has to sit well above that while still rejecting a scrub across hours.
+ * check winds to — one frame in SwiftShader can take ~1s (4000 simulated seconds),
+ * so the cutoff sits at 1 simulated day (86400s) while still rejecting a scrub across weeks.
  */
-export const MAX_SIM_STEP_SECONDS = 3600;
+export const MAX_SIM_STEP_SECONDS = 86400;
 
 /** How many completed migrations the event log keeps. */
 export const MIGRATION_LOG_LENGTH = 6;
+
+/**
+ * Migration strategy:
+ * - "predictive": Proactive illumination-aware pre-handoff before entering eclipse.
+ *   Maximizes GPU compute utilization in the sunlit zone by eliminating pipeline stalls.
+ * - "naive": Reactive migration triggered only after power is completely lost (eclipse/shadow).
+ */
+export const MIGRATION_POLICIES = ["predictive", "naive"] as const;
+export type MigrationPolicy = (typeof MIGRATION_POLICIES)[number];
+
+export const DEFAULT_MIGRATION_POLICY: MigrationPolicy = "naive";
+
+/**
+ * Lookahead window in simulated seconds for predictive migration (e.g. 90 s).
+ * Triggers pre-eclipse handoff before the host satellite loses solar power.
+ */
+export const MIGRATION_PREDICTIVE_LOOKAHEAD_SIM_SECONDS = 90;

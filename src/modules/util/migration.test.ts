@@ -237,11 +237,34 @@ describe("chooseTargetExcluding", () => {
   it("falls back to an occluded lit candidate rather than returning none", () => {
     expect(chooseTargetExcluding(host, [at("occluded", orbit(170), true)], new Set())?.name).toBe("occluded");
   });
+
+  it("prefers candidates with lookahead power when preferLookahead is true", () => {
+    const soonDark: MigrationHost = { name: "soonDark", position: orbit(5), hasPower: true, lookaheadPower: false };
+    const longLit: MigrationHost = { name: "longLit", position: orbit(15), hasPower: true, lookaheadPower: true };
+    const target = chooseTargetExcluding(host, [soonDark, longLit], new Set(), true);
+    expect(target?.name).toBe("longLit");
+  });
 });
 
 describe("decideStageMigration", () => {
-  it("holds while the stage's host is powered", () => {
+  it("holds while the stage's host is powered and not entering eclipse", () => {
     expect(decideStageMigration("H", [at("H", orbit(0), true), at("N", orbit(10), true)], new Set()).action).toBe("hold");
+  });
+
+  it("triggers predictive handoff while still powered if host is approaching eclipse", () => {
+    const currentHost: MigrationHost = { name: "H", position: orbit(0), hasPower: true, lookaheadPower: false };
+    const destination: MigrationHost = { name: "Dest", position: orbit(20), hasPower: true, lookaheadPower: true };
+    const decision = decideStageMigration("H", [currentHost, destination], new Set(), "predictive");
+    expect(decision.action).toBe("migrate");
+    expect(decision.target?.name).toBe("Dest");
+    expect(decision.reason).toContain("predictive handoff");
+  });
+
+  it("holds in naive mode even when approaching eclipse as long as power is on", () => {
+    const currentHost: MigrationHost = { name: "H", position: orbit(0), hasPower: true, lookaheadPower: false };
+    const destination: MigrationHost = { name: "Dest", position: orbit(20), hasPower: true, lookaheadPower: true };
+    const decision = decideStageMigration("H", [currentHost, destination], new Set(), "naive");
+    expect(decision.action).toBe("hold");
   });
 
   it("migrates to the nearest free lit satellite in view", () => {

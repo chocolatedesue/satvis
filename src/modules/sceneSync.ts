@@ -16,6 +16,7 @@ import { nextTick, watch } from "vue";
 
 import { currentPosition } from "../composables/useGeolocation";
 import { useToastProxy } from "../composables/useToastProxy";
+import type { MigrationPolicy } from "../config/migration";
 import { BUILTIN_STAR_MAP, starMapRecovery } from "../config/starMaps";
 import { SKY_MODE } from "../config/viewModes";
 import { useCesiumStore } from "../stores/cesium";
@@ -96,6 +97,8 @@ export interface SceneTarget {
   setMigration(on: boolean): void;
   /** Re-cut the migration demo's pipeline into `count` stages. */
   setMigrationStages(count: number): void;
+  /** Set migration policy (predictive vs naive). */
+  setMigrationPolicy(policy: MigrationPolicy): void;
   /** Turn the stable-constellation link overlay on or off. */
   setLinks(on: boolean): void;
   /** Name the marked cluster, as `<plane>-<slot>@<wire>` tokens. */
@@ -464,6 +467,14 @@ export function startSceneSync(cc: SceneTarget): void {
     () => satStore.migrationStages,
     (count) => {
       cc.setMigrationStages(count);
+    },
+    { immediate: true },
+  );
+
+  watch(
+    () => satStore.migrationPolicy,
+    (policy) => {
+      cc.setMigrationPolicy(policy);
     },
     { immediate: true },
   );

@@ -29,7 +29,7 @@ import { currentPosition } from "../composables/useGeolocation";
 import { usePostHog } from "../composables/usePostHog";
 import { useToastProxy } from "../composables/useToastProxy";
 import { parseLayer } from "../config/layers";
-import { DEFAULT_PIPELINE_STAGES } from "../config/migration";
+import { DEFAULT_MIGRATION_POLICY, DEFAULT_PIPELINE_STAGES, type MigrationPolicy } from "../config/migration";
 import { MSAA_RATES, PIXEL_RATIOS, msaaSamplesFor, resolutionScaleFor } from "../config/rendering";
 import { STAR_MAPS, type StarMapSources, starMapSources } from "../config/starMaps";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
@@ -140,6 +140,9 @@ export class CesiumController {
 
   /** The pipeline length the overlay is (or will be) built with. See setMigrationStages. */
   #migrationStages: number = DEFAULT_PIPELINE_STAGES;
+
+  /** The migration policy (predictive vs naive) to apply. */
+  #migrationPolicy: MigrationPolicy = DEFAULT_MIGRATION_POLICY;
 
   skyView!: SkyView;
 
@@ -657,7 +660,7 @@ export class CesiumController {
   setMigration(on: boolean): void {
     if (on) {
       if (!this.#migration) {
-        this.#migration = new MigrationLayer(this.viewer, this.sats, undefined, this.#migrationStages);
+        this.#migration = new MigrationLayer(this.viewer, this.sats, undefined, this.#migrationStages, this.#migrationPolicy);
       }
       this.#migration.start();
     } else {
@@ -705,6 +708,12 @@ export class CesiumController {
   setMigrationStages(count: number): void {
     this.#migrationStages = count;
     this.#migration?.setStageCount(count);
+  }
+
+  /** Set migration strategy: predictive vs naive. */
+  setMigrationPolicy(policy: MigrationPolicy): void {
+    this.#migrationPolicy = policy;
+    this.#migration?.setPolicy(policy);
   }
 
   /** What the migration overlay is doing, for the panel's readout. */
