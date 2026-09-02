@@ -471,16 +471,17 @@ Satvis implements two live migration policies (`?migpol=predictive` vs `?migpol=
 
 Key metrics and constraints:
 
-- **Line of sight, preferred and reported**: `hasLineOfSight` ranks candidates — a peer the host can see is always taken ahead of one it cannot. It is a preference rather than a
-  veto: a host that has turned its panel away sees no powered neighbour over the near limb, and refusing an occluded target left the stage dark for half an orbit while powered
-  satellites sat idle on the far side. So when nothing is in view the nearest powered satellite is taken anyway — and the hop is **reported as what it is**: `inView: false` in the
-  event log, `⤳ · no direct view` on the halo and in the panel, and a link drawn at a third opacity. A chord through the planet is a two-hop relay, which the fleet has no router
-  for yet (see the roadmap in `TODO.md`); what the overlay must not do is draw it as a direct ISL and say nothing.
+- **The Earth is opaque, so the cache is routed around it**: a chord through the planet is not a long link, it is not a link. `routesFrom` runs Dijkstra over the fleet's
+  visibility graph by wire length, and a hand-off takes the shortest path of real legs — direct when the host can see its target, and otherwise around the limb through lit
+  relays, drawn as a line that bends at each one. The path length is whatever the geometry needs: at 550 km a pair links across at most **42.5°** of Earth-central angle, so the
+  far side of the planet is five legs away and a single relay would be a different, wrong answer. Relays must be powered (a dark satellite can neither receive nor retransmit) and
+  may host another stage. When no lit chain reaches around, the stage is **stranded** — which is then the truth rather than a hop drawn faint with a caveat.
+  Reasoning: `docs/adr/0011-routing-around-the-earth.md`.
 - **Realistic Link Arithmetic**: Real transfer time accounts for 100 Gbps serialisation (~160 ms for 2 GB) + vacuum light travel over the physical chord distance.
 - **Simulated Timebase Ledger**: GPU utilization and served/stalled seconds are tracked accurately against simulated orbit time.
 
-`node scripts/verify-migration.mjs <base-url> <out-dir>` verifies placement, live ISL packet progress, zero-stall serving, and that no hop claims a line of sight it does not have,
-in headless Chromium.
+`node scripts/verify-migration.mjs <base-url> <out-dir>` verifies placement, live ISL packet progress, zero-stall serving, and that **every leg** of every hand-off is inside the
+5014 km line-of-sight horizon, in headless Chromium. Per leg rather than per hand-off: a 9000 km hand-off is fine as two 4500 km legs and impossible as one chord.
 
 ### Satellite metadata
 

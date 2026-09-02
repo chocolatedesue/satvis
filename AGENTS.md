@@ -16,7 +16,8 @@ workspace package). One `pnpm install` at the root covers both.
   orbit lab — Walker generation and ν/κ illumination (0007), the constellation
   links and the marked cluster (0008), multi-shell layouts — which second shell
   holds against the first (0009), stable clusters — the partition orbit space
-  already has, and why it is not a clustering problem (0010).
+  already has, and why it is not a clustering problem (0010), routing around the
+  Earth rather than through it (0011).
 - **`docs/manual-verification.md`** — the checks jsdom cannot run. Rerun the ones
   covering code you change, and record what they returned.
 - **`worker/src/gp/types.ts`** — the group and satellite-table config schema,

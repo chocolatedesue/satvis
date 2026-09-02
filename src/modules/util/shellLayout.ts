@@ -175,9 +175,66 @@ export function coPrecessingCeilingKm(reference: ShellOrbit): number {
  * stacked-shells demo flies 10 satellites per plane at 550 km — below the
  * threshold every intra-plane link is drawn through the ground. Lives here
  * because a generated companion shell has to satisfy it to be worth generating.
+ *
+ * `marginKm` defaults to 0, which is the bar the derivation and the ADRs quote:
+ * clearing the solid Earth. It is the loose bar — a ring at exactly S = 8 and
+ * 550 km clears the ground and grazes the atmosphere, and asking for
+ * `LINK_MARGIN_KM` there wants S ≥ 9. Kept as the default so the published
+ * numbers mean what they say, and exposed so a design that cares can pay for the
+ * extra satellite.
  */
-export function minSatellitesPerRing(altitudeKm: number): number {
-  return Math.ceil(Math.PI / Math.acos(EARTH_RADIUS_KM / semiMajorAxisKm(altitudeKm)));
+export function minSatellitesPerRing(altitudeKm: number, marginKm = 0): number {
+  return Math.ceil(Math.PI / Math.acos((EARTH_RADIUS_KM + marginKm) / semiMajorAxisKm(altitudeKm)));
+}
+
+/**
+ * How far above the surface a link has to clear to be a link: 80 km, the top of
+ * the mesosphere, matching `migration.ts`'s own line-of-sight margin.
+ *
+ * A chord that grazes the limb passes through atmosphere no optical ISL survives,
+ * so "clears the Earth" is the wrong bar by exactly this much.
+ */
+export const LINK_MARGIN_KM = 80;
+
+/**
+ * The longest chord between two circular shells that still clears the Earth:
+ * `√(r₁² − R_b²) + √(r₂² − R_b²)`, each term being one satellite's distance to
+ * its own horizon.
+ *
+ * The Earth's constraint on a layout, in one number. Two shells can hold a
+ * schedule forever and still never exchange a packet: `shellPairLayout` says
+ * whether their geometry *returns*, and this says how much of that geometry is
+ * near enough to be a link at all. A stable layout whose members only ever meet
+ * across the planet is a stable layout with no fabric on it.
+ *
+ * Uses this module's WGS-72 equatorial radius, where `migration.ts`'s segment test
+ * uses the mean radius — 7 km apart, well inside the 80 km margin, and the
+ * conservative way round here.
+ */
+export function maxLinkRangeKm(altitudeAKm: number, altitudeBKm: number, marginKm = LINK_MARGIN_KM): number {
+  const blocking = EARTH_RADIUS_KM + marginKm;
+  const reach = (altitudeKm: number) => {
+    const radius = semiMajorAxisKm(altitudeKm);
+    return radius <= blocking ? 0 : Math.sqrt(radius * radius - blocking * blocking);
+  };
+  return reach(altitudeAKm) + reach(altitudeBKm);
+}
+
+/**
+ * The widest Earth-central angle two shells can span and still see each other:
+ * `arccos(R_b/r₁) + arccos(R_b/r₂)`.
+ *
+ * The same statement as `maxLinkRangeKm`, in the units a constellation is designed
+ * in — each term is how far round the planet one satellite can see, so the sum is
+ * how far apart the pair may be before the limb comes between them.
+ */
+export function linkHorizonAngleDeg(altitudeAKm: number, altitudeBKm: number, marginKm = LINK_MARGIN_KM): number {
+  const blocking = EARTH_RADIUS_KM + marginKm;
+  const horizon = (altitudeKm: number) => {
+    const radius = semiMajorAxisKm(altitudeKm);
+    return radius <= blocking ? 0 : Math.acos(blocking / radius) * RAD_TO_DEG;
+  };
+  return horizon(altitudeAKm) + horizon(altitudeBKm);
 }
 
 /** A whole-number resonance between two shells' along-track rates. */
@@ -358,6 +415,12 @@ export interface StableShellLayout {
   nodeShearDegPerDay: number;
   /** The fewest satellites per plane whose ring links clear the Earth at this altitude. */
   minPerPlane: number;
+  /**
+   * The longest link this shell and its reference could ever close, from
+   * `maxLinkRangeKm`. A layout that returns is not yet a layout that can talk:
+   * the pair has to come inside this to exchange anything.
+   */
+  maxLinkRangeKm: number;
 }
 
 /**
@@ -425,6 +488,7 @@ export function resonantCompanion(reference: ShellOrbit, referenceRevolutions: n
     },
     nodeShearDegPerDay: shellRates(reference).nodeRateDegPerDay - rates.nodeRateDegPerDay,
     minPerPlane: minSatellitesPerRing(altitudeKm),
+    maxLinkRangeKm: maxLinkRangeKm(reference.altitudeKm, altitudeKm),
   };
 }
 
@@ -559,6 +623,14 @@ export interface StableCluster {
   revolutions: number[];
   /** The worst along-track error any member carries into the next cycle. */
   slipDegPerCycle: number;
+  /**
+   * The tightest link budget in the cluster: the shortest `maxLinkRangeKm` over
+   * its member pairs. Whether the cluster's geometry ever brings a pair inside it
+   * is a question for the propagator, but a cluster whose members are far apart
+   * even at their closest is one no fabric can be built on however well it
+   * repeats.
+   */
+  maxLinkRangeKm: number;
   /**
    * `rigid` when every member shares a period as well as a node rate — one shell
    * flown as several patterns, whose offsets are frozen rather than periodic.
@@ -720,6 +792,13 @@ export function findStableClusters(members: readonly ClusterMember[], options: C
         }
         const nodeRates = subset.map((at) => (rates[at] as ShellRates).nodeRateDegPerDay);
         const periods = subset.map((at) => (rates[at] as ShellRates).periodMinutes);
+        const altitudes = subset.map((at) => (group[at] as ClusterMember).orbit.altitudeKm);
+        let tightestLinkKm = Infinity;
+        for (let a = 0; a < altitudes.length; a += 1) {
+          for (let b = a + 1; b < altitudes.length; b += 1) {
+            tightestLinkKm = Math.min(tightestLinkKm, maxLinkRangeKm(altitudes[a] as number, altitudes[b] as number));
+          }
+        }
         found.set(key, {
           members: ids,
           nodeRateDegPerDay: nodeRates.reduce((a, b) => a + b, 0) / nodeRates.length,
@@ -727,6 +806,7 @@ export function findStableClusters(members: readonly ClusterMember[], options: C
           cycleHours,
           revolutions,
           slipDegPerCycle: worstSlip,
+          maxLinkRangeKm: Number.isFinite(tightestLinkKm) ? tightestLinkKm : maxLinkRangeKm(altitudes[0] as number, altitudes[0] as number),
           // Every member on one period as well as one node rate is not a family
           // that returns — it is one shell, and its offsets never moved at all.
           verdict: Math.max(...periods) - Math.min(...periods) <= (Math.max(...periods) as number) * PERIOD_LOCK_TOLERANCE ? "rigid" : "repeating",
@@ -811,6 +891,7 @@ export function shellFamily(reference: ShellOrbit, options: FamilyOptions): Fami
         resonance: { referenceRevolutions: cycleRevolutions, companionRevolutions: revolutions, repeatHours: cycleHours, slipDegPerCycle: 0 },
         nodeShearDegPerDay: 0,
         minPerPlane: minSatellitesPerRing(reference.altitudeKm),
+        maxLinkRangeKm: maxLinkRangeKm(reference.altitudeKm, reference.altitudeKm),
         revolutions,
       });
       continue;

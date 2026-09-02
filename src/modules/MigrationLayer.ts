@@ -39,11 +39,12 @@ import {
   distanceKm,
   emptyLedger,
   flightProgress,
-  hasLineOfSight,
   type MigrationEvent,
   type MigrationHost,
   type MigrationLedger,
+  type MigrationRoute,
   lerp,
+  relaysOf,
   placeStages,
   poweredStageCount,
   recordMigration,
@@ -63,8 +64,8 @@ export interface MigrationStageStatus {
   from?: string;
   to?: string;
   linkKm?: number;
-  /** Whether this stage's hop has line of sight; undefined when it is not migrating. */
-  inView?: boolean;
+  /** The relay this stage's hop goes through, when it needs one and is migrating. */
+  via?: string;
   transferSeconds?: number;
   /**
    * How far the packet has got along the link, 0–1, while `phase` is `migrating`;
@@ -107,8 +108,8 @@ export interface MigrationStatus {
   kvGigabytes: number;
   islGbps: number;
   linkKm?: number;
-  /** Whether the moving stage's hop has line of sight, when one is in flight. */
-  inView?: boolean;
+  /** The relay the moving stage's hop goes through, when it needs one. */
+  via?: string;
   transferSeconds?: number;
   /** The moving stage's progress along its link, 0–1, when one is in flight. */
   progress?: number;
@@ -140,16 +141,15 @@ interface Flight {
    */
   startSimMs: number;
   cost: TransferCost;
+  /** The whole wire, summed over the route's legs. */
   linkKm: number;
   /**
-   * Whether the two hosts could see each other when the hop was decided.
-   *
-   * False when `chooseTargetExcluding` fell back to an occluded candidate rather
-   * than leave the stage dark. The link is still flown — that fallback is the
-   * design — but it is drawn dimmed and logged as what it is, because a chord
-   * through the planet is a relay the fleet cannot route yet, not an ISL.
+   * The path the cache takes: two hosts direct, three through a relay that can see
+   * both ends. Held rather than recomputed per frame because the route is decided
+   * once, at the instant the geometry was sampled — re-solving it while the packet
+   * is in flight would let the line jump to a different relay mid-transfer.
    */
-  inView: boolean;
+  route: MigrationRoute;
   /** Simulated instant the migration was decided, for the event log. */
   decidedAt: string;
 }
@@ -482,7 +482,16 @@ export class MigrationLayer {
         stage.flight = undefined;
         this.#ledger = recordMigration(this.#ledger, this.#kvGigabytes, flight.cost);
         this.#log = [
-          { stage: stage.index, from: flight.from, to: flight.to, linkKm: flight.linkKm, inView: flight.inView, transferSeconds: flight.cost.totalSeconds, at: flight.decidedAt },
+          {
+            stage: stage.index,
+            from: flight.from,
+            to: flight.to,
+            linkKm: flight.linkKm,
+            hops: flight.route.hops,
+            legsKm: flight.route.legsKm,
+            transferSeconds: flight.cost.totalSeconds,
+            at: flight.decidedAt,
+          },
           ...this.#log,
         ].slice(0, MIGRATION_LOG_LENGTH);
       }
@@ -539,15 +548,20 @@ export class MigrationLayer {
       if (decision.action === "migrate" && decision.target) {
         const host = hosts.find((candidate) => candidate.name === stage.hostName);
         if (host) {
-          const linkKm = distanceKm(host.position, decision.target.position);
-          const inView = hasLineOfSight(host.position, decision.target.position);
+          // The wire, not the straight line between the ends: a relayed hop is two
+          // legs long, and the transfer is charged for what it actually traverses.
+          const route = decision.route ?? {
+            hops: [host.name, decision.target.name],
+            legsKm: [distanceKm(host.position, decision.target.position)],
+            linkKm: distanceKm(host.position, decision.target.position),
+          };
           stage.flight = {
             from: host.name,
             to: decision.target.name,
             startSimMs: simMs,
-            cost: transferCost(this.#kvGigabytes, ISL_GBPS, linkKm),
-            linkKm,
-            inView,
+            cost: transferCost(this.#kvGigabytes, ISL_GBPS, route.linkKm),
+            linkKm: route.linkKm,
+            route,
             decidedAt: date.toISOString(),
           };
           stage.phase = "migrating";
@@ -619,7 +633,7 @@ export class MigrationLayer {
       from: stage.flight?.from,
       to: stage.flight?.to,
       linkKm: stage.flight?.linkKm,
-      inView: stage.flight?.inView,
+      via: stage.flight && relaysOf(stage.flight.route).join(" → ") ? relaysOf(stage.flight.route).join(" → ") : undefined,
       transferSeconds: stage.flight?.cost.totalSeconds,
       progress: stage.flight ? flightProgress(stage.flight.startSimMs, simMs, MIGRATION_ANIMATION_SIM_SECONDS).fraction : undefined,
       powered: hosts.find((host) => host.name === stage.hostName)?.hasPower === true,
@@ -648,7 +662,7 @@ export class MigrationLayer {
       from: moving?.from,
       to: moving?.to,
       linkKm: moving?.linkKm,
-      inView: moving?.inView,
+      via: moving?.via,
       transferSeconds: moving?.transferSeconds,
       progress: moving?.progress,
       reason: serving ? `All ${stages.length} stages powered — pipeline serving.` : (lead?.reason ?? `${powered}/${stages.length} stages powered — pipeline stalled.`),
@@ -670,9 +684,11 @@ export class MigrationLayer {
     if (!stage.flight) {
       return [];
     }
-    const from = this.#positionAt(stage.flight.from, time);
-    const to = this.#positionAt(stage.flight.to, time);
-    return from && to ? [from, to] : [];
+    const points = stage.flight.route.hops.map((hop) => this.#positionAt(hop, time));
+    // All or nothing: a relay that left the scene mid-flight would otherwise draw a
+    // straight line between the ends, which is the one line this route exists to
+    // avoid claiming.
+    return points.every((point) => point !== undefined) ? (points as Cartesian3[]) : [];
   }
 
   /**
@@ -687,14 +703,28 @@ export class MigrationLayer {
   #packetPosition(stage: StageState, time: JulianDate): Cartesian3 | undefined {
     const flight = stage.flight;
     if (flight) {
-      const from = this.#positionAt(flight.from, time);
-      const to = this.#positionAt(flight.to, time);
-      if (!from || !to) {
+      const points = this.#linkPositions(stage, time);
+      if (points.length < 2) {
         return undefined;
       }
       const { fraction } = flightProgress(flight.startSimMs, JulianDate.toDate(time).getTime(), MIGRATION_ANIMATION_SIM_SECONDS);
-      const point: Vec3 = lerp({ x: from.x, y: from.y, z: from.z }, { x: to.x, y: to.y, z: to.z }, fraction);
-      return new Cartesian3(point.x, point.y, point.z);
+      // Along the path by length rather than by leg count, so a relayed packet does
+      // not slow down on the long leg and sprint the short one. Lengths are measured
+      // live: the legs stretch as the three satellites move.
+      const legs = points.slice(1).map((point, at) => Cartesian3.distance(points[at] as Cartesian3, point));
+      const total = legs.reduce((sum, leg) => sum + leg, 0);
+      let travelled = fraction * total;
+      for (let leg = 0; leg < legs.length; leg += 1) {
+        const length = legs[leg] as number;
+        if (travelled <= length || leg === legs.length - 1) {
+          const start = points[leg] as Cartesian3;
+          const end = points[leg + 1] as Cartesian3;
+          const along = length > 0 ? Math.min(1, travelled / length) : 0;
+          const point: Vec3 = lerp({ x: start.x, y: start.y, z: start.z }, { x: end.x, y: end.y, z: end.z }, along);
+          return new Cartesian3(point.x, point.y, point.z);
+        }
+        travelled -= length;
+      }
     }
     return this.#positionAt(stage.hostName, time);
   }
@@ -718,9 +748,10 @@ export class MigrationLayer {
     const named = (host: string | undefined) => planeSlotOf(host) ?? host;
     const flight = stage.flight;
     if (flight) {
-      // "⤳" rather than "→" when the two hosts cannot see each other: the hop is
-      // still made, but not over a link the fleet could really close in one.
-      return `${tag} · ${named(flight.from)} ${flight.inView ? "→" : "⤳"} ${named(flight.to)}`;
+      // A relayed hop names every host it passes through: the packet really does go
+      // that way round the limb, and which satellites carry it is the thing worth
+      // reading off the picture.
+      return `${tag} · ${flight.route.hops.map(named).join(" → ")}`;
     }
     if (!stage.hostName) {
       return tag;
@@ -767,24 +798,15 @@ export class MigrationLayer {
       }),
     });
 
-    // The inter-satellite link, drawn only while this stage is in flight.
-    //
-    // Dimmed to a third when the hop has no line of sight. The target selection
-    // prefers a candidate in view and falls back to an occluded one rather than
-    // leave a stage dark (see chooseTargetExcluding), so this line is sometimes a
-    // chord through the planet — which the fleet would need a relay to fly, and
-    // has no multi-hop router for. Drawn faint rather than hidden, because the
-    // hand-off is really happening in the model; drawn faint rather than solid,
-    // because a full-strength line there claims a direct ISL that does not exist.
+    // The inter-satellite link, drawn only while this stage is in flight. Two
+    // points for a direct hop, three when it goes through a relay — the bend at
+    // the middle host is the Earth being routed around rather than through.
     const link = new Entity({
       name: `Migration link ${label}`,
       polyline: new PolylineGraphics({
         positions: new CallbackProperty((time?: JulianDate) => this.#linkPositions(stage, time ?? this.#viewer.clock.currentTime), false),
         width: 3,
-        material: new PolylineGlowMaterialProperty({
-          glowPower: 0.25,
-          color: new CallbackProperty(() => (stage.flight?.inView === false ? hue.withAlpha(0.35) : hue), false),
-        }),
+        material: new PolylineGlowMaterialProperty({ glowPower: 0.25, color: hue }),
         // Straight chord, not draped on the globe — see the note above on why
         // this is ArcType.NONE rather than undefined.
         arcType: ArcType.NONE,

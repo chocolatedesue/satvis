@@ -302,6 +302,25 @@ discussion; sharpen them here when they drift.
   short repeat cycles (2:1, 3:2) are unavailable to a mid-inclination reference,
   and the reason the price of a lock is inclination — a companion node-locked to
   53° / 550 km flies at 34.5° by the time it reaches 1200 km.
+- **Route**: the path a KV cache actually travels between two satellites — the
+  hosts it passes through and each leg's length (`routesFrom`, Dijkstra over the
+  fleet's visibility graph by wire length). Two hops is a direct link; every extra
+  one is a **relay** forwarding around the limb. The Earth is opaque, so a chord
+  through it is not a long link but no link at all: line of sight is a
+  requirement, and the path length is whatever the geometry needs — at 550 km a
+  pair links across at most 42.5° of Earth-central angle, so the far side of the
+  planet is five legs away. Relays must be powered (a dark satellite can neither
+  receive nor retransmit) and may host another stage; the source is exempt, since
+  a host handing off _because_ it is going dark is the premise. When no lit chain
+  reaches around, the stage is **stranded**, which is then the truth rather than a
+  caveat (`docs/adr/0011-routing-around-the-earth.md`).
+- **Link horizon**: how far two circular shells can ever be apart and still see
+  each other — `√(r₁²−R_b²) + √(r₂²−R_b²)` in range, `arccos(R_b/r₁) +
+arccos(R_b/r₂)` in Earth-central angle, against a blocking sphere raised 80 km
+  for the atmosphere (`maxLinkRangeKm`, `linkHorizonAngleDeg`). The Earth's
+  constraint on a _layout_: a shell pair that repeats forever and never comes
+  inside its own horizon carries no fabric, and a cluster reports the tightest
+  horizon among its pairs.
 - **Stable cluster**: a set of orbits whose relative configuration returns —
   all on one node-rate curve, all closing one shared cycle. Both conditions are
   _equivalence relations_, so orbit space is already partitioned and finding a

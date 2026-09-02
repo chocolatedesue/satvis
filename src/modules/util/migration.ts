@@ -238,6 +238,13 @@ export interface MigrationDecision {
   action: "hold" | "migrate" | "stranded";
   /** Where to migrate, when `action` is `migrate`. */
   target?: MigrationHost;
+  /**
+   * How the cache gets there, when `action` is `migrate`: the hops and their
+   * lengths. Carried with the decision because the path is part of it — the same
+   * target is a different hop direct and relayed, and the ledger is charged for
+   * the wire rather than for the straight line between the ends.
+   */
+  route?: MigrationRoute;
   /** One line for the readout: why. */
   reason: string;
 }
@@ -314,6 +321,173 @@ export interface StagePlacement {
 }
 
 /**
+ * A path a KV cache can actually travel: the hosts it passes through, and the wire
+ * length that costs.
+ *
+ * Two entries is a direct link; every extra one is a relay forwarding the cache
+ * around the limb. The count is whatever the geometry needs — at 550 km a pair can
+ * link across 42.8° of Earth-central angle, so the far side of the planet is four
+ * legs away, not one.
+ *
+ * The Earth is the reason this type exists. A straight line between two satellites
+ * on opposite sides of the planet is not a long link, it is not a link: the chord
+ * passes through several thousand kilometres of rock, and no power budget, antenna
+ * or protocol makes that a hop. The model used to draw one anyway (see
+ * `chooseTargetExcluding`), which quietly credited the pipeline with transfers
+ * physics forbids.
+ */
+export interface MigrationRoute {
+  /** Host names from source to destination, inclusive. Length 2 direct, 3 relayed. */
+  hops: string[];
+  /** Each leg's length in km, so a check can hold every leg to the horizon rather than the total. */
+  legsKm: number[];
+  /** The whole wire, summed. What the transfer is actually charged for. */
+  linkKm: number;
+}
+
+/** The relays a route passes through: everything between the two ends. */
+export function relaysOf(route: MigrationRoute): string[] {
+  return route.hops.slice(1, -1);
+}
+
+/**
+ * The shortest path from `source` to every satellite it can reach, hop by hop.
+ *
+ * Dijkstra over the visibility graph, weighted by wire length. One search rather
+ * than one per candidate, because the caller wants the whole reachable set and a
+ * per-candidate search would redo the same graph N times.
+ *
+ * **Why a graph and not a single relay.** A satellite at 550 km sees to a horizon
+ * 21.4° of Earth-central angle away, so a pair can link across at most 42.8° —
+ * about a ninth of the way round. One relay doubles that and no more, which is
+ * nowhere near the far side: reaching a satellite 170° away takes four legs. A
+ * fixed hop budget would therefore not be a simplification, it would be a
+ * different and wrong answer, so the path length is whatever the geometry needs.
+ *
+ * Every intermediate node must be **powered** — a relay has to receive and
+ * retransmit, and a satellite whose panel has turned away can do neither. The
+ * source is exempt: a host handing its cache off *because* it is going dark is the
+ * entire premise, and it is the one transmission the model already assumes.
+ *
+ * Cost is O(N²) line-of-sight tests for the graph and O(N²) for the search, over
+ * the *active* fleet and on the migration evaluation cadence rather than per
+ * frame.
+ */
+export function routesFrom(source: MigrationHost, fleet: readonly MigrationHost[], marginKm?: number): Map<string, MigrationRoute> {
+  const nodes = [source, ...fleet.filter((host) => host.name !== source.name)];
+  const best = new Map<string, { km: number; previous?: string }>([[source.name, { km: 0 }]]);
+  const settled = new Set<string>();
+  for (;;) {
+    let current: MigrationHost | undefined;
+    let currentKm = Infinity;
+    for (const node of nodes) {
+      const reached = best.get(node.name);
+      if (reached && !settled.has(node.name) && reached.km < currentKm) {
+        currentKm = reached.km;
+        current = node;
+      }
+    }
+    if (!current) {
+      break;
+    }
+    settled.add(current.name);
+    // Only a powered satellite forwards; an unpowered one can still be an endpoint,
+    // which is why it is settled above and simply never relaxes its neighbours.
+    if (current.name !== source.name && !current.hasPower) {
+      continue;
+    }
+    for (const neighbour of nodes) {
+      if (neighbour.name === current.name || settled.has(neighbour.name)) {
+        continue;
+      }
+      if (!hasLineOfSight(current.position, neighbour.position, marginKm)) {
+        continue;
+      }
+      const km = currentKm + distanceKm(current.position, neighbour.position);
+      const held = best.get(neighbour.name);
+      if (!held || km < held.km) {
+        best.set(neighbour.name, { km, previous: current.name });
+      }
+    }
+  }
+
+  const positions = new Map(nodes.map((node) => [node.name, node.position]));
+  const routes = new Map<string, MigrationRoute>();
+  for (const [name] of best) {
+    if (name === source.name) {
+      continue;
+    }
+    const hops: string[] = [];
+    for (let at: string | undefined = name; at !== undefined; at = best.get(at)?.previous) {
+      hops.unshift(at);
+    }
+    const legsKm = hops.slice(1).map((hop, at) => distanceKm(positions.get(hops[at] as string) as Vec3, positions.get(hop) as Vec3));
+    routes.set(name, { hops, legsKm, linkKm: legsKm.reduce((total, leg) => total + leg, 0) });
+  }
+  return routes;
+}
+
+/**
+ * How the cache gets from `source` to `target`, or undefined when it cannot.
+ *
+ * One query against `routesFrom`. Undefined is a real answer rather than a
+ * failure: when the Earth sits between the two ends and no chain of lit satellites
+ * reaches around it, there is no link, and the honest state is stranded.
+ */
+export function routeBetween(source: MigrationHost, target: MigrationHost, fleet: readonly MigrationHost[], marginKm?: number): MigrationRoute | undefined {
+  return routesFrom(source, [...fleet, target], marginKm).get(target.name);
+}
+
+/** A reachable target and the path that reaches it. */
+export interface MigrationRouting {
+  target: MigrationHost;
+  route: MigrationRoute;
+}
+
+/**
+ * The best target that can actually be reached, and how.
+ *
+ * The preference order `chooseTargetExcluding` always had, with one tier replaced:
+ * where it used to fall back to "the nearest powered satellite regardless of
+ * occlusion" it now falls back to "the nearest powered satellite a relay can
+ * reach". Both tiers still exist and still prefer a direct link — what is gone is
+ * the option of pretending the Earth is transparent.
+ *
+ * `fleet` is the relay pool, which defaults to the candidate list. It is separate
+ * from `candidates` because a satellite excluded as a *host* (another stage sits
+ * there) is still perfectly good as a *relay*.
+ */
+export function chooseRouteExcluding(
+  source: MigrationHost,
+  candidates: readonly MigrationHost[],
+  taken: ReadonlySet<string>,
+  preferLookahead: boolean = false,
+  fleet: readonly MigrationHost[] = candidates,
+): MigrationRouting | undefined {
+  const routes = routesFrom(source, fleet.some((host) => host.name === source.name) ? fleet : [...fleet, source]);
+  // Four tiers, best first: lookahead-safe and in view, in view, lookahead-safe by
+  // relay, by relay. Within a tier, the shortest wire wins.
+  const tiers: Array<MigrationRouting | undefined> = [undefined, undefined, undefined, undefined];
+  for (const candidate of candidates) {
+    if (candidate.name === source.name || !candidate.hasPower || taken.has(candidate.name)) {
+      continue;
+    }
+    const route = routes.get(candidate.name);
+    if (!route) {
+      continue;
+    }
+    const direct = route.hops.length === 2;
+    const lookaheadSafe = preferLookahead && candidate.lookaheadPower !== false;
+    const tier = direct ? (lookaheadSafe ? 0 : 1) : lookaheadSafe ? 2 : 3;
+    const held = tiers[tier];
+    if (!held || route.linkKm < held.route.linkKm) {
+      tiers[tier] = { target: candidate, route };
+    }
+  }
+  return tiers.find((entry) => entry !== undefined);
+}
+
+/**
  * `chooseTarget`, but refusing satellites another stage already occupies.
  *
  * One stage per satellite. Not a physical law — a satellite could in principle
@@ -325,64 +499,29 @@ export interface StagePlacement {
  * When `preferLookahead` is true (predictive policy), candidates that are both
  * currently powered AND predicted to stay powered in the lookahead window are
  * strongly prioritized, followed by line-of-sight in-view candidates, followed
- * by shortest chord distance.
+ * by shortest wire.
  *
- * **Line of sight is a preference, not a requirement.** A stage whose host has
- * turned its panel away can see no powered neighbour over the near limb, and
- * refusing an occluded target left it dark for half an orbit while powered
- * satellites sat idle on the far side — so when nothing is in view the nearest
- * powered satellite is taken regardless. The caller is expected to *say so*:
- * `hasLineOfSight` on the returned pair is what distinguishes a hop the fabric
- * could really make from one that would need a relay it does not have yet
- * (`MigrationEvent.inView`).
+ * **Line of sight is a requirement, and a relay is how it is met.** This used to
+ * fall back to the nearest powered satellite regardless of occlusion, on the
+ * grounds that leaving a stage dark for half an orbit while powered satellites sat
+ * idle over the limb was worse. Both halves of that were right except the
+ * conclusion: a chord through the planet is not a long link, it is not a link. So
+ * the fallback is now a **relayed** route (`routeBetween`) rather than an occluded
+ * one — the stage still gets off a dark host, and the path it takes is one the
+ * geometry allows. Only when nothing lit can see around the Earth is the answer
+ * stranded, which is then true rather than merely reported.
+ *
+ * The target alone; `chooseRouteExcluding` returns the path with it, and is what
+ * the pipeline uses — a caller that needs to draw or charge the hop needs the legs.
  */
 export function chooseTargetExcluding(
   source: MigrationHost,
   candidates: readonly MigrationHost[],
   taken: ReadonlySet<string>,
   preferLookahead: boolean = false,
+  fleet: readonly MigrationHost[] = candidates,
 ): MigrationHost | undefined {
-  let bestLookaheadInView: MigrationHost | undefined;
-  let bestLookaheadInViewKm = Infinity;
-  let bestLookahead: MigrationHost | undefined;
-  let bestLookaheadKm = Infinity;
-  let nearestInView: MigrationHost | undefined;
-  let nearestInViewKm = Infinity;
-  let nearest: MigrationHost | undefined;
-  let nearestKm = Infinity;
-
-  for (const candidate of candidates) {
-    if (candidate.name === source.name || !candidate.hasPower || taken.has(candidate.name)) {
-      continue;
-    }
-    const km = distanceKm(source.position, candidate.position);
-    const inView = hasLineOfSight(source.position, candidate.position);
-
-    if (km < nearestKm) {
-      nearestKm = km;
-      nearest = candidate;
-    }
-    if (inView && km < nearestInViewKm) {
-      nearestInViewKm = km;
-      nearestInView = candidate;
-    }
-
-    if (preferLookahead && candidate.lookaheadPower !== false) {
-      if (km < bestLookaheadKm) {
-        bestLookaheadKm = km;
-        bestLookahead = candidate;
-      }
-      if (inView && km < bestLookaheadInViewKm) {
-        bestLookaheadInViewKm = km;
-        bestLookaheadInView = candidate;
-      }
-    }
-  }
-
-  if (preferLookahead) {
-    return bestLookaheadInView ?? nearestInView ?? bestLookahead ?? nearest;
-  }
-  return nearestInView ?? nearest;
+  return chooseRouteExcluding(source, candidates, taken, preferLookahead, fleet)?.target;
 }
 
 /**
@@ -408,12 +547,14 @@ export function decideStageMigration(
 
   // Predictive policy: proactive handoff while still powered, before entering eclipse
   if (policy === "predictive" && host.hasPower && host.lookaheadPower === false) {
-    const target = chooseTargetExcluding(host, hosts, taken, true);
-    if (target) {
+    const routing = chooseRouteExcluding(host, hosts, taken, true);
+    if (routing) {
+      const relays = relaysOf(routing.route);
       return {
         action: "migrate",
-        target,
-        reason: `${host.name} approaching eclipse — predictive handoff to ${target.name} preserves GPU compute.`,
+        target: routing.target,
+        route: routing.route,
+        reason: `${host.name} approaching eclipse — predictive handoff to ${routing.target.name}${relays.length > 0 ? ` via ${relays.join(" → ")}` : ""} preserves GPU compute.`,
       };
     }
     // No free target yet for predictive handoff; keep holding on current host while power lasts
@@ -425,11 +566,17 @@ export function decideStageMigration(
   }
 
   // Host has lost power (or reactive naive mode)
-  const target = chooseTargetExcluding(host, hosts, taken, policy === "predictive");
-  if (!target) {
-    return { action: "stranded", reason: `${host.name} lost power and no powered satellite is free — stage stranded.` };
+  const routing = chooseRouteExcluding(host, hosts, taken, policy === "predictive");
+  if (!routing) {
+    return { action: "stranded", reason: `${host.name} lost power and no powered satellite is both free and reachable — stage stranded.` };
   }
-  return { action: "migrate", target, reason: `${host.name} lost power — reactive migration to ${target.name}.` };
+  const relays = relaysOf(routing.route);
+  return {
+    action: "migrate",
+    target: routing.target,
+    route: routing.route,
+    reason: `${host.name} lost power — reactive migration to ${routing.target.name}${relays.length > 0 ? ` via ${relays.join(" → ")}` : ""}.`,
+  };
 }
 
 /**
@@ -560,21 +707,21 @@ export interface MigrationEvent {
   stage: number;
   from: string;
   to: string;
+  /** The whole wire, summed over the legs. */
   linkKm: number;
   transferSeconds: number;
   /**
-   * Whether the two hosts could actually see each other when the hop was decided.
-   *
-   * False is not an error and not a bug: `chooseTargetExcluding` prefers a
-   * candidate in view and falls back to an occluded one rather than leave a stage
-   * dark while powered satellites sit idle over the limb. But a hop through the
-   * planet is not a direct ISL, and a log that does not say so is a log that
-   * overstates the fabric — it would need a relay, and the fleet has no
-   * multi-hop router yet. Recorded so the overlay can draw it as the exception it
-   * is, and so a check can hold the distinction rather than assert an invariant
-   * the code deliberately dropped.
+   * The hosts the cache passed through, source to destination. Two names is a
+   * direct link, three is one relay — `from` and `to` are the ends of this, kept
+   * beside it because every readout wants them and nothing wants to index.
    */
-  inView: boolean;
+  hops: string[];
+  /**
+   * Each leg's length. The check that matters is per leg, not on the total: a
+   * 9000 km total is fine as two 4500 km legs and impossible as one chord, and
+   * only the legs can tell those apart.
+   */
+  legsKm: number[];
   /** Simulated time the migration was decided, as an ISO instant. */
   at: string;
 }

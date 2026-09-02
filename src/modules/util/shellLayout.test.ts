@@ -13,7 +13,10 @@ import {
   coPrecessingInclinationDeg,
   familyCycleHours,
   findStableClusters,
+  LINK_MARGIN_KM,
+  linkHorizonAngleDeg,
   MAX_REPEAT_REVOLUTIONS,
+  maxLinkRangeKm,
   minSatellitesPerRing,
   NODE_LOCK_TOLERANCE_DEG_PER_DAY,
   nodeLockedGroups,
@@ -456,5 +459,58 @@ describe("findStableClusters", () => {
     }));
     expect(findStableClusters(family, { maxCycleHours: 30, minMembers: 4 })).toEqual([]);
     expect(findStableClusters(family, { maxCycleHours: 12 })).toEqual([]);
+  });
+});
+
+describe("the Earth's constraint on a layout", () => {
+  test("the link horizon is the pair's two horizons summed", () => {
+    // A 550 km satellite sees 21.2° of Earth-central angle; a pair of them spans
+    // twice that and no more, which is the chord the migration check bounds a leg by.
+    expect(linkHorizonAngleDeg(550, 550)).toBeCloseTo(42.5, 1);
+    // 5017 rather than the 5014 the migration check bounds a leg by: that one uses
+    // the mean Earth radius, this module the WGS-72 equatorial one it does its
+    // orbital mechanics in. 2.6 km apart, well inside the 80 km margin either way.
+    expect(maxLinkRangeKm(550, 550)).toBeCloseTo(5017, 0);
+  });
+
+  test("altitude buys reach, and the margin costs it", () => {
+    expect(maxLinkRangeKm(1200, 1200)).toBeGreaterThan(maxLinkRangeKm(550, 550));
+    expect(maxLinkRangeKm(550, 550, 0)).toBeGreaterThan(maxLinkRangeKm(550, 550, 80));
+  });
+
+  test("an orbit inside the blocking sphere reaches nothing", () => {
+    expect(maxLinkRangeKm(-6378, 550)).toBeCloseTo(maxLinkRangeKm(550, 550) / 2, 6);
+    expect(linkHorizonAngleDeg(-6378, -6378)).toBe(0);
+  });
+
+  test("a found companion says how far a link to its reference could ever reach", () => {
+    const layout = resonantCompanion(STARLINK_SHELL, 8, 7) as NonNullable<ReturnType<typeof resonantCompanion>>;
+    expect(layout.maxLinkRangeKm).toBeCloseTo(maxLinkRangeKm(550, layout.altitudeKm), 6);
+    // The pair is far enough apart in altitude that the budget matters: it is not
+    // the unbounded number a layout analysis alone would imply.
+    expect(layout.maxLinkRangeKm).toBeLessThan(2 * layout.altitudeKm + 2 * 550 + 12756);
+  });
+
+  test("a cluster carries the tightest link budget among its pairs", () => {
+    const family = shellFamily(STARLINK_SHELL, { cycleRevolutions: 15 }).map((shell) => ({
+      id: `k${shell.revolutions}`,
+      orbit: { altitudeKm: shell.altitudeKm, inclinationDeg: shell.inclinationDeg },
+    }));
+    const cluster = findStableClusters(family, { maxCycleHours: 30 })[0] as StableCluster;
+    const altitudes = family.map((member) => member.orbit.altitudeKm);
+    let tightest = Infinity;
+    for (let a = 0; a < altitudes.length; a += 1) {
+      for (let b = a + 1; b < altitudes.length; b += 1) {
+        tightest = Math.min(tightest, maxLinkRangeKm(altitudes[a] as number, altitudes[b] as number));
+      }
+    }
+    expect(cluster.maxLinkRangeKm).toBeCloseTo(tightest, 6);
+  });
+
+  test("the ring rule keeps its published bar, and says what the margin would cost", () => {
+    // The derivation and the ADRs quote clearing the solid Earth: S >= 8 at 550 km.
+    expect(minSatellitesPerRing(550)).toBe(8);
+    // Asking the ring to clear the atmosphere too wants one more satellite.
+    expect(minSatellitesPerRing(550, LINK_MARGIN_KM)).toBe(9);
   });
 });

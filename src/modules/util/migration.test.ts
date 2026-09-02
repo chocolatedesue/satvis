@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   accrueTime,
+  chooseRouteExcluding,
   chooseTarget,
   chooseTargetExcluding,
   decideMigration,
@@ -19,6 +20,9 @@ import {
   pipelineServing,
   poweredStageCount,
   recordMigration,
+  relaysOf,
+  routeBetween,
+  routesFrom,
   allPoweredFraction,
   SPEED_OF_LIGHT_KM_S,
   transferCost,
@@ -212,6 +216,68 @@ describe("hasLineOfSight", () => {
   });
 });
 
+describe("routeBetween", () => {
+  it("is a direct two-hop path when the pair can see each other", () => {
+    const route = routeBetween(at("a", orbit(0), true), at("b", orbit(20), true), []);
+    expect(route?.hops).toEqual(["a", "b"]);
+    expect(route?.legsKm).toHaveLength(1);
+  });
+
+  it("walks round the limb, and every leg it takes is a link on its own", () => {
+    // A 550 km satellite sees 21.2° of Earth-central angle, so a pair links across
+    // at most 42.5° and the far side is several legs away. A ring at 40° steps is
+    // the chain that reaches it.
+    const source = at("a", orbit(0), true);
+    const target = at("b", orbit(160), true);
+    const ring = [40, 80, 120].map((degrees) => at(`r${degrees}`, orbit(degrees), true));
+    expect(hasLineOfSight(source.position, target.position)).toBe(false);
+    const route = routeBetween(source, target, ring);
+    expect(route?.hops).toEqual(["a", "r40", "r80", "r120", "b"]);
+    const positions = new Map([source, ...ring, target].map((host) => [host.name, host.position]));
+    for (let leg = 0; leg + 1 < (route?.hops.length ?? 0); leg += 1) {
+      const from = positions.get((route as NonNullable<typeof route>).hops[leg] as string) as Vec3;
+      const to = positions.get((route as NonNullable<typeof route>).hops[leg + 1] as string) as Vec3;
+      expect(hasLineOfSight(from, to)).toBe(true);
+    }
+    expect(route?.linkKm).toBeCloseTo(
+      (route?.legsKm ?? []).reduce((a, b) => a + b, 0),
+      6,
+    );
+  });
+
+  it("takes the shortest wire when several chains reach the same place", () => {
+    const source = at("a", orbit(0), true);
+    const target = at("b", orbit(80), true);
+    // One relay at 40° spans it in two legs; going by 20° and 60° needs three and
+    // costs more wire, because a chord is shorter than the arc it cuts and splitting
+    // an angle into more pieces only adds length.
+    const route = routeBetween(
+      source,
+      target,
+      [20, 40, 60].map((degrees) => at(`r${degrees}`, orbit(degrees), true)),
+    );
+    expect(route?.hops).toEqual(["a", "r40", "b"]);
+  });
+
+  it("will not forward through an unpowered satellite", () => {
+    const dark = at("dark", orbit(40), false);
+    expect(routeBetween(at("a", orbit(0), true), at("b", orbit(80), true), [dark])).toBeUndefined();
+  });
+
+  it("is undefined when nothing can see around the Earth", () => {
+    expect(routeBetween(at("a", orbit(0), true), at("b", orbit(180), true), [])).toBeUndefined();
+  });
+
+  it("reaches everything reachable in one search", () => {
+    const source = at("a", orbit(0), true);
+    const ring = [40, 80, 120].map((degrees) => at(`r${degrees}`, orbit(degrees), true));
+    const routes = routesFrom(source, ring);
+    expect([...routes.keys()].toSorted()).toEqual(["r120", "r40", "r80"]);
+    expect(routes.get("r40")?.hops).toEqual(["a", "r40"]);
+    expect(routes.get("r120")?.hops).toEqual(["a", "r40", "r80", "r120"]);
+  });
+});
+
 describe("chooseTargetExcluding", () => {
   const host = at("host", orbit(0), false);
 
@@ -234,8 +300,36 @@ describe("chooseTargetExcluding", () => {
     expect(chooseTargetExcluding(host, [occluded, visible], new Set())?.name).toBe("visible");
   });
 
-  it("falls back to an occluded lit candidate rather than returning none", () => {
-    expect(chooseTargetExcluding(host, [at("occluded", orbit(170), true)], new Set())?.name).toBe("occluded");
+  it("reaches an occluded lit candidate around the limb rather than through the planet", () => {
+    const occluded = at("occluded", orbit(120), true);
+    const chain = [40, 80].map((degrees) => at(`r${degrees}`, orbit(degrees), true));
+    const fleet = [occluded, ...chain];
+    const routing = chooseRouteExcluding(host, [occluded], new Set(), false, fleet);
+    expect(routing?.target.name).toBe("occluded");
+    expect(routing?.route.hops).toEqual(["host", "r40", "r80", "occluded"]);
+    expect(relaysOf(routing?.route as NonNullable<typeof routing>["route"])).toEqual(["r40", "r80"]);
+  });
+
+  it("returns nothing when the only lit candidate is behind the Earth and no chain reaches it", () => {
+    // The one honest answer left: the Earth is in the way and nothing lit reaches
+    // around it, so there is no link and the stage is stranded.
+    expect(chooseTargetExcluding(host, [at("occluded", orbit(170), true)], new Set())).toBeUndefined();
+  });
+
+  it("will not relay through an unpowered satellite", () => {
+    // A relay has to receive and retransmit; a dark one can do neither.
+    const occluded = at("occluded", orbit(80), true);
+    const darkRelay = at("darkRelay", orbit(40), false);
+    expect(chooseTargetExcluding(host, [occluded, darkRelay], new Set())).toBeUndefined();
+  });
+
+  it("prefers a direct link over a relayed one even when the relayed target is nearer", () => {
+    const occludedNear = at("occludedNear", orbit(60), true);
+    const relay = at("relay", orbit(30), true);
+    const directFar = at("directFar", orbit(40), true);
+    const routing = chooseRouteExcluding(host, [occludedNear, relay, directFar], new Set(["relay"]), false, [occludedNear, relay, directFar]);
+    expect(routing?.target.name).toBe("directFar");
+    expect(routing?.route.hops).toHaveLength(2);
   });
 
   it("prefers candidates with lookahead power when preferLookahead is true", () => {
@@ -279,11 +373,23 @@ describe("decideStageMigration", () => {
     expect(decideStageMigration("H", hosts, new Set(["taken"])).action).toBe("stranded");
   });
 
-  it("migrates to the only lit satellite even when it is behind the Earth", () => {
+  it("strands rather than hand off through the planet", () => {
+    // The Earth is opaque. A lit satellite on the far side with nothing lit in
+    // between is not a destination — there is no link to reach it over, and a
+    // hand-off drawn as a chord through rock would credit the pipeline with a
+    // transfer physics forbids.
     const hosts = [at("H", orbit(0), false), at("across", orbit(180), true)];
-    const decision = decideStageMigration("H", hosts, new Set());
+    expect(decideStageMigration("H", hosts, new Set()).action).toBe("stranded");
+  });
+
+  it("hands off around the limb when a lit chain reaches the far side", () => {
+    const hosts = [at("H", orbit(0), false), ...[40, 80].map((degrees) => at(`r${degrees}`, orbit(degrees), true)), at("across", orbit(120), true)];
+    const decision = decideStageMigration("H", hosts, new Set(["r40", "r80"]));
     expect(decision.action).toBe("migrate");
     expect(decision.target?.name).toBe("across");
+    // The relays carry the cache without hosting a stage: taken as hosts, free as wire.
+    expect(decision.route?.hops).toEqual(["H", "r40", "r80", "across"]);
+    expect(decision.reason).toContain("via r40 → r80");
   });
 
   it("reports an unplaced stage as stranded rather than throwing", () => {
