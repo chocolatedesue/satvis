@@ -8,6 +8,7 @@ import {
   LabelGraphics,
   LabelStyle,
   PointGraphics,
+  PolylineDashMaterialProperty,
   PolylineGlowMaterialProperty,
   PolylineGraphics,
   VerticalOrigin,
@@ -154,7 +155,7 @@ export class ConstellationLinksLayer {
         this.#markedEntities.delete(name);
       }
     }
-    const wantedBonds = new Set(bonds.map(([a, b]) => `${[a, b].toSorted().join("|")}`));
+    const wantedBonds = new Map(bonds.map((bond) => [`${[bond.a, bond.b].toSorted().join("|")}`, bond]));
     for (const [key, entity] of this.#bondEntities) {
       if (!wantedBonds.has(key)) {
         this.#viewer.entities.remove(entity);
@@ -192,22 +193,25 @@ export class ConstellationLinksLayer {
       this.#markedEntities.set(member.name, halo);
       this.#viewer.entities.add(halo);
     }
-    for (const [a, b] of bonds) {
-      const key = `${[a, b].toSorted().join("|")}`;
+    for (const [key, bond] of wantedBonds) {
       if (this.#bondEntities.has(key)) {
         continue;
       }
+      // Solid for a bond whose members share a period — the distance envelope
+      // repeats every orbit and the pair never parts. Dashed for one whose
+      // members drift through their synodic cycle without bound. The line
+      // style is the stability verdict, so it reads without the panel.
       const entity = new Entity({
-        name: `Marked bond ${a} ↔ ${b}`,
+        name: `Marked bond ${bond.a} ↔ ${bond.b}${bond.samePeriod ? "" : " (drifting)"}`,
         polyline: new PolylineGraphics({
           positions: new CallbackProperty((time?: JulianDate) => {
             const at = time ?? this.#viewer.clock.currentTime;
-            const pa = this.#positionAt(a, at);
-            const pb = this.#positionAt(b, at);
+            const pa = this.#positionAt(bond.a, at);
+            const pb = this.#positionAt(bond.b, at);
             return pa && pb ? [pa, pb] : [];
           }, false),
           width: 3,
-          material: new PolylineGlowMaterialProperty({ glowPower: 0.3, color: hue }),
+          material: bond.samePeriod ? new PolylineGlowMaterialProperty({ glowPower: 0.3, color: hue }) : new PolylineDashMaterialProperty({ color: hue, dashLength: 18 }),
           // Straight chord between the two satellites, not draped on the globe.
           arcType: undefined,
         }),

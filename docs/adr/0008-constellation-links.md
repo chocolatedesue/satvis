@@ -64,6 +64,12 @@ turns it off.
 - Marked bonds ignore the topology rules but not the Earth: a bond behind the planet is
   hidden with everything else. Cross-shell bonds are therefore intermittently visible —
   which is itself the observation.
+- A marked pair **can** span orbits and still hold: equal altitude means equal period, and
+  the derivation measured a same-period cross-inclination pair whose per-orbit distance
+  maxima repeat unchanged (3620, 3617, 3621 … km) while a different-period pair wanders
+  without bound (5622 → 14507 → 5077 km). Bonds are drawn accordingly — solid for
+  same-period members, dashed for drifting ones — so the verdict is on the line, not in
+  the panel.
 - The `mark=` tokens name satellites by pattern coordinates rather than catalog names, so
   they survive the naming of individual element sets and carry no spaces or commas; a token
   whose satellite is not currently active contributes nothing and joins the moment its

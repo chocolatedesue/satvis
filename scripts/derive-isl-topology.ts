@@ -303,3 +303,42 @@ console.log("== rule: how many satellites per plane before the ring chord clears
   }
   console.log("(below this, intra-plane links pass through the Earth — study 1's 550 km S=6 ring is 100% occluded)");
 }
+
+console.log("");
+console.log("== study 6: can a cluster span orbits at all? marked-pair distance over 10 orbits ==");
+{
+  const at1200a: WalkerDeltaParams = { total: 24, planes: 4, phasing: 1, inclinationDeg: 70, altitudeKm: 1200, raanSpanDeg: 360 };
+  const at1200b: WalkerDeltaParams = { total: 24, planes: 4, phasing: 1, inclinationDeg: 97.6, altitudeKm: 1200, raanSpanDeg: 360 };
+  const at550: WalkerDeltaParams = { total: 40, planes: 4, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 };
+  const mark = (params: WalkerDeltaParams, plane: number, slot: number) => `W P${String(plane + 1).padStart(2, "0")}-${String(slot + 1).padStart(2, "0")}`;
+
+  // Same period, different plane AND different inclination: 70 deg vs 97.6 deg, both 1200 km.
+  const a = fly(at1200a, 10, 60);
+  const b = fly(at1200b, 10, 60);
+  const c = fly(at550, 10, 60);
+  const pairDistance = (x: Frame[], y: Frame[], xa: string, ya: string) =>
+    x.map((frame, at) => {
+      const pa = frame.get(xa);
+      const pb = y[at]?.get(ya);
+      return pa && pb ? chord(pa, pb) : NaN;
+    });
+
+  const samePeriod = pairDistance(a, b, mark(at1200a, 0, 0), mark(at1200b, 0, 0)).filter(Number.isFinite);
+  const drift = pairDistance(a, c, mark(at1200a, 0, 0), mark(at550, 0, 0)).filter(Number.isFinite);
+  const perOrbitMax = (series: number[], periodSamples: number) => {
+    const maxima: number[] = [];
+    for (let at = 0; at + periodSamples <= series.length; at += periodSamples) {
+      maxima.push(Math.max(...series.slice(at, at + periodSamples)));
+    }
+    return maxima;
+  };
+  const periodSamples = 96; // ~95.6 min at 60 s steps for the 550 km shell; the 1200 km pair shares the 110 min period, close enough for an envelope read
+  const sSame = stats(samePeriod);
+  const sDrift = stats(drift);
+  printHeader();
+  printRow({ label: "same period", links: 1, meanKm: sSame.mean, minKm: sSame.min, maxKm: sSame.max, cv: sSame.cv, occluded: NaN, churn: 0 });
+  printRow({ label: "diff period", links: 1, meanKm: sDrift.mean, minKm: sDrift.min, maxKm: sDrift.max, cv: sDrift.cv, occluded: NaN, churn: 1 });
+  console.log(`  same-period pair, per-orbit distance maxima: ${perOrbitMax(samePeriod, periodSamples).map((m) => m.toFixed(0)).join(", ")} km`);
+  console.log(`  diff-period pair, per-orbit distance maxima: ${perOrbitMax(drift, periodSamples).map((m) => m.toFixed(0)).join(", ")} km`);
+  console.log("(same period: the envelope repeats, the pair never parts. different period: the maxima wander without bound)");
+}

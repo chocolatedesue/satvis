@@ -101,7 +101,20 @@ export function parseMarkToken(token: string): { plane: number; slot: number; wi
  * satellite is not currently active simply contributes no member and no bond,
  * and joins in the moment its satellite is switched back on.
  */
-export function resolveMarks(tokens: readonly string[], satellites: readonly LinkEndpoint[]): { members: LinkEndpoint[]; bonds: Array<[string, string]> } {
+export interface MarkedBond {
+  a: string;
+  b: string;
+  /**
+   * Whether the two members share a period (equal altitude, so equal mean
+   * motion). Same-period bonds hold their phase forever and repeat their
+   * distance envelope every orbit; different-period bonds drift through their
+   * synodic cycle without bound. Drawn solid versus dashed, because that is
+   * the one distinction a viewer is asked to read off the cluster.
+   */
+  samePeriod: boolean;
+}
+
+export function resolveMarks(tokens: readonly string[], satellites: readonly LinkEndpoint[]): { members: LinkEndpoint[]; bonds: MarkedBond[] } {
   const byIdentity = new Map<string, LinkEndpoint>();
   for (const satellite of satellites) {
     byIdentity.set(`${satellite.wire}#${satellite.plane}#${satellite.slot}`, satellite);
@@ -117,10 +130,13 @@ export function resolveMarks(tokens: readonly string[], satellites: readonly Lin
       members.push(member);
     }
   }
-  const bonds: Array<[string, string]> = [];
+  const altitudeOf = new Map(members.map((member) => [member.name, decodeWalker(member.wire)?.altitudeKm]));
+  const bonds: MarkedBond[] = [];
   for (let a = 0; a < members.length; a += 1) {
     for (let b = a + 1; b < members.length; b += 1) {
-      bonds.push([members[a]!.name, members[b]!.name]);
+      const first = altitudeOf.get(members[a]!.name);
+      const second = altitudeOf.get(members[b]!.name);
+      bonds.push({ a: members[a]!.name, b: members[b]!.name, samePeriod: first !== undefined && first === second });
     }
   }
   return { members, bonds };

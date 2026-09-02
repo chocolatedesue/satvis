@@ -328,9 +328,15 @@ https://satvis.space/?walker=53:40/4/1@550,70:24/4/1@1200,97.6:24/4/1@1200&mark=
 
 Each member carries an **amber halo** and its slot label; every pair is **bonded in amber**,
 across planes and across shells, rules aside — because the point of marking is to test
-stability by eye exactly where the auto-topology deliberately says nothing. A column holds
-its geometry for as long as the constellation flies; a cross-shell cluster shears open as
-the periods slip, and the bonds show which is which from the first frame.
+stability by eye exactly where the auto-topology deliberately says nothing.
+
+Stability across orbits is real, and the bond's line style is the verdict: **solid** means
+both members share a period (equal altitude), so the pair never parts — the derivation
+measured a same-period cross-inclination pair whose per-orbit distance maxima repeat
+unchanged for ten straight orbits. **Dashed** means the periods differ, and the bond drifts
+through its synodic cycle without settling. A column holds its geometry for as long as the
+constellation flies; a cross-shell cluster shows one solid edge holding while the dashed
+edges shear away from it.
 
 **The "Stacked-shells demo"** puts all of it on screen at once: three shells (53° / 550 km,
 70° / 1200 km, 97.6° / 1200 km), the topology wired, one satellite per shell marked, and the

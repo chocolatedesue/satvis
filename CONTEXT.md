@@ -272,5 +272,8 @@ discussion; sharpen them here when they drift.
   because the point of marking is to test stability by eye exactly where the
   auto-topology deliberately says nothing. A same-slot column across one shell's
   planes flies as a rigid ladder; a same-slot satellite from each of three shells
-  shears open as the periods slip. Members that are not currently active
-  contribute nothing and join when switched on.
+  shears open as the periods slip. Bonds are styled by the verdict the
+  derivation measured: solid for members sharing a period (the distance
+  envelope repeats every orbit; the pair never parts), dashed for members whose
+  periods differ (the bond drifts without bound). Members that are not currently
+  active contribute nothing and join when switched on.
