@@ -135,6 +135,9 @@ export class CesiumController {
 
   #links: ConstellationLinksLayer | undefined;
 
+  /** The marked-cluster tokens to (re)apply whenever the links layer is built. */
+  #marks: string[] = [];
+
   /** The pipeline length the overlay is (or will be) built with. See setMigrationStages. */
   #migrationStages: number = DEFAULT_PIPELINE_STAGES;
 
@@ -673,11 +676,23 @@ export class CesiumController {
     if (on) {
       if (!this.#links) {
         this.#links = new ConstellationLinksLayer(this.viewer, this.sats);
+        this.#links.setMarks(this.#marks);
       }
       this.#links.start();
     } else {
       this.#links?.stop();
     }
+  }
+
+  /**
+   * Which satellites the marked cluster names, as `<plane>-<slot>@<wire>`
+   * tokens. Remembered beside the layer so a cluster named before the overlay
+   * is switched on is in force from its first frame, exactly like the
+   * migration stage count.
+   */
+  setMarks(marks: string[]): void {
+    this.#marks = [...marks];
+    this.#links?.setMarks(this.#marks);
   }
 
   /**

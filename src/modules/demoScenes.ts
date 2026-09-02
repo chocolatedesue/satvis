@@ -199,6 +199,12 @@ export function applyShellsScene(satStore: SatStore, cesiumStore: CesiumStore, c
   // their length while the inter-plane links breathe, and both move with the
   // shells against each other.
   satStore.links = true;
+  // The other half is a marked cluster - one same-slot satellite per shell,
+  // bonded pairwise in amber. The bonds span shells, which the auto-topology
+  // never draws, so the cluster makes the cross-shell shear directly
+  // watchable: two of its members share a period and hold together, the third
+  // laps them, and the amber triangle slowly shears open.
+  satStore.marks = shells.map((shell) => `1-1@${encodeWalker(shell)}`);
   cesiumStore.cameraMode = "Inertial";
   clock.setMultiplier(SHELLS_MULTIPLIER);
   clock.play();

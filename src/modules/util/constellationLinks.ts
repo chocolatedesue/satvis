@@ -60,6 +60,73 @@ export interface SatelliteLink {
 }
 
 /**
+ * One member of a marked cluster: the satellite's catalog name plus where it
+ * sits in its pattern.
+ */
+
+/**
+ * The marked-cluster selector grammar: `<plane>-<slot>@<wire>`, planes and
+ * slots 1-based to match the `P01-01` labels on screen. The wire is the
+ * pattern's own `i:T/P/F@alt` form, so a token names a satellite across every
+ * view and every share link without depending on pattern ordering:
+ * `1-1@53:40/4/1@550` is plane 1, slot 1 of the 40-satellite 550 km shell.
+ * Split on the first `@` - the plane-slot pair never contains one, the wire
+ * contains exactly one.
+ */
+export function parseMarkToken(token: string): { plane: number; slot: number; wire: string } | undefined {
+  const at = token.indexOf("@");
+  if (at <= 0) {
+    return undefined;
+  }
+  const pair = /^([0-9]+)-([0-9]+)$/.exec(token.slice(0, at));
+  if (!pair) {
+    return undefined;
+  }
+  const wire = token.slice(at + 1);
+  if (!decodeWalker(wire)) {
+    return undefined;
+  }
+  return { plane: Number(pair[1]) - 1, slot: Number(pair[2]) - 1, wire };
+}
+
+/**
+ * Resolve marked tokens against the active generated satellites, and bond every
+ * marked pair to every other.
+ *
+ * The bonds are the point of marking: the auto-topology links a satellite only
+ * to its own plane and its neighbouring planes, but a marked cluster is allowed
+ * to span shells - a same-slot satellite from each of three different shells,
+ * bonded pairwise, is exactly the small fleet whose slow shear a viewer wants
+ * to watch. Bonds are drawn between present members only; a token whose
+ * satellite is not currently active simply contributes no member and no bond,
+ * and joins in the moment its satellite is switched back on.
+ */
+export function resolveMarks(tokens: readonly string[], satellites: readonly LinkEndpoint[]): { members: LinkEndpoint[]; bonds: Array<[string, string]> } {
+  const byIdentity = new Map<string, LinkEndpoint>();
+  for (const satellite of satellites) {
+    byIdentity.set(`${satellite.wire}#${satellite.plane}#${satellite.slot}`, satellite);
+  }
+  const members: LinkEndpoint[] = [];
+  for (const token of tokens) {
+    const mark = parseMarkToken(token);
+    if (!mark) {
+      continue;
+    }
+    const member = byIdentity.get(`${mark.wire}#${mark.plane}#${mark.slot}`);
+    if (member) {
+      members.push(member);
+    }
+  }
+  const bonds: Array<[string, string]> = [];
+  for (let a = 0; a < members.length; a += 1) {
+    for (let b = a + 1; b < members.length; b += 1) {
+      bonds.push([members[a]!.name, members[b]!.name]);
+    }
+  }
+  return { members, bonds };
+}
+
+/**
  * The plane-and-slot identity of a generated satellite, read out of its name.
  *
  * `walkerDeltaRecords` names every satellite `<pattern prefix> P01-03`, and
@@ -140,7 +207,10 @@ export function constellationLinks(satellites: readonly LinkEndpoint[]): Satelli
       continue;
     }
     for (const [plane, slots] of planes) {
-      const active = slots.keys().toArray().toSorted((a, b) => a - b);
+      const active = slots
+        .keys()
+        .toArray()
+        .toSorted((a, b) => a - b);
       // The ring closes over the slots that are actually flying, so a partial
       // pattern still reads as a ring rather than as a ring with holes.
       if (active.length === 2) {

@@ -155,6 +155,15 @@ describe("demo scenes", () => {
       expect(s.satStore.links).toBe(true);
     });
 
+    test("marks one satellite per shell as the cross-shell sample", () => {
+      const { s } = applyShells();
+      expect(s.satStore.marks).toHaveLength(3);
+      for (const token of s.satStore.marks as string[]) {
+        expect(token).toMatch(/^1-1@/);
+        expect(s.satStore.walker).toContain(token.split("@").slice(1).join("@"));
+      }
+    });
+
     test("flies the low shell dense enough for its ring links to clear the Earth", () => {
       const { s } = applyShells();
       const low = (s.satStore.walker as string[]).map((wire) => decodeWalker(wire)!).find((shell) => shell.altitudeKm === 550);

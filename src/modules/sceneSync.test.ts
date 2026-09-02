@@ -118,6 +118,7 @@ function fakeTarget() {
     setMigration: () => {},
     setMigrationStages: () => {},
     setLinks: () => {},
+    setMarks: () => {},
   };
 
   return { target, calls, catalog, unavailableStarMaps };

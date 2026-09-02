@@ -1,9 +1,23 @@
-import { CallbackProperty, Cartesian3, Color, Entity, JulianDate, PolylineGlowMaterialProperty, PolylineGraphics } from "@cesium/engine";
+import {
+  CallbackPositionProperty,
+  CallbackProperty,
+  Cartesian3,
+  Color,
+  Entity,
+  JulianDate,
+  LabelGraphics,
+  LabelStyle,
+  PointGraphics,
+  PolylineGlowMaterialProperty,
+  PolylineGraphics,
+  VerticalOrigin,
+} from "@cesium/engine";
 import type { Viewer } from "@cesium/widgets";
 
 import type { SatelliteManager } from "./SatelliteManager";
-import { constellationLinks, parseWalkerSatellite, type SatelliteLink } from "./util/constellationLinks";
+import { constellationLinks, parseWalkerSatellite, resolveMarks, type LinkEndpoint, type SatelliteLink } from "./util/constellationLinks";
 import { hasLineOfSight } from "./util/migration";
+import { planeSlotOf } from "./util/walkerDelta";
 
 /**
  * The stable-constellation link overlay: every generated Walker satellite on
@@ -29,6 +43,12 @@ import { hasLineOfSight } from "./util/migration";
  * CV ≈ 0.001), the inter-plane links breathe with the plane geometry (CV
  * ≈ 0.14–0.27) — watching them swell and slacken as planes cross is watching
  * why the same-slot pairing is the design that holds.
+ *
+ * On top of the auto-topology, a **marked cluster** (`setMarks`) names a small
+ * fleet of satellites to watch as a unit: each member carries an amber halo and
+ * its plane-slot label, and every marked pair is bonded with an amber link —
+ * including pairs the topology rules would never link, which is what makes a
+ * cross-shell cluster's slow shear directly observable.
  */
 export class ConstellationLinksLayer {
   readonly #viewer: Viewer;
@@ -44,6 +64,15 @@ export class ConstellationLinksLayer {
   /** Signature of the active generated-satellite set the graph was built from. */
   #signature = "";
 
+  /** Marked-cluster tokens, resolved against the active set on every rebuild. */
+  #marks: string[] = [];
+
+  /** Halo + label per marked member, keyed by satellite name. */
+  readonly #markedEntities = new Map<string, Entity>();
+
+  /** Amber bond per marked pair, keyed by the undirected endpoint pair. */
+  readonly #bondEntities = new Map<string, Entity>();
+
   #removeTick: (() => void) | undefined;
 
   #lastCheckMs = 0;
@@ -54,6 +83,8 @@ export class ConstellationLinksLayer {
   static readonly INTRA_COLOR = Color.fromCssColorString("#34d399");
 
   static readonly INTER_COLOR = Color.fromCssColorString("#a78bfa");
+
+  static readonly MARK_COLOR = Color.fromCssColorString("#fbbf24");
 
   constructor(viewer: Viewer, sats: SatelliteManager) {
     this.#viewer = viewer;
@@ -77,8 +108,113 @@ export class ConstellationLinksLayer {
     }
     this.#entities.clear();
     this.#visible.clear();
+    this.#clearMarks();
     this.#signature = "";
     this.#viewer.scene.requestRender();
+  }
+
+  /** Restyle the marked cluster. A new token list replaces the old wholesale. */
+  setMarks(marks: string[]): void {
+    this.#marks = [...marks];
+    if (this.#removeTick) {
+      this.#rebuildMarks();
+      this.#viewer.scene.requestRender();
+    }
+  }
+
+  #clearMarks(): void {
+    for (const entity of this.#markedEntities.values()) {
+      this.#viewer.entities.remove(entity);
+    }
+    for (const entity of this.#bondEntities.values()) {
+      this.#viewer.entities.remove(entity);
+    }
+    this.#markedEntities.clear();
+    this.#bondEntities.clear();
+  }
+
+  /**
+   * Rebuild the marked cluster's entities from the current tokens and the
+   * active generated set. Members that are not currently flying contribute
+   * nothing and join later, when the graph next rebuilds with them present.
+   */
+  #rebuildMarks(): void {
+    const endpoints: LinkEndpoint[] = [];
+    for (const sat of this.#sats.activeSatellites) {
+      const parsed = parseWalkerSatellite(sat.props.name);
+      if (parsed) {
+        endpoints.push(parsed);
+      }
+    }
+    const { members, bonds } = resolveMarks(this.#marks, endpoints);
+    const memberNames = new Set(members.map((member) => member.name));
+    for (const [name, entity] of this.#markedEntities) {
+      if (!memberNames.has(name)) {
+        this.#viewer.entities.remove(entity);
+        this.#markedEntities.delete(name);
+      }
+    }
+    const wantedBonds = new Set(bonds.map(([a, b]) => `${[a, b].toSorted().join("|")}`));
+    for (const [key, entity] of this.#bondEntities) {
+      if (!wantedBonds.has(key)) {
+        this.#viewer.entities.remove(entity);
+        this.#bondEntities.delete(key);
+        this.#visible.delete(key);
+      }
+    }
+    const hue = ConstellationLinksLayer.MARK_COLOR;
+    for (const member of members) {
+      if (this.#markedEntities.has(member.name)) {
+        continue;
+      }
+      // A ring rather than a dot: the satellite's own point stays readable
+      // inside it, and the slot label is the handle a viewer tracks.
+      const halo = new Entity({
+        name: `Marked satellite ${member.name}`,
+        position: new CallbackPositionProperty((time?: JulianDate) => this.#positionAt(member.name, time ?? this.#viewer.clock.currentTime) ?? undefined, false),
+        point: new PointGraphics({
+          pixelSize: 22,
+          color: Color.TRANSPARENT,
+          outlineColor: hue,
+          outlineWidth: 3,
+        }),
+        label: new LabelGraphics({
+          text: planeSlotOf(member.name) ?? member.name,
+          font: "13px sans-serif",
+          fillColor: hue,
+          style: LabelStyle.FILL_AND_OUTLINE,
+          outlineColor: Color.BLACK,
+          outlineWidth: 3,
+          verticalOrigin: VerticalOrigin.BOTTOM,
+          pixelOffset: new Cartesian3(0, -18, 0),
+        }),
+      });
+      this.#markedEntities.set(member.name, halo);
+      this.#viewer.entities.add(halo);
+    }
+    for (const [a, b] of bonds) {
+      const key = `${[a, b].toSorted().join("|")}`;
+      if (this.#bondEntities.has(key)) {
+        continue;
+      }
+      const entity = new Entity({
+        name: `Marked bond ${a} ↔ ${b}`,
+        polyline: new PolylineGraphics({
+          positions: new CallbackProperty((time?: JulianDate) => {
+            const at = time ?? this.#viewer.clock.currentTime;
+            const pa = this.#positionAt(a, at);
+            const pb = this.#positionAt(b, at);
+            return pa && pb ? [pa, pb] : [];
+          }, false),
+          width: 3,
+          material: new PolylineGlowMaterialProperty({ glowPower: 0.3, color: hue }),
+          // Straight chord between the two satellites, not draped on the globe.
+          arcType: undefined,
+        }),
+      });
+      this.#bondEntities.set(key, entity);
+      this.#viewer.entities.add(entity);
+    }
   }
 
   #positionAt(name: string, time: JulianDate): Cartesian3 | undefined {
@@ -148,6 +284,7 @@ export class ConstellationLinksLayer {
       this.#entities.set(key, entity);
       this.#viewer.entities.add(entity);
     }
+    this.#rebuildMarks();
     // Occlusion state starts unknown: the next pass settles it, and until then
     // the CallbackProperty above still draws the chord.
     this.#checkOcclusion();
@@ -164,6 +301,12 @@ export class ConstellationLinksLayer {
       const seen = a !== undefined && b !== undefined && hasLineOfSight(a, b, 0);
       this.#visible.set(key, seen);
       entity.show = seen;
+    }
+    for (const [key, entity] of this.#bondEntities) {
+      const endpoints = key.split("|");
+      const a = this.#positionAt(endpoints[0]!, time);
+      const b = this.#positionAt(endpoints[1]!, time);
+      entity.show = a !== undefined && b !== undefined && hasLineOfSight(a, b, 0);
     }
   }
 }

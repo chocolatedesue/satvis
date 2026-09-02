@@ -72,10 +72,18 @@ export const useSatStore = defineStore(
     // The stable-constellation link overlay: every generated Walker satellite
     // wired into the topology scripts/derive-isl-topology.mjs derived — rings
     // inside each plane, same-slot links between same-rotating planes, the
-    // Walker Star seam dropped, nothing across shells. URL-synced like `mig`
-    // because a shared link is the whole scene: which shells fly and how they
-    // are wired belong together.
-    const links = ref(false);
+    // Walker Star seam dropped, nothing across shells. On by default: a
+    // constellation without its topology is just points, and the whole reason
+    // the patterns are drawn is to read how they hold together. `links=false`
+    // in the url turns it off.
+    const links = ref(true);
+
+    // Marked satellites, as `<plane>-<slot>@<wire>` tokens (see
+    // parseMarkToken). A marked cluster is the small fleet a viewer wants to
+    // watch as a unit: each member gets a halo and its slot label, and every
+    // pair is bonded with an amber link - including pairs the auto-topology
+    // would never link, which is what makes a cross-shell cluster observable.
+    const marks = ref<string[]>([]);
 
     // Activation is one invariant cluster — see CONTEXT.md. Held privately and
     // exposed read-only so every writer goes through setActivation and the
@@ -189,6 +197,7 @@ export const useSatStore = defineStore(
       walker,
       migration,
       links,
+      marks,
       migrationStages,
       enabledTags,
       enabledSatellites,
@@ -219,6 +228,7 @@ export const useSatStore = defineStore(
         { name: "migration", url: "mig", kind: boolean() },
         { name: "migrationStages", url: "migst", kind: numberChoice(PIPELINE_STAGE_CHOICES) },
         { name: "links", url: "links", kind: boolean() },
+        { name: "marks", url: "mark", kind: stringList() },
       ],
       // Guarded keys are read-only, so the url goes through the same actions as
       // every other writer; the triple is applied in one call to keep it

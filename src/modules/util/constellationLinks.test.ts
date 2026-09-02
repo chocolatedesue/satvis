@@ -4,7 +4,7 @@
 // never linked.
 import { describe, expect, test } from "vitest";
 
-import { constellationLinks, parseWalkerSatellite, wrapPlanesAgree, type LinkEndpoint } from "./constellationLinks";
+import { constellationLinks, parseMarkToken, parseWalkerSatellite, resolveMarks, wrapPlanesAgree, type LinkEndpoint } from "./constellationLinks";
 import { walkerNamePrefix, type WalkerDeltaParams } from "./walkerDelta";
 
 const DELTA: WalkerDeltaParams = { total: 24, planes: 4, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 };
@@ -45,6 +45,44 @@ describe("wrapPlanesAgree", () => {
 
   test("the Walker Star seam is counter-rotating and dropped", () => {
     expect(wrapPlanesAgree(STAR)).toBe(false);
+  });
+});
+
+describe("parseMarkToken", () => {
+  test("reads plane, slot and wire, 1-based", () => {
+    expect(parseMarkToken("1-1@53:40/4/1@550")).toEqual({ plane: 0, slot: 0, wire: "53:40/4/1@550" });
+    expect(parseMarkToken("4-6@53:24/4/1@550")).toEqual({ plane: 3, slot: 5, wire: "53:24/4/1@550" });
+  });
+
+  test("undefined for a malformed pair or an unknown pattern", () => {
+    expect(parseMarkToken("1@53:24/4/1@550")).toBeUndefined();
+    expect(parseMarkToken("a-b@53:24/4/1@550")).toBeUndefined();
+    expect(parseMarkToken("1-1@nonsense")).toBeUndefined();
+    expect(parseMarkToken("@53:24/4/1@550")).toBeUndefined();
+  });
+});
+
+describe("resolveMarks", () => {
+  test("resolves members by pattern, plane and slot, and bonds every pair", () => {
+    const fleetMarks = fleet(DELTA);
+    const tokens = ["1-1@53:24/4/1@550", "2-1@53:24/4/1@550", "3-1@53:24/4/1@550"];
+    const { members, bonds } = resolveMarks(tokens, fleetMarks);
+    expect(members).toHaveLength(3);
+    // Three members, pairwise bonded: 3 choose 2.
+    expect(bonds).toHaveLength(3);
+  });
+
+  test("a token whose satellite is not active contributes neither member nor bond", () => {
+    const tokens = ["1-1@53:24/4/1@550", "99-99@53:24/4/1@550"];
+    const { members, bonds } = resolveMarks(tokens, fleet(DELTA));
+    expect(members).toHaveLength(1);
+    expect(bonds).toHaveLength(0);
+  });
+
+  test("cross-shell tokens bond across patterns", () => {
+    const higher: WalkerDeltaParams = { ...DELTA, altitudeKm: 1200 };
+    const { bonds } = resolveMarks(["1-1@53:24/4/1@550", "1-1@53:24/4/1@1200"], [...fleet(DELTA), ...fleet(higher)]);
+    expect(bonds).toHaveLength(1);
   });
 });
 

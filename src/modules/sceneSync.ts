@@ -98,6 +98,8 @@ export interface SceneTarget {
   setMigrationStages(count: number): void;
   /** Turn the stable-constellation link overlay on or off. */
   setLinks(on: boolean): void;
+  /** Name the marked cluster, as `<plane>-<slot>@<wire>` tokens. */
+  setMarks(marks: string[]): void;
 }
 
 export function startSceneSync(cc: SceneTarget): void {
@@ -478,6 +480,14 @@ export function startSceneSync(cc: SceneTarget): void {
     () => satStore.links,
     (on) => {
       cc.setLinks(on);
+    },
+    { immediate: true },
+  );
+
+  watch(
+    () => satStore.marks,
+    (marks) => {
+      cc.setMarks([...marks]);
     },
     { immediate: true },
   );

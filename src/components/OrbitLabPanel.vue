@@ -65,6 +65,17 @@
       hidden rather than drawn through it, and the Walker Star seam is never wired — its endpoints sweep past each other at twice orbital rate.
     </p>
 
+    <div class="toolbarTitle">Marked cluster</div>
+    <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!walkerActive" @click="markColumn">Mark one column</button>
+    <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!walkerActive" @click="markCrossShell">Mark one per shell</button>
+    <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!marks.length" @click="clearMarks">Clear marks</button>
+    <p class="orbitLab__note">
+      Marks a small fleet to watch as a unit: each member carries an <span style="color: #fbbf24">amber halo</span> and its slot label, and every pair is bonded in amber — across
+      planes and across shells, rules aside, because the point of a marked cluster is to test stability by eye. <strong>Mark one column</strong> picks the same slot in every plane
+      of the first pattern: the bonds hold their geometry (along-track offsets are exact) and the cluster flies as a rigid ladder. <strong>Mark one per shell</strong>
+      spans the shells: same period holds, different period shears, and the bonds show which is which.
+    </p>
+
     <div class="toolbarTitle">KV-cache live migration</div>
     <button type="button" class="orbitLab__button orbitLab__button--wide" @click="migrationDemo">KV-cache migration demo</button>
     <button type="button" class="orbitLab__button orbitLab__button--wide" @click="walker25Demo">25x4 fleet migration demo</button>
@@ -432,7 +443,7 @@ const STRIP_ORBITS = 2;
 
 const cc = useController();
 const satStore = useSatStore();
-const { pointColorMode, pointSize, panelAxis, walker, migration, migrationStages, links } = storeToRefs(satStore);
+const { pointColorMode, pointSize, panelAxis, walker, migration, migrationStages, links, marks } = storeToRefs(satStore);
 
 // The clock is live viewer state rather than store state (see useViewerClock), and
 // this is the seam the clock deck writes it through — so the demo writes it the same
@@ -698,6 +709,34 @@ function shellsDemo(): void {
 /** Leave the records in the catalog and stop drawing them — the tag is the switch. */
 function clear(): void {
   satStore.setActivation({ enabledTags: satStore.enabledTags.filter((tag) => !isWalkerTag(tag)) });
+}
+
+/**
+ * Mark the same slot in every plane of the first pattern.
+ *
+ * The slot is the middle one, so the marked ladder sits away from the ring's
+ * seam-ish slot-1 edge and the halos read as one column. The bonds between
+ * column members are exactly the links the auto-topology already draws - the
+ * point here is the halo making the column followable by eye.
+ */
+function markColumn(): void {
+  const active = walker.value[0];
+  const params = active ? decodeWalker(active) : undefined;
+  if (!params) {
+    return;
+  }
+  const slotsPerPlane = Math.round(params.total / params.planes);
+  const slot = Math.floor(slotsPerPlane / 2) + 1;
+  satStore.marks = Array.from({ length: params.planes }, (_, plane) => `${plane + 1}-${slot}@${active}`);
+}
+
+/** Mark one satellite per pattern, same slot each: the cross-shell sample. */
+function markCrossShell(): void {
+  satStore.marks = walker.value.map((wire) => `1-1@${wire}`);
+}
+
+function clearMarks(): void {
+  satStore.marks = [];
 }
 
 interface Census {
