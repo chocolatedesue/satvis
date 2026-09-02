@@ -15,7 +15,8 @@ workspace package). One `pnpm install` at the root covers both.
   compass aiming (0004), surface models (0005), SATCAT enrichment (0006), the
   orbit lab — Walker generation and ν/κ illumination (0007), the constellation
   links and the marked cluster (0008), multi-shell layouts — which second shell
-  holds against the first (0009).
+  holds against the first (0009), stable clusters — the partition orbit space
+  already has, and why it is not a clustering problem (0010).
 - **`docs/manual-verification.md`** — the checks jsdom cannot run. Rerun the ones
   covering code you change, and record what they returned.
 - **`worker/src/gp/types.ts`** — the group and satellite-table config schema,

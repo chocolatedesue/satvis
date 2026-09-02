@@ -302,6 +302,24 @@ discussion; sharpen them here when they drift.
   short repeat cycles (2:1, 3:2) are unavailable to a mid-inclination reference,
   and the reason the price of a lock is inclination — a companion node-locked to
   53° / 550 km flies at 34.5° by the time it reaches 1200 km.
+- **Stable cluster**: a set of orbits whose relative configuration returns —
+  all on one node-rate curve, all closing one shared cycle. Both conditions are
+  _equivalence relations_, so orbit space is already partitioned and finding a
+  cluster is a quotient rather than a search: no k to choose, no centroid, no
+  distance (`findStableClusters`). What needs an algorithm is tolerance, which
+  is not transitive — so clusters under tolerance overlap rather than partition,
+  and the output is the **maximal** ones, on a Pareto front of size against
+  cycle. A subset that returns _sooner_ than the cluster containing it is a
+  different offer, not a worse one, and is kept.
+- **Shell family**: the same statement written forwards — fix the reference's
+  revolutions per cycle, and every other whole number of revolutions inside the
+  altitude band names one more node-locked shell (`shellFamily`). Every pair
+  repeats by construction, so the cycle does not grow with the member count the
+  way pairwise ratios' least common multiple would. About one more shell per six
+  hours of cycle at 550 km; the lever is the reference inclination, since a
+  near-polar reference's co-precession ceiling is 9407 km against 1632 km at 53°
+  and its ten shells fit inside a 3° inclination spread
+  (`docs/adr/0010-stable-clusters.md`).
 - **Repeat cycle**: how long a `repeating` pair takes to return to the same
   relative configuration — `p` orbits of one shell against `q` of the other.
   Every cross-shell range and every contact window repeats on it, so a schedule

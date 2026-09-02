@@ -7,16 +7,24 @@ import { describe, expect, test } from "vitest";
 
 import {
   bestResonance,
+  commonRepeatCycle,
   configurationReturns,
   coPrecessingCeilingKm,
   coPrecessingInclinationDeg,
+  familyCycleHours,
+  findStableClusters,
   MAX_REPEAT_REVOLUTIONS,
   minSatellitesPerRing,
+  NODE_LOCK_TOLERANCE_DEG_PER_DAY,
+  nodeLockedGroups,
   resonantCompanion,
   searchStableShellLayouts,
+  shellFamily,
   shellPairLayout,
   shellRates,
+  type FamilyShell,
   type ShellOrbit,
+  type StableCluster,
 } from "./shellLayout";
 import { nodalPrecessionDegPerDay, SUN_DEG_PER_DAY, sunSyncInclinationDeg } from "./sunSynchronous";
 import { meanMotionRevPerDay, walkerPatternAt, type WalkerDeltaParams } from "./walkerDelta";
@@ -283,5 +291,170 @@ describe("walkerPatternAt", () => {
 
   test("undefined when the result would not be a buildable pattern", () => {
     expect(walkerPatternAt(REFERENCE_PATTERN, { altitudeKm: 100, inclinationDeg: 34 })).toBeUndefined();
+  });
+});
+
+describe("nodeLockedGroups", () => {
+  const at = (id: string, altitudeKm: number, inclinationDeg: number) => ({ id, orbit: { altitudeKm, inclinationDeg } });
+
+  test("a co-precessing family is one group; a shell picked for coverage is its own", () => {
+    const companion = resonantCompanion(STARLINK_SHELL, 8, 7) as NonNullable<ReturnType<typeof resonantCompanion>>;
+    const groups = nodeLockedGroups([at("reference", 550, 53), at("companion", companion.altitudeKm, companion.inclinationDeg), at("control", 1200, 97.6)]);
+    expect(groups).toHaveLength(2);
+    const sizes = groups.map((group) => group.length).toSorted();
+    expect(sizes).toEqual([1, 2]);
+    expect(
+      groups
+        .find((group) => group.length === 2)
+        ?.map((member) => member.id)
+        .toSorted(),
+    ).toEqual(["companion", "reference"]);
+  });
+
+  test("tolerance is not transitive, so the groups overlap rather than partition", () => {
+    // Three inclinations whose node rates step by rather less than the tolerance:
+    // the middle one belongs to both maximal groups, and neither is *the* cluster.
+    const rateOf = (inclinationDeg: number) => shellRates({ altitudeKm: 550, inclinationDeg }).nodeRateDegPerDay;
+    const step = NODE_LOCK_TOLERANCE_DEG_PER_DAY * 0.6;
+    const middle = 53;
+    const low = middle + step / Math.abs(rateOf(53) - rateOf(54));
+    const high = middle - step / Math.abs(rateOf(53) - rateOf(54));
+    const groups = nodeLockedGroups([at("a", 550, low), at("b", 550, middle), at("c", 550, high)]);
+    expect(groups).toHaveLength(2);
+    expect(groups.every((group) => group.some((member) => member.id === "b"))).toBe(true);
+  });
+
+  test("an empty fleet has no groups, and a single orbit is its own", () => {
+    expect(nodeLockedGroups([])).toEqual([]);
+    expect(nodeLockedGroups([at("only", 550, 53)])).toHaveLength(1);
+  });
+});
+
+describe("commonRepeatCycle", () => {
+  test("a designed pair closes the cycle the pair analysis quotes", () => {
+    const companion = resonantCompanion(STARLINK_SHELL, 8, 7) as NonNullable<ReturnType<typeof resonantCompanion>>;
+    const cycle = commonRepeatCycle([STARLINK_SHELL, { altitudeKm: companion.altitudeKm, inclinationDeg: companion.inclinationDeg }]);
+    expect(cycle).toBeDefined();
+    expect(cycle?.cycleHours).toBeCloseTo(12.75, 1);
+    expect(cycle?.revolutions.toSorted()).toEqual([7, 8]);
+    expect(cycle?.slipDegPerCycle).toBeLessThan(1e-6);
+  });
+
+  test("one orbit closes its own period, and no orbits close nothing", () => {
+    expect(commonRepeatCycle([STARLINK_SHELL])?.revolutions).toEqual([1]);
+    expect(commonRepeatCycle([])).toBeUndefined();
+  });
+
+  test("a pair whose cycle is longer than the budget reports none", () => {
+    const companion = resonantCompanion(STARLINK_SHELL, 8, 7) as NonNullable<ReturnType<typeof resonantCompanion>>;
+    expect(commonRepeatCycle([STARLINK_SHELL, companion], 6)).toBeUndefined();
+  });
+});
+
+describe("shellFamily", () => {
+  test("every member is node-locked to the reference and closes the same cycle", () => {
+    const shells = shellFamily(STARLINK_SHELL, { cycleRevolutions: 30 });
+    expect(shells.length).toBeGreaterThanOrEqual(7);
+    const cycleDays = (shells[0] as (typeof shells)[number]).resonance.repeatHours / 24;
+    for (const shell of shells) {
+      const rates = shellRates(shell);
+      expect(Math.abs(rates.nodeRateDegPerDay - shellRates(STARLINK_SHELL).nodeRateDegPerDay)).toBeLessThan(1e-9);
+      const turns = (rates.alongTrackRateDegPerDay * cycleDays) / 360;
+      expect(Math.abs(turns - Math.round(turns))).toBeLessThan(1e-9);
+    }
+  });
+
+  test("the reference is a member of its own family", () => {
+    const shells = shellFamily(STARLINK_SHELL, { cycleRevolutions: 15 });
+    expect(shells.some((shell) => shell.altitudeKm === 550 && shell.revolutions === 15)).toBe(true);
+  });
+
+  test("a longer cycle holds more shells, and pays for them in inclination", () => {
+    const short = shellFamily(STARLINK_SHELL, { cycleRevolutions: 15 });
+    const long = shellFamily(STARLINK_SHELL, { cycleRevolutions: 45 });
+    expect(long.length).toBeGreaterThan(short.length);
+    const spread = (shells: typeof long) => Math.max(...shells.map((s) => s.inclinationDeg)) - Math.min(...shells.map((s) => s.inclinationDeg));
+    expect(spread(long)).toBeGreaterThan(spread(short));
+  });
+
+  test("a near-polar reference holds more shells for less inclination, because its ceiling runs away", () => {
+    const polar: ShellOrbit = { altitudeKm: 780, inclinationDeg: 86.4 };
+    const mid = shellFamily(STARLINK_SHELL, { cycleRevolutions: 30 });
+    const near = shellFamily(polar, { cycleRevolutions: 30 });
+    const spread = (shells: FamilyShell[]) => Math.max(...shells.map((s) => s.inclinationDeg)) - Math.min(...shells.map((s) => s.inclinationDeg));
+    expect(near.length).toBeGreaterThan(mid.length);
+    expect(spread(near)).toBeLessThan(spread(mid) / 4);
+    expect(coPrecessingCeilingKm(polar)).toBeGreaterThan(coPrecessingCeilingKm(STARLINK_SHELL) * 4);
+  });
+
+  test("nonsense revolution counts build nothing", () => {
+    expect(shellFamily(STARLINK_SHELL, { cycleRevolutions: 0 })).toEqual([]);
+    expect(shellFamily(STARLINK_SHELL, { cycleRevolutions: 2.5 })).toEqual([]);
+  });
+
+  test("a family whose members share a factor comes back sooner than its stated cycle", () => {
+    const shells = shellFamily(STARLINK_SHELL, { cycleRevolutions: 30 });
+    const stated = (shells[0] as FamilyShell).resonance.repeatHours;
+    expect(familyCycleHours(shells)).toBeLessThanOrEqual(stated);
+    // 25…31 are coprime as a set, so this family really does need its whole cycle.
+    expect(familyCycleHours(shells)).toBeCloseTo(stated, 6);
+    // Two shells three turns apart share a factor of nothing; 14 and 16 share 2.
+    const even = shells.filter((shell) => shell.revolutions % 2 === 0);
+    expect(familyCycleHours(even)).toBeCloseTo(stated / 2, 6);
+  });
+});
+
+describe("findStableClusters", () => {
+  test("finds the designed family as one cluster and leaves the outsider out", () => {
+    const family = shellFamily(STARLINK_SHELL, { cycleRevolutions: 15 });
+    const members = [
+      ...family.map((shell, at) => ({ id: `k${shell.revolutions}`, orbit: { altitudeKm: shell.altitudeKm, inclinationDeg: shell.inclinationDeg }, at })),
+      { id: "outsider", orbit: { altitudeKm: 1200, inclinationDeg: 97.6 }, at: -1 },
+    ].map(({ id, orbit }) => ({ id, orbit }));
+    const clusters = findStableClusters(members, { maxCycleHours: 30 });
+    expect(clusters.length).toBeGreaterThanOrEqual(1);
+    const best = clusters[0] as StableCluster;
+    expect(best.members).toHaveLength(family.length);
+    expect(best.members).not.toContain("outsider");
+    expect(best.verdict).toBe("repeating");
+    expect(best.cycleHours).toBeCloseTo(23.9, 0);
+    expect(best.nodeSpreadDegPerDay).toBeLessThan(1e-9);
+  });
+
+  test("one shell flown as two patterns is rigid, not merely repeating", () => {
+    const clusters = findStableClusters([
+      { id: "dawn", orbit: { altitudeKm: 1200, inclinationDeg: 97.6 } },
+      { id: "dusk", orbit: { altitudeKm: 1200, inclinationDeg: 97.6 } },
+    ]);
+    expect(clusters[0]?.verdict).toBe("rigid");
+    expect(clusters[0]?.members.toSorted()).toEqual(["dawn", "dusk"]);
+  });
+
+  test("shells picked for coverage alone form no cluster at all", () => {
+    const clusters = findStableClusters([
+      { id: "low", orbit: { altitudeKm: 550, inclinationDeg: 53 } },
+      { id: "high", orbit: { altitudeKm: 1200, inclinationDeg: 97.6 } },
+      { id: "mid", orbit: { altitudeKm: 1200, inclinationDeg: 70 } },
+    ]);
+    expect(clusters).toEqual([]);
+  });
+
+  test("the stacked-shells demo's two same-period shells are node-locked to nothing and cluster with nobody", () => {
+    // Equal periods, different inclinations: their phases hold and their planes
+    // shear, which is exactly the case a cluster must not swallow.
+    const clusters = findStableClusters([
+      { id: "seventy", orbit: { altitudeKm: 1200, inclinationDeg: 70 } },
+      { id: "polar", orbit: { altitudeKm: 1200, inclinationDeg: 97.6 } },
+    ]);
+    expect(clusters).toEqual([]);
+  });
+
+  test("minMembers and the cycle budget both shrink what is reported", () => {
+    const family = shellFamily(STARLINK_SHELL, { cycleRevolutions: 15 }).map((shell) => ({
+      id: `k${shell.revolutions}`,
+      orbit: { altitudeKm: shell.altitudeKm, inclinationDeg: shell.inclinationDeg },
+    }));
+    expect(findStableClusters(family, { maxCycleHours: 30, minMembers: 4 })).toEqual([]);
+    expect(findStableClusters(family, { maxCycleHours: 12 })).toEqual([]);
   });
 });

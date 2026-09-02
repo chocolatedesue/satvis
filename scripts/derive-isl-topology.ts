@@ -366,9 +366,13 @@ console.log("== study 6: can a cluster span orbits at all? marked-pair distance 
 import {
   coPrecessingCeilingKm,
   coPrecessingInclinationDeg,
+  familyCycleHours,
+  findStableClusters,
   minSatellitesPerRing,
+  nodeLockedGroups,
   resonantCompanion,
   searchStableShellLayouts,
+  shellFamily,
   shellPairLayout,
   shellRates,
   type ShellOrbit,
@@ -690,4 +694,95 @@ console.log("== study 10: what a co-precessing companion costs — inclination a
     );
   }
   console.log("(the price of the lock is inclination: a companion at 1200 km has to fly at 34.5°, which is coverage a 53° shell already had)");
+}
+
+// ---------------------------------------------------------------------------
+// Studies 11-12 — clusters: how many shells hold at once, and finding them
+//
+// Studies 7-10 fixed one companion against one reference. The structural
+// question underneath is how many shells can hold *simultaneously*, and the
+// answer falls out of the two invariants being equivalence relations: put every
+// shell on one node-rate curve and give them one shared cycle, and every pair
+// among them repeats without anyone checking pairs. What is left to measure is
+// the price — how the count trades against the cycle and against inclination —
+// and whether the finder recovers a family it was not told about.
+// ---------------------------------------------------------------------------
+
+console.log("");
+console.log("== study 11: how many shells hold at once, and what they cost ==");
+{
+  console.log(["reference", "cycle rev", "shells", "cycle h", "inclination span", "adjacent Δh", "worst slip"].map((h) => h.padEnd(18)).join(""));
+  const references: Array<[string, ShellOrbit]> = [
+    ["53° / 550 km", { altitudeKm: 550, inclinationDeg: 53 }],
+    ["70° / 550 km", { altitudeKm: 550, inclinationDeg: 70 }],
+    ["86.4° / 780 km", { altitudeKm: 780, inclinationDeg: 86.4 }],
+  ];
+  for (const [label, reference] of references) {
+    const perDay = shellRates(reference).alongTrackRateDegPerDay / 360;
+    for (const days of [1, 2, 3]) {
+      const shells = shellFamily(reference, { cycleRevolutions: Math.round(perDay * days) });
+      if (shells.length === 0) {
+        continue;
+      }
+      const cycleDays = familyCycleHours(shells) / 24;
+      const inclinations = shells.map((shell) => shell.inclinationDeg);
+      const altitudes = shells.map((shell) => shell.altitudeKm).toSorted((a, b) => a - b);
+      const gaps = altitudes.slice(1).map((altitude, at) => altitude - (altitudes[at] as number));
+      let worstSlip = 0;
+      for (const shell of shells) {
+        const turns = (shellRates(shell).alongTrackRateDegPerDay * cycleDays) / 360;
+        worstSlip = Math.max(worstSlip, Math.abs(turns - Math.round(turns)) * 360);
+      }
+      console.log(
+        [
+          days === 1 ? label : "",
+          String(Math.round(perDay * days)),
+          String(shells.length),
+          (cycleDays * 24).toFixed(1),
+          `${Math.min(...inclinations).toFixed(1)}°–${Math.max(...inclinations).toFixed(1)}°`,
+          `${Math.min(...gaps).toFixed(0)}–${Math.max(...gaps).toFixed(0)} km`,
+          `${worstSlip.toExponential(1)}°`,
+        ]
+          .map((cell) => cell.padEnd(18))
+          .join(""),
+      );
+    }
+  }
+  console.log("(one more shell per ~6 h of cycle at 550 km — the band fixes a period ratio, and the shells are the integers inside it)");
+  console.log(
+    `(the lever is the reference inclination: ceiling ${coPrecessingCeilingKm({ altitudeKm: 550, inclinationDeg: 53 }).toFixed(0)} km at 53°, ${coPrecessingCeilingKm({ altitudeKm: 780, inclinationDeg: 86.4 }).toFixed(0)} km at 86.4° — matching a node rate near zero costs almost no inclination)`,
+  );
+}
+
+console.log("");
+console.log("== study 12: hand the finder a mixed fleet and see what it calls a cluster ==");
+{
+  const reference: ShellOrbit = { altitudeKm: 550, inclinationDeg: 53 };
+  const family = shellFamily(reference, { cycleRevolutions: 30 });
+  const fleet = [
+    ...family.map((shell) => ({ id: `family k=${shell.revolutions}`, orbit: { altitudeKm: shell.altitudeKm, inclinationDeg: shell.inclinationDeg } })),
+    // The stacked-shells demo's own three, none of which was designed to hold.
+    { id: "demo 53/550", orbit: reference },
+    { id: "demo 70/1200", orbit: { altitudeKm: 1200, inclinationDeg: 70 } },
+    { id: "demo 97.6/1200", orbit: { altitudeKm: 1200, inclinationDeg: 97.6 } },
+    // One shell flown twice, which is rigid rather than merely repeating.
+    { id: "sso A", orbit: { altitudeKm: 600, inclinationDeg: 97.79 } },
+    { id: "sso B", orbit: { altitudeKm: 600, inclinationDeg: 97.79 } },
+  ];
+  console.log(
+    `  fleet of ${fleet.length} orbits; node-locked groups: ${nodeLockedGroups(fleet)
+      .map((group) => group.length)
+      .join(", ")}`,
+  );
+  const clusters = findStableClusters(fleet, { maxCycleHours: 48 });
+  console.log(["cluster", "members", "cycle h", "node spread °/d", "slip °/cycle"].map((h) => h.padEnd(16)).join(""));
+  for (const cluster of clusters) {
+    console.log(
+      [cluster.verdict, String(cluster.members.length), cluster.cycleHours.toFixed(2), cluster.nodeSpreadDegPerDay.toExponential(1), cluster.slipDegPerCycle.toExponential(1)]
+        .map((cell) => cell.padEnd(16))
+        .join(""),
+    );
+    console.log(`      ${cluster.members.join(", ")}`);
+  }
+  console.log("(the designed family comes back whole — including the demo's 53/550, which is its own reference — and no shell picked for coverage joins anything)");
 }

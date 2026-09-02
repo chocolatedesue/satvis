@@ -309,15 +309,21 @@ export interface ShellPairLayout {
  * Ordered because the resonance is quoted in the reference's revolutions, not
  * because the physics has a preferred direction — reverse the arguments and the
  * verdict is the same with the cycle counted the other way.
+ *
+ * `maxRevolutions` is the cycle budget, and it is a real parameter rather than a
+ * knob: two members of a wide family can be 37 and 47 revolutions apart, and
+ * under the default 32 this function reports them `node-locked` — correctly, by
+ * its own definition, and misleadingly, because the family they belong to closes
+ * both in one cycle. A caller that already knows the cycle should say so.
  */
-export function shellPairLayout(reference: ShellOrbit, companion: ShellOrbit): ShellPairLayout {
+export function shellPairLayout(reference: ShellOrbit, companion: ShellOrbit, maxRevolutions = MAX_REPEAT_REVOLUTIONS): ShellPairLayout {
   const a = shellRates(reference);
   const b = shellRates(companion);
   const nodeShearDegPerDay = a.nodeRateDegPerDay - b.nodeRateDegPerDay;
   const nodeLocked = Math.abs(nodeShearDegPerDay) <= NODE_LOCK_TOLERANCE_DEG_PER_DAY;
   const periodRatio = b.periodMinutes / a.periodMinutes;
   const samePeriod = Math.abs(periodRatio - 1) <= PERIOD_LOCK_TOLERANCE;
-  const resonance = bestResonance(a.alongTrackRateDegPerDay, b.alongTrackRateDegPerDay);
+  const resonance = bestResonance(a.alongTrackRateDegPerDay, b.alongTrackRateDegPerDay, maxRevolutions);
   const returns = resonance !== undefined && resonance.slipDegPerCycle <= REPEAT_SLIP_TOLERANCE_DEG;
   const verdict: ShellPairVerdict = samePeriod ? (nodeLocked ? "rigid" : "phase-locked") : nodeLocked ? (returns ? "repeating" : "node-locked") : "drifting";
   return {
@@ -476,4 +482,359 @@ export function searchStableShellLayouts(reference: ShellOrbit, options: ShellSe
 
 function greatestCommonDivisor(a: number, b: number): number {
   return b === 0 ? a : greatestCommonDivisor(b, a % b);
+}
+
+// ---------------------------------------------------------------------------
+// Clusters: the partition the two invariants already impose, and how to find it
+// ---------------------------------------------------------------------------
+//
+// Everything above answers "given this shell, where does a second one go". The
+// question underneath it is structural, and it has a cleaner answer than the
+// construction does:
+//
+//   **Both conditions are equivalence relations, so the space of circular orbits
+//   is already partitioned into stable clusters. Finding them is a quotient, not
+//   a search.**
+//
+// - `Ω̇(a, i) = Ω̇(a', i')` is equality of a real number, so node lock is
+//   reflexive, symmetric and transitive by inspection. A cluster does not need
+//   its members checked pairwise: they need only sit on one level set of Ω̇,
+//   which is one curve in the (altitude, inclination) plane. N constraints, not
+//   N².
+// - `u̇/u̇' ∈ ℚ` — commensurability — is an equivalence relation for the same
+//   reason multiplication by a rational is invertible. So "every pair returns"
+//   follows from "every member closes one shared cycle", and the shared cycle is
+//   the thing worth choosing.
+//
+// The intersection of two equivalence relations is an equivalence relation, so
+// the classes are exactly the maximal stable clusters, and a satellite belongs
+// to precisely one. That is the whole theory, and it is why nothing here is a
+// clustering *heuristic*: there is no distance to minimise, no k to choose and
+// no centroid to iterate. What a k-means over orbital elements would produce is
+// a partition of a space whose real partition is already known in closed form.
+//
+// What is left for an algorithm is the part the theory does not survive:
+// **tolerance**. No two flown orbits have exactly equal Ω̇, and every real ratio
+// is rational to within any ε, so both relations have to be relaxed before they
+// describe anything real — and a relaxed equivalence relation is not transitive.
+// A within ε of B and B within ε of C leaves A and C 2ε apart. Clusters under
+// tolerance therefore overlap rather than partition, and the honest output is
+// the set of **maximal** clusters rather than an assignment of each satellite to
+// one of them.
+//
+// That makes both stages exact rather than approximate:
+//
+// 1. **Node lock** reduces to intervals on a line. Sort by Ω̇; a cluster is a
+//    window whose spread is within the tolerance; the maximal ones are the
+//    maximal cliques of an interval graph, which a single pass over the sorted
+//    values enumerates. O(N log N).
+// 2. **Common cycle** reduces to simultaneous rational approximation with a
+//    budget. Any cycle T is, to within the slip tolerance, a whole multiple of
+//    every member's period — so enumerating the multiples of one member's period
+//    up to the budget enumerates every candidate, and each candidate names the
+//    subset that closes it. O(N²·K) for N members and K candidate multiples, and
+//    N here is the number of distinct *orbits*, not satellites.
+//
+// The optimisation that is left is not the clustering. It is the trade the
+// search exposes — members against cycle length against inclination spread —
+// and it is a scan over a handful of integers rather than a descent.
+
+/** One orbit offered to the cluster finder, under a name the caller can read back. */
+export interface ClusterMember {
+  id: string;
+  orbit: ShellOrbit;
+}
+
+/** A set of orbits whose relative configuration returns, and the cycle it returns on. */
+export interface StableCluster {
+  /** Member ids, in the order they were given. */
+  members: string[];
+  /** The node rate the cluster shares. */
+  nodeRateDegPerDay: number;
+  /** How far its members spread around that rate — the seam drift the cluster carries. */
+  nodeSpreadDegPerDay: number;
+  /** How long the whole configuration takes to return. */
+  cycleHours: number;
+  /** Whole revolutions each member makes in one cycle, aligned with `members`. */
+  revolutions: number[];
+  /** The worst along-track error any member carries into the next cycle. */
+  slipDegPerCycle: number;
+  /**
+   * `rigid` when every member shares a period as well as a node rate — one shell
+   * flown as several patterns, whose offsets are frozen rather than periodic.
+   * `repeating` otherwise.
+   */
+  verdict: Extract<ShellPairVerdict, "rigid" | "repeating">;
+}
+
+export interface ClusterOptions {
+  /** How far apart two node rates may be and still count as locked. */
+  nodeToleranceDegPerDay?: number;
+  /** The longest cycle worth calling a return. Default 48 hours. */
+  maxCycleHours?: number;
+  /** How much along-track slip a member may carry per cycle. */
+  slipToleranceDeg?: number;
+  /** The smallest cluster worth reporting. Default 2. */
+  minMembers?: number;
+}
+
+/** The default ceiling on a cluster's cycle: two days, at which point a schedule is a calendar. */
+export const MAX_CLUSTER_CYCLE_HOURS = 48;
+
+/**
+ * The maximal sets of members whose node rates all agree to within the
+ * tolerance — the coarse half of the partition, on its own.
+ *
+ * Reported separately from `findStableClusters` because it answers a different
+ * question, and one worth asking first: a node-locked group holds its *planes*
+ * in a fixed arrangement whether or not its phases ever return, which is what
+ * decides whether the fleet's crossing seams stay put. A group that appears here
+ * and not below is one whose geometry is half stable — every co-precessing
+ * altitude that is not also resonant.
+ *
+ * Maximal rather than partitioned, because tolerance is not transitive: with a
+ * tolerance of 0.01°/day, three shells at 0, 0.008 and 0.016 give two maximal
+ * groups that share their middle member, and calling either one *the* cluster
+ * would be a choice this function has no grounds to make.
+ */
+export function nodeLockedGroups(members: readonly ClusterMember[], toleranceDegPerDay = NODE_LOCK_TOLERANCE_DEG_PER_DAY): ClusterMember[][] {
+  const rated = members.map((member) => ({ member, rate: shellRates(member.orbit).nodeRateDegPerDay })).toSorted((a, b) => a.rate - b.rate);
+  const groups: ClusterMember[][] = [];
+  let previousEnd = -1;
+  for (let start = 0; start < rated.length; start += 1) {
+    let end = start;
+    while (end + 1 < rated.length && (rated[end + 1] as (typeof rated)[number]).rate - (rated[start] as (typeof rated)[number]).rate <= toleranceDegPerDay) {
+      end += 1;
+    }
+    // A window contained in the previous one is not maximal, and the windows are
+    // produced in order, so the previous one is the only one it could sit inside.
+    if (end > previousEnd) {
+      groups.push(rated.slice(start, end + 1).map((entry) => entry.member));
+      previousEnd = end;
+    }
+  }
+  return groups;
+}
+
+/**
+ * The shortest cycle within the budget on which every one of these orbits closes
+ * a whole number of revolutions, or undefined when none does.
+ *
+ * Any such cycle is a whole multiple of every member's period, so the multiples
+ * of the first member's period are a complete candidate list — enumerate them,
+ * and the first that every member closes is the shortest. Anchoring on the
+ * longest period keeps the list short without missing anything, since a longer
+ * period admits fewer multiples inside the same budget.
+ */
+export function commonRepeatCycle(
+  orbits: readonly ShellOrbit[],
+  maxCycleHours = MAX_CLUSTER_CYCLE_HOURS,
+  slipToleranceDeg = REPEAT_SLIP_TOLERANCE_DEG,
+): { cycleHours: number; revolutions: number[]; slipDegPerCycle: number } | undefined {
+  if (orbits.length === 0) {
+    return undefined;
+  }
+  const rates = orbits.map((orbit) => shellRates(orbit).alongTrackRateDegPerDay);
+  const anchorRate = Math.min(...rates);
+  if (!(anchorRate > 0)) {
+    return undefined;
+  }
+  const anchorPeriodHours = (360 / anchorRate) * 24;
+  const candidates = Math.floor(maxCycleHours / anchorPeriodHours);
+  for (let multiple = 1; multiple <= candidates; multiple += 1) {
+    const cycleHours = multiple * anchorPeriodHours;
+    const cycleDays = cycleHours / 24;
+    const revolutions: number[] = [];
+    let worstSlip = 0;
+    for (const rate of rates) {
+      const turns = (rate * cycleDays) / 360;
+      const whole = Math.round(turns);
+      worstSlip = Math.max(worstSlip, Math.abs(turns - whole) * 360);
+      revolutions.push(whole);
+    }
+    if (worstSlip <= slipToleranceDeg) {
+      return { cycleHours, revolutions, slipDegPerCycle: worstSlip };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Every maximal stable cluster among these orbits, best first.
+ *
+ * Two stages, in the order the two conditions bite: node-locked groups first,
+ * because that is the cheap half and the half that cannot be recovered by
+ * waiting longer, then the largest subset of each group that closes one cycle.
+ *
+ * The subset search is a sweep rather than an enumeration of subsets: each
+ * candidate cycle *names* the members that close it, so sweeping the candidate
+ * cycles produces every maximal commensurate subset without ever considering a
+ * set that no cycle supports. Every member is tried as the anchor, since a
+ * cluster that excludes the longest-period member is one its multiples would
+ * never propose.
+ *
+ * Ordered by size, then by the shorter cycle, then by the tighter node spread:
+ * a cluster that holds more satellites is a bigger claim, and between two of the
+ * same size the one that comes back sooner is the one a schedule can use.
+ */
+export function findStableClusters(members: readonly ClusterMember[], options: ClusterOptions = {}): StableCluster[] {
+  const maxCycleHours = options.maxCycleHours ?? MAX_CLUSTER_CYCLE_HOURS;
+  const slipToleranceDeg = options.slipToleranceDeg ?? REPEAT_SLIP_TOLERANCE_DEG;
+  const minMembers = options.minMembers ?? 2;
+  const found = new Map<string, StableCluster>();
+
+  for (const group of nodeLockedGroups(members, options.nodeToleranceDegPerDay)) {
+    const rates = group.map((member) => shellRates(member.orbit));
+    for (const anchor of rates) {
+      // The *along-track* period, not the Keplerian one: J2 moves the node the
+      // angle is measured from, and the part-in-a-thousand between them is 3° of
+      // phase after fifteen revolutions — which is the whole error budget a cycle
+      // has. Anchoring on `periodMinutes` finds no cluster at all, including the
+      // one it was handed.
+      const anchorPeriodHours = (360 / anchor.alongTrackRateDegPerDay) * 24;
+      const candidates = Math.floor(maxCycleHours / anchorPeriodHours);
+      for (let multiple = 1; multiple <= candidates; multiple += 1) {
+        const cycleHours = multiple * anchorPeriodHours;
+        const cycleDays = cycleHours / 24;
+        const subset: number[] = [];
+        const revolutions: number[] = [];
+        let worstSlip = 0;
+        for (let at = 0; at < group.length; at += 1) {
+          const turns = ((rates[at] as ShellRates).alongTrackRateDegPerDay * cycleDays) / 360;
+          const whole = Math.round(turns);
+          const slip = Math.abs(turns - whole) * 360;
+          if (whole >= 1 && slip <= slipToleranceDeg) {
+            subset.push(at);
+            revolutions.push(whole);
+            worstSlip = Math.max(worstSlip, slip);
+          }
+        }
+        if (subset.length < minMembers) {
+          continue;
+        }
+        const ids = subset.map((at) => (group[at] as ClusterMember).id);
+        const key = ids.toSorted().join("|");
+        const existing = found.get(key);
+        if (existing && existing.cycleHours <= cycleHours) {
+          continue;
+        }
+        const nodeRates = subset.map((at) => (rates[at] as ShellRates).nodeRateDegPerDay);
+        const periods = subset.map((at) => (rates[at] as ShellRates).periodMinutes);
+        found.set(key, {
+          members: ids,
+          nodeRateDegPerDay: nodeRates.reduce((a, b) => a + b, 0) / nodeRates.length,
+          nodeSpreadDegPerDay: Math.max(...nodeRates) - Math.min(...nodeRates),
+          cycleHours,
+          revolutions,
+          slipDegPerCycle: worstSlip,
+          // Every member on one period as well as one node rate is not a family
+          // that returns — it is one shell, and its offsets never moved at all.
+          verdict: Math.max(...periods) - Math.min(...periods) <= (Math.max(...periods) as number) * PERIOD_LOCK_TOLERANCE ? "rigid" : "repeating",
+        });
+      }
+    }
+  }
+
+  // What survives is the Pareto front of size against cycle, not a partition and
+  // not a single answer: a subset of a bigger cluster is kept when it comes back
+  // *sooner*, because that is a different offer rather than a worse one. Three
+  // shells at 25, 30 and 35 turns return every fifth of the cycle their eight-shell
+  // family needs, and a scheduler that only wants three should be told so. Only a
+  // subset that is no faster than the cluster containing it is dropped.
+  const clusters = [...found.values()];
+  const maximal = clusters.filter(
+    (cluster) =>
+      !clusters.some(
+        (other) =>
+          other !== cluster &&
+          other.members.length > cluster.members.length &&
+          other.cycleHours <= cluster.cycleHours &&
+          cluster.members.every((member) => other.members.includes(member)),
+      ),
+  );
+  return maximal.toSorted((a, b) => b.members.length - a.members.length || a.cycleHours - b.cycleHours || a.nodeSpreadDegPerDay - b.nodeSpreadDegPerDay);
+}
+
+/** One shell of a constructed family: where it flies, and how many turns it takes per cycle. */
+export interface FamilyShell extends StableShellLayout {
+  /** Whole revolutions this shell makes in the family's shared cycle. */
+  revolutions: number;
+}
+
+export interface FamilyOptions extends ShellSearchOptions {
+  /** How many revolutions the reference itself makes per cycle. */
+  cycleRevolutions: number;
+}
+
+/**
+ * The whole family a reference shell can hold at once, rather than one companion
+ * at a time.
+ *
+ * `findStableClusters` reads a partition off orbits that already exist; this
+ * writes one. Fix the reference's own revolutions per cycle and the cycle length
+ * follows; every other whole number of revolutions inside the altitude band then
+ * names one more shell, node-locked to the same curve and closing the same
+ * cycle. Every pair among them repeats by construction — which is the point of
+ * choosing a shared cycle rather than pairwise ratios, whose least common
+ * multiple would grow with every shell added.
+ *
+ * The count is bounded by the band rather than by the arithmetic: the altitude
+ * floor and the co-precession ceiling fix a ratio of periods, and the shells are
+ * the integers that fit inside it. Roughly one more shell per six hours of
+ * cycle at 550 km — and far more than that from a near-polar reference, whose
+ * ceiling is thousands of kilometres higher because matching a node rate near
+ * zero costs almost no inclination.
+ *
+ * The reference is included, at `revolutions = cycleRevolutions`. A family whose
+ * revolution counts share a factor returns sooner than its stated cycle, so the
+ * caller that wants the true cycle should divide by their greatest common
+ * divisor — `familyCycleHours` does.
+ */
+export function shellFamily(reference: ShellOrbit, options: FamilyOptions): FamilyShell[] {
+  const { cycleRevolutions } = options;
+  if (!Number.isInteger(cycleRevolutions) || cycleRevolutions < 1) {
+    return [];
+  }
+  const minAltitudeKm = options.minAltitudeKm ?? 300;
+  const maxAltitudeKm = options.maxAltitudeKm ?? 2000;
+  const rates = shellRates(reference);
+  const cycleHours = ((cycleRevolutions * 360) / rates.alongTrackRateDegPerDay) * 24;
+  const shells: FamilyShell[] = [];
+  // A shell can turn no more than the band's fastest orbit allows, so the search
+  // stops well before the loop's own ceiling; four times the reference's count
+  // clears the whole band at any altitude worth flying.
+  for (let revolutions = 1; revolutions <= cycleRevolutions * 4; revolutions += 1) {
+    if (revolutions === cycleRevolutions) {
+      shells.push({
+        altitudeKm: reference.altitudeKm,
+        inclinationDeg: reference.inclinationDeg,
+        resonance: { referenceRevolutions: cycleRevolutions, companionRevolutions: revolutions, repeatHours: cycleHours, slipDegPerCycle: 0 },
+        nodeShearDegPerDay: 0,
+        minPerPlane: minSatellitesPerRing(reference.altitudeKm),
+        revolutions,
+      });
+      continue;
+    }
+    const layout = resonantCompanion(reference, cycleRevolutions, revolutions);
+    if (!layout || layout.altitudeKm < minAltitudeKm || layout.altitudeKm > maxAltitudeKm) {
+      continue;
+    }
+    shells.push({ ...layout, revolutions });
+  }
+  return shells.toSorted((a, b) => a.altitudeKm - b.altitudeKm);
+}
+
+/**
+ * How long a family really takes to come back.
+ *
+ * The stated cycle divided by the greatest common divisor of its members'
+ * revolution counts: shells at 14 and 16 turns close together twice per stated
+ * cycle, and quoting the longer number would be quoting a cycle nobody waits.
+ */
+export function familyCycleHours(shells: readonly FamilyShell[]): number {
+  if (shells.length === 0) {
+    return 0;
+  }
+  const divisor = shells.map((shell) => shell.revolutions).reduce((a, b) => greatestCommonDivisor(a, b));
+  return (shells[0] as FamilyShell).resonance.repeatHours / divisor;
 }

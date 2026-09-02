@@ -3,7 +3,11 @@
 ## 1. Project Overview & Repository Info
 
 - **GitHub Repository**: [https://github.com/chocolatedesue/satvis.git](https://github.com/chocolatedesue/satvis.git)
-- **Deployment Targets (Cloudflare Pages)**:
+- **Live deployment (GitHub Pages, this fork)**: <https://chocolatedesue.github.io/satvis/> —
+  published by `.github/workflows/deploy-pages.yml` on every push to `main`. Imagery is capped at
+  level 2 there (levels 3–5 need docker) and `/ot` 404s (it needs Cloudflare's `_redirects`
+  rewrite); everything else is the full build.
+- **Upstream deployment targets (Cloudflare Pages, credentialed host only)**:
   - `https://satvis-inertial-frame.pages.dev`
   - `https://satvis-orbit-lab.pages.dev`
 - **Main Branch**: `main`
@@ -48,11 +52,38 @@
   `drifting` — driving the marked-bond line style, the sky-blue cross-pattern bridge links
   (drawn only for `rigid` pairs) and the orbit lab's pairwise table.
 
-### D. Space AI Compute & Multi-Satellite Collaboration (多星协同)
+### D. Stable Clusters & Shell Families (稳定集群与壳层家族)
+
+- **The structure**: relative motion of two circular orbits is governed by exactly two secular
+  differences — `ΔΩ̇` (planes shear) and `Δu̇` (phases slide) — and both conditions for stability
+  are **equivalence relations**. So orbit space is already partitioned: finding a stable cluster
+  is a quotient, not a search, and N shells cost N constraints rather than N².
+- **Why not k-means**: there is no k, no centroid and no distance. Euclidean proximity in element
+  space means nothing here — two shells 3 km apart drift forever, two 700 km apart can hold a
+  schedule for years.
+- **What does need an algorithm is tolerance**, which is not transitive, so clusters under
+  tolerance _overlap_ rather than partition. Both stages stay exact: node lock is maximal windows
+  over `Ω̇` sorted (an interval graph, `O(N log N)`), and the common cycle is simultaneous rational
+  approximation where each candidate cycle _names_ the subset that closes it.
+- **Output is a Pareto front of size against cycle**: a subset that returns sooner than the
+  cluster containing it is a different offer, not a worse one (`findStableClusters`).
+- **Families, written forwards** (`shellFamily`): fix the reference's revolutions per cycle, and
+  every other whole number of revolutions in the band names one more node-locked shell. 53° /
+  550 km holds 3 shells at 23.9 h, 7 at 47.8 h, 11 at 71.7 h — about **one more shell per six
+  hours of cycle**.
+- **The lever is the reference inclination**: the co-precession ceiling is 1632 km at 53° and
+  **9407 km at 86.4°**, so a near-polar family holds 10 shells inside a **3°** inclination spread
+  where a 53° family's eleventh has fallen to 17°. A sun-synchronous family is the strongest case
+  — every member is sun-synchronous by construction, so the fleet holds a fixed local solar time
+  _and_ returns its cross-shell geometry every cycle.
+- Derivation, algorithm and complexity: [`docs/adr/0010-stable-clusters.md`](docs/adr/0010-stable-clusters.md);
+  measurements: `scripts/derive-isl-topology.ts` studies 11–12.
+
+### E. Space AI Compute & Multi-Satellite Collaboration (多星协同)
 
 - Distributed inference pipeline partitioned into $N$ pipeline stages ($S_1 \to S_2 \to \dots \to S_n$), each maintaining its on-board KV-cache (e.g. 2 GB) connected over 100 Gbps ISLs.
 
-### E. Maximizing Sunlit GPU Utilization via Predictive Pre-Handoff (日照区 GPU 利用率优化)
+### F. Maximizing Sunlit GPU Utilization via Predictive Pre-Handoff (日照区 GPU 利用率优化)
 
 - **Physical Reality**: Satellite GPUs rely on solar power; entering the Earth's shadow (`umbra`, `penumbra`) or panel misalignment (`sunlit_back`) halts on-board compute.
 - **Serving Conjunction Constraint**: A pipeline only produces tokens when **all stages are powered simultaneously**.
@@ -98,7 +129,7 @@ bash scripts/deploy-pages.sh
 
 ## 4. Key Modified Files & Module Mapping
 
-- [`src/modules/util/shellLayout.ts`](file:///home/ccds/satvis/src/modules/util/shellLayout.ts): The multi-shell layout math — secular rates, `coPrecessingInclinationDeg`, `coPrecessingCeilingKm`, `resonantCompanion`, `searchStableShellLayouts`, `shellPairLayout`. No runtime imports, so the derivation script can run it under node's type stripping.
+- [`src/modules/util/shellLayout.ts`](file:///home/ccds/satvis/src/modules/util/shellLayout.ts): The multi-shell layout math — plus the cluster finder (`nodeLockedGroups`, `commonRepeatCycle`, `findStableClusters`) and the family constructor (`shellFamily`, `familyCycleHours`). The multi-shell layout math — secular rates, `coPrecessingInclinationDeg`, `coPrecessingCeilingKm`, `resonantCompanion`, `searchStableShellLayouts`, `shellPairLayout`. No runtime imports, so the derivation script can run it under node's type stripping.
 - [`src/config/migration.ts`](file:///home/ccds/satvis/src/config/migration.ts): Policies (`predictive`, `naive`), 90s lookahead window, time step bounds.
 - [`src/modules/util/migration.ts`](file:///home/ccds/satvis/src/modules/util/migration.ts): Target selection (`chooseTargetExcluding` — line of sight is a **preference**, with the occluded fallback recorded as `MigrationEvent.inView: false`), predictive decision engine (`decideStageMigration`).
 - [`src/modules/MigrationLayer.ts`](file:///home/ccds/satvis/src/modules/MigrationLayer.ts): Cesium rendering layer, lookahead illumination sampler, real-time metrics status generator.

@@ -410,7 +410,39 @@ a **co-precession ceiling of 1632 km**: above that no inclination precesses slow
 keep up, which is why the short cycles are unavailable. The price of the lock is inclination —
 a companion node-locked to 53° / 550 km has to fly at 34.5° by the time it reaches 1200 km.
 
-`scripts/derive-isl-topology.ts` (studies 7–10) flies the result with SGP4 rather than
+#### More than two shells at once
+
+The two conditions are **equivalence relations** — `Ω̇` equality is equality of a real number, and
+commensurability of `u̇` is closed under composition — so orbit space is _already partitioned_ and a
+family of N shells costs N constraints rather than N². Fix the reference's revolutions per cycle,
+and every other whole number of revolutions inside the altitude band names one more shell on the
+same node-rate curve; every pair among them repeats by construction, so the cycle does not grow
+with the member count the way pairwise ratios' least common multiple would.
+
+| reference      | cycle  | shells | inclination span |
+| -------------- | ------ | ------ | ---------------- |
+| 53° / 550 km   | 23.9 h | 3      | 32.5°–53.0°      |
+| 53° / 550 km   | 47.8 h | 7      | 22.3°–56.1°      |
+| 53° / 550 km   | 71.7 h | 11     | 17.2°–57.1°      |
+| 86.4° / 780 km | 48.6 h | 10     | **83.8°–87.1°**  |
+
+About **one more shell per six hours of cycle**, and the lever is the reference inclination: the
+co-precession ceiling is 1632 km at 53° and **9407 km at 86.4°**, because matching a node rate near
+zero costs almost no inclination at any altitude. A near-polar family holds ten shells inside a 3°
+spread where a 53° family's eleventh shell has fallen to 17°. The sun-synchronous case is the
+strongest: every member of a family built on `Ω̇* = +0.9856°/day` is sun-synchronous too, so the
+whole fleet holds a fixed local solar time _and_ returns its cross-shell geometry every cycle.
+
+Going the other way — **given a fleet, which subsets hold?** — is a quotient, not a clustering
+problem: there is no k to choose, no centroid and no distance, because a k-means over orbital
+elements would impose an arbitrary partition on a space that has a canonical one. What needs an
+algorithm is tolerance, which is not transitive, so clusters under tolerance overlap and the honest
+output is the **maximal** ones on a Pareto front of size against cycle. `findStableClusters` does it
+in two exact stages: sort by `Ω̇` and take the maximal windows (an interval graph, `O(N log N)`),
+then sweep candidate cycles, each of which _names_ the subset that closes it. Reasoning, the
+derivation and the complexity: `docs/adr/0010-stable-clusters.md`.
+
+`scripts/derive-isl-topology.ts` (studies 7–12) flies the result with SGP4 rather than
 asserting it. The designed companion's seam shears at **0.005°/day** against 5.21°/day for a
 97.6° shell at the same altitude, and one repeat cycle later **99.7%** of satellites find the
 same cross-shell partner at a median range change of 4 km — against **79.3%** and 398 km for
