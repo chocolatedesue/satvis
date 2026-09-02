@@ -9,6 +9,15 @@
 #
 #   - `base: ""` in vite.config.ts already emits relative asset urls
 #     (`./assets/…`), so the bundle does not care what path it is served from.
+#     That is also why there is no `actions/configure-pages` step: its whole job
+#     is to hand a static site generator the base path it must be built for, and
+#     this one does not need to know. It was tried, and it fails on a repository
+#     whose Pages site does not exist yet — `GITHUB_TOKEN` carries `pages: write`,
+#     which permits *deploying* to a site, not *creating* one, so it answered
+#     "Create Pages site failed: resource not accessible by integration" and took
+#     the build down with it. Enabling Pages is one visit to
+#     Settings → Pages → Source: GitHub Actions, and nothing in a workflow can
+#     stand in for it.
 #   - `actions/upload-pages-artifact` serves the artifact as-is, with no Jekyll
 #     pass, so `public/_headers`, `public/_redirects` and `404.html` travel
 #     untouched. `_redirects` is a Cloudflare feature and is inert here, which
@@ -64,12 +73,6 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm ci
-      - name: Configure Pages
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-        with:
-          # Create the Pages site on the first run rather than asking for a
-          # visit to the repository settings.
-          enablement: true
       # The static element-set snapshot the app falls back to when no Worker
       # answers /api. Not fatal: CelesTrak firewalls by IP and answers a refused
       # source with HTTP 522 (AGENTS.md), and a fleet the orbit lab generates

@@ -177,10 +177,12 @@ snapshot, so all presets keep working without the worker.
 to `https://<owner>.github.io/<repo>/` on every push to `main` (and on
 `workflow_dispatch`). It needs no Vite configuration for the subpath: `base: ""`
 already emits relative asset urls, and `upload-pages-artifact` serves the build
-as-is with no Jekyll pass. The workflow enables the Pages site itself on its
-first run (`configure-pages` with `enablement: true`); on a **fork**, GitHub
-disables workflows until the owner presses the button once under
-_Actions → I understand my workflows, go ahead and enable them_.
+as-is with no Jekyll pass. One manual step is unavoidable, once:
+**Settings → Pages → Source: GitHub Actions**. `GITHUB_TOKEN` carries
+`pages: write`, which permits deploying to a Pages site but not creating one, so
+no workflow can stand in for that click — `actions/configure-pages` with
+`enablement: true` was tried and answers `Create Pages site failed: resource not
+accessible by integration`. After the click every push to `main` publishes.
 
 Two things are worse there than on Cloudflare Pages, by construction rather than
 by neglect:
