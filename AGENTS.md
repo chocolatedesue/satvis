@@ -23,6 +23,12 @@ workspace package). One `pnpm install` at the root covers both.
   field by field.
 - **`src/modules/benchmark/README.md`** — the benchmark framework, and how the
   frame cost scales.
+- **`.claude/skills/`** — two project skills, checked in rather than subscribed:
+  `domain-modeling` (fires when terminology is argued about, `CONTEXT.md` is
+  edited or an ADR is written — its two format references describe _this_ repo's
+  glossary and ADR shape) and `writing-for-agents` (fires when a skill,
+  `AGENTS.md` or any agent-facing doc is written). Provenance and what was
+  adapted: `.claude/skills/README.md`.
 
 ## Architecture
 

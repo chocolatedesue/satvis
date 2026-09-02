@@ -23,6 +23,10 @@ report/
 .env.*
 !.env.example
 
-# Claude Code: track only the launch.json blueprint (worktrees/ stays ignored)
+# Claude Code: track the launch.json blueprint and the project skills, nothing
+# else (worktrees/, settings.local.json and the rest stay ignored). The skills
+# are checked in on purpose — they are repo conventions, so a clone gets them
+# and a change to one is a reviewable diff (.claude/skills/README.md).
 .claude/*
 !.claude/launch.json
+!.claude/skills/
