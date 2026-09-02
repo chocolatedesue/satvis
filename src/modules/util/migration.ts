@@ -326,6 +326,15 @@ export interface StagePlacement {
  * currently powered AND predicted to stay powered in the lookahead window are
  * strongly prioritized, followed by line-of-sight in-view candidates, followed
  * by shortest chord distance.
+ *
+ * **Line of sight is a preference, not a requirement.** A stage whose host has
+ * turned its panel away can see no powered neighbour over the near limb, and
+ * refusing an occluded target left it dark for half an orbit while powered
+ * satellites sat idle on the far side — so when nothing is in view the nearest
+ * powered satellite is taken regardless. The caller is expected to *say so*:
+ * `hasLineOfSight` on the returned pair is what distinguishes a hop the fabric
+ * could really make from one that would need a relay it does not have yet
+ * (`MigrationEvent.inView`).
  */
 export function chooseTargetExcluding(
   source: MigrationHost,
@@ -553,6 +562,19 @@ export interface MigrationEvent {
   to: string;
   linkKm: number;
   transferSeconds: number;
+  /**
+   * Whether the two hosts could actually see each other when the hop was decided.
+   *
+   * False is not an error and not a bug: `chooseTargetExcluding` prefers a
+   * candidate in view and falls back to an occluded one rather than leave a stage
+   * dark while powered satellites sit idle over the limb. But a hop through the
+   * planet is not a direct ISL, and a log that does not say so is a log that
+   * overstates the fabric — it would need a relay, and the fleet has no
+   * multi-hop router yet. Recorded so the overlay can draw it as the exception it
+   * is, and so a check can hold the distinction rather than assert an invariant
+   * the code deliberately dropped.
+   */
+  inView: boolean;
   /** Simulated time the migration was decided, as an ISO instant. */
   at: string;
 }

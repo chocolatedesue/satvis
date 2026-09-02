@@ -326,9 +326,12 @@ pattern: the halos fly as a rigid ladder), **Mark one per shell** (one satellite
 pattern, same slot), **Clear marks** — or write the tokens straight into the url as a
 comma-joined `mark=` list, each `<plane>-<slot>@<wire>` with 1-based planes and slots:
 
+`walker=` registers a pattern; `tags=` is what switches it on, one `Walker <wire>` per
+pattern (the space encodes as `%20`). Without the tags the url draws nothing:
+
 ```
 # one satellite per shell, bonded pairwise across shells
-https://satvis.space/?walker=53:40/4/1@550,70:24/4/1@1200,97.6:24/4/1@1200&mark=1-1@53:40/4/1@550,1-1@70:24/4/1@1200,1-1@97.6:24/4/1@1200&camera=Inertial
+https://satvis.space/?walker=53:40/4/1@550,70:24/4/1@1200,97.6:24/4/1@1200&tags=Walker%2053:40/4/1@550,Walker%2070:24/4/1@1200,Walker%2097.6:24/4/1@1200&mark=1-1@53:40/4/1@550,1-1@70:24/4/1@1200,1-1@97.6:24/4/1@1200&camera=Inertial
 ```
 
 Each member carries an **amber halo** and its slot label; every pair is **bonded in amber**,
@@ -368,8 +371,11 @@ The **Multi-shell layout** section of the orbit lab does both from whatever is i
 reports the answer, and **Add the companion shell** puts it on the globe beside the reference:
 
 ```
-# a 53° / 550 km shell and the 8:7 companion designed to hold against it
+# a 53° / 550 km shell, the 8:7 companion designed to hold against it, and a control
 https://satvis.space/?demo=stable-shells
+
+# the designed pair on its own, one satellite of each marked
+https://satvis.space/?walker=53:40/4/1@550,34.47:40/4/1@1201.887&tags=Walker%2053:40/4/1@550,Walker%2034.47:40/4/1@1201.887&mark=1-1@53:40/4/1@550,1-1@34.47:40/4/1@1201.887&paint=illumination&psize=large&camera=Inertial
 ```
 
 Against a 53° / 550 km reference the search returns 6:5 at 1455.8 km / 22.30° (returning every
@@ -398,7 +404,7 @@ Satvis implements two live migration policies (`?migpol=predictive` vs `?migpol=
 
 1. **Predictive Illumination-Aware Pre-Handoff (`predictive`, Recommended)**:
    - Evaluates orbital illumination lookahead (default 90 s pre-eclipse window).
-   - Before a host satellite enters darkness, it proactively schedules an ISL transfer to an idle peer with line-of-sight that has the longest remaining sunlit duration.
+   - Before a host satellite enters darkness, it proactively schedules an ISL transfer to an idle peer that has line of sight and the longest remaining sunlit duration.
    - The KV-cache migration finishes _before_ power loss occurs, achieving **zero pipeline stalls** and **maximizing sunlit GPU compute utilization (near 100% uptime)**.
 
 2. **Naive Reactive Migration (`naive`, Baseline)**:
@@ -407,11 +413,16 @@ Satvis implements two live migration policies (`?migpol=predictive` vs `?migpol=
 
 Key metrics and constraints:
 
-- **Strict Line-of-Sight (LOS)**: Candidates are chosen with physical visibility (`hasLineOfSight`), strictly forbidding chords passing through the Earth.
+- **Line of sight, preferred and reported**: `hasLineOfSight` ranks candidates — a peer the host can see is always taken ahead of one it cannot. It is a preference rather than a
+  veto: a host that has turned its panel away sees no powered neighbour over the near limb, and refusing an occluded target left the stage dark for half an orbit while powered
+  satellites sat idle on the far side. So when nothing is in view the nearest powered satellite is taken anyway — and the hop is **reported as what it is**: `inView: false` in the
+  event log, `⤳ · no direct view` on the halo and in the panel, and a link drawn at a third opacity. A chord through the planet is a two-hop relay, which the fleet has no router
+  for yet (see the roadmap in `TODO.md`); what the overlay must not do is draw it as a direct ISL and say nothing.
 - **Realistic Link Arithmetic**: Real transfer time accounts for 100 Gbps serialisation (~160 ms for 2 GB) + vacuum light travel over the physical chord distance.
 - **Simulated Timebase Ledger**: GPU utilization and served/stalled seconds are tracked accurately against simulated orbit time.
 
-`node scripts/verify-migration.mjs <base-url> <out-dir>` verifies placement, live ISL packet progress, zero-stall serving, and line-of-sight constraints in headless Chromium.
+`node scripts/verify-migration.mjs <base-url> <out-dir>` verifies placement, live ISL packet progress, zero-stall serving, and that no hop claims a line of sight it does not have,
+in headless Chromium.
 
 ### Satellite metadata
 

@@ -59,7 +59,7 @@
 - **Naive Reactive Policy**: Migrates only _after_ power loss, causing periodic pipeline stalls and reducing sunlit GPU utilization to ~30%–45%.
 - **Predictive Illumination-Aware Pre-Handoff (`predictive`)**:
   - Uses orbital illumination geometry to anticipate eclipse entry within a 90-second lookahead window (`MIGRATION_PREDICTIVE_LOOKAHEAD_SIM_SECONDS`).
-  - Proactively triggers KV-cache transfer to an idle peer with line-of-sight that has maximum remaining sunlit duration.
+  - Proactively triggers KV-cache transfer to an idle peer that has line of sight and maximum remaining sunlit duration.
   - Handoff completes before shadow ingress, achieving **zero pipeline stalls** and **near 100% sunlit GPU utilization**.
 
 ---
@@ -100,7 +100,7 @@ bash scripts/deploy-pages.sh
 
 - [`src/modules/util/shellLayout.ts`](file:///home/ccds/satvis/src/modules/util/shellLayout.ts): The multi-shell layout math — secular rates, `coPrecessingInclinationDeg`, `coPrecessingCeilingKm`, `resonantCompanion`, `searchStableShellLayouts`, `shellPairLayout`. No runtime imports, so the derivation script can run it under node's type stripping.
 - [`src/config/migration.ts`](file:///home/ccds/satvis/src/config/migration.ts): Policies (`predictive`, `naive`), 90s lookahead window, time step bounds.
-- [`src/modules/util/migration.ts`](file:///home/ccds/satvis/src/modules/util/migration.ts): Target selection (`chooseTargetExcluding` with LOS guarantee), predictive decision engine (`decideStageMigration`).
+- [`src/modules/util/migration.ts`](file:///home/ccds/satvis/src/modules/util/migration.ts): Target selection (`chooseTargetExcluding` — line of sight is a **preference**, with the occluded fallback recorded as `MigrationEvent.inView: false`), predictive decision engine (`decideStageMigration`).
 - [`src/modules/MigrationLayer.ts`](file:///home/ccds/satvis/src/modules/MigrationLayer.ts): Cesium rendering layer, lookahead illumination sampler, real-time metrics status generator.
 - [`src/components/OrbitLabPanel.vue`](file:///home/ccds/satvis/src/components/OrbitLabPanel.vue): Policy toggle, Sunlit GPU utilization metric display, pipeline state badges.
 - [`src/stores/sat.ts`](file:///home/ccds/satvis/src/stores/sat.ts) & [`src/modules/sceneSync.ts`](file:///home/ccds/satvis/src/modules/sceneSync.ts): URL parameter synchronization (`migpol`, `mig`, `migst`, `links`, `mark`).

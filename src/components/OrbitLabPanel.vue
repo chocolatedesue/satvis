@@ -173,6 +173,12 @@
       The pipeline only produces tokens while <strong>every</strong> stage has power simultaneously. <strong>Sunlit GPU utilization</strong> below measures that all-powered serving
       uptime over simulated time.
     </p>
+    <p class="orbitLab__note">
+      Line of sight is a <em>preference</em>, not a requirement: a candidate the host can see is taken first, but when a host has turned its panel away and sees no powered
+      neighbour over the near limb, the nearest powered satellite is taken anyway rather than leaving the stage dark for half an orbit. Such a hop is marked
+      <code>⤳ · no direct view</code> and its link is drawn faint — it is a chord through the planet, which a real fleet would fly as a two-hop relay and this one has no router for
+      yet.
+    </p>
 
     <table v-if="migrationStatus?.active && migrationStatus.stages.length > 0" class="orbitLab__facts">
       <tbody>
@@ -183,7 +189,9 @@
           </td>
           <td class="orbitLab__factValue">
             <template v-if="stage.phase === 'migrating'"
-              >{{ shortHost(stage.from) }} → {{ shortHost(stage.to) }} ({{ ((stage.transferSeconds ?? 0) * 1000).toFixed(0) }} ms)</template
+              >{{ shortHost(stage.from) }} {{ stage.inView === false ? "⤳" : "→" }} {{ shortHost(stage.to) }} ({{ ((stage.transferSeconds ?? 0) * 1000).toFixed(0) }} ms){{
+                stage.inView === false ? " · no direct view" : ""
+              }}</template
             >
             <template v-else-if="stage.phase === 'stranded'">{{ shortHost(stage.hostName) }} · stranded</template>
             <template v-else>{{ shortHost(stage.hostName) }}{{ stage.powered ? (stage.lookaheadPowered === false ? " · near eclipse" : " · sunlit") : " · dark" }}</template>
@@ -236,7 +244,8 @@
             <td class="orbitLab__factName">{{ clockOf(event.at) }}</td>
             <td class="orbitLab__factValue">
               <span class="orbitLab__swatch" :style="{ backgroundColor: stageColor(event.stage) }"></span>
-              S{{ event.stage + 1 }} {{ shortHost(event.from) }} → {{ shortHost(event.to) }} · {{ event.linkKm.toFixed(0) }} km · {{ (event.transferSeconds * 1000).toFixed(0) }} ms
+              S{{ event.stage + 1 }} {{ shortHost(event.from) }} {{ event.inView ? "→" : "⤳" }} {{ shortHost(event.to) }} · {{ event.linkKm.toFixed(0) }} km ·
+              {{ (event.transferSeconds * 1000).toFixed(0) }} ms{{ event.inView ? "" : " · no direct view" }}
             </td>
           </tr>
         </tbody>

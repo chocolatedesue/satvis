@@ -407,12 +407,19 @@ record(
 );
 
 record(
-  "every link respects line of sight — no hop through the Earth",
-  (readout?.log ?? []).map((event) => Math.round(event.linkKm)),
+  "no hop claims a line of sight it does not have",
+  (readout?.log ?? []).map((event) => ({ km: Math.round(event.linkKm), inView: event.inView })),
   // Two satellites at 550 km can see each other only out to 2*sqrt(6921² - 6451²) ≈
-  // 5014 km, taking the 80 km atmospheric margin. Anything longer was drawn through
-  // the planet, which is what the line-of-sight constraint exists to stop.
-  (links) => links.length > 0 && links.every((km) => km < 5050),
+  // 5014 km, taking the 80 km atmospheric margin.
+  //
+  // The invariant is *not* that every hop is that short. chooseTargetExcluding
+  // prefers a candidate in view and falls back to an occluded one rather than leave
+  // a stage dark while powered satellites sit idle over the limb, so a longer hop is
+  // the design rather than a bug — one the fleet would need a relay to fly, and has
+  // no multi-hop router for yet. What must hold is that such a hop is *reported* as
+  // occluded: `inView` false, drawn dimmed, labelled "no direct view". A hop that
+  // says it is in view and is longer than the horizon would be the real failure.
+  (hops) => hops.length > 0 && hops.every((hop) => typeof hop.inView === "boolean" && (!hop.inView || hop.km < 5050)),
 );
 
 console.log("ledger:", JSON.stringify(readout?.ledger), "all-stages-powered fraction:", readout?.allPoweredFraction);

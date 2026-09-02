@@ -39,6 +39,7 @@ import {
   distanceKm,
   emptyLedger,
   flightProgress,
+  hasLineOfSight,
   type MigrationEvent,
   type MigrationHost,
   type MigrationLedger,
@@ -62,6 +63,8 @@ export interface MigrationStageStatus {
   from?: string;
   to?: string;
   linkKm?: number;
+  /** Whether this stage's hop has line of sight; undefined when it is not migrating. */
+  inView?: boolean;
   transferSeconds?: number;
   /**
    * How far the packet has got along the link, 0–1, while `phase` is `migrating`;
@@ -104,6 +107,8 @@ export interface MigrationStatus {
   kvGigabytes: number;
   islGbps: number;
   linkKm?: number;
+  /** Whether the moving stage's hop has line of sight, when one is in flight. */
+  inView?: boolean;
   transferSeconds?: number;
   /** The moving stage's progress along its link, 0–1, when one is in flight. */
   progress?: number;
@@ -136,6 +141,15 @@ interface Flight {
   startSimMs: number;
   cost: TransferCost;
   linkKm: number;
+  /**
+   * Whether the two hosts could see each other when the hop was decided.
+   *
+   * False when `chooseTargetExcluding` fell back to an occluded candidate rather
+   * than leave the stage dark. The link is still flown — that fallback is the
+   * design — but it is drawn dimmed and logged as what it is, because a chord
+   * through the planet is a relay the fleet cannot route yet, not an ISL.
+   */
+  inView: boolean;
   /** Simulated instant the migration was decided, for the event log. */
   decidedAt: string;
 }
@@ -468,7 +482,7 @@ export class MigrationLayer {
         stage.flight = undefined;
         this.#ledger = recordMigration(this.#ledger, this.#kvGigabytes, flight.cost);
         this.#log = [
-          { stage: stage.index, from: flight.from, to: flight.to, linkKm: flight.linkKm, transferSeconds: flight.cost.totalSeconds, at: flight.decidedAt },
+          { stage: stage.index, from: flight.from, to: flight.to, linkKm: flight.linkKm, inView: flight.inView, transferSeconds: flight.cost.totalSeconds, at: flight.decidedAt },
           ...this.#log,
         ].slice(0, MIGRATION_LOG_LENGTH);
       }
@@ -526,12 +540,14 @@ export class MigrationLayer {
         const host = hosts.find((candidate) => candidate.name === stage.hostName);
         if (host) {
           const linkKm = distanceKm(host.position, decision.target.position);
+          const inView = hasLineOfSight(host.position, decision.target.position);
           stage.flight = {
             from: host.name,
             to: decision.target.name,
             startSimMs: simMs,
             cost: transferCost(this.#kvGigabytes, ISL_GBPS, linkKm),
             linkKm,
+            inView,
             decidedAt: date.toISOString(),
           };
           stage.phase = "migrating";
@@ -603,6 +619,7 @@ export class MigrationLayer {
       from: stage.flight?.from,
       to: stage.flight?.to,
       linkKm: stage.flight?.linkKm,
+      inView: stage.flight?.inView,
       transferSeconds: stage.flight?.cost.totalSeconds,
       progress: stage.flight ? flightProgress(stage.flight.startSimMs, simMs, MIGRATION_ANIMATION_SIM_SECONDS).fraction : undefined,
       powered: hosts.find((host) => host.name === stage.hostName)?.hasPower === true,
@@ -631,6 +648,7 @@ export class MigrationLayer {
       from: moving?.from,
       to: moving?.to,
       linkKm: moving?.linkKm,
+      inView: moving?.inView,
       transferSeconds: moving?.transferSeconds,
       progress: moving?.progress,
       reason: serving ? `All ${stages.length} stages powered — pipeline serving.` : (lead?.reason ?? `${powered}/${stages.length} stages powered — pipeline stalled.`),
@@ -700,7 +718,9 @@ export class MigrationLayer {
     const named = (host: string | undefined) => planeSlotOf(host) ?? host;
     const flight = stage.flight;
     if (flight) {
-      return `${tag} · ${named(flight.from)} → ${named(flight.to)}`;
+      // "⤳" rather than "→" when the two hosts cannot see each other: the hop is
+      // still made, but not over a link the fleet could really close in one.
+      return `${tag} · ${named(flight.from)} ${flight.inView ? "→" : "⤳"} ${named(flight.to)}`;
     }
     if (!stage.hostName) {
       return tag;
@@ -748,12 +768,23 @@ export class MigrationLayer {
     });
 
     // The inter-satellite link, drawn only while this stage is in flight.
+    //
+    // Dimmed to a third when the hop has no line of sight. The target selection
+    // prefers a candidate in view and falls back to an occluded one rather than
+    // leave a stage dark (see chooseTargetExcluding), so this line is sometimes a
+    // chord through the planet — which the fleet would need a relay to fly, and
+    // has no multi-hop router for. Drawn faint rather than hidden, because the
+    // hand-off is really happening in the model; drawn faint rather than solid,
+    // because a full-strength line there claims a direct ISL that does not exist.
     const link = new Entity({
       name: `Migration link ${label}`,
       polyline: new PolylineGraphics({
         positions: new CallbackProperty((time?: JulianDate) => this.#linkPositions(stage, time ?? this.#viewer.clock.currentTime), false),
         width: 3,
-        material: new PolylineGlowMaterialProperty({ glowPower: 0.25, color: hue }),
+        material: new PolylineGlowMaterialProperty({
+          glowPower: 0.25,
+          color: new CallbackProperty(() => (stage.flight?.inView === false ? hue.withAlpha(0.35) : hue), false),
+        }),
         // Straight chord, not draped on the globe — see the note above on why
         // this is ArcType.NONE rather than undefined.
         arcType: ArcType.NONE,

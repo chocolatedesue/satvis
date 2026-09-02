@@ -17,7 +17,7 @@
   - **被动掉电迁移 (Naive Reactive)**：掉电后才被动换星，导致管线频繁停摆（日照区 GPU 实际有效利用率仅 30%~45%）；
   - **预判式协同交接 (Predictive Pre-Handoff)**：结合轨道几何与未来 90s 光照预判，在卫星进入地影前提前经 ISL 完成 KV-Cache 零中断换星交接，将**日照区 GPU 算力利用率提升至接近 100%（Zero Pipeline Stalls）**。
 - **方便活体迁移 (Seamless Live Migration)**：
-  - 严格遵守星间视线通视（Line-of-Sight），杜绝穿地传输；
+  - 星间视线通视（Line-of-Sight）是**优选项而非硬约束**：通视候选优先，但当宿主背光且近侧看不到任何有电邻星时，宁可选一个被遮挡的目标也不让该阶段在暗区枯坐半圈；这类跳变会被如实标记（`inView: false`、halo 与面板显示 `⤳ · no direct view`、链路淡化绘制），因为穿地弦本质上需要两跳中继，而当前还没有多跳路由；
   - 目标星优选通视良好、剩余日照寿命最长且传输时延最短的空闲节点；
   - 状态全量持久化在 URL 参数中（`?mig=true&migst=4&migpol=predictive`），支持一键分享与无状态复现。
 
@@ -55,6 +55,7 @@
   - 回归周期已经证明跨壳几何是周期函数，下一步是把它变成可用的时刻表：对 `repeating` 壳层对预计算一个周期内的全部跨壳可见窗口，之后按周期复用，让迁移目标选择从"每帧搜索"变成"查表"。
 - [ ] **多跳星间路由寻径 (Multi-hop ISL Routing)**:
   - 当前换星为单跳直连（Single-hop LOS）；当直连目标受地球物理遮挡时，可基于 Dijkstra / Floyd 算法规划经由中继星的 2 跳/3 跳最短路由。
+  - 这正是目前 `inView: false` 跳变所缺的那一环：几何与代价账本都已就位，缺的是中继选路与相应的多段链路绘制。
 - [ ] **增量 KV-Cache 传输优化 (Incremental Differential Patching)**:
   - 引入增量快照算法（Differential Snapshot），仅传输推理产生的新增 Token 缓存，将换星数据量从 2 GB 压缩至数 MB。
 - [ ] **大规模真实星座算力映射 (Real SATCAT Fleet Mapping)**:
