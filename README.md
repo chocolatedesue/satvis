@@ -18,6 +18,8 @@ The sky view trades the globe for a ground-level camera aimed by your phone's co
 - Find a satellite in the sky overhead rather than on a map, in a ground-level sky view aimed by your phone's compass and gyroscope and walked with the movement keys
 - Add OpenStreetMap buildings to the globe, or Google's photorealistic tiles under the sky view
 - Generate a Walker Delta or Walker Star constellation from its `i: T/P/F` specification and fly it beside the real catalog, with every per-satellite visual the real ones get
+- Wire the generated constellation into the stable inter-satellite topology a propagation derivation picks — rigid intra-plane rings, same-slot inter-plane links, the Walker Star seam dropped — and mark a small cluster of satellites, bonded pairwise even across shells, to watch its geometry hold or shear
+- Stack several shells in one scene (`?demo=shells`) with the clock fast enough that the relative motion between them is the thing you see
 - Colour satellites by what the sun is doing to them — eclipse (ν) _and_ solar panel incidence (κ) — as a point colour, and as the orbit line itself cut into sunlit, penumbra and back-sun arcs
 - Read one satellite's eclipse and back-sun budget over its next two orbits, as percentages and as a strip of colour
 - Share the exact view you are looking at as a link: the url carries the satellites, the components, the ground station and the map layers
@@ -289,6 +291,52 @@ satellite you click: its current ν, κ and beta angle, and a strip of its next 
 with the share spent in each state — two rather than one, because one orbit cannot show what
 changes between them. Reasoning and alternatives are in
 `docs/adr/0007-orbit-lab.md`.
+
+### Constellation links, and a marked cluster
+
+A constellation is a promise about geometry, and a scatter of points does not show it. With
+a pattern on screen the app draws the **stable inter-satellite topology** on top — on by
+default, `?links=false` to turn it off — with one colour per family, because the families
+are the story:
+
+- **Green ring links** inside each plane never change length: equal periods keep the
+  spacing exact, measured to a coefficient of variation of 0.001.
+- **Violet inter-plane links** join each satellite to its same-slot neighbour in the next
+  plane. The along-track offset between the pair is constant forever, so the endpoints never
+  re-wire, but the link breathes as the planes cross (CV 0.14–0.27) — watching it swell and
+  slacken is watching why this pairing is the one that holds.
+- A link that would pass **behind the Earth is hidden**, not drawn through rock. Which
+  links are up therefore changes through the orbit — that is part of the reading.
+- The **Walker Star seam is never wired**: across it the planes counter-rotate, the
+  same-slot pair sweeps past itself at twice orbital rate, and a link there would flicker
+  from 1.5 to 14 thousand km. Iridium closes its seam; so does the derivation.
+
+These are not tastes but the output of `scripts/derive-isl-topology.mjs`, which flies the
+patterns with SGP4 and scores every candidate wiring on length discipline and
+nearest-neighbour identity stability. Reasoning and numbers: `docs/adr/0008-constellation-links.md`.
+
+On top of the auto-topology, **Marked cluster** names a small fleet to watch as a unit.
+Three buttons in the panel — **Mark one column** (the same slot in every plane of the first
+pattern: the halos fly as a rigid ladder), **Mark one per shell** (one satellite from each
+pattern, same slot), **Clear marks** — or write the tokens straight into the url as a
+comma-joined `mark=` list, each `<plane>-<slot>@<wire>` with 1-based planes and slots:
+
+```
+# one satellite per shell, bonded pairwise across shells
+https://satvis.space/?walker=53:40/4/1@550,70:24/4/1@1200,97.6:24/4/1@1200&mark=1-1@53:40/4/1@550,1-1@70:24/4/1@1200,1-1@97.6:24/4/1@1200&camera=Inertial
+```
+
+Each member carries an **amber halo** and its slot label; every pair is **bonded in amber**,
+across planes and across shells, rules aside — because the point of marking is to test
+stability by eye exactly where the auto-topology deliberately says nothing. A column holds
+its geometry for as long as the constellation flies; a cross-shell cluster shears open as
+the periods slip, and the bonds show which is which from the first frame.
+
+**The "Stacked-shells demo"** puts all of it on screen at once: three shells (53° / 550 km,
+70° / 1200 km, 97.6° / 1200 km), the topology wired, one satellite per shell marked, and the
+clock at 600× so the low shell laps the high ones about every 76 seconds while the amber
+triangle shears. The low shell flies 10 per plane on purpose — a ring link clears the Earth
+only when `a·cos(π/S) > R`, which at 550 km asks for at least 8 satellites per plane.
 
 ### Naive KV-cache live migration
 

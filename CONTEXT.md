@@ -253,3 +253,24 @@ discussion; sharpen them here when they drift.
   class (a standing fact) or its illumination state (what the sun is doing now).
   Exactly one, and only the second costs a per-frame evaluation, which is why it
   is not the default.
+- **Constellation links**: the inter-satellite topology drawn over generated
+  Walker patterns, on by default (`links=false` to shed it). The wiring is the
+  derivation's, not a taste — intra-plane rings (rigid, length CV ≈ 0.001),
+  same-slot links between same-rotating adjacent planes (endpoints fixed, length
+  breathing), the Walker Star seam dropped (its planes counter-rotate; a link
+  there would sweep 1.5–14 thousand km) and nothing between patterns (different
+  periods never settle). Green and violet distinguish the two families, because
+  rigid versus breathing is the story the drawing tells. Links whose chord
+  passes behind the Earth are hidden, not drawn through it — the same standard
+  the migration overlay sets. Rules in `constellationLinks.ts`; the derivation
+  they come from is `scripts/derive-isl-topology.ts`
+  (`docs/adr/0008-constellation-links.md`).
+- **Marked cluster**: a small fleet named to be watched as a unit, as
+  `<plane>-<slot>@<wire>` tokens in the `mark=` url parameter. Each active
+  member carries an amber halo and its slot label; every marked pair is bonded
+  pairwise in amber — across planes and across shells, topology rules aside,
+  because the point of marking is to test stability by eye exactly where the
+  auto-topology deliberately says nothing. A same-slot column across one shell's
+  planes flies as a rigid ladder; a same-slot satellite from each of three shells
+  shears open as the periods slip. Members that are not currently active
+  contribute nothing and join when switched on.
