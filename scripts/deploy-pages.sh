@@ -166,7 +166,21 @@ elif [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   export CLOUDFLARE_API_TOKEN
 fi
 cd "$HOME/$DEPLOY_DIR"
-npx -y "$WRANGLER" pages deploy . --project-name "$PROJECT" --branch "$BRANCH"
+# Prefer a wrangler already installed on the host: `npx -y wrangler@<version>`
+# downloads ~50 MB from npm on first use, and on a host with slow or filtered
+# egress that download is where a deploy hangs — long after the credential
+# checks passed, with no error to read. A preinstalled binary is instant.
+WRANGLER_BIN="$(command -v wrangler 2>/dev/null || true)"
+if [[ -z "$WRANGLER_BIN" ]]; then
+  WRANGLER_BIN="$(ls -t "$HOME"/.local/share/mise/installs/node/*/bin/wrangler 2>/dev/null | head -1 || true)"
+fi
+if [[ -n "$WRANGLER_BIN" ]]; then
+  echo "using preinstalled wrangler: $WRANGLER_BIN"
+  "$WRANGLER_BIN" pages deploy . --project-name "$PROJECT" --branch "$BRANCH"
+else
+  echo "no preinstalled wrangler found; falling back to npx $WRANGLER"
+  npx -y "$WRANGLER" pages deploy . --project-name "$PROJECT" --branch "$BRANCH"
+fi
 REMOTE
 done
 
