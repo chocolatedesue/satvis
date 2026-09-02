@@ -79,13 +79,13 @@ describe("walkerDeltaRecords", () => {
 
   it("spreads the planes evenly over the RAAN span", () => {
     const records = walkerDeltaRecords(minimal, EPOCH);
-    const raans = [...new Set(records.map((record) => Number(ommOf(record).RA_OF_ASC_NODE)))].sort((a, b) => a - b);
+    const raans = [...new Set(records.map((record) => Number(ommOf(record).RA_OF_ASC_NODE)))].toSorted((a, b) => a - b);
     expect(raans).toEqual([0, 120, 240]);
   });
 
   it("halves the plane spacing for a Walker Star span", () => {
     const records = walkerDeltaRecords({ ...minimal, raanSpanDeg: 180 }, EPOCH);
-    const raans = [...new Set(records.map((record) => Number(ommOf(record).RA_OF_ASC_NODE)))].sort((a, b) => a - b);
+    const raans = [...new Set(records.map((record) => Number(ommOf(record).RA_OF_ASC_NODE)))].toSorted((a, b) => a - b);
     expect(raans).toEqual([0, 60, 120]);
   });
 

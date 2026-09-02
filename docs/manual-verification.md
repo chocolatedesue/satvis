@@ -853,26 +853,26 @@ holds two points, whether a marked halo tracks a moving satellite, and whether a
 behind the planet is hidden are all questions about the rendered scene.
 
 **Procedure.** Headless Chromium over CDP (the `verify-migration.mjs` plumbing, no
-puppeteer), against a built deployment, opened on `?demo=shells`:
+puppeteer), against a built deployment or local server serving `dist`, opened on `?demo=shells`:
 
 ```sh
-pnpm build && bash scripts/deploy-pages.sh
-VERIFY_PROXY=http://127.0.0.1:10800 node /tmp/verify-links-live.mjs https://satvis-orbit-lab.pages.dev
+pnpm build && (cd dist && python3 -m http.server 8791 --bind 127.0.0.1 &)
+node scripts/verify-links.mjs http://127.0.0.1:8791 /tmp/satvis-links-verify
 ```
 
-The script strips any service worker and its caches before navigating — a worker installed
-by an earlier visit serves its precached (older) app shell and silently masks the
-deployment, which read as a missing feature until it was caught. It then polls until link
-entities exist and reports:
+Every run starts with a fresh user profile directory (`mkdtempSync`), avoiding any
+service-worker precache skew. It then polls until link entities exist and reports:
 
 - **Ring links 88, inter-plane links 88** — exactly the graph the rules produce for the
   demo's fleet: 4 planes × (10 + 6 + 6) slots of intra-plane links, the same count of
   same-slot inter-plane links, wrap included (all Delta shells).
 - **Marked halos 3, marked bonds 3** — one satellite per shell (`mark=1-1@…` per pattern),
   bonded pairwise; the bonds span shells, which the auto-topology never draws.
-- **bondVisible 1 of 3** at the sample instant — the other two chords pass behind the Earth.
-  Cross-shell distances are thousands of km, so occlusion is frequent; the honest-hide rule
-  is what makes the count dip rather than the drawing lie.
+- **bondVisible 3 of 3** — bonds stay shown across the orbit and dim to quarter opacity
+  (alpha 0.25) when their chord passes behind the Earth, rather than disappearing and
+  making a holding cluster look like it disintegrated.
+- **Bonds styled by stability** — 1 solid (same period across the two 1200 km shells) and
+  2 dashed (drifting between the 550 km and 1200 km shells).
 - `mark` round-trips in `location.search`, and a sample link's positions resolve to two
   Cartesian3 values at the current clock time.
 

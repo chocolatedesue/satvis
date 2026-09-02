@@ -21,7 +21,7 @@ const PORT = 9334;
 mkdirSync(OUT, { recursive: true });
 
 const chromium = spawn(
-  "/usr/bin/chromium",
+  process.env.CHROME_BIN ?? "/usr/bin/google-chrome",
   [
     "--headless=new",
     "--no-sandbox",
@@ -186,9 +186,9 @@ record(
   "the pipeline is drawn as a standing chain between consecutive stage hosts",
   await sampleUntil(
     "(() => { const t = window.cc.viewer.clock.currentTime;" +
-    " const links = window.cc.viewer.entities.values.filter((e) => /^Pipeline link S/.test(e.name));" +
-    " const drawn = links.filter((e) => (e.polyline?.positions?.getValue(t) ?? []).length === 2);" +
-    " return { names: links.map((e) => e.name), drawn: drawn.length }; })()",
+      " const links = window.cc.viewer.entities.values.filter((e) => /^Pipeline link S/.test(e.name));" +
+      " const drawn = links.filter((e) => (e.polyline?.positions?.getValue(t) ?? []).length === 2);" +
+      " return { names: links.map((e) => e.name), drawn: drawn.length }; })()",
     (v) => v && v.drawn >= STAGES - 1,
   ),
   // One segment per consecutive pair, on screen whether or not a hop is in flight:

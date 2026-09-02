@@ -201,6 +201,15 @@ export class ConstellationLinksLayer {
       // repeats every orbit and the pair never parts. Dashed for one whose
       // members drift through their synodic cycle without bound. The line
       // style is the stability verdict, so it reads without the panel.
+      //
+      // The colour reads the occlusion state, because a bond is a relation and
+      // not a live link: it does not stop existing while the Earth is between
+      // its members, so it is never hidden — it dims (the through-rock stretch
+      // is depth-occluded by the globe itself) and brightens again as the pair
+      // comes back into view. Hiding it made a holding cluster look like it
+      // fell apart once per orbit, which is exactly the misreading the
+      // overlay exists to prevent.
+      const occludedColor = new CallbackProperty(() => (this.#visible.get(key) === false ? hue.withAlpha(0.25) : hue), false);
       const entity = new Entity({
         name: `Marked bond ${bond.a} ↔ ${bond.b}${bond.samePeriod ? "" : " (drifting)"}`,
         polyline: new PolylineGraphics({
@@ -211,7 +220,9 @@ export class ConstellationLinksLayer {
             return pa && pb ? [pa, pb] : [];
           }, false),
           width: 3,
-          material: bond.samePeriod ? new PolylineGlowMaterialProperty({ glowPower: 0.3, color: hue }) : new PolylineDashMaterialProperty({ color: hue, dashLength: 18 }),
+          material: bond.samePeriod
+            ? new PolylineGlowMaterialProperty({ glowPower: 0.3, color: occludedColor })
+            : new PolylineDashMaterialProperty({ color: occludedColor, dashLength: 18 }),
           // Straight chord between the two satellites, not draped on the globe.
           arcType: undefined,
         }),
@@ -295,7 +306,15 @@ export class ConstellationLinksLayer {
     this.#viewer.scene.requestRender();
   }
 
-  /** Hide links whose chord passes behind the Earth. */
+  /**
+   * Hide links whose chord passes behind the Earth; dim bonds instead.
+   *
+   * A topology link stands for a live inter-satellite link, and a link through
+   * rock does not exist, so it is hidden. A marked bond stands for the
+   * *relation* between two satellites, which the Earth interrupts but does not
+   * dissolve — so it stays drawn, dimmed to a quarter opacity, its colour
+   * driven by the `#visible` flag the bond's material reads.
+   */
   #checkOcclusion(): void {
     const time = this.#viewer.clock.currentTime;
     for (const [key, entity] of this.#entities) {
@@ -310,7 +329,8 @@ export class ConstellationLinksLayer {
       const endpoints = key.split("|");
       const a = this.#positionAt(endpoints[0]!, time);
       const b = this.#positionAt(endpoints[1]!, time);
-      entity.show = a !== undefined && b !== undefined && hasLineOfSight(a, b, 0);
+      this.#visible.set(key, a !== undefined && b !== undefined && hasLineOfSight(a, b, 0));
+      entity.show = a !== undefined && b !== undefined;
     }
   }
 }

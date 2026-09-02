@@ -61,9 +61,10 @@ turns it off.
   clears the Earth only when `a·cos(π/S) > R`, which at 550 km asks for **S ≥ 8 per plane**
   (at 1200 km, S ≥ 6). The stacked-shells demo flies its 550 km shell with 10 per plane so
   its ring links do not run through the ground.
-- Marked bonds ignore the topology rules but not the Earth: a bond behind the planet is
-  hidden with everything else. Cross-shell bonds are therefore intermittently visible —
-  which is itself the observation.
+- Marked bonds ignore the topology rules but not the Earth: a bond is a relation rather
+  than a live link, so when its chord passes behind the planet it dims to quarter opacity
+  rather than disappearing. A holding cluster never looks like it falls apart once per orbit,
+  while the dimming still signals when line of sight is broken.
 - A marked pair **can** span orbits and still hold: equal altitude means equal period, and
   the derivation measured a same-period cross-inclination pair whose per-orbit distance
   maxima repeat unchanged (3620, 3617, 3621 … km) while a different-period pair wanders

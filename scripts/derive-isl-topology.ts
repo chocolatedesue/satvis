@@ -338,7 +338,15 @@ console.log("== study 6: can a cluster span orbits at all? marked-pair distance 
   printHeader();
   printRow({ label: "same period", links: 1, meanKm: sSame.mean, minKm: sSame.min, maxKm: sSame.max, cv: sSame.cv, occluded: NaN, churn: 0 });
   printRow({ label: "diff period", links: 1, meanKm: sDrift.mean, minKm: sDrift.min, maxKm: sDrift.max, cv: sDrift.cv, occluded: NaN, churn: 1 });
-  console.log(`  same-period pair, per-orbit distance maxima: ${perOrbitMax(samePeriod, periodSamples).map((m) => m.toFixed(0)).join(", ")} km`);
-  console.log(`  diff-period pair, per-orbit distance maxima: ${perOrbitMax(drift, periodSamples).map((m) => m.toFixed(0)).join(", ")} km`);
+  console.log(
+    `  same-period pair, per-orbit distance maxima: ${perOrbitMax(samePeriod, periodSamples)
+      .map((m) => m.toFixed(0))
+      .join(", ")} km`,
+  );
+  console.log(
+    `  diff-period pair, per-orbit distance maxima: ${perOrbitMax(drift, periodSamples)
+      .map((m) => m.toFixed(0))
+      .join(", ")} km`,
+  );
   console.log("(same period: the envelope repeats, the pair never parts. different period: the maxima wander without bound)");
 }

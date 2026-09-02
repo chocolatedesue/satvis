@@ -189,4 +189,5 @@ echo "deployed. verify with:"
 for project in $PAGES_PROJECTS; do
   echo "  VERIFY_PROXY=http://127.0.0.1:10808 node scripts/verify-migration.mjs https://$project.pages.dev /tmp/$project-mig"
   echo "  VERIFY_PROXY=http://127.0.0.1:10808 node scripts/verify-orbit-lab.mjs  https://$project.pages.dev /tmp/$project-ol"
+  echo "  VERIFY_PROXY=http://127.0.0.1:10808 node scripts/verify-links.mjs      https://$project.pages.dev /tmp/$project-links"
 done

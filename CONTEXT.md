@@ -275,5 +275,7 @@ discussion; sharpen them here when they drift.
   shears open as the periods slip. Bonds are styled by the verdict the
   derivation measured: solid for members sharing a period (the distance
   envelope repeats every orbit; the pair never parts), dashed for members whose
-  periods differ (the bond drifts without bound). Members that are not currently
-  active contribute nothing and join when switched on.
+  periods differ (the bond drifts without bound). Bonds dim to quarter opacity when
+  their chord passes behind the Earth rather than disappearing, keeping the cluster relation
+  visible throughout the orbit. Members that are not currently active contribute nothing and
+  join when switched on.

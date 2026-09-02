@@ -328,7 +328,9 @@ https://satvis.space/?walker=53:40/4/1@550,70:24/4/1@1200,97.6:24/4/1@1200&mark=
 
 Each member carries an **amber halo** and its slot label; every pair is **bonded in amber**,
 across planes and across shells, rules aside — because the point of marking is to test
-stability by eye exactly where the auto-topology deliberately says nothing.
+stability by eye exactly where the auto-topology deliberately says nothing. When the chord
+between two marked satellites passes behind the Earth, the bond dims to quarter opacity
+rather than disappearing, preserving the visual cluster relation across the entire orbit.
 
 Stability across orbits is real, and the bond's line style is the verdict: **solid** means
 both members share a period (equal altitude), so the pair never parts — the derivation

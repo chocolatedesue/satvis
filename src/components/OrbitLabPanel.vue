@@ -75,7 +75,8 @@
       of the first pattern: the bonds hold their geometry (along-track offsets are exact) and the cluster flies as a rigid ladder. <strong>Mark one per shell</strong> spans the
       shells: same period holds, different period shears, and the bonds show which is which. The line style is the stability verdict, read straight off the picture: a
       <strong>solid</strong> bond joins members sharing a period, so the pair never parts and its distance envelope repeats every orbit; a <strong>dashed</strong> bond joins
-      members whose periods differ, and it drifts through its synodic cycle without ever settling.
+      members whose periods differ, and it drifts through its synodic cycle without ever settling. Bonds dim when occluded by the Earth rather than disappearing, keeping the
+      cluster relation visible throughout the orbit.
     </p>
 
     <div class="toolbarTitle">KV-cache live migration</div>
@@ -734,7 +735,7 @@ function markColumn(): void {
 
 /** Mark one satellite per pattern, same slot each: the cross-shell sample. */
 function markCrossShell(): void {
-  satStore.marks = walker.value.map((wire) => `1-1@${wire}`);
+  satStore.marks = walker.value.map((w) => `1-1@${w}`);
 }
 
 function clearMarks(): void {

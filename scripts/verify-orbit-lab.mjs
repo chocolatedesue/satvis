@@ -39,7 +39,7 @@ const PORT = 9333;
 mkdirSync(OUT, { recursive: true });
 
 const chromium = spawn(
-  "/usr/bin/chromium",
+  process.env.CHROME_BIN ?? "/usr/bin/google-chrome",
   [
     "--headless=new",
     "--no-sandbox",
