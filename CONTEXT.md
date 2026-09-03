@@ -253,6 +253,24 @@ discussion; sharpen them here when they drift.
   class (a standing fact) or its illumination state (what the sun is doing now).
   Exactly one, and only the second costs a per-frame evaluation, which is why it
   is not the default.
+- **Store-and-forward**: how a relayed transfer is priced (`routeTransferCost`) —
+  a relay receives the *complete* cache before sending it on, so the
+  serialisation term is paid once per leg and propagation sums the legs.
+  Charging the whole wire one serialisation would be cut-through, which is not
+  what a cache transfer is.
+- **Delta snapshot** (`deltaSnapshot`): what a transfer ships under incremental
+  KV sync (`?miginc=true`) — the cache's growth since the stage's last completed
+  transfer, plus what arrives while the delta itself serialises, in closed form.
+  Answers "full" when there is no prior sync, when growth exceeds the snapshot,
+  or when the clock was scrubbed backwards; the ledger keeps the always-full
+  baseline beside the actual bytes so the saving is a ratio of two honest
+  numbers.
+- **Service continuity** (`fleetContinuity`): a real fleet's sunlit service
+  figures, sampled over two orbits on a common time grid — per-satellite sunlit
+  fraction, **fixed-placement continuity** (a greedy mapping chosen once, the
+  no-migration deployment) and **service opportunity** (instants with at least
+  k satellites lit, the ceiling migration can reach). The gap is what the
+  machinery buys, measured on real catalogued orbits.
 - **Constellation links**: the inter-satellite topology drawn over generated
   Walker patterns, on by default (`links=false` to shed it). The wiring is the
   derivation's, not a taste — intra-plane rings (rigid, length CV ≈ 0.001),

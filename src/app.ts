@@ -13,6 +13,7 @@ import { createViewer } from "./modules/createViewer";
 import {
   applyMigrationScene,
   applyShellsScene,
+  applyRealFleetScene,
   applyStableShellsScene,
   applySunSyncScene,
   applyTwoOrbitScene,
@@ -115,6 +116,8 @@ app.mount("#app");
         applyShellsScene(satStore, cesiumStore, clock);
       } else if (requested === "stable-shells") {
         applyStableShellsScene(satStore, cesiumStore, clock);
+      } else if (requested === "real-fleet") {
+        applyRealFleetScene(satStore, cesiumStore, clock);
       } else {
         applyTwoOrbitScene(satStore, cesiumStore, clock);
       }

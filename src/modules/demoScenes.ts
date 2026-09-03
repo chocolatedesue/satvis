@@ -53,7 +53,7 @@ export const DEMO_MULTIPLIER = 60;
 export const SHELLS_MULTIPLIER = 600;
 
 /** The names `?demo=` understands. */
-export const DEMO_NAMES = ["two-orbit", "sso", "migration", "walker25", "shells", "stable-shells"] as const;
+export const DEMO_NAMES = ["two-orbit", "sso", "migration", "walker25", "shells", "stable-shells", "real-fleet"] as const;
 export type DemoName = (typeof DEMO_NAMES)[number];
 
 function withIlluminationComponents(satStore: SatStore): void {
@@ -271,6 +271,36 @@ export function applyStableShellsScene(satStore: SatStore, cesiumStore: CesiumSt
   satStore.marks = shells.map((shell) => `1-1@${encodeWalker(shell)}`);
   cesiumStore.cameraMode = "Inertial";
   clock.setMultiplier(SHELLS_MULTIPLIER);
+  clock.play();
+}
+
+/**
+ * The migration overlay mapped onto a *real* catalogued constellation.
+ *
+ * Iridium NEXT is the fleet the demo maps onto because it is the one large
+ * constellation that actually flies the thing being modelled — 80 satellites in
+ * six near-polar planes, launched specifically to carry cross-linked traffic —
+ * and because its group is small enough that the route search's per-decision
+ * O(n²) sweep is cheap while still being a real OMM catalog, not a generated
+ * pattern. The pipeline's stages are placed one per satellite across the real
+ * fleet, the ledger measures sunlit serving time exactly as it does over the
+ * Walker scenes, and the orbit lab's continuity report brackets what migration
+ * can buy on it.
+ *
+ * Real records carry no plane-and-slot identity, so the topology overlay has
+ * nothing to wire — the ISLs here are the routes the migration layer itself
+ * plans, drawn leg by leg as they fly.
+ */
+export function applyRealFleetScene(satStore: SatStore, cesiumStore: CesiumStore, clock: ClockControl): void {
+  satStore.pointColorMode = "illumination";
+  satStore.pointSize = "large";
+  withIlluminationComponents(satStore);
+  // The tag the catalog registers for the iridium-NEXT group (see
+  // src/config/presets.ts — bare group name matching worker/src/config/satvis.core.yaml).
+  showOnly(satStore, ["IridiumNEXT"]);
+  cesiumStore.cameraMode = "Inertial";
+  satStore.migration = true;
+  clock.setMultiplier(DEMO_MULTIPLIER);
   clock.play();
 }
 

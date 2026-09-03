@@ -20,9 +20,11 @@ import type { Viewer } from "@cesium/widgets";
 import type { PanelAxis } from "../config/illumination";
 import {
   DEFAULT_KV_GIGABYTES,
+  DEFAULT_KV_INCREMENTAL,
   DEFAULT_MIGRATION_POLICY,
   DEFAULT_PIPELINE_STAGES,
   ISL_GBPS,
+  KV_GROWTH_MB_PER_SECOND,
   MAX_SIM_STEP_SECONDS,
   MIGRATION_ANIMATION_SIM_SECONDS,
   MIGRATION_COLOR,
@@ -36,6 +38,7 @@ import type { SatelliteManager } from "./SatelliteManager";
 import {
   accrueTime,
   decideStageMigration,
+  deltaSnapshot,
   distanceKm,
   emptyLedger,
   flightProgress,
@@ -49,7 +52,7 @@ import {
   poweredStageCount,
   recordMigration,
   allPoweredFraction,
-  transferCost,
+  routeTransferCost,
   type TransferCost,
   type Vec3,
 } from "./util/migration";
@@ -67,6 +70,8 @@ export interface MigrationStageStatus {
   /** The relay this stage's hop goes through, when it needs one and is migrating. */
   via?: string;
   transferSeconds?: number;
+  /** What this migration is shipping, in GB — the full cache or a delta against the last sync. */
+  payloadGigabytes?: number;
   /**
    * How far the packet has got along the link, 0–1, while `phase` is `migrating`;
    * undefined otherwise.
@@ -99,6 +104,8 @@ export interface MigrationStatus {
   active: boolean;
   /** Current migration policy. */
   policy: MigrationPolicy;
+  /** Whether transfers ship incremental KV deltas rather than full snapshots. */
+  incremental: boolean;
   /** `migrating` if any stage is in flight, else `stranded` if any is stuck, else `holding`. */
   phase: "holding" | "migrating" | "stranded";
   hostName?: string;
@@ -141,6 +148,8 @@ interface Flight {
    */
   startSimMs: number;
   cost: TransferCost;
+  /** What this transfer ships, in GB — the full cache or a delta against the last sync. */
+  payloadGigabytes: number;
   /** The whole wire, summed over the route's legs. */
   linkKm: number;
   /**
@@ -159,6 +168,12 @@ interface StageState {
   index: number;
   hostName: string | undefined;
   flight: Flight | undefined;
+  /**
+   * Simulated instant this stage's last transfer completed, for the differential
+   * snapshot: what the next transfer ships is what the cache appended since this
+   * moment. Undefined until the first transfer lands.
+   */
+  lastSyncSimMs: number | undefined;
   /** The four entities drawing this stage. */
   entities: Entity[];
   /** Why the stage is where it is, last time the model was asked. */
@@ -207,6 +222,9 @@ export class MigrationLayer {
 
   #policy: MigrationPolicy;
 
+  /** Whether transfers ship differential KV snapshots instead of full ones. */
+  #incremental: boolean;
+
   #stages: StageState[] = [];
 
   /**
@@ -237,12 +255,14 @@ export class MigrationLayer {
     kvGigabytes: number = DEFAULT_KV_GIGABYTES,
     stageCount: number = DEFAULT_PIPELINE_STAGES,
     policy: MigrationPolicy = DEFAULT_MIGRATION_POLICY,
+    incremental: boolean = DEFAULT_KV_INCREMENTAL,
   ) {
     this.#viewer = viewer;
     this.#sats = sats;
     this.#kvGigabytes = kvGigabytes;
     this.#stageCount = stageCount;
     this.#policy = policy;
+    this.#incremental = incremental;
     this.#status = this.#idleStatus();
   }
 
@@ -257,6 +277,24 @@ export class MigrationLayer {
     }
     this.#policy = policy;
     this.#lastEvalSimMs = undefined; // re-evaluate immediately on policy switch
+    if (this.#removeTick) {
+      this.#viewer.scene.requestRender();
+    }
+  }
+
+  /**
+   * Switch between full-snapshot and differential-snapshot transfers.
+   *
+   * Affects flights decided from now on; the ledger keeps what it has already
+   * recorded, since the point of the toggle is comparing the two regimes and
+   * rewriting history would hide the difference.
+   */
+  setIncremental(on: boolean): void {
+    if (on === this.#incremental) {
+      return;
+    }
+    this.#incremental = on;
+    this.#lastEvalSimMs = undefined;
     if (this.#removeTick) {
       this.#viewer.scene.requestRender();
     }
@@ -316,7 +354,7 @@ export class MigrationLayer {
   #buildStages(): void {
     this.#stages = [];
     for (let index = 0; index < this.#stageCount; index += 1) {
-      const stage: StageState = { index, hostName: undefined, flight: undefined, entities: [], phase: "stranded", reason: "Stage is unplaced." };
+      const stage: StageState = { index, hostName: undefined, flight: undefined, lastSyncSimMs: undefined, entities: [], phase: "stranded", reason: "Stage is unplaced." };
       stage.entities = this.#buildEntities(stage);
       for (const entity of stage.entities) {
         this.#viewer.entities.add(entity);
@@ -385,6 +423,7 @@ export class MigrationLayer {
     return {
       active: false,
       policy: this.#policy,
+      incremental: this.#incremental,
       phase: "holding",
       reason: "Migration demo is off.",
       kvGigabytes: this.#kvGigabytes,
@@ -480,7 +519,10 @@ export class MigrationLayer {
       if (flightProgress(flight.startSimMs, simMs, MIGRATION_ANIMATION_SIM_SECONDS).arrived) {
         stage.hostName = flight.to;
         stage.flight = undefined;
-        this.#ledger = recordMigration(this.#ledger, this.#kvGigabytes, flight.cost);
+        // The landing is the differential snapshot's sync point: what the next
+        // transfer ships is what the cache appends from here.
+        stage.lastSyncSimMs = simMs;
+        this.#ledger = recordMigration(this.#ledger, flight.payloadGigabytes, this.#kvGigabytes, flight.cost);
         this.#log = [
           {
             stage: stage.index,
@@ -489,6 +531,7 @@ export class MigrationLayer {
             linkKm: flight.linkKm,
             hops: flight.route.hops,
             legsKm: flight.route.legsKm,
+            payloadGigabytes: flight.payloadGigabytes,
             transferSeconds: flight.cost.totalSeconds,
             at: flight.decidedAt,
           },
@@ -540,7 +583,7 @@ export class MigrationLayer {
     for (const stage of this.#stages) {
       if (stage.flight) {
         stage.phase = "migrating";
-        stage.reason = `Migrating ${this.#kvGigabytes} GB: ${stage.flight.from} → ${stage.flight.to}.`;
+        stage.reason = `Migrating ${this.#describePayload(stage)}: ${stage.flight.from} → ${stage.flight.to}.`;
         continue;
       }
       const decision = decideStageMigration(stage.hostName, hosts, this.#takenBySiblings(stage), this.#policy);
@@ -549,17 +592,26 @@ export class MigrationLayer {
         const host = hosts.find((candidate) => candidate.name === stage.hostName);
         if (host) {
           // The wire, not the straight line between the ends: a relayed hop is two
-          // legs long, and the transfer is charged for what it actually traverses.
+          // legs long, and the transfer is charged for what it actually traverses —
+          // store-and-forward, so the serialisation is paid once per leg, not once
+          // for the whole wire.
           const route = decision.route ?? {
             hops: [host.name, decision.target.name],
             legsKm: [distanceKm(host.position, decision.target.position)],
             linkKm: distanceKm(host.position, decision.target.position),
           };
+          // Under incremental sync the payload is what the cache appended since
+          // this stage's last completed transfer, plus what arrives while the
+          // delta itself serialises; see deltaSnapshot.
+          const delta = this.#incremental
+            ? deltaSnapshot(this.#kvGigabytes, KV_GROWTH_MB_PER_SECOND, stage.lastSyncSimMs === undefined ? undefined : (simMs - stage.lastSyncSimMs) / 1000, ISL_GBPS)
+            : { gigabytes: this.#kvGigabytes };
           stage.flight = {
             from: host.name,
             to: decision.target.name,
             startSimMs: simMs,
-            cost: transferCost(this.#kvGigabytes, ISL_GBPS, route.linkKm),
+            cost: routeTransferCost(delta.gigabytes, ISL_GBPS, route.legsKm),
+            payloadGigabytes: delta.gigabytes,
             linkKm: route.linkKm,
             route,
             decidedAt: date.toISOString(),
@@ -570,6 +622,12 @@ export class MigrationLayer {
       }
       stage.phase = decision.action === "stranded" ? "stranded" : "holding";
     }
+  }
+
+  /** The readout of what a stage's in-flight transfer is shipping. */
+  #describePayload(stage: StageState): string {
+    const payload = stage.flight?.payloadGigabytes ?? this.#kvGigabytes;
+    return payload < this.#kvGigabytes ? `${(payload * 1024).toFixed(0)} MB delta` : `${payload} GB`;
   }
 
   /**
@@ -634,6 +692,7 @@ export class MigrationLayer {
       to: stage.flight?.to,
       linkKm: stage.flight?.linkKm,
       via: stage.flight && relaysOf(stage.flight.route).join(" → ") ? relaysOf(stage.flight.route).join(" → ") : undefined,
+      payloadGigabytes: stage.flight?.payloadGigabytes,
       transferSeconds: stage.flight?.cost.totalSeconds,
       progress: stage.flight ? flightProgress(stage.flight.startSimMs, simMs, MIGRATION_ANIMATION_SIM_SECONDS).fraction : undefined,
       powered: hosts.find((host) => host.name === stage.hostName)?.hasPower === true,
@@ -657,6 +716,7 @@ export class MigrationLayer {
     return {
       active: true,
       policy: this.#policy,
+      incremental: this.#incremental,
       phase,
       hostName: lead?.hostName ?? stages[0]?.hostName,
       from: moving?.from,

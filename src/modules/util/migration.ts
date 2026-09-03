@@ -209,6 +209,27 @@ export function transferCost(kvGigabytes: number, islGbps: number, linkKm: numbe
 }
 
 /**
+ * The cost of shipping `kvGigabytes` along a whole route, leg by leg.
+ *
+ * Store-and-forward, because that is what a cache transfer is: every relay
+ * receives the *complete* cache before sending it on, so the serialisation term
+ * is paid once per leg while propagation sums the legs' light time. Charging the
+ * whole wire a single serialisation — what pricing `transferCost` on `linkKm`
+ * alone does — undercounts a relayed transfer by the per-relay receive-and-
+ * re-emit, which is precisely the thing that makes relaying expensive.
+ */
+export function routeTransferCost(kvGigabytes: number, islGbps: number, legsKm: readonly number[]): TransferCost {
+  let serializeSeconds = 0;
+  let propagationSeconds = 0;
+  for (const legKm of legsKm) {
+    const leg = transferCost(kvGigabytes, islGbps, legKm);
+    serializeSeconds += leg.serializeSeconds;
+    propagationSeconds += leg.propagationSeconds;
+  }
+  return { serializeSeconds, propagationSeconds, totalSeconds: serializeSeconds + propagationSeconds };
+}
+
+/**
  * The nearest powered satellite other than the source, or undefined if none is
  * lit.
  *
@@ -649,6 +670,15 @@ export interface MigrationLedger {
   migrations: number;
   /** KV cache actually pushed across links, in GB. */
   gigabytesMoved: number;
+  /**
+   * What those same migrations would have moved as full snapshots, in GB.
+   *
+   * Always `migrations × full snapshot size`, kept beside the actual figure so the
+   * panel can show the differential snapshot's saving as a ratio of two honest
+   * numbers rather than asserting a percentage the caller cannot check. Equal to
+   * `gigabytesMoved` while incremental sync is off.
+   */
+  baselineGigabytes: number;
   /** Summed transfer cost of those migrations, in seconds of link time. */
   transferSeconds: number;
   /** Simulated seconds at least one stage lacked power, so the pipeline could not run. */
@@ -658,17 +688,67 @@ export interface MigrationLedger {
 }
 
 export function emptyLedger(): MigrationLedger {
-  return { migrations: 0, gigabytesMoved: 0, transferSeconds: 0, stalledSeconds: 0, allPoweredSeconds: 0 };
+  return { migrations: 0, gigabytesMoved: 0, baselineGigabytes: 0, transferSeconds: 0, stalledSeconds: 0, allPoweredSeconds: 0 };
 }
 
-/** The ledger with one completed migration of `kvGigabytes` costing `cost` added. */
-export function recordMigration(ledger: MigrationLedger, kvGigabytes: number, cost: TransferCost): MigrationLedger {
+/**
+ * The ledger with one completed migration added.
+ *
+ * `payloadGigabytes` is what actually crossed the links; `fullGigabytes` is what a
+ * full snapshot of the cache weighs, which is what the baseline charges. The two
+ * are the same unless the caller ships differential snapshots — see `deltaSnapshot`.
+ */
+export function recordMigration(ledger: MigrationLedger, payloadGigabytes: number, fullGigabytes: number, cost: TransferCost): MigrationLedger {
   return {
     ...ledger,
     migrations: ledger.migrations + 1,
-    gigabytesMoved: ledger.gigabytesMoved + kvGigabytes,
+    gigabytesMoved: ledger.gigabytesMoved + payloadGigabytes,
+    baselineGigabytes: ledger.baselineGigabytes + fullGigabytes,
     transferSeconds: ledger.transferSeconds + cost.totalSeconds,
   };
+}
+
+/** What a transfer has to ship, under the differential-snapshot model. */
+export interface DeltaSnapshot {
+  /** The payload to serialize for this transfer, in GB. */
+  gigabytes: number;
+  /** False when the payload is a delta against the last synced snapshot. */
+  full: boolean;
+}
+
+/**
+ * How much KV cache a stage's next transfer must move.
+ *
+ * The serving stage keeps appending tokens to its cache, so what has to travel is
+ * everything added since the last completed transfer *plus* whatever arrives while
+ * the transfer itself is being serialized — a transfer that ships only the delta
+ * measured at take-off lands already stale. That self-referential term resolves in
+ * closed form: with growth rate r (GB/s), link bandwidth b (Gbps) and a delta g,
+ * the payload p satisfies p = g + r · (8p / b), so p = g / (1 − 8r / b). The
+ * denominator is a sanity clamp as much as arithmetic: if growth ever approaches
+ * the link's serialisation rate the fixed point diverges and the honest answer is
+ * the full snapshot, not an infinite delta.
+ *
+ * `secondsSinceSync` of undefined means this stage has never completed a transfer,
+ * so there is no earlier snapshot to diff against and the payload is the full
+ * cache. A negative span — the demo clock scrubbed backwards — answers the same
+ * way: a rewound clock's "last sync" is not a state the cache actually lived
+ * through, and the conservative payload is the whole cache.
+ */
+export function deltaSnapshot(fullGigabytes: number, growthMbPerSecond: number, secondsSinceSync: number | undefined, islGbps: number): DeltaSnapshot {
+  if (secondsSinceSync === undefined || secondsSinceSync < 0) {
+    return { gigabytes: fullGigabytes, full: true };
+  }
+  const grownGigabytes = (growthMbPerSecond * secondsSinceSync) / 1024;
+  if (grownGigabytes >= fullGigabytes) {
+    return { gigabytes: fullGigabytes, full: true };
+  }
+  const growthGigabytesPerSecond = growthMbPerSecond / 1024;
+  const denominator = 1 - (8 * growthGigabytesPerSecond) / islGbps;
+  if (denominator <= 0.5) {
+    return { gigabytes: fullGigabytes, full: true };
+  }
+  return { gigabytes: grownGigabytes / denominator, full: false };
 }
 
 /**

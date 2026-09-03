@@ -399,11 +399,17 @@ record(
 );
 
 record(
-  "the pipeline's ceiling is well below a single satellite's lit fraction",
+  "the routed pipeline still stalls — the all-stages-at-once condition binds even with relays",
   readout?.allPoweredFraction,
-  // Four stages need four coincidences; a single satellite is lit roughly half the
-  // time, so the conjunction has to land clearly under that or the model is wrong.
-  (f) => f < 0.5,
+  // Relay routing removed the deep-stall regime the naive policy used to sit in
+  // (a host over the limb used to strand its stage for half an orbit; now the
+  // cache goes around), so the served fraction no longer lands under a single
+  // satellite's lit fraction. What still binds is the conjunction itself: the
+  // four stages' hosts are not all lit at once during eclipse ingress, migration
+  // is decided on a cadence, and a 20-satellite fleet runs out of free lit hosts
+  // often enough that a fraction pinned at 1 would mean the model had stopped
+  // counting stalls — which is the failure this check exists to catch.
+  (f) => f > 0 && f < 0.9,
 );
 
 record(

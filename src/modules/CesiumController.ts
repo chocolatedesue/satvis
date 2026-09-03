@@ -29,7 +29,7 @@ import { currentPosition } from "../composables/useGeolocation";
 import { usePostHog } from "../composables/usePostHog";
 import { useToastProxy } from "../composables/useToastProxy";
 import { parseLayer } from "../config/layers";
-import { DEFAULT_MIGRATION_POLICY, DEFAULT_PIPELINE_STAGES, type MigrationPolicy } from "../config/migration";
+import { DEFAULT_KV_INCREMENTAL, DEFAULT_MIGRATION_POLICY, DEFAULT_PIPELINE_STAGES, type MigrationPolicy } from "../config/migration";
 import { MSAA_RATES, PIXEL_RATIOS, msaaSamplesFor, resolutionScaleFor } from "../config/rendering";
 import { STAR_MAPS, type StarMapSources, starMapSources } from "../config/starMaps";
 import { CAMERA_MODES, SCENE_MODES } from "../config/viewModes";
@@ -143,6 +143,9 @@ export class CesiumController {
 
   /** The migration policy (predictive vs naive) to apply. */
   #migrationPolicy: MigrationPolicy = DEFAULT_MIGRATION_POLICY;
+
+  /** Whether migration transfers ship incremental KV deltas. See setMigrationIncremental. */
+  #migrationIncremental: boolean = DEFAULT_KV_INCREMENTAL;
 
   skyView!: SkyView;
 
@@ -660,7 +663,7 @@ export class CesiumController {
   setMigration(on: boolean): void {
     if (on) {
       if (!this.#migration) {
-        this.#migration = new MigrationLayer(this.viewer, this.sats, undefined, this.#migrationStages, this.#migrationPolicy);
+        this.#migration = new MigrationLayer(this.viewer, this.sats, undefined, this.#migrationStages, this.#migrationPolicy, this.#migrationIncremental);
       }
       this.#migration.start();
     } else {
@@ -714,6 +717,19 @@ export class CesiumController {
   setMigrationPolicy(policy: MigrationPolicy): void {
     this.#migrationPolicy = policy;
     this.#migration?.setPolicy(policy);
+  }
+
+  /**
+   * Whether migration transfers ship incremental KV deltas rather than full
+   * snapshots.
+   *
+   * Remembered beside the layer (like the stage count and the policy) so a value
+   * set before the overlay is first built — by a `?miginc=true` link, say — is in
+   * force from its first frame rather than from its second decision.
+   */
+  setMigrationIncremental(on: boolean): void {
+    this.#migrationIncremental = on;
+    this.#migration?.setIncremental(on);
   }
 
   /** What the migration overlay is doing, for the panel's readout. */

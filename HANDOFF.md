@@ -93,6 +93,13 @@
   - Proactively triggers KV-cache transfer to an idle peer that has line of sight and maximum remaining sunlit duration — or, when the limb is in the way, around it through lit relays (`routesFrom`, Dijkstra over the visibility graph). **A chord through the Earth is not a link**, so it is never taken: when no lit chain reaches around, the stage is `stranded` (`docs/adr/0011-routing-around-the-earth.md`).
   - Handoff completes before shadow ingress, achieving **zero pipeline stalls** and **near 100% sunlit GPU utilization**.
 
+### G. Store-and-Forward Relays, Incremental KV Sync, Real-Fleet Mapping & Per-Frame Occlusion (存储转发 / 增量传输 / 真实星座映射 / 逐帧遮挡)
+
+- **Store-and-forward relay cost** (`routeTransferCost`): a relay receives the complete cache before re-sending it, so the serialisation term is paid once **per leg** (~160 ms per 2 GB at 100 Gbps) while propagation sums the legs — the relayed transfers' headline cost now includes the per-relay receive-and-emit that cut-through pricing undercounted.
+- **Incremental KV sync** (`deltaSnapshot`, toggle `?miginc=true` / panel switch): the first transfer ships the full 2 GB snapshot, later ones ship only the cache's growth since the last completed transfer (~25.6 MB/s) plus what arrives while the delta serialises (closed form `p = g/(1−8r/b)`); scrubbed clocks and runaway growth fall back to the full snapshot. The ledger records actual bytes moved beside the always-full baseline; the panel shows the compression ratio.
+- **Real-fleet mapping**: `?demo=real-fleet` (or the panel button) maps the pipeline onto the real Iridium NEXT catalog group (80 sats). The orbit lab's **sunlit continuity report** (`fleetContinuity`) samples up to 48 satellites over two orbits on a common grid and reports fixed-placement continuity vs the ≥k-lit service ceiling — the gap is what migration buys on real orbits.
+- **Per-frame honest occlusion**: topology links evaluate line-of-sight **per frame, at the frame's own instant** inside the positions callbacks — a link the Earth stands between draws nothing that frame, at any clock multiplier (the old 400 ms wall-cadence pass let links pierce the planet for frames at a time). The pipeline chain and marked bonds keep their dim-not-hide relation semantics, with the dim verdict also computed per frame.
+
 ---
 
 ## 3. Quick Verification & Test Commands
@@ -130,8 +137,11 @@ bash scripts/deploy-pages.sh
 ## 4. Key Modified Files & Module Mapping
 
 - [`src/modules/util/shellLayout.ts`](file:///home/ccds/satvis/src/modules/util/shellLayout.ts): The multi-shell layout math — plus the cluster finder (`nodeLockedGroups`, `commonRepeatCycle`, `findStableClusters`) and the family constructor (`shellFamily`, `familyCycleHours`). The multi-shell layout math — secular rates, `coPrecessingInclinationDeg`, `coPrecessingCeilingKm`, `resonantCompanion`, `searchStableShellLayouts`, `shellPairLayout`. No runtime imports, so the derivation script can run it under node's type stripping.
-- [`src/config/migration.ts`](file:///home/ccds/satvis/src/config/migration.ts): Policies (`predictive`, `naive`), 90s lookahead window, time step bounds.
-- [`src/modules/util/migration.ts`](file:///home/ccds/satvis/src/modules/util/migration.ts): Line-of-sight routing (`routesFrom` / `routeBetween` / `chooseRouteExcluding` — the Earth is opaque, so a hand-off takes the shortest path of real legs and strands when there is none), predictive decision engine (`decideStageMigration`).
-- [`src/modules/MigrationLayer.ts`](file:///home/ccds/satvis/src/modules/MigrationLayer.ts): Cesium rendering layer, lookahead illumination sampler, real-time metrics status generator.
-- [`src/components/OrbitLabPanel.vue`](file:///home/ccds/satvis/src/components/OrbitLabPanel.vue): Policy toggle, Sunlit GPU utilization metric display, pipeline state badges.
-- [`src/stores/sat.ts`](file:///home/ccds/satvis/src/stores/sat.ts) & [`src/modules/sceneSync.ts`](file:///home/ccds/satvis/src/modules/sceneSync.ts): URL parameter synchronization (`migpol`, `mig`, `migst`, `links`, `mark`).
+- [`src/config/migration.ts`](file:///home/ccds/satvis/src/config/migration.ts): Policies (`predictive`, `naive`), 90s lookahead window, time step bounds, incremental-KV defaults and growth-rate constants (`KV_TOKENS_PER_SECOND` × `KV_MEGABYTES_PER_TOKEN`).
+- [`src/modules/util/migration.ts`](file:///home/ccds/satvis/src/modules/util/migration.ts): Line-of-sight routing (`routesFrom` / `routeBetween` / `chooseRouteExcluding` — the Earth is opaque, so a hand-off takes the shortest path of real legs and strands when there is none), store-and-forward pricing (`routeTransferCost`), differential snapshot (`deltaSnapshot`), predictive decision engine (`decideStageMigration`).
+- [`src/modules/MigrationLayer.ts`](file:///home/ccds/satvis/src/modules/MigrationLayer.ts): Cesium rendering layer, lookahead illumination sampler, per-leg transfer pricing, incremental sync points, ledger with full-snapshot baseline, real-time metrics status generator.
+- [`src/modules/util/fleetContinuity.ts`](file:///home/ccds/satvis/src/modules/util/fleetContinuity.ts): Pure real-fleet service-continuity evaluation (fixed greedy placement vs the ≥k-lit service ceiling).
+- [`src/modules/ConstellationLinksLayer.ts`](file:///home/ccds/satvis/src/modules/ConstellationLinksLayer.ts): Per-frame line-of-sight in the positions callbacks (occluded links draw nothing that frame), per-frame bond dimming.
+- [`src/modules/demoScenes.ts`](file:///home/ccds/satvis/src/modules/demoScenes.ts): `applyRealFleetScene` (Iridium NEXT mapping) + `?demo=real-fleet`.
+- [`src/components/OrbitLabPanel.vue`](file:///home/ccds/satvis/src/components/OrbitLabPanel.vue): Policy toggle, incremental KV toggle, KV-moved compression ratio, Sunlit GPU utilization metric display, pipeline state badges, real-fleet demo button + continuity report.
+- [`src/stores/sat.ts`](file:///home/ccds/satvis/src/stores/sat.ts) & [`src/modules/sceneSync.ts`](file:///home/ccds/satvis/src/modules/sceneSync.ts): URL parameter synchronization (`migpol`, `mig`, `miginc`, `migst`, `links`, `mark`, `demo=real-fleet`).

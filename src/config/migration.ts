@@ -138,3 +138,29 @@ export const DEFAULT_MIGRATION_POLICY: MigrationPolicy = "naive";
  * Triggers pre-eclipse handoff before the host satellite loses solar power.
  */
 export const MIGRATION_PREDICTIVE_LOOKAHEAD_SIM_SECONDS = 90;
+
+/**
+ * Whether a migration ships only the KV delta accumulated since the stage's last
+ * completed transfer, instead of re-pushing the full snapshot every time.
+ *
+ * Off by default so the ledger's "KV moved" figure stays the full-snapshot
+ * baseline the naive-vs-predictive comparison argues from; `?miginc=true` (or the
+ * panel toggle) turns the differential snapshot on and the same metric becomes
+ * the before/after of the optimisation.
+ */
+export const DEFAULT_KV_INCREMENTAL = false;
+
+/**
+ * How fast one pipeline stage appends to its KV cache while serving, in MB per
+ * simulated second.
+ *
+ * Derived, not measured: 64 decode tokens/s at 0.4 MB per token — 0.4 MB is
+ * 2 · layers · kv_heads · head_dim · 2 bytes for roughly 80 layers × 8 KV heads ×
+ * 128 head dim in fp16, a mid-size model's per-token footprint across the whole
+ * stack. 64 tokens/s is one token per decode step at 15 steps/s. Together:
+ * 25.6 MB/s, so a stage that migrated a minute ago re-ships ~1.5 GB of a 2 GB
+ * snapshot, and one that migrated ten seconds ago ships ~256 MB.
+ */
+export const KV_TOKENS_PER_SECOND = 64;
+export const KV_MEGABYTES_PER_TOKEN = 0.4;
+export const KV_GROWTH_MB_PER_SECOND = KV_TOKENS_PER_SECOND * KV_MEGABYTES_PER_TOKEN;

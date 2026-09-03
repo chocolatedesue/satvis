@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 
 import { POINT_SIZES, SATELLITE_COMPONENTS, type PointSize } from "../config/components";
 import { DEFAULT_POINT_PAINT, PANEL_AXES, POINT_COLOR_MODES, type PanelAxis, type PointColorMode } from "../config/illumination";
-import { DEFAULT_MIGRATION_POLICY, DEFAULT_PIPELINE_STAGES, MIGRATION_POLICIES, type MigrationPolicy, PIPELINE_STAGE_CHOICES } from "../config/migration";
+import { DEFAULT_KV_INCREMENTAL, DEFAULT_MIGRATION_POLICY, DEFAULT_PIPELINE_STAGES, MIGRATION_POLICIES, type MigrationPolicy, PIPELINE_STAGE_CHOICES } from "../config/migration";
 import { sameValue } from "../modules/util/equality";
 import { boolean, closedStringList, enumString, groundStationList, numberChoice, plainString, stringList, tildeEscapedStringList } from "../modules/util/urlCodec";
 
@@ -72,6 +72,12 @@ export const useSatStore = defineStore(
     // Migration policy: "predictive" (illumination-aware pre-eclipse handoff to maximize
     // GPU utilization in sunlit zones) or "naive" (reactive migration on power loss).
     const migrationPolicy = ref<MigrationPolicy>(DEFAULT_MIGRATION_POLICY);
+
+    // Incremental KV sync: whether a migration ships only the cache's delta since
+    // the last completed transfer (differential snapshot) or the full snapshot
+    // every time. Off by default so the ledger's "KV moved" stays the naive
+    // baseline the before/after comparison argues from; `?miginc=true` flips it.
+    const migrationIncremental = ref<boolean>(DEFAULT_KV_INCREMENTAL);
 
     // The stable-constellation link overlay: every generated Walker satellite
     // wired into the topology scripts/derive-isl-topology.mjs derived — rings
@@ -204,6 +210,7 @@ export const useSatStore = defineStore(
       marks,
       migrationStages,
       migrationPolicy,
+      migrationIncremental,
       enabledTags,
       enabledSatellites,
       disabledSatellites,
@@ -233,6 +240,7 @@ export const useSatStore = defineStore(
         { name: "migration", url: "mig", kind: boolean() },
         { name: "migrationStages", url: "migst", kind: numberChoice(PIPELINE_STAGE_CHOICES) },
         { name: "migrationPolicy", url: "migpol", kind: enumString(MIGRATION_POLICIES) },
+        { name: "migrationIncremental", url: "miginc", kind: boolean() },
         { name: "links", url: "links", kind: boolean() },
         { name: "marks", url: "mark", kind: stringList() },
       ],

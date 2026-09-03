@@ -63,9 +63,6 @@ export class ConstellationLinksLayer {
   /** One entity per link, keyed by the undirected endpoint pair. */
   readonly #entities = new Map<string, Entity>();
 
-  /** Line-of-sight state per link key, refreshed on the slow cadence. */
-  readonly #visible = new Map<string, boolean>();
-
   /** Signature of the active generated-satellite set the graph was built from. */
   #signature = "";
 
@@ -79,11 +76,6 @@ export class ConstellationLinksLayer {
   readonly #bondEntities = new Map<string, Entity>();
 
   #removeTick: (() => void) | undefined;
-
-  #lastCheckMs = 0;
-
-  /** Wall-clock cadence for the occlusion pass and the graph-diff, in ms. */
-  static readonly CHECK_EVERY_MS = 400;
 
   static readonly INTRA_COLOR = Color.fromCssColorString("#34d399");
 
@@ -114,7 +106,6 @@ export class ConstellationLinksLayer {
       this.#viewer.entities.remove(entity);
     }
     this.#entities.clear();
-    this.#visible.clear();
     this.#clearMarks();
     this.#signature = "";
     this.#viewer.scene.requestRender();
@@ -166,7 +157,6 @@ export class ConstellationLinksLayer {
       if (!wantedBonds.has(key)) {
         this.#viewer.entities.remove(entity);
         this.#bondEntities.delete(key);
-        this.#visible.delete(key);
       }
     }
     const hue = ConstellationLinksLayer.MARK_COLOR;
@@ -217,7 +207,15 @@ export class ConstellationLinksLayer {
       // comes back into view. Hiding it made a holding cluster look like it
       // fell apart once per orbit, which is exactly the misreading the
       // overlay exists to prevent.
-      const occludedColor = new CallbackProperty(() => (this.#visible.get(key) === false ? hue.withAlpha(0.25) : hue), false);
+      // The test runs per frame against the frame's own instant, so the dimming
+      // is honest at any clock multiplier.
+      const occludedColor = new CallbackProperty((time?: JulianDate) => {
+        const at = time ?? this.#viewer.clock.currentTime;
+        const pa = this.#positionAt(bond.a, at);
+        const pb = this.#positionAt(bond.b, at);
+        const occluded = !(pa !== undefined && pb !== undefined && hasLineOfSight(pa, pb, 0));
+        return occluded ? hue.withAlpha(0.25) : hue;
+      }, false);
       const entity = new Entity({
         name: `Marked bond ${bond.a} ↔ ${bond.b} (${bond.verdict})`,
         polyline: new PolylineGraphics({
@@ -250,13 +248,10 @@ export class ConstellationLinksLayer {
   }
 
   #tick(): void {
-    const now = performance.now();
-    if (now - this.#lastCheckMs < ConstellationLinksLayer.CHECK_EVERY_MS) {
-      return;
-    }
-    this.#lastCheckMs = now;
+    // Cheap per frame: the graph diff below returns immediately unless the active
+    // satellite set changed, and occlusion is now read per frame inside the
+    // positions and material callbacks rather than on a pass of its own.
     this.#refresh();
-    this.#checkOcclusion();
   }
 
   /** Rebuild the link graph when the active generated-satellite set changed. */
@@ -285,7 +280,6 @@ export class ConstellationLinksLayer {
       if (!wanted.has(key)) {
         this.#viewer.entities.remove(entity);
         this.#entities.delete(key);
-        this.#visible.delete(key);
       }
     }
     for (const [key, link] of wanted) {
@@ -300,7 +294,11 @@ export class ConstellationLinksLayer {
             const at = time ?? this.#viewer.clock.currentTime;
             const a = this.#positionAt(link.a, at);
             const b = this.#positionAt(link.b, at);
-            return a && b ? [a, b] : [];
+            // An ISL the Earth stands between does not exist this frame, so it
+            // draws nothing: the occlusion verdict is taken at the same instant
+            // as the endpoints, which is what keeps a fast clock from ever
+            // showing a line through the planet.
+            return a !== undefined && b !== undefined && hasLineOfSight(a, b, 0) ? [a, b] : [];
           }, false),
           width: link.kind === "intra" ? 1.5 : 2,
           material: new PolylineGlowMaterialProperty({ glowPower: 0.2, color: hue }),
@@ -313,38 +311,7 @@ export class ConstellationLinksLayer {
       this.#viewer.entities.add(entity);
     }
     this.#rebuildMarks();
-    // Occlusion state starts unknown: the next pass settles it, and until then
-    // the CallbackProperty above still draws the chord.
-    this.#checkOcclusion();
     this.#viewer.scene.requestRender();
-  }
-
-  /**
-   * Hide links whose chord passes behind the Earth; dim bonds instead.
-   *
-   * A topology link stands for a live inter-satellite link, and a link through
-   * rock does not exist, so it is hidden. A marked bond stands for the
-   * *relation* between two satellites, which the Earth interrupts but does not
-   * dissolve — so it stays drawn, dimmed to a quarter opacity, its colour
-   * driven by the `#visible` flag the bond's material reads.
-   */
-  #checkOcclusion(): void {
-    const time = this.#viewer.clock.currentTime;
-    for (const [key, entity] of this.#entities) {
-      const endpoints = key.split("|");
-      const a = this.#positionAt(endpoints[0]!, time);
-      const b = this.#positionAt(endpoints[1]!, time);
-      const seen = a !== undefined && b !== undefined && hasLineOfSight(a, b, 0);
-      this.#visible.set(key, seen);
-      entity.show = seen;
-    }
-    for (const [key, entity] of this.#bondEntities) {
-      const endpoints = key.split("|");
-      const a = this.#positionAt(endpoints[0]!, time);
-      const b = this.#positionAt(endpoints[1]!, time);
-      this.#visible.set(key, a !== undefined && b !== undefined && hasLineOfSight(a, b, 0));
-      entity.show = a !== undefined && b !== undefined;
-    }
   }
 }
 

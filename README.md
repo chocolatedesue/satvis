@@ -477,10 +477,32 @@ Key metrics and constraints:
   far side of the planet is five legs away and a single relay would be a different, wrong answer. Relays must be powered (a dark satellite can neither receive nor retransmit) and
   may host another stage. When no lit chain reaches around, the stage is **stranded** — which is then the truth rather than a hop drawn faint with a caveat.
   Reasoning: `docs/adr/0011-routing-around-the-earth.md`.
-- **Realistic Link Arithmetic**: Real transfer time accounts for 100 Gbps serialisation (~160 ms for 2 GB) + vacuum light travel over the physical chord distance.
+- **Store-and-forward relay cost**: a relay receives the *complete* cache before sending it on, so the transfer is priced with `routeTransferCost` — the serialisation term
+  is paid **once per leg** (100 Gbps re-serialises 2 GB in ~160 ms at every relay) while propagation sums the legs. Charging one serialisation for the whole wire would
+  undercount exactly the thing that makes relaying expensive.
+- **Incremental KV sync (`?miginc=true` or the panel toggle)**: the first migration ships the full 2 GB snapshot; every later one ships only the cache's growth since its last
+  completed transfer (~25.6 MB/s of appended KV: 64 decode tokens/s × 0.4 MB/token), plus what arrives while the delta itself serialises — resolved in closed form by
+  `deltaSnapshot`, falling back to the full snapshot when the clock was scrubbed or the growth outruns the link. The ledger tracks the actual bytes moved beside the
+  always-full baseline, and the panel shows the ratio.
+- **Realistic Link Arithmetic**: Real transfer time accounts for 100 Gbps serialisation (~160 ms for 2 GB) + vacuum light travel over the physical chord distance, summed
+  store-and-forward over every leg.
 - **Simulated Timebase Ledger**: GPU utilization and served/stalled seconds are tracked accurately against simulated orbit time.
 
 `node scripts/verify-migration.mjs <base-url> <out-dir>` verifies placement, live ISL packet progress, zero-stall serving, and that **every leg** of every hand-off is inside the
+5014 km line-of-sight horizon, in headless Chromium. Per leg rather than per hand-off: a 9000 km hand-off is fine as two 4500 km legs and impossible as one chord.
+
+### Real-fleet mapping & service continuity (真实星座算力映射)
+
+The **"Iridium NEXT fleet mapping demo"** (`?demo=real-fleet` or the panel button) maps the same pipeline onto a real catalogued constellation — 80 Iridium NEXT satellites
+from the live CelesTrak-derived OMM catalog, the one large fleet that actually flies cross-linked traffic. Placement, migration policy, relay routing and the ledger all work
+unchanged; the orbits are real, and the topology is whatever the line-of-sight routes make of it.
+
+The orbit lab's **sunlit continuity report** (`fleetContinuity`) then brackets what migration buys on that fleet: each of up to 48 sampled satellites is propagated over two
+orbits on a common time grid, and the report reads out a fixed greedy placement's continuity ("put the stages where the sun lives", no migration) against the **service
+ceiling** — the share of instants with at least k satellites lit at once, which predictive handoff, relay routing and incremental sync can approach. The gap between the two
+rows is the value of the machinery, measured on real orbits.
+
+### Satellite metadata
 5014 km line-of-sight horizon, in headless Chromium. Per leg rather than per hand-off: a 9000 km hand-off is fine as two 4500 km legs and impossible as one chord.
 
 ### Satellite metadata

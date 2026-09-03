@@ -158,7 +158,13 @@ await until(
   "link and bond entities built and settled",
 );
 
-const report = await evaluate(`(() => {
+// The report is only meaningful once the trajectories are answering: at the demo's
+// 600x a capture can land in the window where the sampled-position worker still
+// lags the clock, every callback draws nothing, and the numbers would describe
+// that gap rather than the topology. Polled, like the settle check above.
+let report;
+for (let attempt = 0; attempt < 40; attempt += 1) {
+  report = await evaluate(`(() => {
   const entities = [...(window.cc?.viewer?.entities?.values ?? [])];
   const rings = entities.filter((e) => (e.name || "").startsWith("Ring link"));
   const inters = entities.filter((e) => (e.name || "").startsWith("Inter-plane link"));
@@ -166,7 +172,20 @@ const report = await evaluate(`(() => {
   const bonds = entities.filter((e) => (e.name || "").startsWith("Marked bond"));
   const visible = entities.filter((e) => (e.name || "").includes("link") && e.show === true);
   const bondVisible = bonds.filter((e) => e.show === true).length;
-  const sample = (inters[0] || rings[0])?.polyline?.positions?.getValue(window.cc?.viewer?.clock?.currentTime) ?? [];
+  // A topology link whose chord the Earth blocks draws nothing that frame — the
+  // occlusion verdict is taken per frame at the frame's own instant — so the
+  // two-point chord is sampled from the first link actually in view rather than
+  // from whichever the list happens to put first: on the shells demo the first
+  // inter-plane pair sits 90° apart in RAAN and is occluded most of the orbit.
+  const samplePoints = [...inters, ...rings]
+    .map((e) => {
+      try {
+        return e.polyline?.positions?.getValue(window.cc?.viewer?.clock?.currentTime) ?? [];
+      } catch {
+        return [];
+      }
+    })
+    .find((points) => points.length > 0)?.length ?? 0;
   return {
     rings: rings.length,
     inters: inters.length,
@@ -174,10 +193,13 @@ const report = await evaluate(`(() => {
     bonds: bonds.length,
     bondVisible,
     visible: visible.length,
-    samplePoints: sample.length,
+    samplePoints,
     marks: new URLSearchParams(location.search).get("mark"),
   };
 })()`);
+  if (report.samplePoints > 0) break;
+  await sleep(500);
+}
 
 console.log("links report:", JSON.stringify(report, null, 2));
 

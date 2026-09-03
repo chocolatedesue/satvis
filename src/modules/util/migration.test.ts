@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   accrueTime,
+  deltaSnapshot,
   chooseRouteExcluding,
   chooseTarget,
   chooseTargetExcluding,
@@ -22,6 +23,7 @@ import {
   recordMigration,
   relaysOf,
   routeBetween,
+  routeTransferCost,
   routesFrom,
   allPoweredFraction,
   SPEED_OF_LIGHT_KM_S,
@@ -473,11 +475,11 @@ describe("poweredStageCount", () => {
 
 describe("the ledger", () => {
   it("starts empty", () => {
-    expect(emptyLedger()).toEqual({ migrations: 0, gigabytesMoved: 0, transferSeconds: 0, stalledSeconds: 0, allPoweredSeconds: 0 });
+    expect(emptyLedger()).toEqual({ migrations: 0, gigabytesMoved: 0, baselineGigabytes: 0, transferSeconds: 0, stalledSeconds: 0, allPoweredSeconds: 0 });
   });
 
   it("adds a migration's bytes and its cost", () => {
-    const ledger = recordMigration(emptyLedger(), 2, transferCost(2, 100, 0));
+    const ledger = recordMigration(emptyLedger(), 2, 2, transferCost(2, 100, 0));
     expect(ledger.migrations).toBe(1);
     expect(ledger.gigabytesMoved).toBe(2);
     expect(ledger.transferSeconds).toBeCloseTo(0.16, 9);
@@ -485,8 +487,8 @@ describe("the ledger", () => {
 
   it("accumulates across migrations without mutating the input", () => {
     const first = emptyLedger();
-    const second = recordMigration(first, 2, transferCost(2, 100, 0));
-    const third = recordMigration(second, 2, transferCost(2, 100, 0));
+    const second = recordMigration(first, 2, 2, transferCost(2, 100, 0));
+    const third = recordMigration(second, 2, 2, transferCost(2, 100, 0));
     expect(first.migrations).toBe(0);
     expect(third.gigabytesMoved).toBe(4);
   });
@@ -566,5 +568,69 @@ describe("a packet's progress along its link", () => {
     expect(flightProgress(0, 0, 0)).toEqual({ fraction: 1, arrived: true });
     expect(flightProgress(0, 0, -5)).toEqual({ fraction: 1, arrived: true });
     expect(flightProgress(0, 0, Number.NaN)).toEqual({ fraction: 1, arrived: true });
+  });
+});
+
+describe("routeTransferCost", () => {
+  it("charges serialisation once per leg — store-and-forward is what a cache transfer is", () => {
+    // Two legs: the payload is received in full at the relay before it is sent on,
+    // so the serialisation is paid twice where one direct link would pay it once.
+    const cost = routeTransferCost(2, 100, [2000, 3000]);
+    expect(cost.serializeSeconds).toBeCloseTo(0.32, 9);
+    expect(cost.propagationSeconds).toBeCloseTo(transferCost(2, 100, 2000).propagationSeconds + transferCost(2, 100, 3000).propagationSeconds, 9);
+    expect(cost.totalSeconds).toBeCloseTo(cost.serializeSeconds + cost.propagationSeconds, 9);
+  });
+
+  it("is the direct cost for a one-leg route", () => {
+    const cost = routeTransferCost(2, 100, [2000]);
+    const direct = transferCost(2, 100, 2000);
+    expect(cost.serializeSeconds).toBeCloseTo(direct.serializeSeconds, 9);
+    expect(cost.propagationSeconds).toBeCloseTo(direct.propagationSeconds, 9);
+  });
+
+  it("is zero across an empty route", () => {
+    expect(routeTransferCost(2, 100, []).totalSeconds).toBe(0);
+  });
+});
+
+describe("the ledger's full-snapshot baseline", () => {
+  it("charges the baseline the full snapshot while the payload shrinks under delta sync", () => {
+    const ledger = recordMigration(recordMigration(emptyLedger(), 2, 2, transferCost(2, 100, 0)), 0.04, 2, transferCost(0.04, 100, 0));
+    expect(ledger.migrations).toBe(2);
+    expect(ledger.gigabytesMoved).toBeCloseTo(2.04, 9);
+    expect(ledger.baselineGigabytes).toBe(4);
+  });
+});
+
+describe("deltaSnapshot", () => {
+  const FULL = 2;
+
+  it("ships the full cache when the stage has never synced", () => {
+    expect(deltaSnapshot(FULL, 25.6, undefined, 100)).toEqual({ gigabytes: FULL, full: true });
+  });
+
+  it("ships the full cache when the clock was scrubbed backwards", () => {
+    expect(deltaSnapshot(FULL, 25.6, -30, 100).full).toBe(true);
+  });
+
+  it("ships only the growth since the last sync, plus what arrives while it serialises", () => {
+    // 60 s of growth at 25.6 MB/s is 1.5 GB of a 2 GB cache — a delta, not a full
+    // push, once the in-flight growth term is folded in.
+    const delta = deltaSnapshot(FULL, 25.6, 60, 100);
+    expect(delta.full).toBe(false);
+    expect(delta.gigabytes).toBeGreaterThan(1.5);
+    expect(delta.gigabytes).toBeLessThan(FULL);
+  });
+
+  it("ships the full cache once the growth exceeds it", () => {
+    // Two hours since the last sync at 25.6 MB/s is ~184 GB — long past the 2 GB
+    // snapshot; diffing against a snapshot older than the whole cache is a full push.
+    expect(deltaSnapshot(FULL, 25.6, 7200, 100)).toEqual({ gigabytes: FULL, full: true });
+  });
+
+  it("never divides through the serialisation clamp", () => {
+    // At 6400 MB/s of KV growth the fixed point's denominator hits the clamp and
+    // the honest answer is the full snapshot, not a diverging delta.
+    expect(deltaSnapshot(FULL, 6400, 60, 100)).toEqual({ gigabytes: FULL, full: true });
   });
 });

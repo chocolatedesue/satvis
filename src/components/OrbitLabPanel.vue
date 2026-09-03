@@ -160,6 +160,17 @@
         Reactive (Post-failure · Naive baseline)
       </label>
     </div>
+    <label class="toolbarSwitch">
+      <input type="checkbox" :checked="migrationIncremental" @change="migrationIncremental = ($event.target as HTMLInputElement).checked" />
+      <span class="slider"></span>
+      Incremental KV sync (differential snapshot)
+    </label>
+    <p class="orbitLab__note">
+      With <strong>incremental KV sync</strong> on, a stage's first transfer ships the full {{ migrationStatus?.kvGigabytes ?? 2 }} GB snapshot and every later one ships only the
+      cache's growth since its last completed transfer — at ~25.6 MB of appended KV per simulated second (64 decode tokens/s at 0.4 MB/token), that turns a gigabyte-scale migration
+      into hundreds of megabytes or less. The KV-moved row below shows the ratio against the always-full baseline. Relays are charged store-and-forward: every hop re-serialises the
+      whole payload, so relaying costs a serialisation per leg.
+    </p>
     <p class="orbitLab__note">
       An inference pipeline is cut into {{ migrationStatus?.stageCount ?? migrationStages }} stages, each holding its own {{ migrationStatus?.kvGigabytes ?? 2 }} GB KV cache on its
       own satellite — one stage per satellite, connected via stable inter-satellite links (ISLs). Space GPUs rely on solar power, which is only available in the sunlit zone.
@@ -226,7 +237,10 @@
         <tr v-if="migrationStatus.ledger.migrations > 0">
           <td class="orbitLab__factName">KV moved</td>
           <td class="orbitLab__factValue">
-            {{ migrationStatus.ledger.gigabytesMoved.toFixed(0) }} GB in {{ (migrationStatus.ledger.transferSeconds * 1000).toFixed(0) }} ms of link time
+            {{ formatPayload(migrationStatus.ledger.gigabytesMoved) }} in {{ (migrationStatus.ledger.transferSeconds * 1000).toFixed(0) }} ms of link time
+            <template v-if="migrationStatus.incremental && migrationStatus.ledger.baselineGigabytes > migrationStatus.ledger.gigabytesMoved">
+              · {{ migrationDelta }}× less than full
+            </template>
           </td>
         </tr>
         <tr v-if="migrationStatus.linkKm !== undefined">
@@ -252,6 +266,43 @@
       </table>
       <p class="orbitLab__note">Newest first, at the simulated time the migration was decided.</p>
     </template>
+
+    <div class="toolbarTitle">Real fleet mapping</div>
+    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="realFleetDemo">Iridium NEXT fleet mapping demo</button>
+    <p class="orbitLab__note">
+      Maps the same compute pipeline onto a <strong>real catalogued constellation</strong> — Iridium NEXT, 80 satellites from the live CelesTrak-derived OMM catalog, the one large
+      fleet that actually flies cross-linked traffic. Placement, migration policy, relay routing and the ledger all work unchanged; what changes is that the orbits are real, and
+      the topology is whatever the migration layer's line-of-sight routes make of it. The link <code>?demo=real-fleet</code> opens the same scene.
+    </p>
+    <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="realSatelliteCount === 0 || evaluatingFleet" @click="evaluateContinuity">
+      {{ evaluatingFleet ? "Evaluating…" : `Evaluate sunlit continuity (${realSatelliteCount} real satellites)` }}
+    </button>
+    <table v-if="fleetReport" class="orbitLab__facts">
+      <tbody>
+        <tr title="How much of the sampled window each satellite can power its compute, averaged over the fleet">
+          <td class="orbitLab__factName">Mean sunlit fraction</td>
+          <td class="orbitLab__factValue">{{ pct(fleetReport.meanSunlitFraction) }}</td>
+        </tr>
+        <tr title="The best-lit satellite in the fleet — a one-stage pipeline's fixed-placement figure">
+          <td class="orbitLab__factName">Best single satellite</td>
+          <td class="orbitLab__factValue">{{ pct(fleetReport.bestSunlitFraction) }}</td>
+        </tr>
+        <tr title="A fixed mapping of the pipeline onto the fleet's best-lit satellites, chosen once: serves only when all its hosts are lit together">
+          <td class="orbitLab__factName">{{ migrationStages }}-stage fixed placement</td>
+          <td class="orbitLab__factValue">{{ fleetReport.staticPlacementContinuity === undefined ? "—" : pct(fleetReport.staticPlacementContinuity) }}</td>
+        </tr>
+        <tr
+          title="Share of instants with at least this many satellites lit at once, whatever they are — the ceiling predictive handoff, relay routing and incremental sync can reach"
+        >
+          <td class="orbitLab__factName">{{ migrationStages }}-stage service ceiling</td>
+          <td class="orbitLab__factValue">{{ pct(fleetReport.serviceOpportunity) }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <p v-if="fleetReport" class="orbitLab__note">
+      Sampled over two orbits at {{ FLEET_STEP_SECONDS }} s steps across {{ fleetReport.satellites }} satellites. The gap between the two rows is what live migration buys on the
+      real fleet: the fixed placement cannot chase the sun, the migrated pipeline can.
+    </p>
 
     <label class="orbitLab__field">
       <span>Preset</span>
@@ -469,6 +520,7 @@ import { PIPELINE_STAGE_CHOICES, stageColor } from "../config/migration";
 import { CAMERA_MODES } from "../config/viewModes";
 import {
   applyMigrationScene,
+  applyRealFleetScene,
   applyShellsScene,
   applyStableShellsScene,
   applySunSyncScene,
@@ -479,6 +531,8 @@ import {
   SHELLS_MULTIPLIER,
   STABLE_REFERENCE,
 } from "../modules/demoScenes";
+import { parseWalkerSatellite } from "../modules/util/constellationLinks";
+import { fleetContinuity, type FleetContinuity } from "../modules/util/fleetContinuity";
 import { illuminationTimeline } from "../modules/util/illumination";
 import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, maxReachableBetaDeg } from "../modules/util/orbitDesign";
 import { coPrecessingCeilingKm, searchStableShellLayouts, shellPairLayout } from "../modules/util/shellLayout";
@@ -526,7 +580,7 @@ const STRIP_ORBITS = 2;
 
 const cc = useController();
 const satStore = useSatStore();
-const { pointColorMode, pointSize, panelAxis, walker, migration, migrationStages, migrationPolicy, links, marks } = storeToRefs(satStore);
+const { pointColorMode, pointSize, panelAxis, walker, migration, migrationStages, migrationPolicy, migrationIncremental, links, marks } = storeToRefs(satStore);
 
 // The clock is live viewer state rather than store state (see useViewerClock), and
 // this is the seam the clock deck writes it through — so the demo writes it the same
@@ -953,6 +1007,84 @@ const selected = ref<SelectedReadout | undefined>(undefined);
 const migrationStatus = ref(cc.migrationStatus);
 
 /**
+ * How many of the fleet's real (non-generated) satellites are active.
+ *
+ * The continuity report is about real catalogued orbits — a generated Walker
+ * pattern is the other sections' business — so this is the fleet the section
+ * sizes itself against. Zero disables the evaluate button rather than showing a
+ * report about nothing.
+ */
+const realSatelliteCount = computed(() => cc.sats.activeSatellites.filter((sat) => !parseWalkerSatellite(sat.props.name)).length);
+
+/** The last continuity report, shown until the fleet changes enough to re-run. */
+const fleetReport = ref<FleetContinuity | undefined>(undefined);
+
+const evaluatingFleet = ref(false);
+
+/**
+ * How many real satellites the continuity report samples, at most.
+ *
+ * The report propagates every sampled satellite over two orbits at 30 s steps —
+ * ~400 SGP4 evaluations each — so the cap keeps the largest mapped fleet
+ * (OneWeb's 651) under a second of work while still covering every orbital plane.
+ * Evenly strided rather than the first N, so a fleet ordered by launch date does
+ * not bias the sample to one shell.
+ */
+const FLEET_SAMPLE_LIMIT = 48;
+
+/** Sample step for the continuity timelines, in seconds. */
+const FLEET_STEP_SECONDS = 30;
+
+/**
+ * Evaluate the real fleet's sunlit service continuity.
+ *
+ * Each sampled satellite's illumination timeline is propagated over two orbits
+ * from *now* — the same window for every satellite, so the per-instant columns
+ * align and "how many are lit at once" is a real conjunction count, not a
+ * per-satellite average. Propagation is synchronous (a few hundred ms at the
+ * cap); the button disables for the duration rather than the report racing
+ * itself.
+ */
+function evaluateContinuity(): void {
+  if (evaluatingFleet.value) {
+    return;
+  }
+  evaluatingFleet.value = true;
+  try {
+    const date = JulianDate.toDate(cc.viewer.clock.currentTime);
+    const real = cc.sats.activeSatellites.filter((sat) => !parseWalkerSatellite(sat.props.name));
+    if (real.length === 0) {
+      fleetReport.value = undefined;
+      return;
+    }
+    const stride = Math.max(1, Math.ceil(real.length / FLEET_SAMPLE_LIMIT));
+    const sampled = real.filter((_, index) => index % stride === 0);
+    const periods = sampled.map((sat) => sat.props.orbit.orbitalPeriod).toSorted((a, b) => a - b);
+    const spanSeconds = 2 * 60 * (periods[Math.floor(periods.length / 2)] ?? 95);
+    const axis = panelAxis.value;
+    const powered = sampled.map((sat) => {
+      const timeline = illuminationTimeline(sat.props.orbit.satrec, date, spanSeconds, FLEET_STEP_SECONDS, axis);
+      return timeline.samples.map((sample) => sample.state === "sunlit_on" || sample.state === "sunlit_edge");
+    });
+    fleetReport.value = fleetContinuity(powered, migrationStages.value);
+  } finally {
+    evaluatingFleet.value = false;
+  }
+}
+
+/**
+ * The migration demo mapped onto a real constellation, in one press.
+ *
+ * The scene is the shared `?demo=real-fleet` helper: it activates the real
+ * Iridium NEXT group from the catalog, colours it by illumination and turns the
+ * migration overlay on over it. The form is not touched — it holds Walker
+ * numbers, and a real catalog has none to fill it with.
+ */
+function realFleetDemo(): void {
+  applyRealFleetScene(satStore, cesiumStore, clockControl);
+}
+
+/**
  * A span of simulated time, in the largest unit that keeps it readable.
  *
  * The demo runs at 60× and the browser check winds to 4000×, so the accounted span
@@ -998,6 +1130,24 @@ function shortHost(name: string | undefined): string {
 /** The wall-clock time of an ISO instant, to the second — the log's left column. */
 function clockOf(iso: string): string {
   return iso.slice(11, 19);
+}
+
+/** How much less the incremental sync has moved than the full-snapshot baseline. */
+const migrationDelta = computed(() => {
+  const ledger = migrationStatus.value?.ledger;
+  if (!ledger || ledger.gigabytesMoved <= 0) {
+    return "0";
+  }
+  const factor = ledger.baselineGigabytes / ledger.gigabytesMoved;
+  return factor >= 10 ? factor.toFixed(0) : factor.toFixed(1);
+});
+
+/** A transfer payload for the tables: megabyte deltas read better than fractions of a GB. */
+function formatPayload(gigabytes: number | undefined): string {
+  if (gigabytes === undefined) {
+    return "—";
+  }
+  return gigabytes < 2 ? `${(gigabytes * 1024).toFixed(0)} MB` : `${gigabytes.toFixed(gigabytes < 10 ? 2 : 0)} GB`;
 }
 
 /**

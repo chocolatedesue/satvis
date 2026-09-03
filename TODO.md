@@ -72,10 +72,15 @@
   - 有了 `findStableClusters` 之后这一步的输入已经现成：集群自带 `cycleHours` 与每层圈数，时刻表的长度和分辨率都由它决定。
 - [ ] **集群的长期有效性 (How long does a cluster actually hold?)**:
   - 当前全部结论是**长期 J2 两体**：无阻力、无三体、无 J3、无位保。集群会因为差分阻力（不同高度/面质比）而缓慢失谐，回归周期会漂。下一步是量化"多久需要一次位保脉冲才能守住这个周期"，以及给 `StableCluster` 加一个"保持成本"字段——这才是把布局从几何结论变成工程结论的那一步。
-- [ ] **中继的存储转发代价 (Store-and-forward cost per relay)**:
-  - 多跳路由已落地（`routesFrom`，Dijkstra + 可视图），但传输代价仍按**一次序列化 + 全程传播**计算，等价于"直通式（cut-through）中继"。若按存储转发建模，每一跳都要先收完 2 GB 再转发，100 Gbps 下每跳多花约 160 ms——这是一个真实的建模选择，会再次改变管线的头条数字，需要单独决定而不是默认假设。
-  - 与之相关：中继星自身的功耗与缓存占用目前完全没有计入。
-- [ ] **增量 KV-Cache 传输优化 (Incremental Differential Patching)**:
-  - 引入增量快照算法（Differential Snapshot），仅传输推理产生的新增 Token 缓存，将换星数据量从 2 GB 压缩至数 MB。
-- [ ] **大规模真实星座算力映射 (Real SATCAT Fleet Mapping)**:
-  - 将协同计算模型映射到真实低轨巨型星座（如 Starlink / OneWeb / 银河航天等真实 OMM/TLE 轨道数据），评估真实天基算力网的日照服务连续度。
+- [x] **中继的存储转发代价 (Store-and-forward cost per relay)**:
+  - 已按存储转发建模：`routeTransferCost` 逐腿计费——中继必须先**收完整个缓存**再转发，序列化项按腿数叠加（100 Gbps 下每跳多约 160 ms/2GB），传播项照常求和；`MigrationLayer` 的飞行费用改用它计价。
+  - 仍开放的中继代价：中继星自身的功耗占用与缓存驻留开销未计入（转发≠计算，但收发要电）。
+- [x] **增量 KV-Cache 传输优化 (Incremental Differential Patching)**:
+  - `deltaSnapshot`：首次迁移传输全量 2 GB 快照，之后仅传距上次**完成同步**的增量（64 token/s × 0.4 MB/token ≈ 25.6 MB/s），并计入传输期间新增的自引用项（闭式解 `p = g/(1−8r/b)`）；时钟倒拨/增量逼近全量时诚实回退为全量快照。
+  - 账本同时记录实际搬运量 `gigabytesMoved` 与全量基线 `baselineGigabytes`，面板显示压缩比；`?miginc=true` 或面板开关切换，默认关闭保持基线可比。
+- [x] **大规模真实星座算力映射 (Real SATCAT Fleet Mapping)**:
+  - `?demo=real-fleet`（或面板按钮）：将协同计算管线映射到真实 Iridium NEXT 星座（80 颗，实时 CelesTrak OMM 目录）——布站、策略、中继路由与账本零改动复用。
+  - `fleetContinuity` 纯函数评估真实星座日照服务连续度：同一时间网格采样全星座光照，输出**固定布设连续度**（贪心"逐日而居"、无迁移）与 **≥k 星同亮服务上限**（迁移可达天花板），两者之差即迁移机制的真实价值。
+- [x] **ISL 绘制物理修正 (Per-frame honest occlusion)**:
+  - 拓扑链路遮挡由 400ms 墙钟节流改为**逐帧、与端点同瞬时**判定——被地球挡住的 ISL 该帧直接不画；高倍率时钟下不再出现"链路穿地数帧"。
+  - 管线链条（逻辑关系）与 marked bond 保持"遮挡减光"语义（0.25/0.12 透明度），但减光判定同样逐帧。

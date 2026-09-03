@@ -99,6 +99,8 @@ export interface SceneTarget {
   setMigrationStages(count: number): void;
   /** Set migration policy (predictive vs naive). */
   setMigrationPolicy(policy: MigrationPolicy): void;
+  /** Whether migration transfers ship incremental KV deltas rather than full snapshots. */
+  setMigrationIncremental(on: boolean): void;
   /** Turn the stable-constellation link overlay on or off. */
   setLinks(on: boolean): void;
   /** Name the marked cluster, as `<plane>-<slot>@<wire>` tokens. */
@@ -475,6 +477,14 @@ export function startSceneSync(cc: SceneTarget): void {
     () => satStore.migrationPolicy,
     (policy) => {
       cc.setMigrationPolicy(policy);
+    },
+    { immediate: true },
+  );
+
+  watch(
+    () => satStore.migrationIncremental,
+    (on) => {
+      cc.setMigrationIncremental(on);
     },
     { immediate: true },
   );
