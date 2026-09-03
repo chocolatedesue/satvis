@@ -505,10 +505,6 @@ rows is the value of the machinery, measured on real orbits.
 
 ### Satellite metadata
 
-5014 km line-of-sight horizon, in headless Chromium. Per leg rather than per hand-off: a 9000 km hand-off is fine as two 4500 km legs and impossible as one chord.
-
-### Satellite metadata
-
 Static per-satellite facts are keyed by NORAD id in one satellite table with two
 contributors:
 

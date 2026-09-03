@@ -59,10 +59,14 @@ layout with no fabric on it, and nothing before this said so.
 - **Cost is O(N²) line-of-sight tests plus O(N²) search per evaluation**, over the active fleet
   and on the migration cadence rather than per frame. One Dijkstra serves every candidate, which
   is why the search is per host rather than per host-candidate pair.
-- **Serialisation is still charged once, not per leg.** The transfer cost is one serialisation
-  plus propagation over the whole wire — a cut-through relay. Store-and-forward would charge
-  160 ms per leg at 100 Gbps, which is a real modelling choice and a separate one; it is in
-  `TODO.md` rather than assumed here.
+- **Serialisation was charged once, not per leg — this has since been fixed.** As shipped here
+  the transfer cost was one serialisation plus propagation over the whole wire, a cut-through
+  relay, and the alternative was left in `TODO.md` rather than assumed. It was taken up:
+  `routeTransferCost` now prices a route leg by leg, because a relay receives the _complete_
+  cache before sending it on, so the serialisation term is paid once per hop (~160 ms per leg
+  for 2 GB at 100 Gbps) while propagation sums the legs' light time. Relaying is therefore more
+  expensive than this ADR's own numbers imply — which is the point: the cut-through price was
+  the last place the model still got a relay for free.
 - **The overlay draws the path.** The migration polyline runs through every hop, bending at each
   relay, and the packet walks it by length so it does not sprint the short leg. The halo reads
   `S1 · P01-08 → P02-03 → P01-02`.
