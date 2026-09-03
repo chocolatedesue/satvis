@@ -39,8 +39,8 @@ is not hosting a stage, and refusing that would throw away the densest part of t
 satellite, and no chain of lit satellites reaches around it, there is no link — and that is the
 state, rather than a hop drawn faint with a caveat attached.
 
-**The check moved from the hop to the leg.** `verify-migration.mjs` bounds each leg by the
-5014 km horizon rather than the hand-off by it: a 9000 km hand-off is fine as two 4500 km legs
+**The check moved from the hop to the leg.** `verify-migration.mjs` bounds each leg by the link
+horizon rather than the hand-off by it: a 9000 km hand-off is fine as two 4500 km legs
 and impossible as one chord, and only the legs tell those apart. Before this change the
 demo logged single chords of 8149–11 215 km; after it, every leg is ~4283 km and the long
 hand-offs are two of them.
@@ -66,10 +66,21 @@ layout with no fabric on it, and nothing before this said so.
 - **The overlay draws the path.** The migration polyline runs through every hop, bending at each
   relay, and the packet walks it by length so it does not sprint the short leg. The halo reads
   `S1 · P01-08 → P02-03 → P01-02`.
+- **A "550 km" orbit is not at 6921 km, so the runtime bound is not the label's.** Two effects
+  lift it: SGP4 works in WGS-72, so the altitude label means a 6928.1 km semi-major axis rather
+  than the 6921.0 km `6371 + 550` implies, and J2 makes a _nominally circular_ orbit breathe
+  ±6.0 km about that. The demo's Walker ranges over **6921.0–6933.0 km**, so its real leg limit
+  is **5079.6 km** against the 5013.9 km the label gives, and `verify-migration.mjs` derives its
+  bound from the radius reached — a check written to `6371 + 550` would have failed a legal link.
+  `maxLinkRangeKm` needs no such correction: its WGS-72 nominal sits 0.14 km from the measured
+  mean radius, and the oscillation swings its 5016.6 km answer over 4977.1–5043.2 km either side
+  of it, which is the right way for a design figure to behave.
 - **Two Earth radii are in play**: `migration.ts` tests the segment against the mean radius
   (6371 km), `shellLayout.ts` computes the horizon against the WGS-72 equatorial one
-  (6378.135 km) it does its orbital mechanics in. 2.6 km apart on a 5014 km horizon, well inside
-  the 80 km atmospheric margin both apply, and the conservative way round in each.
+  (6378.135 km) it does its orbital mechanics in. 2.7 km apart on a ~5015 km horizon, well inside
+  the 80 km atmospheric margin both apply. Neither is uniformly the conservative choice —
+  the mean radius under-blocks an equatorial chord by 7.1 km and over-blocks a polar one by
+  14.3 km — which is what the margin is for.
 - **The ring rule keeps its published bar.** `minSatellitesPerRing` still clears the _solid_
   Earth by default — S ≥ 8 at 550 km, the number `0008` and `0009` quote — and now takes a margin,
   which at 550 km asks for S ≥ 9. Changing the default would silently restate those ADRs.

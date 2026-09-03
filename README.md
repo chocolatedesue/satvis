@@ -489,7 +489,8 @@ Key metrics and constraints:
 - **Simulated Timebase Ledger**: GPU utilization and served/stalled seconds are tracked accurately against simulated orbit time.
 
 `node scripts/verify-migration.mjs <base-url> <out-dir>` verifies placement, live ISL packet progress, zero-stall serving, and that **every leg** of every hand-off is inside the
-5014 km line-of-sight horizon, in headless Chromium. Per leg rather than per hand-off: a 9000 km hand-off is fine as two 4500 km legs and impossible as one chord.
+line-of-sight horizon, in headless Chromium. Per leg rather than per hand-off: a 9000 km hand-off is fine as two 4500 km legs and impossible as one chord. The bound is derived from
+the radius the orbits actually reach (6933 km, so 5079.6 km), not from the 550 km label — see `docs/adr/0011-routing-around-the-earth.md`.
 
 ### Real-fleet mapping & service continuity (真实星座算力映射)
 

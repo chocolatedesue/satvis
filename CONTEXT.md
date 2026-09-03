@@ -338,7 +338,11 @@ arccos(R_b/r₂)` in Earth-central angle, against a blocking sphere raised 80 km
   for the atmosphere (`maxLinkRangeKm`, `linkHorizonAngleDeg`). The Earth's
   constraint on a _layout_: a shell pair that repeats forever and never comes
   inside its own horizon carries no fabric, and a cluster reports the tightest
-  horizon among its pairs.
+  horizon among its pairs. A design figure, not a runtime bound — it is computed
+  at the nominal radius, and J2 makes a nominally circular orbit breathe ±6.0 km
+  about that, swinging the 5016.6 km answer for a 550 km pair over
+  4977.1–5043.2 km. A measured leg tens of km over the closed form is the
+  oscillation, not a bug (`docs/adr/0011-routing-around-the-earth.md`).
 - **Stable cluster**: a set of orbits whose relative configuration returns —
   all on one node-rate curve, all closing one shared cycle. Both conditions are
   _equivalence relations_, so orbit space is already partitioned and finding a

@@ -412,18 +412,29 @@ record(
   (f) => f > 0 && f < 0.9,
 );
 
+// The Earth is opaque, so the horizon is a hard bound on one *leg* — not on the
+// hand-off, which routes around the limb through as many lit relays as the
+// geometry needs and can therefore total far more while every segment of it
+// stays a real link. Checked per leg for exactly that reason: a 9000 km hand-off
+// is fine as two 4500 km legs and impossible as one chord, and only the legs
+// tell those apart.
+//
+// Bounded at the radius the orbits actually reach, not the one their altitude
+// label implies. Two effects lift it. SGP4 works in WGS-72, so "550 km" means a
+// 6928.1 km semi-major axis, not the 6921.0 km that 6371 + 550 suggests; and J2
+// makes a *nominally circular* orbit breathe ±6.0 km about that. This scene's
+// Walker therefore ranges over 6921.0–6933.0 km (measured over 20 satellites ×
+// 200 minutes of SGP4 from the pattern's own epoch), and its real leg limit is
+// 5079.6 km. Bounding at the label's 5013.9 km would fail a legal 5060 km leg
+// between two satellites near the top of the oscillation.
+const BLOCKING_RADIUS_KM = 6371 + 80; // migration.ts: mean radius, atmospheric margin
+const MAX_ORBIT_RADIUS_KM = 6933;
+const MAX_LEG_KM = 2 * Math.sqrt(MAX_ORBIT_RADIUS_KM ** 2 - BLOCKING_RADIUS_KM ** 2);
+
 record(
   "every leg of every hand-off is a link the geometry allows",
   (readout?.log ?? []).map((event) => ({ hops: event.hops?.length, legs: (event.legsKm ?? []).map((km) => Math.round(km)) })),
-  // Two satellites at 550 km can see each other only out to 2*sqrt(6921² - 6451²) ≈
-  // 5014 km, taking the 80 km atmospheric margin. The Earth is opaque, so that is a
-  // hard bound on one *leg* — not on the hand-off, which routes around the limb
-  // through as many lit relays as the geometry needs and can therefore total far
-  // more than 5014 km while every segment of it stays a real link.
-  //
-  // Checked per leg for exactly that reason: a 9000 km hand-off is fine as two
-  // 4500 km legs and impossible as one chord, and only the legs tell those apart.
-  (events) => events.length > 0 && events.every((event) => event.legs.length >= 1 && event.legs.every((km) => km < 5050)),
+  (events) => events.length > 0 && events.every((event) => event.legs.length >= 1 && event.legs.every((km) => km < MAX_LEG_KM)),
 );
 
 console.log("ledger:", JSON.stringify(readout?.ledger), "all-stages-powered fraction:", readout?.allPoweredFraction);
