@@ -39,8 +39,13 @@ import { planeSlotOf } from "./util/walkerDelta";
  *   "整体的变化" the overlay exists to show.
  * - **Honest occlusion.** A link whose chord passes behind the Earth is hidden
  *   rather than drawn through rock — the same standard util/migration.ts sets
- *   for the migration overlay, checked per link on a slow cadence since the
- *   occlusion state changes far more slowly than the positions do.
+ *   for the migration overlay, taken per frame at the frame's own instant. A
+ *   400 ms wall-clock pass was tried first, on the reasoning that occlusion
+ *   changes far more slowly than the positions do. It does not: under the
+ *   demo's clock multipliers a link crosses the limb between one frame and the
+ *   next, and the cadence left it drawn through the planet for frames at a
+ *   time. Per frame is also cheap here — the test is two positions and a
+ *   segment-sphere check, which the polyline already pays for its endpoints.
  *
  * Real ISL colours would be one hue; three are used because the families are
  * the story: the intra-plane rings never change length (the derivation measured
