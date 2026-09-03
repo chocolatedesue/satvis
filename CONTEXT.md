@@ -254,7 +254,7 @@ discussion; sharpen them here when they drift.
   Exactly one, and only the second costs a per-frame evaluation, which is why it
   is not the default.
 - **Store-and-forward**: how a relayed transfer is priced (`routeTransferCost`) —
-  a relay receives the *complete* cache before sending it on, so the
+  a relay receives the _complete_ cache before sending it on, so the
   serialisation term is paid once per leg and propagation sums the legs.
   Charging the whole wire one serialisation would be cut-through, which is not
   what a cache transfer is.

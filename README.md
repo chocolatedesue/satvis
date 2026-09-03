@@ -477,7 +477,7 @@ Key metrics and constraints:
   far side of the planet is five legs away and a single relay would be a different, wrong answer. Relays must be powered (a dark satellite can neither receive nor retransmit) and
   may host another stage. When no lit chain reaches around, the stage is **stranded** — which is then the truth rather than a hop drawn faint with a caveat.
   Reasoning: `docs/adr/0011-routing-around-the-earth.md`.
-- **Store-and-forward relay cost**: a relay receives the *complete* cache before sending it on, so the transfer is priced with `routeTransferCost` — the serialisation term
+- **Store-and-forward relay cost**: a relay receives the _complete_ cache before sending it on, so the transfer is priced with `routeTransferCost` — the serialisation term
   is paid **once per leg** (100 Gbps re-serialises 2 GB in ~160 ms at every relay) while propagation sums the legs. Charging one serialisation for the whole wire would
   undercount exactly the thing that makes relaying expensive.
 - **Incremental KV sync (`?miginc=true` or the panel toggle)**: the first migration ships the full 2 GB snapshot; every later one ships only the cache's growth since its last
@@ -503,6 +503,7 @@ ceiling** — the share of instants with at least k satellites lit at once, whic
 rows is the value of the machinery, measured on real orbits.
 
 ### Satellite metadata
+
 5014 km line-of-sight horizon, in headless Chromium. Per leg rather than per hand-off: a 9000 km hand-off is fine as two 4500 km legs and impossible as one chord.
 
 ### Satellite metadata
