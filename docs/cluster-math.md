@@ -230,6 +230,48 @@ happens.
 
 ---
 
+## Differential drag: which claim survives air
+
+Everything above is secular J₂ in a vacuum. At 550–650 km there is still air,
+and two satellites that differ in area-to-mass do not lose altitude at the same
+rate — which is a phase difference, and phase differences are what both claims
+are made of. `scripts/drag-budget.ts` computes the size of it:
+
+```
+ȧ  = −ρ B √(μ a)          B = C_d·A/m
+Δs = ¾ · n · ρ ΔB √(μ a) · t²
+```
+
+The **t²** is the thing to notice. Every other effect in this file is a rate;
+drag makes the separation itself accelerate. Exponential atmosphere, ρ(550 km)
+= 2×10⁻¹² kg/m³, H = 65 km, B = 0.11 m²/kg, `ΔB` from a fractional spread
+between two members:
+
+| configuration                        | tolerance          | 10% spread | verdict            |
+| ------------------------------------ | ------------------ | ---------- | ------------------ |
+| cross-shell cluster, 550 km, 48 h    | 121 km (1° of arc) | **28 km**  | holds, 4× margin   |
+| cross-shell cluster, 780 km, 48 h    | 125 km             | **0.8 km** | holds, 150× margin |
+| cross-shell cluster, 1200 km, 48 h   | 132 km             | **1.2 m**  | holds trivially    |
+| Suncatcher lattice, 650 km, 1 orbit  | 100 m (spacing)    | **6.9 m**  | holds              |
+| Suncatcher lattice, 650 km, 5 orbits | 100 m              | **173 m**  | **dispersed**      |
+
+Solar activity moves it by an order of magnitude — at solar maximum
+(ρ₅₅₀ = 1.5×10⁻¹¹) the 550 km cluster reaches 213 km over 48 h and the lattice
+52 m in one orbit. So both claims are conditional on the cycle, the altitude and
+the solar epoch, and neither is a free-fall result you can quote unqualified.
+
+**The result worth stating:** differential drag does not care how far apart two
+satellites are; the tolerance for "still in formation" does. The tighter the
+configuration, the sooner drag — not J₂ — becomes the thing that disperses it.
+The two tolerances differ by ~1000× (121 km against 100 m) while the physics is
+the same, so the cross-shell claim and the formation claim fail on timescales
+~20× apart even at identical ballistic coefficients.
+
+Which is also why the near-polar recommendation above _strengthens_ under drag
+rather than weakening: the families that hold ten shells live at 780 km and
+above, where the effect is two to three orders of magnitude smaller than at
+550 km.
+
 ## Open, and deliberately not done
 
 - **Overlap under tolerance is a choice, and arguable.** Returning maximal clusters rather than a
