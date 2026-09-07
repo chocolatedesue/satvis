@@ -23,14 +23,14 @@
               v-model="draftName"
               class="head__rename"
               type="text"
-              placeholder="unnamed"
+              :placeholder="$t('entity.unnamed')"
               aria-label="Station name"
               @keydown.enter="commitRename"
               @keydown.esc="cancelRename"
               @blur="commitRename"
             />
             <span v-else class="head__name">{{ name }}</span>
-            <UTooltip v-if="canRename" :text="renaming ? 'Done' : 'Rename'">
+            <UTooltip v-if="canRename" :text="renaming ? $t('entity.done') : $t('entity.rename')">
               <!-- Keeps focus in the input, so pressing it commits once through
                    the click rather than once through the blur and then reopening. -->
               <UButton
@@ -44,16 +44,16 @@
               />
             </UTooltip>
             <span class="head__id">{{ satnum ? `#${satnum}` : "" }}</span>
-            <UTooltip text="Notify for upcoming passes">
+            <UTooltip :text="$t('entity.notify')">
               <UButton icon="i-lucide-bell" variant="ghost" color="neutral" size="xs" aria-label="Notify for upcoming passes" @click="notifyPasses" />
             </UTooltip>
-            <UTooltip v-if="canEnterSkyView" text="View the sky from here">
+            <UTooltip v-if="canEnterSkyView" :text="$t('entity.skyView')">
               <UButton icon="i-lucide-telescope" variant="ghost" color="neutral" size="xs" aria-label="View the sky from this ground station" @click="enterSkyView" />
             </UTooltip>
             <!-- Hidden rather than disabled in the sky view, which owns the camera:
                  tracking there has no meaning to convey, and a button that silently
                  did nothing would read as broken. -->
-            <UTooltip v-if="!inSkyView" :text="isTracked ? 'Stop tracking' : 'Track entity'">
+            <UTooltip v-if="!inSkyView" :text="isTracked ? $t('entity.stopTracking') : $t('entity.track')">
               <UButton icon="i-lucide-video" variant="ghost" :color="isTracked ? 'primary' : 'neutral'" size="xs" aria-label="Track entity" @click="toggleTrack" />
             </UTooltip>
             <UButton icon="i-lucide-x" variant="ghost" color="neutral" size="xs" aria-label="Close" @click="deselect" />
@@ -137,16 +137,16 @@
               <USwitch v-model="showPastPasses" label="Past" size="xs" />
             </div>
 
-            <div v-if="passesPending" class="empty">Computing passes…</div>
+            <div v-if="passesPending" class="empty">{{ $t("entity.computing") }}</div>
             <div v-else-if="!hasAnyPasses" class="empty">{{ emptyPassText }}</div>
-            <div v-else-if="passRows.length === 0" class="empty">No upcoming passes</div>
+            <div v-else-if="passRows.length === 0" class="empty">{{ $t("entity.none") }}</div>
             <table v-else ref="tableEl" class="info-table">
               <thead>
                 <tr>
                   <th v-if="subjectCount > 1">{{ selection.kind === "groundstation" ? "Satellite" : "Station" }}</th>
                   <th>In</th>
-                  <th>Start</th>
-                  <th>End</th>
+                  <th>{{ $t("entity.start") }}</th>
+                  <th>{{ $t("entity.end") }}</th>
                   <th class="num">{{ overpassMode === "swath" ? "Dist" : "El" }}</th>
                   <th class="num">{{ overpassMode === "swath" ? "Swath" : "Az" }}</th>
                 </tr>
@@ -184,7 +184,7 @@
             </table>
 
             <template v-if="links.length > 0">
-              <div class="section">Links</div>
+              <div class="section">{{ $t("entity.links") }}</div>
               <div class="links">
                 <a v-for="link in links" :key="link.label" class="links__item" :href="link.href" :title="link.title" target="_blank" rel="noopener">{{ link.label }}</a>
               </div>

@@ -1,6 +1,6 @@
 <template>
   <div v-if="row.kind === 'group'" class="browser-row browser-row--group">
-    <button type="button" class="browser-chevron" :aria-label="row.expanded ? 'Collapse group' : 'Expand group'" @click="emit('toggle-expand', row.tag)">
+    <button type="button" class="browser-chevron" :aria-label="row.expanded ? $t('browser.collapseGroup') : $t('browser.expandGroup')" @click="emit('toggle-expand', row.tag)">
       <UIcon :name="row.expanded ? 'lucide:chevron-down' : 'lucide:chevron-right'" />
     </button>
     <input
@@ -8,7 +8,7 @@
       class="browser-checkbox"
       type="checkbox"
       :checked="row.state === 'all'"
-      :aria-label="`Toggle group ${row.tag}`"
+      :aria-label="$t('browser.toggleGroup', { tag: row.tag })"
       @click.stop="emit('toggle-group', row.tag)"
     />
     <span class="browser-label browser-label--group" @click="emit('toggle-expand', row.tag)">{{ row.tag }}</span>
@@ -16,11 +16,15 @@
   </div>
 
   <div v-else class="browser-row browser-row--sat">
-    <input class="browser-checkbox" type="checkbox" :checked="row.checked" :aria-label="`Toggle ${row.name}`" @click.stop="emit('toggle-sat', row.name)" />
+    <input
+      class="browser-checkbox"
+      type="checkbox"
+      :checked="row.checked"
+      :aria-label="$t('browser.toggleSatellite', { name: row.name })"
+      @click.stop="emit('toggle-sat', row.name)"
+    />
     <span class="browser-label browser-label--sat" @click="emit('toggle-sat', row.name)">{{ row.name }}</span>
-    <span class="browser-orbit" :style="{ color: ORBIT_CLASS_COLOR[row.orbitClass] }" :title="`${row.orbitClass} — the colour this satellite's point is drawn in`">{{
-      row.orbitClass
-    }}</span>
+    <span class="browser-orbit" :style="{ color: ORBIT_CLASS_COLOR[row.orbitClass] }" :title="$t('browser.orbitClass', { orbitClass: row.orbitClass })">{{ row.orbitClass }}</span>
     <span class="browser-satnum">{{ row.satnum }}</span>
     <span v-if="row.groupsLabel" class="browser-groups">{{ row.groupsLabel }}</span>
   </div>

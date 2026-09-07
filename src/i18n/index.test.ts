@@ -60,17 +60,33 @@ describe("component keys", () => {
   // Literal `$t("a.b.c")` and `$t(\`a.b.${x}\`)` calls. The template-literal form
   // is checked for its prefix only; its tail comes from a config array that has
   // its own test in the module that owns it.
-  const components = ["src/components/OrbitLabPanel.vue"];
+  // Every component that has been converted. A component still holding literal
+  // English is absent from this list rather than listed and skipped — the list is
+  // the record of how far the conversion has got.
+  const components = [
+    "src/components/AboutDialog.vue",
+    "src/components/ClockDeck.vue",
+    "src/components/EntityInfoPanel.vue",
+    "src/components/FormationView.vue",
+    "src/components/GroundStationList.vue",
+    "src/components/LocaleToggle.vue",
+    "src/components/OrbitLabPanel.vue",
+    "src/components/SatelliteBrowser.vue",
+    "src/components/SatelliteBrowserRow.vue",
+    "src/components/Satvis.vue",
+    "src/components/SkyHud.vue",
+  ];
 
   for (const relative of components) {
     it(`${relative} only asks for keys that exist`, () => {
       const path = fileURLToPath(new URL(`../../${relative}`, import.meta.url));
       const source = readFileSync(path, "utf8");
       const keys = new Set<string>();
-      for (const match of source.matchAll(/\$t\(\s*"([^"]+)"/g)) {
+      // Both `$t("…")` in a template and `t('…')` in a script, in either quote.
+      for (const match of source.matchAll(/\$?\bt\(\s*["']([^"']+)["']/g)) {
         keys.add(match[1] as string);
       }
-      expect(keys.size).toBeGreaterThan(40);
+      expect(keys.size).toBeGreaterThan(0);
       const missing = [...keys].filter((key) => resolve(en, key) === undefined);
       expect(missing).toEqual([]);
     });

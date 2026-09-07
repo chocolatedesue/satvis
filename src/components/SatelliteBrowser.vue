@@ -1,7 +1,7 @@
 <template>
   <div class="satellite-browser">
     <!-- Bound to enabledTags by the tag value-key, so one click takes a whole group. -->
-    <div class="toolbarTitle">Satellite groups</div>
+    <div class="toolbarTitle">{{ $t("browser.title") }}</div>
     <div class="browser-quickselect">
       <USelectMenu
         :model-value="enabledTags"
@@ -11,7 +11,7 @@
         label-key="label"
         multiple
         :search-input="{ placeholder: 'Filter groups' }"
-        placeholder="Select groups"
+        :placeholder="$t('browser.selectGroups')"
         class="w-full"
       />
     </div>
@@ -19,7 +19,7 @@
     <div class="browser-search">
       <UInput
         :model-value="searchQuery"
-        placeholder="Search satellites"
+        :placeholder="$t('browser.search')"
         icon="i-lucide-search"
         :ui="{ base: 'w-full' }"
         class="w-full"
@@ -34,8 +34,8 @@
     </div>
 
     <!-- Virtualized, and the only element here that scrolls. -->
-    <div v-if="isLoading" class="browser-empty">Loading satellites…</div>
-    <div v-else-if="rows.length === 0" class="browser-empty">No matches</div>
+    <div v-if="isLoading" class="browser-empty">{{ $t("browser.loading") }}</div>
+    <div v-else-if="rows.length === 0" class="browser-empty">{{ $t("browser.noMatches") }}</div>
     <div v-else ref="scrollEl" class="browser-list" :style="{ height: listHeight }">
       <div class="browser-list-inner" :style="{ height: `${totalSize}px` }">
         <div v-for="virtualRow in virtualRows" :key="virtualRow.row.id" class="browser-list-row" :style="{ transform: `translateY(${virtualRow.start}px)` }">
@@ -46,7 +46,7 @@
 
     <div class="browser-summary">
       <span>{{ groupCount }} group{{ groupCount === 1 ? "" : "s" }} · {{ activeSatCount }} satellite{{ activeSatCount === 1 ? "" : "s" }} active</span>
-      <button v-if="hasActiveSelection" type="button" class="browser-clear" @click="clearAll">Clear all</button>
+      <button v-if="hasActiveSelection" type="button" class="browser-clear" @click="clearAll">{{ $t("browser.clearAll") }}</button>
     </div>
   </div>
 </template>

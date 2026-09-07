@@ -1,13 +1,17 @@
 <template>
-  <UModal v-model:open="open" title="About Satvis" :ui="{ content: 'bg-[#303336]/95 text-[#edffff] divide-neutral-600 max-w-2xl', header: 'p-2 sm:px-3', body: 'p-3 sm:p-3' }">
-    <UTooltip text="About">
+  <UModal
+    v-model:open="open"
+    :title="$t('about.title')"
+    :ui="{ content: 'bg-[#303336]/95 text-[#edffff] divide-neutral-600 max-w-2xl', header: 'p-2 sm:px-3', body: 'p-3 sm:p-3' }"
+  >
+    <UTooltip :text="$t('about.open')">
       <!-- A real link that the dialog intercepts, rather than a button. Opening the
            dialog is what a click does, but /about is the same content as a page, so
            the href is honest — and it is the only thing in the rendered document
            that points there. Without it the page is reachable only by typing the
            url, which for anything crawling the app means not at all. Middle-click
            and "open in new tab" get the page, as they should. -->
-      <a class="cesium-button cesium-toolbar-button" href="/about" aria-label="About Satvis" @click.prevent>
+      <a class="cesium-button cesium-toolbar-button" href="/about" :aria-label="$t('about.title')" @click.prevent>
         <UIcon name="lucide:info" />
       </a>
     </UTooltip>
@@ -15,8 +19,11 @@
       <!-- eslint-disable-next-line vue/no-v-html -->
       <div v-if="content" class="about about--dialog" v-html="content"></div>
       <div v-else class="about about--dialog">
-        <p v-if="failed">The about page could not be loaded. <a href="/about">Open it directly</a>.</p>
-        <p v-else>Loading…</p>
+        <p v-if="failed">
+          {{ $t("about.failed") }} <a href="/about">{{ $t("about.directly") }}</a
+          >.
+        </p>
+        <p v-else>{{ $t("about.loading") }}</p>
       </div>
     </template>
   </UModal>

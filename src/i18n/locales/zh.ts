@@ -45,6 +45,144 @@ export default {
     perPlane: "每平面 {count} 颗",
   },
 
+  // 地球本身的框架：工具栏提示，以及它们打开的菜单的标题。图层、地表模型、星图、
+  // 场景模式、相机模式的名字刻意不在这里——那些是地球自己命名的数据，不是文案。
+  // 每个面板一节，改翻译的人一眼就知道这个字符串在哪个文件里。
+  entity: {
+    rename: "重命名",
+    done: "完成",
+    notify: "过境前通知我",
+    skyView: "从这里看天空",
+    track: "跟踪该目标",
+    stopTracking: "停止跟踪",
+    computing: "正在计算过境…",
+    none: "近期无过境",
+    start: "开始",
+    end: "结束",
+    links: "链接",
+    unnamed: "未命名",
+  },
+
+  formation: {
+    title: "编队视图",
+    rotating: "旋转系",
+    nonRotating: "非旋转系",
+    summary: "{rings} 圈、节距 {pitch} m —— {members} 个成员在 R = {radius} km 之内，从参考卫星画出，而不是从地球上画：在那里整个编队只有几个像素宽。",
+    runClock: "运行时钟即可观察。",
+    rotatingNote:
+      "在<strong>旋转</strong>参考系里，编队静止地待在它的椭圆内——沿航向是径向的两倍宽——并且从不出界。这就是<em>有界</em>的含义，也是这个参考系下完全看不到形变的原因。",
+    nonRotatingNote:
+      "在<strong>非旋转</strong>参考系里——参考卫星的坐标轴在初始时刻取一次并保持不动，卫星继续飞——椭圆随轨道转动，" +
+      "于是能看到编队在变形：扁—立—扁，<strong>每圈两次</strong>。同一个运动，不同的参考系；Google 那张图画的就是这个。",
+  },
+
+  browser: {
+    title: "卫星分组",
+    selectGroups: "选择分组",
+    search: "搜索卫星",
+    loading: "正在加载卫星…",
+    noMatches: "无匹配",
+    clearAll: "全部清除",
+    collapseGroup: "折叠分组",
+    expandGroup: "展开分组",
+    toggleGroup: "切换分组 {tag}",
+    toggleSatellite: "切换 {name}",
+    orbitClass: "{orbitClass} —— 该卫星的点被画成的颜色",
+  },
+
+  clock: {
+    play: "播放",
+    pause: "暂停",
+    hideControls: "隐藏时钟控件",
+    showControls: "显示时钟控件",
+    live: "实时",
+    showTimeline: "显示时间轴",
+    setSpeed: "设置播放速度",
+    backToRealTime: "回到真实时间",
+    backToNow: "回到当前",
+    playbackSpeed: "播放速度",
+    timeline: "时间轴",
+  },
+
+  stations: {
+    empty: "还没有——在地球上点一个，或者使用你自己的位置。",
+    standsHere: "天空视图当前站在这里",
+    standHere: "把天空视图站到这里",
+    reorder: "拖动以调整顺序",
+    name: "名称",
+    latitude: "纬度",
+    longitude: "经度",
+    remove: "移除",
+    pick: "在地球上选取",
+    hint: "天空视图站在 ◉ 处，点击某个编号可移动它。",
+  },
+
+  sky: {
+    flat: "把手机放平以校准正北",
+    tap: "点击打开",
+  },
+
+  about: {
+    title: "关于 Satvis",
+    open: "关于",
+    failed: "关于页面加载失败。",
+    directly: "直接打开",
+    loading: "加载中…",
+  },
+
+  shell: {
+    menu: {
+      cat: "卫星选择",
+      sat: "卫星组件",
+      gs: "地面站",
+      lab: "轨道实验室：Walker 星座与光照",
+      map: "地图",
+      view: "视角",
+      ios: "移动端",
+      render: "渲染",
+    },
+    github: "GitHub",
+    toggleUI: "显示 / 隐藏界面",
+    map: {
+      basemap: "底图",
+      overlays: "叠加层",
+      terrain: "地形",
+      surface: "地表模型",
+      starMap: "星图",
+    },
+    view: {
+      title: "视角",
+      camera: "相机",
+      aiming: "指向",
+      compass: "使用罗盘",
+      walkNote: "WASD 移动观察者，Q 和 E 改变高度。",
+    },
+    mobile: {
+      vr: "VR",
+      play: "播放",
+      faster: "加快播放速度",
+      slower: "减慢播放速度",
+      reload: "重新加载",
+    },
+    render: {
+      measurement: "测量",
+      fps: "帧率",
+      benchmark: "基准测试",
+      requestRender: "按需渲染",
+      effects: "场景效果",
+      fog: "雾",
+      lighting: "光照",
+      hdr: "HDR",
+      atmosphere: "大气",
+      pixelRatio: "像素比",
+      native: "{ratio}x（原生）",
+      ratio: "{ratio}x",
+      msaa: "抗锯齿 (MSAA)",
+      off: "关",
+      msaaRate: "{rate}x",
+    },
+  },
+
   orbitLab: {
     group: {
       constellation: "Walker 星座",

@@ -1,6 +1,6 @@
 <template>
   <div class="gsList">
-    <div v-if="stations.length === 0" class="toolbarNote gsList__empty">None yet — pick one on the globe, or use your own position.</div>
+    <div v-if="stations.length === 0" class="toolbarNote gsList__empty">{{ $t("stations.empty") }}</div>
     <div
       v-for="(station, index) in stations"
       :key="index"
@@ -15,7 +15,7 @@
         type="button"
         class="gsList__rank"
         :class="{ 'gsList__rank--observer': index === observerStation }"
-        :title="index === observerStation ? 'The sky view stands here' : 'Stand the sky view here'"
+        :title="index === observerStation ? $t('stations.standsHere') : $t('stations.standHere')"
         :aria-pressed="index === observerStation"
         @click="satStore.setObserverStation(index)"
       >
@@ -28,7 +28,7 @@
         class="gsList__grip"
         role="button"
         tabindex="0"
-        title="Drag to reorder"
+        :title="$t('stations.reorder')"
         @pointerdown="startDrag(index, $event)"
         @pointermove="moveDrag($event)"
         @pointerup="endDrag($event)"
@@ -42,8 +42,8 @@
         class="gsList__name"
         type="text"
         :value="station.name ?? ''"
-        placeholder="unnamed"
-        aria-label="Name"
+        :placeholder="$t('entity.unnamed')"
+        :aria-label="$t('stations.name')"
         @change="commitName(index, $event)"
         @keydown.enter="commit"
         @keydown.esc="abandon($event, station.name ?? '')"
@@ -53,7 +53,7 @@
         type="text"
         inputmode="decimal"
         :value="station.lat"
-        aria-label="Latitude"
+        :aria-label="$t('stations.latitude')"
         @change="commitCoordinate(index, 'lat', $event)"
         @keydown.enter="commit"
         @keydown.esc="abandon($event, String(station.lat))"
@@ -63,16 +63,16 @@
         type="text"
         inputmode="decimal"
         :value="station.lon"
-        aria-label="Longitude"
+        :aria-label="$t('stations.longitude')"
         @change="commitCoordinate(index, 'lon', $event)"
         @keydown.enter="commit"
         @keydown.esc="abandon($event, String(station.lon))"
       />
-      <button type="button" class="gsList__remove" title="Remove" @click="removeAt(index)">×</button>
+      <button type="button" class="gsList__remove" :title="$t('stations.remove')" @click="removeAt(index)">×</button>
     </div>
 
     <div class="gsList__actions">
-      <button type="button" :class="{ 'gsList__action--on': pickMode }" @click="pickMode = !pickMode">Pick on globe</button>
+      <button type="button" :class="{ 'gsList__action--on': pickMode }" @click="pickMode = !pickMode">{{ $t("stations.pick") }}</button>
       <button type="button" :disabled="locating" @click="void locate()">
         <span v-if="locating" class="toolbarSpinner gsList__spinner"></span>
         My location
@@ -84,7 +84,7 @@
          the time it matters you have a list to read it against, and above the rows
          it was the first thing in a panel whose first thing should be the
          stations. -->
-    <div class="toolbarNote">The sky view stands at ◉, click a number to move it.</div>
+    <div class="toolbarNote">{{ $t("stations.hint") }}</div>
   </div>
 </template>
 

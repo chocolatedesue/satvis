@@ -54,7 +54,7 @@
     <!-- North is not known until the phone has been flat once, and until then the
          sky is aimed from an arbitrary zero. The toast that says so on enabling is
          dismissable; this is not, and it goes the instant calibration latches. -->
-    <div v-if="compassActive && !calibrated" class="sky-hud__warn">Hold the phone flat to set north</div>
+    <div v-if="compassActive && !calibrated" class="sky-hud__warn">{{ $t("sky.flat") }}</div>
 
     <div v-if="locked" class="sky-hud__card">
       <div class="sky-hud__name">{{ locked.name }}</div>
@@ -64,7 +64,7 @@
           <dd>{{ fact[1] }}</dd>
         </template>
       </dl>
-      <div class="sky-hud__hint">Tap to open</div>
+      <div class="sky-hud__hint">{{ $t("sky.tap") }}</div>
     </div>
   </div>
 </template>

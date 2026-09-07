@@ -46,6 +46,149 @@ export default {
     perPlane: "{count} per plane",
   },
 
+  // The globe's own chrome: toolbar tooltips, and the headings of the menus they
+  // open. Layer, surface-model, star-map, scene-mode and camera-mode names are
+  // deliberately absent — those are data the globe itself names, not prose.
+  // One section per panel, so a reader fixing a translation knows which file the
+  // string appears in.
+  entity: {
+    rename: "Rename",
+    done: "Done",
+    notify: "Notify for upcoming passes",
+    skyView: "View the sky from here",
+    track: "Track entity",
+    stopTracking: "Stop tracking",
+    computing: "Computing passes…",
+    none: "No upcoming passes",
+    start: "Start",
+    end: "End",
+    links: "Links",
+    unnamed: "unnamed",
+  },
+
+  formation: {
+    title: "Formation view",
+    rotating: "Rotating",
+    nonRotating: "Non-rotating",
+    summary:
+      "{rings} rings at {pitch} m — {members} members inside R = {radius} km, drawn from the reference satellite rather than from the globe, where the whole formation is a few " +
+      "pixels wide.",
+    runClock: "Run the clock to watch it.",
+    rotatingNote:
+      "In the <strong>rotating</strong> frame the formation sits still inside its ellipse — twice as wide along-track as it is tall — and never leaves it. That is " +
+      "what <em>bounded</em> means, and it is why this frame shows no deformation at all.",
+    nonRotatingNote:
+      "In the <strong>non-rotating</strong> frame — the reference's axes captured once and held while it flies on — the ellipse turns with the orbit and the " +
+      "formation is seen to deform, flat to upright to flat, <strong>twice per orbit</strong>. Same motion, different frame; this is the one Google's figure is drawn in.",
+  },
+
+  browser: {
+    title: "Satellite groups",
+    selectGroups: "Select groups",
+    search: "Search satellites",
+    loading: "Loading satellites…",
+    noMatches: "No matches",
+    clearAll: "Clear all",
+    collapseGroup: "Collapse group",
+    expandGroup: "Expand group",
+    toggleGroup: "Toggle group {tag}",
+    toggleSatellite: "Toggle {name}",
+    orbitClass: "{orbitClass} — the colour this satellite's point is drawn in",
+  },
+
+  clock: {
+    play: "Play",
+    pause: "Pause",
+    hideControls: "Hide clock controls",
+    showControls: "Show clock controls",
+    live: "Live",
+    showTimeline: "Show timeline",
+    setSpeed: "Set playback speed",
+    backToRealTime: "Back to real time",
+    backToNow: "Back to now",
+    playbackSpeed: "Playback speed",
+    timeline: "Timeline",
+  },
+
+  stations: {
+    empty: "None yet — pick one on the globe, or use your own position.",
+    standsHere: "The sky view stands here",
+    standHere: "Stand the sky view here",
+    reorder: "Drag to reorder",
+    name: "Name",
+    latitude: "Latitude",
+    longitude: "Longitude",
+    remove: "Remove",
+    pick: "Pick on globe",
+    hint: "The sky view stands at ◉, click a number to move it.",
+  },
+
+  sky: {
+    flat: "Hold the phone flat to set north",
+    tap: "Tap to open",
+  },
+
+  about: {
+    title: "About Satvis",
+    open: "About",
+    failed: "The about page could not be loaded.",
+    directly: "Open it directly",
+    loading: "Loading…",
+  },
+
+  shell: {
+    menu: {
+      cat: "Satellite selection",
+      sat: "Satellite components",
+      gs: "Ground station",
+      lab: "Orbit lab: Walker constellations and illumination",
+      map: "Map",
+      view: "View",
+      ios: "Mobile",
+      render: "Render",
+    },
+    github: "GitHub",
+    toggleUI: "Toggle UI",
+    map: {
+      basemap: "Basemap",
+      overlays: "Overlays",
+      terrain: "Terrain",
+      surface: "Surface",
+      starMap: "Star map",
+    },
+    view: {
+      title: "View",
+      camera: "Camera",
+      aiming: "Aiming",
+      compass: "Use compass",
+      walkNote: "WASD walks the observer, Q and E change height.",
+    },
+    mobile: {
+      vr: "VR",
+      play: "Play",
+      faster: "Increase play speed",
+      slower: "Decrease play speed",
+      reload: "Reload",
+    },
+    render: {
+      measurement: "Measurement",
+      fps: "FPS",
+      benchmark: "Benchmark",
+      requestRender: "RequestRender",
+      effects: "Scene effects",
+      fog: "Fog",
+      lighting: "Lighting",
+      hdr: "HDR",
+      atmosphere: "Atmosphere",
+      pixelRatio: "Pixel ratio",
+      native: "{ratio}x (Native)",
+      ratio: "{ratio}x",
+      msaa: "Antialiasing (MSAA)",
+      off: "Off",
+      msaaRate: "{rate}x",
+    },
+  },
+
   orbitLab: {
     group: {
       constellation: "Walker constellation",

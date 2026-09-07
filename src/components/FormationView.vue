@@ -1,23 +1,23 @@
 <template>
   <div v-if="params" class="formation">
-    <div class="toolbarTitle">Formation view</div>
+    <div class="toolbarTitle">{{ $t("formation.title") }}</div>
     <canvas ref="canvas" class="formation__canvas" :width="SIZE" :height="SIZE" />
     <div class="formation__frames">
-      <button type="button" class="formation__button" :class="{ 'formation__button--on': !rotating }" @click="useEpochFrame">Non-rotating</button>
-      <button type="button" class="formation__button" :class="{ 'formation__button--on': rotating }" @click="rotating = true">Rotating</button>
+      <button type="button" class="formation__button" :class="{ 'formation__button--on': !rotating }" @click="useEpochFrame">{{ $t("formation.nonRotating") }}</button>
+      <button type="button" class="formation__button" :class="{ 'formation__button--on': rotating }" @click="rotating = true">{{ $t("formation.rotating") }}</button>
     </div>
     <p class="formation__note">
-      {{ params.rings }} rings at {{ params.pitchM }} m — {{ memberCount }} members inside R = {{ Math.round(radiusKm) }} km, drawn from the reference satellite rather than from
-      the globe, where the whole formation is a few pixels wide.
-      <template v-if="rotating">
-        In the <strong>rotating</strong> frame the formation sits still inside its ellipse — twice as wide along-track as it is tall — and never leaves it. That is what
-        <em>bounded</em> means, and it is why this frame shows no deformation at all.
-      </template>
-      <template v-else>
-        In the <strong>non-rotating</strong> frame — the reference's axes captured once and held while it flies on — the ellipse turns with the orbit and the formation is seen to
-        deform, flat to upright to flat, <strong>twice per orbit</strong>. Same motion, different frame; this is the one Google's figure is drawn in.
-      </template>
-      Run the clock to watch it.
+      {{
+        $t("formation.summary", {
+          rings: params.rings,
+          pitch: params.pitchM,
+          members: memberCount,
+          radius: Math.round(radiusKm),
+        })
+      }}
+      <span v-if="rotating" v-html="$t('formation.rotatingNote')"></span>
+      <span v-else v-html="$t('formation.nonRotatingNote')"></span>
+      {{ $t("formation.runClock") }}
     </p>
   </div>
 </template>

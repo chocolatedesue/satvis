@@ -8,28 +8,28 @@
 <template>
   <div class="deck" :class="{ 'deck--folded': !open }">
     <div ref="cluster" class="cluster" :style="surfaceStyle">
-      <button v-if="open" type="button" class="play" :aria-label="playing ? 'Pause' : 'Play'" @click="togglePlaying">
+      <button v-if="open" type="button" class="play" :aria-label="playing ? $t('clock.pause') : $t('clock.play')" @click="togglePlaying">
         <span class="play__circle">
           <UIcon :name="playing ? 'lucide:pause' : 'lucide:play'" />
         </span>
       </button>
 
-      <button type="button" class="stamp" :aria-label="open ? 'Hide clock controls' : 'Show clock controls'" :aria-expanded="open" @click="toggle">
+      <button type="button" class="stamp" :aria-label="open ? $t('clock.hideControls') : $t('clock.showControls')" :aria-expanded="open" @click="toggle">
         <span class="stamp__time">{{ clockLabel(now) }}</span>
         <span class="stamp__date">{{ dateLabel(now) }} UTC</span>
-        <span v-if="!offPresent" class="stamp__live" role="img" aria-label="Live"></span>
+        <span v-if="!offPresent" class="stamp__live" role="img" :aria-label="$t('clock.live')"></span>
       </button>
 
       <div class="right">
         <template v-if="open">
           <!-- Before the reset, so it holds still as the reset comes and goes. -->
-          <button type="button" class="mode" :aria-pressed="onLadder" :aria-label="onLadder ? 'Show timeline' : 'Set playback speed'" @click="toggleScale">
+          <button type="button" class="mode" :aria-pressed="onLadder" :aria-label="onLadder ? $t('clock.showTimeline') : $t('clock.setSpeed')" @click="toggleScale">
             <span class="mode__circle" :class="{ 'mode__circle--on': onLadder }">
               <UIcon :name="onLadder ? 'lucide:clock' : 'lucide:gauge'" />
             </span>
           </button>
 
-          <button v-if="resettable" type="button" class="reset" :aria-label="onLadder ? 'Back to real time' : 'Back to now'" @click="reset">
+          <button v-if="resettable" type="button" class="reset" :aria-label="onLadder ? $t('clock.backToRealTime') : $t('clock.backToNow')" @click="reset">
             <span class="reset__circle">
               <UIcon name="lucide:rotate-ccw" />
             </span>
@@ -48,7 +48,7 @@
           class="ladder"
           :style="{ '--rung-width': `${CHIP_PX}px`, '--rung-inset': `${CHIP_PX / 2}px` }"
           role="radiogroup"
-          aria-label="Playback speed"
+          :aria-label="$t('clock.playbackSpeed')"
           @scroll="onLadderScroll"
           @keydown="onLadderKey"
           @pointerdown="onLadderDown"
@@ -81,7 +81,7 @@
           class="timeline"
           role="group"
           tabindex="0"
-          aria-label="Timeline"
+          :aria-label="$t('clock.timeline')"
           @pointerdown="onTimelineDown"
           @pointermove="onTimelineMove"
           @pointerup="onTimelineUp"

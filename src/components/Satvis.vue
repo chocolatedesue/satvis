@@ -2,42 +2,42 @@
   <div class="cesium">
     <div v-show="showUI" id="toolbarLeft">
       <div class="toolbarButtons">
-        <UTooltip text="Satellite selection">
+        <UTooltip :text="$t('shell.menu.cat')">
           <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.cat }" @click="toggleMenu('cat')">
             <UIcon name="lucide:satellite" />
           </button>
         </UTooltip>
-        <UTooltip text="Satellite components">
+        <UTooltip :text="$t('shell.menu.sat')">
           <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.sat }" @click="toggleMenu('sat')">
             <UIcon name="lucide:orbit" />
           </button>
         </UTooltip>
-        <UTooltip text="Ground station">
+        <UTooltip :text="$t('shell.menu.gs')">
           <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.gs }" @click="toggleMenu('gs')">
             <UIcon name="lucide:map-pin" />
           </button>
         </UTooltip>
-        <UTooltip text="Orbit lab: Walker constellations and illumination">
+        <UTooltip :text="$t('shell.menu.lab')">
           <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.lab }" @click="toggleMenu('lab')">
             <UIcon name="lucide:sun" />
           </button>
         </UTooltip>
-        <UTooltip text="Map">
+        <UTooltip :text="$t('shell.menu.map')">
           <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.map }" @click="toggleMenu('map')">
             <UIcon name="lucide:layers" />
           </button>
         </UTooltip>
-        <UTooltip text="View">
+        <UTooltip :text="$t('shell.menu.view')">
           <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.view }" @click="toggleMenu('view')">
             <UIcon name="lucide:telescope" />
           </button>
         </UTooltip>
-        <UTooltip v-if="cc.minimalUI" text="Mobile">
+        <UTooltip v-if="cc.minimalUI" :text="$t('shell.menu.ios')">
           <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.ios }" @click="toggleMenu('ios')">
             <UIcon name="lucide:smartphone" />
           </button>
         </UTooltip>
-        <UTooltip text="Render">
+        <UTooltip :text="$t('shell.menu.render')">
           <button type="button" class="cesium-button cesium-toolbar-button" :class="{ 'toolbarButton--open': menu.render }" @click="toggleMenu('render')">
             <UIcon name="lucide:gauge" />
           </button>
@@ -56,7 +56,7 @@
       <div v-show="menu.sat" class="toolbarSwitches">
         <!-- "Components", not "elements": an element set is the GP data a
              satellite is built from, and this panel is about what is drawn. -->
-        <div class="toolbarTitle">Satellite components</div>
+        <div class="toolbarTitle">{{ $t("shell.menu.sat") }}</div>
         <label v-for="componentName in cc.sats.availableComponents" :key="componentName" class="toolbarSwitch">
           <input v-model="enabledComponents" type="checkbox" :value="componentName" />
           <span class="slider"></span>
@@ -70,7 +70,7 @@
         -->
       </div>
       <div v-show="menu.gs" class="toolbarSwitches">
-        <div class="toolbarTitle">Ground station</div>
+        <div class="toolbarTitle">{{ $t("shell.menu.gs") }}</div>
         <ground-station-list />
       </div>
       <!-- v-if, like the catalog panel: the census walks every active satellite on
@@ -89,20 +89,20 @@
              describes. Dimmed, and still live: the selection is still the user's,
              it simply is not being drawn while the globe is hidden. The Terrain
              group below is the one exception, and says why. -->
-        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('layers') }">Basemap</div>
+        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('layers') }">{{ $t("shell.map.basemap") }}</div>
         <label v-for="name in cc.baseLayers" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('layers') }">
           <input type="radio" name="basemap" :value="name" :checked="baseLayer === name" @change="setBaseLayer(name)" />
           <span class="slider"></span>
           {{ name }}
         </label>
-        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('layers') }">Overlays</div>
+        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('layers') }">{{ $t("shell.map.overlays") }}</div>
         <label v-for="name in cc.overlayLayers" :key="name" class="toolbarSwitch" :class="{ 'toolbarSwitch--inert': inert.includes('layers') }">
           <input type="checkbox" :checked="hasOverlay(name)" @change="toggleOverlay(name, ($event.target as HTMLInputElement).checked)" />
           <span class="slider"></span>
           {{ name }}
         </label>
         <div v-if="inertReason('layers')" class="toolbarNote">{{ inertReason("layers") }}</div>
-        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('terrain') }">Terrain</div>
+        <div class="toolbarTitle" :class="{ 'toolbarTitle--inert': inert.includes('terrain') }">{{ $t("shell.map.terrain") }}</div>
         <!-- `:checked` against what the globe is using rather than `v-model` against
              the store: while a surface model imposes a terrain, the stored choice is
              not the terrain being drawn, and a radio's dot is the app saying what
@@ -118,7 +118,7 @@
              Without it the Terrain group is the confusing case: the selected row is
              not what is in force, and nothing on screen names what is. -->
         <div v-if="inertReason('terrain')" class="toolbarNote">{{ inertReason("terrain") }}</div>
-        <div class="toolbarTitle">Surface</div>
+        <div class="toolbarTitle">{{ $t("shell.map.surface") }}</div>
         <label v-for="name in SURFACE_MODELS" :key="name" class="toolbarSwitch">
           <input v-model="surfaceModel" type="radio" :value="name" />
           <span class="slider"></span>
@@ -136,7 +136,7 @@
              non-builtin ones are optional assets, and a radio that selects a sky
              nobody can load is worse than one that is absent. The url vocabulary
              is not narrowed with it — `?stars=` still accepts every name. -->
-        <div class="toolbarTitle">Star map</div>
+        <div class="toolbarTitle">{{ $t("shell.map.starMap") }}</div>
         <label v-for="name in starMapOptions" :key="name" class="toolbarSwitch">
           <input v-model="starMap" type="radio" :value="name" />
           <span class="slider"></span>
@@ -146,7 +146,7 @@
       <!-- Where you look from and with what, as against the Map panel's what you
            are looking at. -->
       <div v-show="menu.view" class="toolbarSwitches">
-        <div class="toolbarTitle">View</div>
+        <div class="toolbarTitle">{{ $t("shell.view.title") }}</div>
         <label v-for="name in cc.sceneModes" :key="name" class="toolbarSwitch">
           <input v-model="sceneMode" type="radio" :value="name" />
           <span class="slider"></span>
@@ -157,8 +157,8 @@
              says so, but nothing else in the app would say it. Hidden in
              minimalUI — the iOS and iframe case — where there is no keyboard to
              press and the panel is the smaller for it. -->
-        <div v-if="inSkyView && !cc.minimalUI" class="toolbarNote">WASD walks the observer, Q and E change height.</div>
-        <div class="toolbarTitle">Camera</div>
+        <div v-if="inSkyView && !cc.minimalUI" class="toolbarNote">{{ $t("shell.view.walkNote") }}</div>
+        <div class="toolbarTitle">{{ $t("shell.view.camera") }}</div>
         <label v-for="name in cc.cameraModes" :key="name" class="toolbarSwitch">
           <input v-model="cameraMode" type="radio" :value="name" />
           <span class="slider"></span>
@@ -167,7 +167,7 @@
         <!-- Only in the sky view, which is the only place an aim exists to hand
              over, and only where the sensor could work at all. -->
         <template v-if="inSkyView && compassOffered">
-          <div class="toolbarTitle">Aiming</div>
+          <div class="toolbarTitle">{{ $t("shell.view.aiming") }}</div>
           <label class="toolbarSwitch">
             <input type="checkbox" :checked="compassActive" :disabled="compassPending" @change="onCompassToggle" />
             <!-- The spinner stands in for the slider rather than joining it: both
@@ -175,33 +175,33 @@
                  answer to "what is this control doing". -->
             <span v-if="compassPending" class="toolbarSpinner"></span>
             <span v-else class="slider"></span>
-            Use compass
+            {{ $t("shell.view.compass") }}
           </label>
         </template>
       </div>
       <div v-show="menu.ios" class="toolbarSwitches">
-        <div class="toolbarTitle">Mobile</div>
+        <div class="toolbarTitle">{{ $t("shell.menu.ios") }}</div>
         <label class="toolbarSwitch">
           <input v-model="cc.viewer.scene.useWebVR" type="checkbox" />
           <span class="slider"></span>
-          VR
+          {{ $t("shell.mobile.vr") }}
         </label>
         <label class="toolbarSwitch">
           <input v-model="cc.viewer.clock.shouldAnimate" type="checkbox" />
           <span class="slider"></span>
-          Play
+          {{ $t("shell.mobile.play") }}
         </label>
         <label class="toolbarSwitch">
           <input type="button" @click="cc.viewer.clockViewModel.multiplier *= 2" />
-          Increase play speed
+          {{ $t("shell.mobile.faster") }}
         </label>
         <label class="toolbarSwitch">
           <input type="button" @click="cc.viewer.clockViewModel.multiplier /= 2" />
-          Decrease play speed
+          {{ $t("shell.mobile.slower") }}
         </label>
         <label class="toolbarSwitch">
           <input type="button" @click="reload" />
-          Reload
+          {{ $t("shell.mobile.reload") }}
         </label>
       </div>
       <!-- Everything about how the globe is drawn, and what that costs. Four
@@ -209,11 +209,11 @@
            decide it — what is in the scene, how many pixels it is drawn into,
            and what each edge pixel costs. -->
       <div v-show="menu.render" class="toolbarSwitches">
-        <div class="toolbarTitle">Measurement</div>
+        <div class="toolbarTitle">{{ $t("shell.render.measurement") }}</div>
         <label class="toolbarSwitch">
           <input v-model="showFps" type="checkbox" />
           <span class="slider"></span>
-          FPS
+          {{ $t("shell.render.fps") }}
         </label>
         <!-- The benchmarking framework (src/modules/benchmark). Beneath FPS because it is the same
              question asked in more depth, and url-synced like the rest of this
@@ -221,7 +221,7 @@
         <label class="toolbarSwitch">
           <input v-model="showBenchmark" type="checkbox" />
           <span class="slider"></span>
-          Benchmark
+          {{ $t("shell.render.benchmark") }}
         </label>
         <!-- Not a measurement itself, but the setting that decides whether there
              is one to be had: with render-on-demand on, the gap between frames
@@ -229,54 +229,54 @@
         <label class="toolbarSwitch">
           <input v-model="requestRenderMode" type="checkbox" />
           <span class="slider"></span>
-          RequestRender
+          {{ $t("shell.render.requestRender") }}
         </label>
-        <div class="toolbarTitle">Scene effects</div>
+        <div class="toolbarTitle">{{ $t("shell.render.effects") }}</div>
         <label class="toolbarSwitch">
           <input v-model="cc.viewer.scene.fog.enabled" type="checkbox" />
           <span class="slider"></span>
-          Fog
+          {{ $t("shell.render.fog") }}
         </label>
         <label class="toolbarSwitch">
           <input v-model="cc.viewer.scene.globe.enableLighting" type="checkbox" />
           <span class="slider"></span>
-          Lighting
+          {{ $t("shell.render.lighting") }}
         </label>
         <label class="toolbarSwitch">
           <input v-model="cc.viewer.scene.highDynamicRange" type="checkbox" />
           <span class="slider"></span>
-          HDR
+          {{ $t("shell.render.hdr") }}
         </label>
         <label class="toolbarSwitch">
           <input v-model="cc.viewer.scene.globe.showGroundAtmosphere" type="checkbox" />
           <span class="slider"></span>
-          Atmosphere
+          {{ $t("shell.render.atmosphere") }}
         </label>
         <!-- The two halves of the same trade, in the order they multiply. Both
              are ladders rather than switches because both costs are smooth —
              see src/config/rendering.ts. -->
-        <div class="toolbarTitle">Pixel ratio</div>
+        <div class="toolbarTitle">{{ $t("shell.render.pixelRatio") }}</div>
         <label v-for="ratio in pixelRatioOptions" :key="ratio" class="toolbarSwitch">
           <input v-model="pixelRatio" type="radio" :value="ratio" />
           <span class="slider"></span>
-          {{ ratio === "native" ? `${devicePixelRatio.toFixed(1)}x (Native)` : `${Number(ratio).toFixed(1)}x` }}
+          {{ ratio === "native" ? $t("shell.render.native", { ratio: devicePixelRatio.toFixed(1) }) : $t("shell.render.ratio", { ratio: Number(ratio).toFixed(1) }) }}
         </label>
-        <div class="toolbarTitle">Antialiasing (MSAA)</div>
+        <div class="toolbarTitle">{{ $t("shell.render.msaa") }}</div>
         <label v-for="rate in MSAA_RATES" :key="rate" class="toolbarSwitch">
           <input v-model="msaa" type="radio" :value="rate" />
           <span class="slider"></span>
-          {{ rate === "off" ? "Off" : `${rate}x` }}
+          {{ rate === "off" ? $t("shell.render.off") : $t("shell.render.msaaRate", { rate }) }}
         </label>
       </div>
     </div>
     <div id="toolbarRight">
       <about-dialog v-if="showUI" />
-      <UTooltip v-if="showUI" text="Github">
+      <UTooltip v-if="showUI" :text="$t('shell.github')">
         <a class="cesium-button cesium-toolbar-button" href="https://github.com/Flowm/satvis/" target="_blank" rel="noopener">
           <UIcon name="fa6-brands:github" />
         </a>
       </UTooltip>
-      <UTooltip text="Toggle UI">
+      <UTooltip :text="$t('shell.toggleUI')">
         <button type="button" class="cesium-button cesium-toolbar-button" @click="toggleUI">
           <UIcon name="lucide:eye" />
         </button>
