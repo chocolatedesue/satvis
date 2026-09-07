@@ -35,6 +35,26 @@ try {
 
 const port = process.env.PORT ? Number(process.env.PORT) : undefined;
 
+/**
+ * Hosts the dev and preview servers will answer for, beyond localhost.
+ *
+ * Needed because the useful way to look at this app from another machine is a
+ * tunnel — `*.cnb.run`, `*.trycloudflare.com` — whose subdomain is different
+ * every time it is opened. So the host cannot be committed to the config, and
+ * Vite's host check rejects the request with a block page before anything
+ * renders. Comma-separated:
+ *
+ *   SATVIS_ALLOWED_HOSTS=yfmw0pki2m-4173.cnb.run pnpm dev
+ *
+ * Left off the committed config on purpose. `allowedHosts: true` would work and
+ * would also disable the check that stops any host on the network from being
+ * served this app, which is not a trade a default should make.
+ */
+const allowedHosts = (process.env.SATVIS_ALLOWED_HOSTS ?? "")
+  .split(",")
+  .map((host) => host.trim())
+  .filter((host) => host.length > 0);
+
 // Headers for `performance.measureUserAgentSpecificMemory()` to provide accurate memory data in the benchmark panel.
 const CROSS_ORIGIN_ISOLATION_HEADERS = {
   "Cross-Origin-Opener-Policy": "same-origin",
@@ -226,6 +246,7 @@ export default defineConfig({
   server: {
     port,
     strictPort: port !== undefined,
+    allowedHosts,
     headers: CROSS_ORIGIN_ISOLATION_HEADERS,
     proxy: {
       // Proxy /api to production by default so `pnpm dev` works out of the box.
@@ -239,6 +260,7 @@ export default defineConfig({
   preview: {
     port,
     strictPort: port !== undefined,
+    allowedHosts,
     headers: CROSS_ORIGIN_ISOLATION_HEADERS,
     proxy: {
       "/api": {

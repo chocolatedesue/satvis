@@ -64,6 +64,14 @@ the SPA and the `worker/` package.
 - `pnpm update-gp` to refresh the static satellite-data snapshot (see below)
 - `pnpm update-imagery` to build the offline base map (needs docker; see below)
 
+Behind a tunnel (`*.cnb.run`, `*.trycloudflare.com`), Vite's host check answers
+with a block page before anything renders, and the subdomain is different every
+time the tunnel opens — so the host cannot be committed to the config. Pass it in:
+
+```sh
+SATVIS_ALLOWED_HOSTS=yfmw0pki2m-4173.cnb.run pnpm dev
+```
+
 ### Full-stack dev (with the worker)
 
 To run the frontend against a local worker instead of the deployed API:
