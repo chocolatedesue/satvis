@@ -5,497 +5,487 @@
      constellation exists to be analysed, and the analysis needs something with a
      known geometry to be checked against. Both halves also work alone: the
      illumination half colours the real catalog, and the generator half is just a
-     constellation. -->
+     constellation.
+
+     The sections are collapsible because the panel is not one control but
+     eight: a reader who came to generate a pattern does not want the migration
+     ledger in the way, and a reader who came for the ledger does not want the
+     form. Grouping them also gives each one a heading it did not have — the
+     generator's own fields used to sit, unlabelled, between two unrelated
+     sections. Only the first group opens itself; the rest announce themselves
+     and stay out of the way. -->
 <template>
   <div class="orbitLab">
-    <div class="toolbarTitle">Walker constellation</div>
-    <p class="orbitLab__note">
-      Walker notation <code>i: T/P/F</code> — T satellites in P planes, each plane offset along-track from the last by F·360°/T. Generated as circular element sets at a fixed
-      epoch, so this is the pattern's geometry, not a forecast of any real constellation.
-    </p>
+    <details class="orbitLab__group" open>
+      <summary class="orbitLab__summary">{{ $t("orbitLab.group.constellation") }}</summary>
+      <div class="orbitLab__body">
+        <p class="orbitLab__note" v-html="$t('orbitLab.pattern.intro')"></p>
 
-    <div class="orbitLab__radios">
-      <label v-for="mode in CAMERA_MODES" :key="mode" class="toolbarSwitch">
-        <input type="radio" name="orbitLabCameraMode" :value="mode" :checked="cameraMode === mode" @change="cameraMode = mode" />
-        <span class="slider"></span>
-        {{ CAMERA_MODE_LABEL[mode] }}
-      </label>
-    </div>
-    <p class="orbitLab__note">
-      An orbit plane is fixed in <em>inertial</em> space, not in the rotating Earth's — once launched it does not follow the ground round. So in the <strong>Inertial</strong> frame
-      the orbit holds still and the Earth turns underneath it, which is what actually happens; in <strong>Earth-fixed</strong> the ground holds still and the same stationary orbit
-      appears to sweep past. Every demo below opens in the inertial frame.
-    </p>
+        <div class="orbitLab__radios">
+          <label v-for="mode in CAMERA_MODES" :key="mode" class="toolbarSwitch">
+            <input type="radio" name="orbitLabCameraMode" :value="mode" :checked="cameraMode === mode" @change="cameraMode = mode" />
+            <span class="slider"></span>
+            {{ $t(`labels.cameraMode.${mode}`) }}
+          </label>
+        </div>
+        <p class="orbitLab__note" v-html="$t('orbitLab.camera.note')"></p>
 
-    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="twoOrbitDemo">Two-orbit demo</button>
-    <p class="orbitLab__note">
-      One click: two orbital planes 90° apart with ten satellites each, orbit lines coloured by illumination, points coloured to match and enlarged, and the clock at
-      {{ DEMO_MULTIPLIER }}× so an orbit takes about {{ demoOrbitSeconds }} s. Watch a point cross from the sunlit arc into the eclipsed one and change colour as it goes.
-    </p>
-    <p class="orbitLab__note">
-      Penumbra is a sliver either way: a satellite crosses it in 10–20 s of a ~96 minute orbit, so on the arc it is a short blue tick at each eclipse boundary rather than a band.
-    </p>
-    <p class="orbitLab__note">
-      The <code>Illumination arc</code> component is in the satellite-components menu. It stands in for the plain <code>Orbit</code> while it is on — the two are the same ellipse,
-      so drawing both would z-fight.
-    </p>
+        <label class="orbitLab__field">
+          <span>{{ $t("orbitLab.form.preset") }}</span>
+          <select class="orbitLab__preset" :value="presetIndex" @change="applyPreset(Number(($event.target as HTMLSelectElement).value))">
+            <option :value="-1">{{ $t("common.custom") }}</option>
+            <option v-for="(preset, index) in WALKER_PRESETS" :key="preset.label" :value="index">{{ preset.label }}</option>
+          </select>
+        </label>
+        <p v-if="presetNote" class="orbitLab__note">{{ presetNote }}</p>
 
-    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="sunSyncDemo">Always-sunlit SSO demo</button>
-    <p class="orbitLab__note">
-      Two sun-synchronous orbits at <strong>{{ alwaysSunlitAltitude }} km</strong>, differing only in how their plane faces the sun: the dawn–dusk one never enters the Earth's
-      shadow, the noon–midnight one is eclipsed for a third of every orbit. Same altitude, same inclination — a quarter turn of the plane apart.
-    </p>
+        <div class="orbitLab__grid">
+          <label class="orbitLab__field">
+            <span>{{ $t("orbitLab.form.total") }}</span>
+            <input v-model.number="draft.total" type="number" min="1" :max="MAX_WALKER_SATELLITES" step="1" />
+          </label>
+          <label class="orbitLab__field">
+            <span>{{ $t("orbitLab.form.planes") }}</span>
+            <input v-model.number="draft.planes" type="number" min="1" step="1" />
+          </label>
+          <label class="orbitLab__field">
+            <span>{{ $t("orbitLab.form.phasing") }}</span>
+            <input v-model.number="draft.phasing" type="number" min="0" step="1" />
+          </label>
+          <label class="orbitLab__field">
+            <span>{{ $t("orbitLab.form.inclination") }}</span>
+            <input v-model.number="draft.inclinationDeg" type="number" min="0" max="180" step="0.1" />
+          </label>
+          <label class="orbitLab__field">
+            <span>{{ $t("orbitLab.form.altitude") }}</span>
+            <input v-model.number="draft.altitudeKm" type="number" min="150" step="10" />
+          </label>
+          <label class="orbitLab__field">
+            <span>{{ $t("orbitLab.form.raanSpan") }}</span>
+            <input v-model.number="draft.raanSpanDeg" type="number" min="1" max="360" step="1" />
+          </label>
+        </div>
 
-    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="shellsDemo">Stacked-shells demo</button>
-    <p class="orbitLab__note">
-      Three Walker shells at once — 4 planes of 10 at <strong>53° / 550 km</strong>, 4 planes of 6 at <strong>70° / 1200 km</strong> and <strong>97.6° / 1200 km</strong> — with the
-      clock at {{ SHELLS_MULTIPLIER }}×. Each shell is rigid inside itself; what moves is shell against shell. The 550 km one laps the two higher shells (a full relative revolution
-      about every 76 s at this speed), while the two same-period high shells hold their along-track lock and drift apart in node instead, their crossing seam creeping a couple of
-      degrees of RAAN per simulated day.
-    </p>
+        <p class="orbitLab__derived">
+          {{ $t("orbitLab.form.derived", { perPlane, period: periodMinutes, meanMotion }) }}
+          <template v-if="draft.raanSpanDeg === 180">{{ $t("orbitLab.form.walkerStar") }}</template>
+        </p>
+        <p v-if="validation.error" class="orbitLab__error">{{ validation.error }}</p>
 
-    <label class="toolbarSwitch">
-      <input type="checkbox" :checked="links" @change="links = ($event.target as HTMLInputElement).checked" />
-      <span class="slider"></span>
-      Show constellation links
-    </label>
-    <p class="orbitLab__note">
-      Wires every generated Walker satellite into the topology the derivation script picked: <span style="color: #34d399">green ring links</span> inside each plane hold their
-      length to within a part in a thousand, <span style="color: #a78bfa">violet inter-plane links</span> breathe as their planes cross, a link that passes behind the Earth is
-      hidden rather than drawn through it, and the Walker Star seam is never wired — its endpoints sweep past each other at twice orbital rate.
-    </p>
-
-    <div class="toolbarTitle">Marked cluster</div>
-    <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!walkerActive" @click="markColumn">Mark one column</button>
-    <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!walkerActive" @click="markCrossShell">Mark one per shell</button>
-    <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!marks.length" @click="clearMarks">Clear marks</button>
-    <p class="orbitLab__note">
-      Marks a small fleet to watch as a unit: each member carries an <span style="color: #fbbf24">amber halo</span> and its slot label, and every pair is bonded in amber — across
-      planes and across shells, rules aside, because the point of a marked cluster is to test stability by eye. <strong>Mark one column</strong> picks the same slot in every plane
-      of the first pattern: the bonds hold their geometry (along-track offsets are exact) and the cluster flies as a rigid ladder. <strong>Mark one per shell</strong> spans the
-      shells: same period holds, different period shears, and the bonds show which is which. The line style is the stability verdict, read straight off the picture: a
-      <strong>solid</strong> bond joins members sharing a period, so the pair never parts and its distance envelope repeats every orbit; a <strong>dashed</strong> bond joins
-      members whose periods differ, and it drifts through its synodic cycle without ever settling. Bonds dim when occluded by the Earth rather than disappearing, keeping the
-      cluster relation visible throughout the orbit.
-    </p>
-
-    <formation-view />
-
-    <div class="toolbarTitle">Multi-shell layout</div>
-    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="stableShellsDemo">Stable-layout demo</button>
-    <p class="orbitLab__note">
-      One shell, the companion designed to hold against it, and a companion that was not. Nothing rigid exists between two different shells — freezing the phases wants an equal
-      period, freezing the planes wants an equal node rate, and both at once is the same shell — so a layout is designed for <em>return</em> instead: match the node rates so the
-      planes hold their arrangement, then pick the altitude so the along-track rates land in a small-integer ratio and the whole configuration comes back on a cycle. The derivation
-      measures 99.7% of satellites finding the same cross-shell partner one cycle later, against 79% for a shell picked for its coverage alone.
-    </p>
-    <table class="orbitLab__facts">
-      <tbody>
-        <tr title="How fast the J₂ bulge turns this orbit's node — two shells hold a fixed plane arrangement only where these agree">
-          <td class="orbitLab__factName">Node rate, this shell</td>
-          <td class="orbitLab__factValue">{{ nodeDrift }}</td>
-        </tr>
-        <tr title="Above this altitude no inclination precesses slowly enough to keep up with this shell's node">
-          <td class="orbitLab__factName">Co-precession ceiling</td>
-          <td class="orbitLab__factValue">{{ layoutCeiling }}</td>
-        </tr>
-        <tr v-if="bestLayout" title="The companion whose configuration returns soonest: its node rate matches, and its along-track rate is in a whole-number ratio">
-          <td class="orbitLab__factName">Best companion</td>
-          <td class="orbitLab__factValue">{{ bestCompanionText }}</td>
-        </tr>
-        <tr v-if="bestLayout" title="How long the two shells take to return to the same relative configuration — every range and every contact window repeats on it">
-          <td class="orbitLab__factName">Repeat cycle</td>
-          <td class="orbitLab__factValue">{{ bestCycleText }}</td>
-        </tr>
-      </tbody>
-    </table>
-    <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!bestCompanionWire || patterns.includes(bestCompanionWire)" @click="addCompanionShell">
-      Add the companion shell
-    </button>
-    <p class="orbitLab__note">
-      Solved from the form's altitude and inclination: the companion's inclination comes from <code>cos i₂ = cos i₁ · (a₂/a₁)^(7/2)</code>, which is where the node rates agree, and
-      its altitude from the resonance that closes the cycle. Secular J₂, so the propagator wants about a tenth of a degree more — <code>scripts/derive-isl-topology.ts</code>
-      refines both against SGP4 and prints the correction. The price of the lock is inclination: the higher the companion, the shallower it has to fly.
-    </p>
-
-    <template v-if="layoutVerdicts.length > 0">
-      <table class="orbitLab__facts">
-        <tbody>
-          <tr v-for="row in layoutVerdicts" :key="row.key" :title="row.detail">
-            <td class="orbitLab__factName">
-              <code>{{ row.pair }}</code>
-            </td>
-            <td class="orbitLab__factValue">{{ row.verdict }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p class="orbitLab__note">
-        Every pair of generated patterns, by what it does to the other: <strong>rigid</strong> (one shell in two pieces — every offset frozen, and the only case the topology
-        bridges across in <span style="color: #38bdf8">blue</span>), <strong>repeating</strong> (planes locked, phases returning on a cycle), <strong>phase-locked</strong> (equal
-        period, planes shearing), <strong>node-locked</strong> (planes held, phases sliding forever) and <strong>drifting</strong> (neither).
-      </p>
-    </template>
-
-    <div class="toolbarTitle">Multi-satellite compute & live migration</div>
-    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="migrationDemo">KV-cache & GPU migration demo</button>
-    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="walker25Demo">25x4 fleet migration demo</button>
-    <label class="toolbarSwitch">
-      <input type="checkbox" :checked="migration" @change="migration = ($event.target as HTMLInputElement).checked" />
-      <span class="slider"></span>
-      Show migration overlay
-    </label>
-    <label class="orbitLab__field">
-      <span>Pipeline stages</span>
-      <select class="orbitLab__stages" :value="migrationStages" @change="migrationStages = Number(($event.target as HTMLSelectElement).value)">
-        <option v-for="count in PIPELINE_STAGE_CHOICES" :key="count" :value="count">{{ count }}</option>
-      </select>
-    </label>
-    <div class="orbitLab__radios">
-      <label class="toolbarSwitch">
-        <input type="radio" name="orbitLabMigrationPolicy" value="predictive" :checked="migrationPolicy === 'predictive'" @change="migrationPolicy = 'predictive'" />
-        <span class="slider"></span>
-        Predictive (Pre-eclipse handoff · High GPU uptime)
-      </label>
-      <label class="toolbarSwitch">
-        <input type="radio" name="orbitLabMigrationPolicy" value="naive" :checked="migrationPolicy === 'naive'" @change="migrationPolicy = 'naive'" />
-        <span class="slider"></span>
-        Reactive (Post-failure · Naive baseline)
-      </label>
-    </div>
-    <label class="toolbarSwitch">
-      <input type="checkbox" :checked="migrationIncremental" @change="migrationIncremental = ($event.target as HTMLInputElement).checked" />
-      <span class="slider"></span>
-      Incremental KV sync (differential snapshot)
-    </label>
-    <p class="orbitLab__note">
-      With <strong>incremental KV sync</strong> on, a stage's first transfer ships the full {{ migrationStatus?.kvGigabytes ?? 2 }} GB snapshot and every later one ships only the
-      cache's growth since its last completed transfer — at ~25.6 MB of appended KV per simulated second (64 decode tokens/s at 0.4 MB/token), that turns a gigabyte-scale migration
-      into hundreds of megabytes or less. The KV-moved row below shows the ratio against the always-full baseline. Relays are charged store-and-forward: every hop re-serialises the
-      whole payload, so relaying costs a serialisation per leg.
-    </p>
-    <p class="orbitLab__note">
-      An inference pipeline is cut into {{ migrationStatus?.stageCount ?? migrationStages }} stages, each holding its own {{ migrationStatus?.kvGigabytes ?? 2 }} GB KV cache on its
-      own satellite — one stage per satellite, connected via stable inter-satellite links (ISLs). Space GPUs rely on solar power, which is only available in the sunlit zone.
-    </p>
-    <p class="orbitLab__note">
-      <strong>Predictive mode</strong> (Recommended) uses orbit geometry and illumination lookahead to proactively hand off workloads across ISLs <em>before</em> entering eclipse,
-      eliminating pipeline stalls and keeping GPU compute utilization near 100%. <strong>Reactive mode</strong> waits until power is lost, causing pipeline stalls at every shadow
-      crossing.
-    </p>
-    <p class="orbitLab__note">
-      The pipeline only produces tokens while <strong>every</strong> stage has power simultaneously. <strong>Sunlit GPU utilization</strong> below measures that all-powered serving
-      uptime over simulated time.
-    </p>
-    <p class="orbitLab__note">
-      <strong>The Earth is opaque.</strong> A chord that passes through the planet is not a long link — it is not a link, at any power budget. So a hand-off takes a satellite the
-      host can see; and when a host has turned its panel away and sees no powered neighbour over the near limb, the cache goes <strong>around</strong> the limb through a lit relay
-      that can see both ends, drawn as a two-segment line bending at the relay. The transfer is charged for the whole wire, so a relayed hop costs more than the straight line
-      between its ends would suggest. Only when nothing lit can see around the Earth is a stage <code>stranded</code>, which is then the truth rather than a report.
-    </p>
-
-    <table v-if="migrationStatus?.active && migrationStatus.stages.length > 0" class="orbitLab__facts">
-      <tbody>
-        <tr v-for="stage in migrationStatus.stages" :key="stage.index">
-          <td class="orbitLab__factName">
-            <span class="orbitLab__swatch" :style="{ backgroundColor: stage.color }"></span>
-            S{{ stage.index + 1 }}
-          </td>
-          <td class="orbitLab__factValue">
-            <template v-if="stage.phase === 'migrating'"
-              >{{ shortHost(stage.from) }} → <template v-if="stage.via">{{ shortHost(stage.via) }} → </template>{{ shortHost(stage.to) }} ({{
-                ((stage.transferSeconds ?? 0) * 1000).toFixed(0)
-              }}
-              ms)</template
-            >
-            <template v-else-if="stage.phase === 'stranded'">{{ shortHost(stage.hostName) }} · stranded</template>
-            <template v-else>{{ shortHost(stage.hostName) }}{{ stage.powered ? (stage.lookaheadPowered === false ? " · near eclipse" : " · sunlit") : " · dark" }}</template>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <table v-if="migrationStatus?.active" class="orbitLab__facts">
-      <tbody>
-        <tr>
-          <td class="orbitLab__factName">Pipeline Status</td>
-          <td class="orbitLab__factValue">
-            {{ migrationStatus.serving ? "serving (computing)" : "stalled" }} · {{ migrationStatus.poweredStages }}/{{ migrationStatus.stages.length }} stages powered
-          </td>
-        </tr>
-        <tr>
-          <td class="orbitLab__factName">Policy</td>
-          <td class="orbitLab__factValue">{{ migrationStatus.policy === "predictive" ? "Predictive handoff" : "Reactive baseline" }}</td>
-        </tr>
-        <tr v-if="migrationStatus.allPoweredFraction !== undefined">
-          <td class="orbitLab__factName">Sunlit GPU utilization</td>
-          <td class="orbitLab__factValue">
-            {{ pct(migrationStatus.allPoweredFraction) }} of {{ simDuration(migrationStatus.ledger.allPoweredSeconds + migrationStatus.ledger.stalledSeconds) }}
-          </td>
-        </tr>
-        <tr>
-          <td class="orbitLab__factName">Migrations</td>
-          <td class="orbitLab__factValue">{{ migrationStatus.migrations }}</td>
-        </tr>
-        <tr v-if="migrationStatus.ledger.migrations > 0">
-          <td class="orbitLab__factName">KV moved</td>
-          <td class="orbitLab__factValue">
-            {{ formatPayload(migrationStatus.ledger.gigabytesMoved) }} in {{ (migrationStatus.ledger.transferSeconds * 1000).toFixed(0) }} ms of link time
-            <template v-if="migrationStatus.incremental && migrationStatus.ledger.baselineGigabytes > migrationStatus.ledger.gigabytesMoved">
-              · {{ migrationDelta }}× less than full
-            </template>
-          </td>
-        </tr>
-        <tr v-if="migrationStatus.linkKm !== undefined">
-          <td class="orbitLab__factName">ISL in flight</td>
-          <td class="orbitLab__factValue">{{ migrationStatus.linkKm.toFixed(0) }} km</td>
-        </tr>
-      </tbody>
-    </table>
-    <p v-if="migrationStatus?.active" class="orbitLab__note">{{ migrationStatus.reason }}</p>
-
-    <template v-if="migrationStatus?.active && migrationStatus.log.length > 0">
-      <div class="toolbarTitle">Migration log</div>
-      <table class="orbitLab__facts">
-        <tbody>
-          <tr v-for="(event, index) in migrationStatus.log" :key="`${event.at}-${event.stage}-${index}`">
-            <td class="orbitLab__factName">{{ clockOf(event.at) }}</td>
-            <td class="orbitLab__factValue">
-              <span class="orbitLab__swatch" :style="{ backgroundColor: stageColor(event.stage) }"></span>
-              S{{ event.stage + 1 }} {{ event.hops.map(shortHost).join(" → ") }} · {{ event.linkKm.toFixed(0) }} km · {{ (event.transferSeconds * 1000).toFixed(0) }} ms
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p class="orbitLab__note">Newest first, at the simulated time the migration was decided.</p>
-    </template>
-
-    <div class="toolbarTitle">Real fleet mapping</div>
-    <button type="button" class="orbitLab__button orbitLab__button--wide" @click="realFleetDemo">Iridium NEXT fleet mapping demo</button>
-    <p class="orbitLab__note">
-      Maps the same compute pipeline onto a <strong>real catalogued constellation</strong> — Iridium NEXT, 80 satellites from the live CelesTrak-derived OMM catalog, the one large
-      fleet that actually flies cross-linked traffic. Placement, migration policy, relay routing and the ledger all work unchanged; what changes is that the orbits are real, and
-      the topology is whatever the migration layer's line-of-sight routes make of it. The link <code>?demo=real-fleet</code> opens the same scene.
-    </p>
-    <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="realSatelliteCount === 0 || evaluatingFleet" @click="evaluateContinuity">
-      {{ evaluatingFleet ? "Evaluating…" : `Evaluate sunlit continuity (${realSatelliteCount} real satellites)` }}
-    </button>
-    <table v-if="fleetReport" class="orbitLab__facts">
-      <tbody>
-        <tr title="How much of the sampled window each satellite can power its compute, averaged over the fleet">
-          <td class="orbitLab__factName">Mean sunlit fraction</td>
-          <td class="orbitLab__factValue">{{ pct(fleetReport.meanSunlitFraction) }}</td>
-        </tr>
-        <tr title="The best-lit satellite in the fleet — a one-stage pipeline's fixed-placement figure">
-          <td class="orbitLab__factName">Best single satellite</td>
-          <td class="orbitLab__factValue">{{ pct(fleetReport.bestSunlitFraction) }}</td>
-        </tr>
-        <tr title="A fixed mapping of the pipeline onto the fleet's best-lit satellites, chosen once: serves only when all its hosts are lit together">
-          <td class="orbitLab__factName">{{ migrationStages }}-stage fixed placement</td>
-          <td class="orbitLab__factValue">{{ fleetReport.staticPlacementContinuity === undefined ? "—" : pct(fleetReport.staticPlacementContinuity) }}</td>
-        </tr>
-        <tr
-          title="Share of instants with at least this many satellites lit at once, whatever they are — the ceiling predictive handoff, relay routing and incremental sync can reach"
-        >
-          <td class="orbitLab__factName">{{ migrationStages }}-stage service ceiling</td>
-          <td class="orbitLab__factValue">{{ pct(fleetReport.serviceOpportunity) }}</td>
-        </tr>
-      </tbody>
-    </table>
-    <p v-if="fleetReport" class="orbitLab__note">
-      Sampled over two orbits at {{ FLEET_STEP_SECONDS }} s steps across {{ fleetReport.satellites }} satellites. The gap between the two rows is what live migration buys on the
-      real fleet: the fixed placement cannot chase the sun, the migrated pipeline can.
-    </p>
-
-    <label class="orbitLab__field">
-      <span>Preset</span>
-      <select class="orbitLab__preset" :value="presetIndex" @change="applyPreset(Number(($event.target as HTMLSelectElement).value))">
-        <option :value="-1">Custom</option>
-        <option v-for="(preset, index) in WALKER_PRESETS" :key="preset.label" :value="index">{{ preset.label }}</option>
-      </select>
-    </label>
-    <p v-if="presetNote" class="orbitLab__note">{{ presetNote }}</p>
-
-    <div class="orbitLab__grid">
-      <label class="orbitLab__field">
-        <span>Total (T)</span>
-        <input v-model.number="draft.total" type="number" min="1" :max="MAX_WALKER_SATELLITES" step="1" />
-      </label>
-      <label class="orbitLab__field">
-        <span>Planes (P)</span>
-        <input v-model.number="draft.planes" type="number" min="1" step="1" />
-      </label>
-      <label class="orbitLab__field">
-        <span>Phasing (F)</span>
-        <input v-model.number="draft.phasing" type="number" min="0" step="1" />
-      </label>
-      <label class="orbitLab__field">
-        <span>Inclination °</span>
-        <input v-model.number="draft.inclinationDeg" type="number" min="0" max="180" step="0.1" />
-      </label>
-      <label class="orbitLab__field">
-        <span>Altitude km</span>
-        <input v-model.number="draft.altitudeKm" type="number" min="150" step="10" />
-      </label>
-      <label class="orbitLab__field">
-        <span>RAAN span °</span>
-        <input v-model.number="draft.raanSpanDeg" type="number" min="1" max="360" step="1" />
-      </label>
-    </div>
-
-    <p class="orbitLab__derived">
-      {{ perPlane }} per plane · {{ periodMinutes }} min period · {{ meanMotion }} rev/day
-      <template v-if="draft.raanSpanDeg === 180"> · Walker Star (planes over 180°)</template>
-    </p>
-    <p v-if="validation.error" class="orbitLab__error">{{ validation.error }}</p>
-
-    <div class="orbitLab__actions">
-      <button type="button" class="orbitLab__button" :disabled="!validation.ok" :title="`Draw only ${wire}`" @click="generate">
-        {{ patterns.length === 1 && patterns[0] === wire ? "Regenerate" : "Show only" }}
-      </button>
-      <button type="button" class="orbitLab__button" :disabled="!validation.ok || patterns.includes(wire)" :title="`Draw ${wire} beside the others`" @click="addPattern">
-        Add
-      </button>
-      <button type="button" class="orbitLab__button" :disabled="!walkerActive" @click="clear">Hide all</button>
-    </div>
-
-    <template v-if="patterns.length > 0">
-      <div class="toolbarTitle">Generated patterns</div>
-      <ul class="orbitLab__patterns">
-        <li v-for="pattern in patterns" :key="pattern">
-          <button
-            type="button"
-            class="orbitLab__patternName"
-            :class="{ 'orbitLab__patternName--off': !isShown(pattern) }"
-            :title="isShown(pattern) ? 'Stop drawing this pattern' : 'Draw this pattern'"
-            @click="toggleShown(pattern)"
-          >
-            <code>{{ pattern }}</code>
+        <div class="orbitLab__actions">
+          <button type="button" class="orbitLab__button" :disabled="!validation.ok" :title="$t('orbitLab.form.showOnlyTitle', { wire })" @click="generate">
+            {{ patterns.length === 1 && patterns[0] === wire ? $t("orbitLab.form.regenerate") : $t("orbitLab.form.showOnly") }}
           </button>
-          <button type="button" class="orbitLab__patternDrop" title="Load these numbers into the form" @click="loadIntoForm(pattern)">edit</button>
-          <button type="button" class="orbitLab__patternDrop" title="Forget this pattern" @click="dropPattern(pattern)">×</button>
-        </li>
-      </ul>
-      <p class="orbitLab__note">
-        All of them travel in the url, so this link is the whole scene:
-        <code>?walker={{ patterns.join(",") }}</code>
-      </p>
-    </template>
+          <button type="button" class="orbitLab__button" :disabled="!validation.ok || patterns.includes(wire)" :title="$t('orbitLab.form.addTitle', { wire })" @click="addPattern">
+            {{ $t("orbitLab.form.add") }}
+          </button>
+          <button type="button" class="orbitLab__button" :disabled="!walkerActive" @click="clear">{{ $t("orbitLab.form.hideAll") }}</button>
+        </div>
 
-    <div class="toolbarTitle">Sun-synchronous</div>
-    <p class="orbitLab__note">
-      Computed from the altitude above, by inverting the J₂ nodal precession Ω̇ = −(3/2)·J₂·n·(Rₑ/a)²·cos i for the sun's own 0.9856°/day. Secular two-body, in the same WGS-72
-      system the element sets use — within about 0.1° of the published inclinations.
-    </p>
-    <table class="orbitLab__facts">
-      <tbody>
-        <tr title="The best |β| any plane at this inclination can reach, at the best moment of the year, against what the shadow demands here">
-          <td class="orbitLab__factName">Reachable β vs demanded</td>
-          <td class="orbitLab__factValue">{{ reachableVsDemanded }}</td>
-        </tr>
-        <tr title="Share of this shell's planes that clear the Earth's shadow entirely, averaged over a year. Depends on altitude and inclination alone.">
-          <td class="orbitLab__factName">Planes never eclipsed</td>
-          <td class="orbitLab__factValue">{{ eclipseFreePlanes }}</td>
-        </tr>
-        <tr title="How much altitude buys the same β margin as one degree of inclination, at this altitude">
-          <td class="orbitLab__factName">1° inclination is worth</td>
-          <td class="orbitLab__factValue">{{ exchangeRate }}</td>
-        </tr>
-        <tr title='How fast the J₂ bulge turns this orbit&apos;s node — the rate by which "fixed" is only nearly true'>
-          <td class="orbitLab__factName">Node drift, this orbit</td>
-          <td class="orbitLab__factValue">{{ nodeDrift }}</td>
-        </tr>
-        <tr title="The inclination that makes this altitude sun-synchronous">
-          <td class="orbitLab__factName">Sun-sync inclination</td>
-          <td class="orbitLab__factValue">{{ ssoInclination }}</td>
-        </tr>
-        <tr title="Sun elevation above the orbit plane at the worst moment of the year, for a dawn–dusk plane">
-          <td class="orbitLab__factName">Worst β (dawn–dusk)</td>
-          <td class="orbitLab__factValue">{{ ssoWorstBeta }}</td>
-        </tr>
-        <tr title="What |β| must clear for the orbit to miss the Earth's shadow: arcsin(Rₑ/(Rₑ+h)), plus a degree for the penumbra">
-          <td class="orbitLab__factName">β needed to stay lit</td>
-          <td class="orbitLab__factValue">{{ ssoRequiredBeta }}</td>
-        </tr>
-        <tr :title="ssoVerdictNote">
-          <td class="orbitLab__factName">Always sunlit?</td>
-          <td class="orbitLab__factValue">{{ ssoVerdict }}</td>
-        </tr>
-      </tbody>
-    </table>
-    <p class="orbitLab__note">
-      The three knobs, weakest last: <strong>where the node sits relative to the sun</strong> picks β within the range the inclination allows, and is free —
-      <strong>inclination</strong> raises that ceiling one-for-one — <strong>altitude</strong> only lowers what the shadow demands, at about 0.02°/km. Full sweep in
-      <code>docs/starlink-energy-report.md</code>.
-    </p>
-    <p class="orbitLab__note">
-      Fixed, but not exactly: the Earth's J₂ bulge turns every orbit's node a few degrees a day — −5°/day for the ISS, and precisely +0.9856°/day for a sun-synchronous orbit, which
-      is the whole trick those orbits are built on.
-    </p>
-    <p class="orbitLab__note">
-      Always-sunlit dawn–dusk orbits exist only between <strong>{{ sunlitBand }}</strong> — a band, not a floor: the shadow shrinks with altitude, but sun-synchrony demands an ever
-      steeper retrograde inclination, which caps β. Above the band the second effect wins. Every flown dawn–dusk mission (Sentinel-1 at 693 km, TerraSAR-X at 514 km) sits below it
-      and is eclipse-free for part of the year only.
-    </p>
-    <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!validation.ok" @click="useSunSyncInclination">Use this inclination for the form</button>
-
-    <div class="toolbarTitle">Illumination</div>
-    <p class="orbitLab__note">
-      ν is the fraction of the solar disc left uncovered by the Earth (satellite.js's conical shadow model). κ is the signed cosine between the sun and an assumed solar panel
-      normal — a model, not a fact: no element set carries attitude.
-    </p>
-
-    <div class="orbitLab__radios">
-      <label v-for="mode in POINT_COLOR_MODES" :key="mode" class="toolbarSwitch">
-        <input type="radio" name="pointColorMode" :value="mode" :checked="pointColorMode === mode" @change="pointColorMode = mode" />
-        <span class="slider"></span>
-        {{ POINT_COLOR_MODE_LABEL[mode] }}
-      </label>
-    </div>
-
-    <label class="orbitLab__field">
-      <span>Point size</span>
-      <select :value="pointSize" @change="pointSize = ($event.target as HTMLSelectElement).value as PointSize">
-        <option v-for="size in POINT_SIZES" :key="size" :value="size">{{ POINT_SIZE_LABEL[size] }}</option>
-      </select>
-    </label>
-
-    <label class="orbitLab__field">
-      <span>Panel normal</span>
-      <select :value="panelAxis" @change="panelAxis = ($event.target as HTMLSelectElement).value as PanelAxis">
-        <option v-for="axis in PANEL_AXES" :key="axis" :value="axis">{{ PANEL_AXIS_LABEL[axis] }}</option>
-      </select>
-    </label>
-
-    <table class="orbitLab__legend">
-      <tbody>
-        <tr v-for="state in ILLUMINATION_STATES" :key="state" :title="ILLUMINATION_DESCRIPTION[state]">
-          <td><span class="orbitLab__swatch" :style="{ backgroundColor: ILLUMINATION_COLOR[state] }"></span></td>
-          <td class="orbitLab__legendName">{{ state }}</td>
-          <td class="orbitLab__legendCount">{{ census.counts[state] ?? 0 }}</td>
-          <td class="orbitLab__legendShare">{{ share(census.counts[state] ?? 0) }}</td>
-        </tr>
-      </tbody>
-    </table>
-    <p class="orbitLab__derived">
-      {{ census.total }} satellites on screen<template v-if="census.total > 0"> · {{ share(census.dark) }} without usable power</template>
-    </p>
-    <p v-if="pointColorMode === 'class'" class="orbitLab__note">Switch the colouring to Illumination to paint these states onto the globe.</p>
-
-    <template v-if="selected">
-      <div class="toolbarTitle">{{ selected.name }}</div>
-      <p class="orbitLab__derived">
-        <span class="orbitLab__swatch" :style="{ backgroundColor: ILLUMINATION_COLOR[selected.state] }"></span>
-        {{ selected.state }} · ν {{ selected.nu.toFixed(3) }} · κ {{ selected.kappa.toFixed(3) }} · β {{ selected.betaDeg.toFixed(1) }}°
-      </p>
-      <div v-if="selected.strip.length > 0" class="orbitLab__strip" :title="`${STRIP_ORBITS} orbits from now (${selected.spanMinutes} min), ${STRIP_STEP_SECONDS} s per sample`">
-        <span v-for="(segment, index) in selected.strip" :key="index" :style="{ backgroundColor: segment.color, flexGrow: segment.weight }"></span>
+        <template v-if="patterns.length > 0">
+          <div class="toolbarTitle">{{ $t("orbitLab.group.patterns") }}</div>
+          <ul class="orbitLab__patterns">
+            <li v-for="pattern in patterns" :key="pattern">
+              <button
+                type="button"
+                class="orbitLab__patternName"
+                :class="{ 'orbitLab__patternName--off': !isShown(pattern) }"
+                :title="isShown(pattern) ? $t('orbitLab.patterns.stopDrawing') : $t('orbitLab.patterns.draw')"
+                @click="toggleShown(pattern)"
+              >
+                <code>{{ pattern }}</code>
+              </button>
+              <button type="button" class="orbitLab__patternDrop" :title="$t('orbitLab.patterns.load')" @click="loadIntoForm(pattern)">
+                {{ $t("orbitLab.patterns.edit") }}
+              </button>
+              <button type="button" class="orbitLab__patternDrop" :title="$t('orbitLab.patterns.forget')" @click="dropPattern(pattern)">×</button>
+            </li>
+          </ul>
+          <p class="orbitLab__note">
+            {{ $t("orbitLab.patterns.note") }}
+            <code>?walker={{ patterns.join(",") }}</code>
+          </p>
+        </template>
       </div>
-      <p v-if="selected.strip.length > 0" class="orbitLab__note">
-        Next {{ STRIP_ORBITS }} orbits ({{ selected.spanMinutes }} min): {{ pct(selected.fractions.umbra ?? 0) }} umbra · {{ pct(selected.fractions.penumbra ?? 0) }} penumbra ·
-        {{ pct(selected.fractions.sunlit_back ?? 0) }} back-facing · {{ pct(selected.darkFraction) }} dark in total
-      </p>
-    </template>
-    <p v-else class="orbitLab__note">Click a satellite to read its ν/κ and its next orbit.</p>
+    </details>
+
+    <details class="orbitLab__group">
+      <summary class="orbitLab__summary">{{ $t("orbitLab.group.demos") }}</summary>
+      <div class="orbitLab__body">
+        <button type="button" class="orbitLab__button orbitLab__button--wide" @click="twoOrbitDemo">{{ $t("orbitLab.demos.twoOrbit") }}</button>
+        <p class="orbitLab__note" v-html="$t('orbitLab.demos.twoOrbitNote', { multiplier: DEMO_MULTIPLIER, seconds: demoOrbitSeconds })"></p>
+        <p class="orbitLab__note" v-html="$t('orbitLab.demos.penumbraNote')"></p>
+        <p class="orbitLab__note" v-html="$t('orbitLab.demos.arcNote')"></p>
+
+        <button type="button" class="orbitLab__button orbitLab__button--wide" @click="sunSyncDemo">{{ $t("orbitLab.demos.sunSync") }}</button>
+        <p class="orbitLab__note" v-html="$t('orbitLab.demos.sunSyncNote', { altitude: alwaysSunlitAltitude })"></p>
+
+        <button type="button" class="orbitLab__button orbitLab__button--wide" @click="shellsDemo">{{ $t("orbitLab.demos.shells") }}</button>
+        <p class="orbitLab__note" v-html="$t('orbitLab.demos.shellsNote', { multiplier: SHELLS_MULTIPLIER })"></p>
+
+        <label class="toolbarSwitch">
+          <input type="checkbox" :checked="links" @change="links = ($event.target as HTMLInputElement).checked" />
+          <span class="slider"></span>
+          {{ $t("orbitLab.links.label") }}
+        </label>
+        <p class="orbitLab__note" v-html="$t('orbitLab.links.note')"></p>
+      </div>
+    </details>
+
+    <details class="orbitLab__group">
+      <summary class="orbitLab__summary">{{ $t("orbitLab.group.marked") }}</summary>
+      <div class="orbitLab__body">
+        <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!walkerActive" @click="markColumn">
+          {{ $t("orbitLab.marked.markColumn") }}
+        </button>
+        <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!walkerActive" @click="markCrossShell">
+          {{ $t("orbitLab.marked.markCrossShell") }}
+        </button>
+        <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!marks.length" @click="clearMarks">
+          {{ $t("orbitLab.marked.clear") }}
+        </button>
+        <p class="orbitLab__note" v-html="$t('orbitLab.marked.note')"></p>
+
+        <formation-view />
+      </div>
+    </details>
+
+    <details class="orbitLab__group">
+      <summary class="orbitLab__summary">{{ $t("orbitLab.group.shells") }}</summary>
+      <div class="orbitLab__body">
+        <button type="button" class="orbitLab__button orbitLab__button--wide" @click="stableShellsDemo">{{ $t("orbitLab.shells.demo") }}</button>
+        <p class="orbitLab__note" v-html="$t('orbitLab.shells.note')"></p>
+        <table class="orbitLab__facts">
+          <tbody>
+            <tr :title="$t('orbitLab.shells.facts.nodeRateTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.shells.facts.nodeRate") }}</td>
+              <td class="orbitLab__factValue">{{ nodeDrift }}</td>
+            </tr>
+            <tr :title="$t('orbitLab.shells.facts.ceilingTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.shells.facts.ceiling") }}</td>
+              <td class="orbitLab__factValue">{{ layoutCeiling }}</td>
+            </tr>
+            <tr v-if="bestLayout" :title="$t('orbitLab.shells.facts.companionTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.shells.facts.companion") }}</td>
+              <td class="orbitLab__factValue">{{ bestCompanionText }}</td>
+            </tr>
+            <tr v-if="bestLayout" :title="$t('orbitLab.shells.facts.cycleTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.shells.facts.cycle") }}</td>
+              <td class="orbitLab__factValue">{{ bestCycleText }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!bestCompanionWire || patterns.includes(bestCompanionWire)" @click="addCompanionShell">
+          {{ $t("orbitLab.shells.add") }}
+        </button>
+        <p class="orbitLab__note" v-html="$t('orbitLab.shells.addNote')"></p>
+
+        <template v-if="layoutVerdicts.length > 0">
+          <table class="orbitLab__facts">
+            <tbody>
+              <tr v-for="row in layoutVerdicts" :key="row.key" :title="row.detail">
+                <td class="orbitLab__factName">
+                  <code>{{ row.pair }}</code>
+                </td>
+                <td class="orbitLab__factValue">{{ row.verdict }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="orbitLab__note" v-html="$t('orbitLab.shells.verdictsNote')"></p>
+        </template>
+      </div>
+    </details>
+
+    <details class="orbitLab__group">
+      <summary class="orbitLab__summary">{{ $t("orbitLab.group.migration") }}</summary>
+      <div class="orbitLab__body">
+        <button type="button" class="orbitLab__button orbitLab__button--wide" @click="migrationDemo">{{ $t("orbitLab.migration.kvDemo") }}</button>
+        <button type="button" class="orbitLab__button orbitLab__button--wide" @click="walker25Demo">{{ $t("orbitLab.migration.fleetDemo") }}</button>
+        <label class="toolbarSwitch">
+          <input type="checkbox" :checked="migration" @change="migration = ($event.target as HTMLInputElement).checked" />
+          <span class="slider"></span>
+          {{ $t("orbitLab.migration.overlay") }}
+        </label>
+        <label class="orbitLab__field">
+          <span>{{ $t("orbitLab.migration.stages") }}</span>
+          <select class="orbitLab__stages" :value="migrationStages" @change="migrationStages = Number(($event.target as HTMLSelectElement).value)">
+            <option v-for="count in PIPELINE_STAGE_CHOICES" :key="count" :value="count">{{ count }}</option>
+          </select>
+        </label>
+        <div class="orbitLab__radios">
+          <label class="toolbarSwitch">
+            <input type="radio" name="orbitLabMigrationPolicy" value="predictive" :checked="migrationPolicy === 'predictive'" @change="migrationPolicy = 'predictive'" />
+            <span class="slider"></span>
+            {{ $t("orbitLab.migration.policyPredictive") }}
+          </label>
+          <label class="toolbarSwitch">
+            <input type="radio" name="orbitLabMigrationPolicy" value="naive" :checked="migrationPolicy === 'naive'" @change="migrationPolicy = 'naive'" />
+            <span class="slider"></span>
+            {{ $t("orbitLab.migration.policyNaive") }}
+          </label>
+        </div>
+        <label class="toolbarSwitch">
+          <input type="checkbox" :checked="migrationIncremental" @change="migrationIncremental = ($event.target as HTMLInputElement).checked" />
+          <span class="slider"></span>
+          {{ $t("orbitLab.migration.incremental") }}
+        </label>
+        <p class="orbitLab__note" v-html="$t('orbitLab.migration.incrementalNote', { gigabytes: migrationStatus?.kvGigabytes ?? 2 })"></p>
+        <p
+          class="orbitLab__note"
+          v-html="$t('orbitLab.migration.pipelineNote', { stageCount: migrationStatus?.stageCount ?? migrationStages, gigabytes: migrationStatus?.kvGigabytes ?? 2 })"
+        ></p>
+        <p class="orbitLab__note" v-html="$t('orbitLab.migration.policyNote')"></p>
+        <p class="orbitLab__note" v-html="$t('orbitLab.migration.servingNote')"></p>
+        <p class="orbitLab__note" v-html="$t('orbitLab.migration.opaqueNote')"></p>
+
+        <table v-if="migrationStatus?.active && migrationStatus.stages.length > 0" class="orbitLab__facts">
+          <tbody>
+            <tr v-for="stage in migrationStatus.stages" :key="stage.index">
+              <td class="orbitLab__factName">
+                <span class="orbitLab__swatch" :style="{ backgroundColor: stage.color }"></span>
+                S{{ stage.index + 1 }}
+              </td>
+              <td class="orbitLab__factValue">
+                <template v-if="stage.phase === 'migrating'"
+                  >{{ shortHost(stage.from) }} → <template v-if="stage.via">{{ shortHost(stage.via) }} → </template>{{ shortHost(stage.to) }} ({{
+                    $t("orbitLab.migration.transferMs", { ms: ((stage.transferSeconds ?? 0) * 1000).toFixed(0) })
+                  }})</template
+                >
+                <template v-else-if="stage.phase === 'stranded'">{{ shortHost(stage.hostName) }}{{ $t("orbitLab.migration.stage.stranded") }}</template>
+                <template v-else>
+                  {{ shortHost(stage.hostName)
+                  }}{{
+                    stage.powered
+                      ? stage.lookaheadPowered === false
+                        ? $t("orbitLab.migration.stage.nearEclipse")
+                        : $t("orbitLab.migration.stage.sunlit")
+                      : $t("orbitLab.migration.stage.dark")
+                  }}
+                </template>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <table v-if="migrationStatus?.active" class="orbitLab__facts">
+          <tbody>
+            <tr>
+              <td class="orbitLab__factName">{{ $t("orbitLab.migration.facts.status") }}</td>
+              <td class="orbitLab__factValue">
+                {{ migrationStatus.serving ? $t("orbitLab.migration.status.serving") : $t("orbitLab.migration.status.stalled") }} ·
+                {{ $t("orbitLab.migration.status.stagesPowered", { powered: migrationStatus.poweredStages, total: migrationStatus.stages.length }) }}
+              </td>
+            </tr>
+            <tr>
+              <td class="orbitLab__factName">{{ $t("orbitLab.migration.facts.policy") }}</td>
+              <td class="orbitLab__factValue">
+                {{ migrationStatus.policy === "predictive" ? $t("orbitLab.migration.policy.predictive") : $t("orbitLab.migration.policy.reactive") }}
+              </td>
+            </tr>
+            <tr v-if="migrationStatus.allPoweredFraction !== undefined">
+              <td class="orbitLab__factName">{{ $t("orbitLab.migration.facts.utilization") }}</td>
+              <td class="orbitLab__factValue">
+                {{ pct(migrationStatus.allPoweredFraction) }} of {{ simDuration(migrationStatus.ledger.allPoweredSeconds + migrationStatus.ledger.stalledSeconds) }}
+              </td>
+            </tr>
+            <tr>
+              <td class="orbitLab__factName">{{ $t("orbitLab.migration.facts.migrations") }}</td>
+              <td class="orbitLab__factValue">{{ migrationStatus.migrations }}</td>
+            </tr>
+            <tr v-if="migrationStatus.ledger.migrations > 0">
+              <td class="orbitLab__factName">{{ $t("orbitLab.migration.facts.kvMoved") }}</td>
+              <td class="orbitLab__factValue">
+                {{
+                  $t("orbitLab.migration.kvMovedValue", {
+                    payload: formatPayload(migrationStatus.ledger.gigabytesMoved),
+                    ms: (migrationStatus.ledger.transferSeconds * 1000).toFixed(0),
+                  })
+                }}
+                <template v-if="migrationStatus.incremental && migrationStatus.ledger.baselineGigabytes > migrationStatus.ledger.gigabytesMoved">
+                  {{ $t("orbitLab.migration.lessThanFull", { delta: migrationDelta }) }}
+                </template>
+              </td>
+            </tr>
+            <tr v-if="migrationStatus.linkKm !== undefined">
+              <td class="orbitLab__factName">{{ $t("orbitLab.migration.facts.isl") }}</td>
+              <td class="orbitLab__factValue">{{ $t("orbitLab.migration.linkTime", { kilometres: migrationStatus.linkKm.toFixed(0) }) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="migrationStatus?.active" class="orbitLab__note">{{ migrationStatus.reason }}</p>
+
+        <template v-if="migrationStatus?.active && migrationStatus.log.length > 0">
+          <div class="toolbarTitle">{{ $t("orbitLab.group.log") }}</div>
+          <table class="orbitLab__facts">
+            <tbody>
+              <tr v-for="(event, index) in migrationStatus.log" :key="`${event.at}-${event.stage}-${index}`">
+                <td class="orbitLab__factName">{{ clockOf(event.at) }}</td>
+                <td class="orbitLab__factValue">
+                  <span class="orbitLab__swatch" :style="{ backgroundColor: stageColor(event.stage) }"></span>
+                  S{{ event.stage + 1 }} {{ event.hops.map(shortHost).join(" → ") }} · {{ event.linkKm.toFixed(0) }} km ·
+                  {{ $t("orbitLab.migration.transferMs", { ms: (event.transferSeconds * 1000).toFixed(0) }) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="orbitLab__note">{{ $t("orbitLab.migration.logNote") }}</p>
+        </template>
+      </div>
+    </details>
+
+    <details class="orbitLab__group">
+      <summary class="orbitLab__summary">{{ $t("orbitLab.group.fleet") }}</summary>
+      <div class="orbitLab__body">
+        <button type="button" class="orbitLab__button orbitLab__button--wide" @click="realFleetDemo">{{ $t("orbitLab.fleet.demo") }}</button>
+        <p class="orbitLab__note" v-html="$t('orbitLab.fleet.note', { count: realSatelliteCount })"></p>
+        <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="realSatelliteCount === 0 || evaluatingFleet" @click="evaluateContinuity">
+          {{ evaluatingFleet ? $t("orbitLab.fleet.evaluating") : $t("orbitLab.fleet.evaluate", { count: realSatelliteCount }) }}
+        </button>
+        <table v-if="fleetReport" class="orbitLab__facts">
+          <tbody>
+            <tr :title="$t('orbitLab.fleet.facts.meanSunlitTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.fleet.facts.meanSunlit") }}</td>
+              <td class="orbitLab__factValue">{{ pct(fleetReport.meanSunlitFraction) }}</td>
+            </tr>
+            <tr :title="$t('orbitLab.fleet.facts.bestTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.fleet.facts.best") }}</td>
+              <td class="orbitLab__factValue">{{ pct(fleetReport.bestSunlitFraction) }}</td>
+            </tr>
+            <tr :title="$t('orbitLab.fleet.facts.fixedPlacementTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.fleet.facts.fixedPlacement", { stages: migrationStages }) }}</td>
+              <td class="orbitLab__factValue">{{ fleetReport.staticPlacementContinuity === undefined ? "—" : pct(fleetReport.staticPlacementContinuity) }}</td>
+            </tr>
+            <tr :title="$t('orbitLab.fleet.facts.ceilingTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.fleet.facts.ceiling", { stages: migrationStages }) }}</td>
+              <td class="orbitLab__factValue">{{ pct(fleetReport.serviceOpportunity) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="fleetReport" class="orbitLab__note" v-html="$t('orbitLab.fleet.sampleNote', { step: FLEET_STEP_SECONDS, satellites: fleetReport.satellites })"></p>
+      </div>
+    </details>
+
+    <details class="orbitLab__group">
+      <summary class="orbitLab__summary">{{ $t("orbitLab.group.sunSync") }}</summary>
+      <div class="orbitLab__body">
+        <p class="orbitLab__note" v-html="$t('orbitLab.sunSync.note')"></p>
+        <table class="orbitLab__facts">
+          <tbody>
+            <tr :title="$t('orbitLab.sunSync.facts.reachableTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.sunSync.facts.reachable") }}</td>
+              <td class="orbitLab__factValue">{{ reachableVsDemanded }}</td>
+            </tr>
+            <tr :title="$t('orbitLab.sunSync.facts.neverEclipsedTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.sunSync.facts.neverEclipsed") }}</td>
+              <td class="orbitLab__factValue">{{ eclipseFreePlanes }}</td>
+            </tr>
+            <tr :title="$t('orbitLab.sunSync.facts.exchangeTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.sunSync.facts.exchange") }}</td>
+              <td class="orbitLab__factValue">{{ exchangeRate }}</td>
+            </tr>
+            <tr :title="$t('orbitLab.sunSync.facts.nodeDriftTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.sunSync.facts.nodeDrift") }}</td>
+              <td class="orbitLab__factValue">{{ nodeDrift }}</td>
+            </tr>
+            <tr :title="$t('orbitLab.sunSync.facts.inclinationTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.sunSync.facts.inclination") }}</td>
+              <td class="orbitLab__factValue">{{ ssoInclination }}</td>
+            </tr>
+            <tr :title="$t('orbitLab.sunSync.facts.worstBetaTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.sunSync.facts.worstBeta") }}</td>
+              <td class="orbitLab__factValue">{{ ssoWorstBeta }}</td>
+            </tr>
+            <tr :title="$t('orbitLab.sunSync.facts.requiredBetaTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.sunSync.facts.requiredBeta") }}</td>
+              <td class="orbitLab__factValue">{{ ssoRequiredBeta }}</td>
+            </tr>
+            <tr :title="ssoVerdictNote">
+              <td class="orbitLab__factName">{{ $t("orbitLab.sunSync.facts.always") }}</td>
+              <td class="orbitLab__factValue">{{ ssoVerdict === "yes" ? $t("orbitLab.sunSync.verdictYes") : $t("orbitLab.sunSync.verdictNo") }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="orbitLab__note" v-html="$t('orbitLab.sunSync.knobsNote')"></p>
+        <p class="orbitLab__note" v-html="$t('orbitLab.sunSync.notExactNote')"></p>
+        <p class="orbitLab__note" v-html="$t('orbitLab.sunSync.bandNote', { band: sunlitBand })"></p>
+        <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="!validation.ok" @click="useSunSyncInclination">
+          {{ $t("orbitLab.sunSync.use") }}
+        </button>
+      </div>
+    </details>
+
+    <details class="orbitLab__group">
+      <summary class="orbitLab__summary">{{ $t("orbitLab.group.illumination") }}</summary>
+      <div class="orbitLab__body">
+        <p class="orbitLab__note" v-html="$t('orbitLab.illumination.note')"></p>
+
+        <div class="orbitLab__radios">
+          <label v-for="mode in POINT_COLOR_MODES" :key="mode" class="toolbarSwitch">
+            <input type="radio" name="pointColorMode" :value="mode" :checked="pointColorMode === mode" @change="pointColorMode = mode" />
+            <span class="slider"></span>
+            {{ $t(`labels.pointColorMode.${mode}`) }}
+          </label>
+        </div>
+
+        <label class="orbitLab__field">
+          <span>{{ $t("orbitLab.illumination.pointSize") }}</span>
+          <select :value="pointSize" @change="pointSize = ($event.target as HTMLSelectElement).value as PointSize">
+            <option v-for="size in POINT_SIZES" :key="size" :value="size">{{ $t(`labels.pointSize.${size}`) }}</option>
+          </select>
+        </label>
+
+        <label class="orbitLab__field">
+          <span>{{ $t("orbitLab.illumination.panelNormal") }}</span>
+          <select :value="panelAxis" @change="panelAxis = ($event.target as HTMLSelectElement).value as PanelAxis">
+            <option v-for="axis in PANEL_AXES" :key="axis" :value="axis">{{ $t(`labels.panelAxis.${axis}`) }}</option>
+          </select>
+        </label>
+
+        <table class="orbitLab__legend">
+          <tbody>
+            <tr v-for="state in ILLUMINATION_STATES" :key="state" :title="$t(`labels.illumination.${state}`)">
+              <td><span class="orbitLab__swatch" :style="{ backgroundColor: ILLUMINATION_COLOR[state] }"></span></td>
+              <td class="orbitLab__legendName">{{ state }}</td>
+              <td class="orbitLab__legendCount">{{ census.counts[state] ?? 0 }}</td>
+              <td class="orbitLab__legendShare">{{ share(census.counts[state] ?? 0) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="orbitLab__derived">
+          {{ $t("orbitLab.illumination.census", { total: census.total }) }}
+          <template v-if="census.total > 0">{{ $t("orbitLab.illumination.withoutPower", { share: share(census.dark) }) }}</template>
+        </p>
+        <p v-if="pointColorMode === 'class'" class="orbitLab__note">{{ $t("orbitLab.illumination.switchNote") }}</p>
+
+        <template v-if="selected">
+          <div class="toolbarTitle">{{ selected.name }}</div>
+          <p class="orbitLab__derived">
+            <span class="orbitLab__swatch" :style="{ backgroundColor: ILLUMINATION_COLOR[selected.state] }"></span>
+            {{ selected.state }} · ν {{ selected.nu.toFixed(3) }} · κ {{ selected.kappa.toFixed(3) }} · β {{ selected.betaDeg.toFixed(1) }}°
+          </p>
+          <div
+            v-if="selected.strip.length > 0"
+            class="orbitLab__strip"
+            :title="$t('orbitLab.illumination.stripTitle', { orbits: STRIP_ORBITS, minutes: selected.spanMinutes, step: STRIP_STEP_SECONDS })"
+          >
+            <span v-for="(segment, index) in selected.strip" :key="index" :style="{ backgroundColor: segment.color, flexGrow: segment.weight }"></span>
+          </div>
+          <p v-if="selected.strip.length > 0" class="orbitLab__note">
+            {{
+              $t("orbitLab.illumination.stripNote", {
+                orbits: STRIP_ORBITS,
+                minutes: selected.spanMinutes,
+                umbra: pct(selected.fractions.umbra ?? 0),
+                penumbra: pct(selected.fractions.penumbra ?? 0),
+                back: pct(selected.fractions.sunlit_back ?? 0),
+                dark: pct(selected.darkFraction),
+              })
+            }}
+          </p>
+        </template>
+        <p v-else class="orbitLab__note">{{ $t("orbitLab.illumination.clickNote") }}</p>
+      </div>
+    </details>
   </div>
 </template>
 
@@ -503,21 +493,12 @@
 import { JulianDate } from "@cesium/engine";
 import { storeToRefs } from "pinia";
 import { computed, onUnmounted, reactive, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 
 import { useController } from "../composables/useController";
 import { useViewerClock } from "../composables/useViewerClock";
-import { POINT_SIZE_LABEL, POINT_SIZES, type PointSize } from "../config/components";
-import {
-  ILLUMINATION_COLOR,
-  ILLUMINATION_DESCRIPTION,
-  ILLUMINATION_STATES,
-  PANEL_AXES,
-  PANEL_AXIS_LABEL,
-  POINT_COLOR_MODE_LABEL,
-  POINT_COLOR_MODES,
-  type IlluminationState,
-  type PanelAxis,
-} from "../config/illumination";
+import { POINT_SIZES, type PointSize } from "../config/components";
+import { ILLUMINATION_COLOR, ILLUMINATION_STATES, PANEL_AXES, POINT_COLOR_MODES, type IlluminationState, type PanelAxis } from "../config/illumination";
 import { PIPELINE_STAGE_CHOICES, stageColor } from "../config/migration";
 import { CAMERA_MODES } from "../config/viewModes";
 import {
@@ -581,6 +562,8 @@ const STRIP_STEP_SECONDS = 10;
  */
 const STRIP_ORBITS = 2;
 
+const { tm } = useI18n();
+
 const cc = useController();
 const satStore = useSatStore();
 const { pointColorMode, pointSize, panelAxis, walker, migration, migrationStages, migrationPolicy, migrationIncremental, links, marks } = storeToRefs(satStore);
@@ -596,11 +579,9 @@ const clock = useViewerClock();
 const cesiumStore = useCesiumStore();
 const { cameraMode } = storeToRefs(cesiumStore);
 
-const CAMERA_MODE_LABEL: Record<string, string> = {
-  Fixed: "Earth-fixed — ground still, orbit sweeps",
-  Inertial: "Inertial — orbit still, Earth turns",
-};
-
+// Camera-mode labels are prose, so they are read from the locale rather than
+// carried here — see `labels.cameraMode` in src/i18n/locales.
+//
 // The demo scenes are shared with the `?demo=` startup path (modules/demoScenes).
 // The panel drives the clock through useViewerClock; the startup path drives the
 // ClockViewModel directly. Both reach the scenes through this small control.
@@ -790,7 +771,17 @@ const sunlitBand = band ? `${band.lowestKm} and ${band.highestKm} km` : "no alti
 const alwaysSunlitAltitude = representativeAlwaysSunlitAltitudeKm() ?? 1760;
 
 const presetIndex = computed(() => WALKER_PRESETS.findIndex((preset) => encodeWalker(preset.params) === wire.value));
-const presetNote = computed(() => WALKER_PRESETS[presetIndex.value]?.note ?? "");
+// The note is prose, so it is translated here rather than read off the preset.
+// Keyed by position in `WALKER_PRESETS`, and a preset added without a matching
+// note falls back to the English one rather than to nothing.
+const presetNote = computed(() => {
+  const index = presetIndex.value;
+  if (index < 0) {
+    return "";
+  }
+  const translated = tm(`orbitLab.presetNotes.${index}`);
+  return (typeof translated === "string" ? translated : WALKER_PRESETS[index]?.note) ?? "";
+});
 
 function applyPreset(index: number): void {
   const preset = WALKER_PRESETS[index];
@@ -1266,6 +1257,54 @@ watch(panelAxis, () => refresh());
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* One collapsible section per topic. Native `details` rather than a component:
+   the panel is a Cesium toolbar child with its own styling, and this gets
+   keyboard operation, find-in-page expansion and print behaviour for free. */
+.orbitLab__group {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.orbitLab__group:first-of-type {
+  border-top: none;
+}
+
+.orbitLab__summary {
+  padding: 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+/* The marker is ours so the triangle sits at the end of the line — a heading
+   reads as a heading when its affordance does not interrupt it. */
+.orbitLab__summary::-webkit-details-marker {
+  display: none;
+}
+
+.orbitLab__summary::after {
+  float: right;
+  font-weight: 400;
+  opacity: 0.6;
+  content: "▸";
+}
+
+.orbitLab__group[open] > .orbitLab__summary::after {
+  content: "▾";
+}
+
+.orbitLab__summary:hover::after {
+  opacity: 1;
+}
+
+.orbitLab__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 0 6px 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .orbitLab__note {

@@ -42,6 +42,7 @@
             <UIcon name="lucide:gauge" />
           </button>
         </UTooltip>
+        <locale-toggle />
       </div>
       <!-- v-if (not v-show like the other panels): the virtualized list inside
            measures its scroll element on mount, and mounting hidden (display:none)
@@ -311,6 +312,7 @@ import AboutDialog from "./AboutDialog.vue";
 import ClockDeck from "./ClockDeck.vue";
 import EntityInfoPanel from "./EntityInfoPanel.vue";
 import GroundStationList from "./GroundStationList.vue";
+import LocaleToggle from "./LocaleToggle.vue";
 import OrbitLabPanel from "./OrbitLabPanel.vue";
 import SatelliteBrowser from "./SatelliteBrowser.vue";
 import SkyHud from "./SkyHud.vue";

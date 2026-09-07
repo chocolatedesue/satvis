@@ -8,6 +8,7 @@ import { controllerKey } from "./composables/useController";
 import { usePWAUpdate } from "./composables/usePWAUpdate";
 import { ionAccessToken } from "./config/ion";
 import { getConfigPreset } from "./config/presets";
+import { currentLocale, i18n } from "./i18n";
 import { CesiumController } from "./modules/CesiumController";
 import { createViewer } from "./modules/createViewer";
 import {
@@ -52,6 +53,10 @@ Ion.defaultAccessToken = ionAccessToken;
 // which is handed to the Vue tree — so every edge into the globe is an argument
 // somebody passed rather than a global somebody found.
 const app = createApp(App);
+// Before anything renders: the document's language is what a screen reader
+// announces and what the browser offers to translate, and it is one attribute
+// that has to agree with whatever the locale file says.
+document.documentElement.lang = currentLocale();
 const viewer = createViewer("cesiumContainer", { minimalUI: DeviceDetect.minimalUI() });
 const cc = new CesiumController(viewer);
 app.provide(controllerKey, cc);
@@ -73,6 +78,10 @@ setupRouterGuards(router, cc);
 app.use(router);
 
 app.use(ui);
+
+// Last of the plugins: a component can read `t()` from the first render, so no
+// panel can paint an untranslated string on the frame it mounts.
+app.use(i18n);
 
 app.mount("#app");
 
