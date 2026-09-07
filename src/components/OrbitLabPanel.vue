@@ -8,7 +8,7 @@
      constellation.
 
      The sections are collapsible because the panel is not one control but
-     eight: a reader who came to generate a pattern does not want the migration
+     nine: a reader who came to generate a pattern does not want the migration
      ledger in the way, and a reader who came for the ledger does not want the
      form. Grouping them also gives each one a heading it did not have — the
      generator's own fields used to sit, unlabelled, between two unrelated
@@ -285,6 +285,64 @@
           </table>
           <p class="orbitLab__note" v-html="$t('orbitLab.shells.verdictsNote')"></p>
         </template>
+      </div>
+    </details>
+
+    <details class="orbitLab__group">
+      <summary class="orbitLab__summary">{{ $t("orbitLab.group.clusters") }}</summary>
+      <div class="orbitLab__body">
+        <p class="orbitLab__note" v-html="$t('orbitLab.clusters.note')"></p>
+
+        <button type="button" class="orbitLab__button orbitLab__button--wide" @click="familyDemo">{{ $t("orbitLab.clusters.demo") }}</button>
+        <p class="orbitLab__note" v-html="$t('orbitLab.clusters.demoNote', { shells: familyDemoShells, revolutions: FAMILY_CYCLE_REVOLUTIONS })"></p>
+
+        <div class="toolbarTitle">{{ $t("orbitLab.clusters.foundTitle", { count: clusterRows.length }) }}</div>
+        <template v-if="clusterRows.length > 0">
+          <table class="orbitLab__facts">
+            <tbody>
+              <tr v-for="row in clusterRows" :key="row.key">
+                <td class="orbitLab__factName" :title="row.detail">
+                  <code>{{ row.members }}</code>
+                </td>
+                <td class="orbitLab__factValue">{{ row.cycle }}</td>
+                <td class="orbitLab__factMark">
+                  <button type="button" class="orbitLab__patternDrop" :title="$t('orbitLab.clusters.markTitle')" @click="markCluster(row)">
+                    {{ $t("orbitLab.clusters.mark") }}
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="orbitLab__note" v-html="$t('orbitLab.clusters.foundNote')"></p>
+        </template>
+        <p v-else class="orbitLab__note">{{ $t("orbitLab.clusters.none", { count: patternOrbits.length }) }}</p>
+
+        <div class="toolbarTitle">{{ $t("orbitLab.clusters.family") }}</div>
+        <label class="orbitLab__field">
+          <span>{{ $t("orbitLab.clusters.revolutions") }}</span>
+          <input v-model.number="familyRevolutions" type="number" min="2" max="60" step="1" />
+        </label>
+        <p class="orbitLab__derived">{{ $t("orbitLab.clusters.familyDerived", { shells: familyShellPatterns.length, cycle: familyCycleText }) }}</p>
+        <table v-if="familyShells.length > 0" class="orbitLab__facts">
+          <tbody>
+            <tr :title="$t('orbitLab.clusters.facts.altitudeTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.clusters.facts.altitude") }}</td>
+              <td class="orbitLab__factValue">{{ familyAltitudeText }}</td>
+            </tr>
+            <tr :title="$t('orbitLab.clusters.facts.inclinationTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.clusters.facts.inclination") }}</td>
+              <td class="orbitLab__factValue">{{ familyInclinationText }}</td>
+            </tr>
+            <tr :title="$t('orbitLab.clusters.facts.revolutionsTitle')">
+              <td class="orbitLab__factName">{{ $t("orbitLab.clusters.facts.revolutions") }}</td>
+              <td class="orbitLab__factValue">{{ familyRevolutionsText }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <button type="button" class="orbitLab__button orbitLab__button--wide" :disabled="familyShellPatterns.length < 2 || !validation.ok" @click="flyFamily">
+          {{ $t("orbitLab.clusters.flyFamily") }}
+        </button>
+        <p class="orbitLab__note" v-html="$t('orbitLab.clusters.familyNote')"></p>
       </div>
     </details>
 
@@ -594,6 +652,7 @@ import { ILLUMINATION_COLOR, ILLUMINATION_STATES, PANEL_AXES, POINT_COLOR_MODES,
 import { PIPELINE_STAGE_CHOICES, stageColor } from "../config/migration";
 import { CAMERA_MODES } from "../config/viewModes";
 import {
+  applyFamilyScene,
   applyMigrationScene,
   applyRealFleetScene,
   applyShellsScene,
@@ -603,6 +662,10 @@ import {
   applyWalker25Scene,
   type ClockControl,
   DEMO_MULTIPLIER,
+  FAMILY_BAND_KM,
+  FAMILY_CYCLE_REVOLUTIONS,
+  familyPatterns,
+  familyReference,
   SHELLS_MULTIPLIER,
   STABLE_REFERENCE,
 } from "../modules/demoScenes";
@@ -621,7 +684,16 @@ import { parseGeneratedSatellite } from "../modules/util/constellationLinks";
 import { fleetContinuity, type FleetContinuity } from "../modules/util/fleetContinuity";
 import { illuminationTimeline } from "../modules/util/illumination";
 import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, maxReachableBetaDeg } from "../modules/util/orbitDesign";
-import { coPrecessingCeilingKm, searchStableShellLayouts, shellPairLayout } from "../modules/util/shellLayout";
+import {
+  coPrecessingCeilingKm,
+  familyCycleHours,
+  findStableClusters,
+  type ClusterMember,
+  MAX_CLUSTER_CYCLE_HOURS,
+  searchStableShellLayouts,
+  shellFamily,
+  shellPairLayout,
+} from "../modules/util/shellLayout";
 import {
   alwaysSunlitAltitudeBandKm,
   alwaysSunlitVerdict,
@@ -1047,6 +1119,167 @@ function addCompanionShell(): void {
 /** Leave the records in the catalog and stop drawing them — the tag is the switch. */
 function clear(): void {
   satStore.setActivation({ enabledTags: satStore.enabledTags.filter((tag) => !isWalkerTag(tag)) });
+}
+
+// ---------------------------------------------------------------------------
+// Stable clusters
+//
+// The third thing the app calls a cluster, and until now the only one with
+// nowhere to be seen: `findStableClusters` and `shellFamily` ran in scripts and
+// tests and printed to a terminal, while the panel could build a shell and a
+// formation but not read the partition back off either.
+//
+// Two halves, because the two functions answer opposite questions:
+// `findStableClusters` reads the partition off orbits that already exist, and
+// `shellFamily` writes one. The first is a table of what the generated patterns
+// already are; the second is a control that turns the form's own shell into a
+// whole family and flies it.
+// ---------------------------------------------------------------------------
+
+/** How long a cycle may be and still be worth offering: two days (see shellLayout). */
+const CLUSTER_MAX_CYCLE_HOURS = MAX_CLUSTER_CYCLE_HOURS;
+
+/** How many revolutions per cycle the family builder starts on. */
+const familyRevolutions = ref(FAMILY_CYCLE_REVOLUTIONS);
+
+/**
+ * The distinct orbits the generated patterns fly, one wire each.
+ *
+ * Deduplicated by (altitude, inclination) because a cluster is a statement about
+ * orbits: two patterns differing only in phasing or plane count are one shell in
+ * two pieces, and offering them as two members would inflate every cluster by
+ * however many times the reader pressed Add.
+ */
+const patternOrbits = computed<ClusterMember[]>(() => {
+  const seen = new Map<string, ClusterMember>();
+  for (const wireForm of patterns.value) {
+    const params = decodeWalker(wireForm);
+    if (!params) {
+      continue;
+    }
+    const key = `${params.inclinationDeg.toFixed(3)}@${params.altitudeKm.toFixed(3)}`;
+    if (!seen.has(key)) {
+      seen.set(key, { id: wireForm, orbit: { altitudeKm: params.altitudeKm, inclinationDeg: params.inclinationDeg } });
+    }
+  }
+  return [...seen.values()];
+});
+
+/**
+ * Every stable cluster among the generated patterns, best first.
+ *
+ * The Pareto front of size against cycle rather than one answer: a subset that
+ * returns sooner than the cluster containing it is a different offer, not a
+ * worse one, and it is kept. So this list is not a partition — the same shell
+ * appears in several rows, which is the honest reading of a tolerance that is
+ * not transitive.
+ */
+const stableClusters = computed(() => findStableClusters(patternOrbits.value, { maxCycleHours: CLUSTER_MAX_CYCLE_HOURS }));
+
+interface ClusterRow {
+  key: string;
+  /** The member patterns, as wires, in the order the solver reported them. */
+  wires: string[];
+  members: string;
+  cycle: string;
+  detail: string;
+}
+
+/** An orbit, as the panel names it: the two numbers a cluster is a statement about. */
+function orbitLabel(wireForm: string): string {
+  const params = decodeWalker(wireForm);
+  return params ? `${params.inclinationDeg}°/${params.altitudeKm}` : wireForm;
+}
+
+const clusterRows = computed<ClusterRow[]>(() =>
+  stableClusters.value.map((found) => ({
+    key: found.members.toSorted().join("|"),
+    wires: [...found.members],
+    members: found.members.map(orbitLabel).join(" + "),
+    cycle: `${found.cycleHours.toFixed(2)} h · ${found.verdict}`,
+    detail: [
+      `${found.revolutions.join(", ")} revolutions per cycle`,
+      `slip ${found.slipDegPerCycle.toFixed(2)}° per cycle`,
+      `node spread ${found.nodeSpreadDegPerDay.toFixed(4)}°/day`,
+      `tightest link budget ${found.maxLinkRangeKm.toFixed(0)} km`,
+    ].join(" · "),
+  })),
+);
+
+/**
+ * Bond one satellite per cluster member, which is what makes a cluster visible
+ * rather than tabulated: the marks are the amber halos, and every pair of them is
+ * bonded in the verdict's line style. A cluster that returns draws solid and
+ * comes back to the same shape; pressing this on two rows in turn is how the
+ * Pareto front is read off the globe rather than off the table.
+ */
+function markCluster(row: ClusterRow): void {
+  satStore.marks = row.wires.map((wireForm) => `1-1@${wireForm}`);
+}
+
+/** The family the form's own shell can hold, as orbits. */
+const familyShells = computed(() =>
+  validation.value.ok && Number.isInteger(familyRevolutions.value) && familyRevolutions.value >= 2
+    ? shellFamily(draft, { cycleRevolutions: familyRevolutions.value, minAltitudeKm: FAMILY_BAND_KM.min, maxAltitudeKm: FAMILY_BAND_KM.max })
+    : [],
+);
+
+/** The same family, as patterns the globe can draw. */
+const familyShellPatterns = computed(() =>
+  validation.value.ok && Number.isInteger(familyRevolutions.value) && familyRevolutions.value >= 2 ? familyPatterns(draft, familyRevolutions.value) : [],
+);
+
+const familyCycleText = computed(() => {
+  const hours = familyCycleHours(familyShells.value);
+  return hours > 0 ? `${hours.toFixed(2)} h` : "—";
+});
+
+const familyAltitudeText = computed(() => {
+  const altitudes = familyShells.value.map((shell) => shell.altitudeKm);
+  return altitudes.length === 0 ? "—" : `${(altitudes[0] as number).toFixed(0)} – ${(altitudes[altitudes.length - 1] as number).toFixed(0)} km`;
+});
+
+const familyInclinationText = computed(() => {
+  const inclinations = familyShells.value.map((shell) => shell.inclinationDeg);
+  if (inclinations.length === 0) {
+    return "—";
+  }
+  const spread = (Math.max(...inclinations) as number) - (Math.min(...inclinations) as number);
+  return `${(inclinations[0] as number).toFixed(2)}° – ${(inclinations[inclinations.length - 1] as number).toFixed(2)}° (span ${spread.toFixed(2)}°)`;
+});
+
+const familyRevolutionsText = computed(() => familyShells.value.map((shell) => shell.revolutions).join(", "));
+
+/**
+ * Fly the whole family the form's shell can hold.
+ *
+ * Replaces the pattern list rather than adding to it: a family is a designed
+ * object, and leaving the shell it was solved from plus three unrelated patterns
+ * on screen makes the pairwise table below the multi-shell group read as if the
+ * family were drifting. One satellite per shell is marked, so the bonds between
+ * shells — the thing a family guarantees — are the thing on screen.
+ */
+function flyFamily(): void {
+  const shells = familyShellPatterns.value;
+  if (shells.length < 2 || !validation.value.ok) {
+    return;
+  }
+  const wires = shells.map(encodeWalker);
+  walker.value = wires;
+  satStore.setActivation({ enabledTags: shells.map(walkerTagFor) });
+  satStore.links = true;
+  satStore.marks = wires.map((wireForm) => `1-1@${wireForm}`);
+}
+
+/** How many shells the sun-synchronous family scene flies. */
+const familyDemoShells = computed(() => {
+  const reference = familyReference();
+  return reference ? familyPatterns(reference, FAMILY_CYCLE_REVOLUTIONS).length : 0;
+});
+
+/** The sun-synchronous family, in one press: the scene `?demo=sso-family` also opens. */
+function familyDemo(): void {
+  applyFamilyScene(satStore, cesiumStore, clockControl);
 }
 
 // ---------------------------------------------------------------------------
@@ -1653,6 +1886,14 @@ watch(panelAxis, () => refresh());
   text-align: right;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+/* The cluster table's third column: a per-row action, so a row can be flown
+   without re-typing what it says. Padded rather than flush, because it sits
+   beside a right-aligned figure. */
+.orbitLab__factMark {
+  padding-left: 6px;
+  white-space: nowrap;
 }
 
 .orbitLab__legend {

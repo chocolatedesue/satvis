@@ -263,6 +263,7 @@ export default {
       formation: "Formation cluster",
       formationCloseUp: "Formation close-up",
       shells: "Multi-shell layout",
+      clusters: "Stable clusters",
       migration: "Multi-satellite compute & live migration",
       fleet: "Real fleet mapping",
       patterns: "Generated patterns",
@@ -388,6 +389,45 @@ export default {
         'topology bridges across in <span style="color: #38bdf8">blue</span>), <strong>repeating</strong> (planes locked, phases returning on a cycle), ' +
         "<strong>phase-locked</strong> (equal period, planes shearing), <strong>node-locked</strong> (planes held, phases sliding forever) and <strong>drifting</strong> " +
         "(neither).",
+    },
+
+    // The third thing the app calls a cluster: the partition orbit space already
+    // has. The other two (a marked cluster across shells, a formation inside one)
+    // are drawn; this one was only ever printed to a terminal.
+    clusters: {
+      note:
+        "Two orbits hold their relative arrangement only where their node rates agree and their phases return — and both conditions are <strong>equivalence relations</strong>, so orbit space is " +
+        "already partitioned: a cluster is a <em>quotient</em>, not a search. There is no k, no centroid and no distance, which is why k-means has nothing to offer here — two shells 3 km apart drift " +
+        "forever, two 700 km apart can hold a schedule for years. What does need an algorithm is tolerance, which is not transitive, so clusters under tolerance <strong>overlap</strong> rather than " +
+        "partition, and the honest answer is a Pareto front of size against cycle rather than one grouping.",
+      demo: "Sun-synchronous family demo",
+      demoNote:
+        "{shells} shells at once, every pair of them returning on one cycle, and every one of them sun-synchronous because each is node-locked to a sun-synchronous reference. The reference turns " +
+        "{revolutions} times per cycle; each other shell takes a whole number of turns beside it. <code>?demo=sso-family</code>",
+      foundTitle: "Stable clusters among the generated patterns ({count})",
+      mark: "Mark",
+      markTitle: "Bond one satellite per member, so the cluster is watchable rather than only tabulated",
+      foundNote:
+        "Every maximal set of shells that closes one cycle, best first — a subset that returns <em>sooner</em> than the cluster containing it is a different offer rather than a worse one, which is why " +
+        "one shell can appear in several rows. <strong>slip</strong> is the worst along-track error a member carries into the next cycle; the <strong>link budget</strong> is the shortest range any pair " +
+        "in the cluster could ever close, so a cluster whose members never come inside it returns to a geometry no fabric can be built on.",
+      none: "No cluster closes a cycle among the {count} distinct orbits on screen — add a second shell, or press beside the companion the multi-shell group solves for.",
+      family: "Family from this shell",
+      revolutions: "Reference revolutions per cycle",
+      familyDerived: "{shells} shells, returning every {cycle}",
+      facts: {
+        altitude: "Altitudes",
+        altitudeTitle: "The band a family may spread across — above the drag, below the inner belt",
+        inclination: "Inclinations",
+        inclinationTitle:
+          "The price of the lock: node-locking a higher shell to this one costs inclination, because cos i₂ = cos i₁ · (a₂/a₁)^(7/2) — which is also why a near-polar reference holds a far wider family",
+        revolutions: "Turns per cycle",
+        revolutionsTitle: "Whole revolutions each shell makes in one family cycle — the integers inside the band are the family",
+      },
+      flyFamily: "Fly this family",
+      familyNote:
+        "Writes a partition forwards instead of searching for one: fix how many turns the reference makes per cycle, and every other whole number of turns inside the band names one more node-locked " +
+        "shell. Every pair returns <em>by construction</em>, so a shell added costs nothing in stability — what it costs is inclination spread and cycle length, and both are in the rows above.",
     },
 
     migration: {

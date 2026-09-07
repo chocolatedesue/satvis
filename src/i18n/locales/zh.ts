@@ -254,6 +254,7 @@ export default {
       formation: "编队集群",
       formationCloseUp: "编队近视图",
       shells: "多壳层布局",
+      clusters: "稳定集群",
       migration: "多星协同与实时迁移",
       fleet: "真实星座映射",
       patterns: "已生成的星座",
@@ -366,6 +367,39 @@ export default {
         "每一对已生成的星座图案，按它对另一条所做的事来分：<strong>rigid</strong>（一个壳层拆成两半——所有偏移都冻结，也是唯一会被拓扑用" +
         '<span style="color: #38bdf8">蓝色</span>跨接的情况）、<strong>repeating</strong>（平面锁定，相位在周期上回来）、<strong>phase-locked</strong>' +
         "（周期相同，平面在剪切）、<strong>node-locked</strong>（平面保持，相位永远在滑动）和 <strong>drifting</strong>（两者都不是）。",
+    },
+
+    clusters: {
+      note:
+        "两条轨道要保持相对构型，只有两个条件：升交点进动率一致、相位能够回归——而这两个条件<strong>都是等价关系</strong>，所以轨道空间<em>早已被划分好了</em>：集群是一个<em>商</em>，不是一次搜索。" +
+        "这里没有 k、没有质心、没有距离，所以 k-means 之类无从下手——相距 3 km 的两层可以永远漂移，相距 700 km 的两层却能按同一张时刻表运行好几年。真正需要算法的是<strong>容差</strong>，而容差不满足传递性：" +
+        "带容差的集群因此<strong>相互重叠</strong>而不构成划分，诚实的答案是“规模 × 周期”的 Pareto 前沿，而不是一个唯一的分组。",
+      demo: "太阳同步家族演示",
+      demoNote:
+        "一次放飞 {shells} 层，每一对都在同一个周期上回归，而且每一层都自动太阳同步——因为它们都与太阳同步的基准层锁定在同一条进动率上。基准层每周期绕 {revolutions} 圈，其余各层各取一个整数圈数。" +
+        "<code>?demo=sso-family</code>",
+      foundTitle: "已生成图案中的稳定集群（{count}）",
+      mark: "标记",
+      markTitle: "给每个成员各标记一颗星，让集群能被看见，而不只是躺在表里",
+      foundNote:
+        "所有能闭合同一周期的极大集合，按优劣排序——比包含它的集群<em>更早</em>回归的子集是另一种报价，而不是更差的报价，所以同一层可能出现在多行里。<strong>slip</strong> 是成员进入下一个周期时携带的最大沿迹误差；" +
+        "<strong>链路预算</strong> 是集群内任意一对可能达到的最短距离——若成员永远走不进这个距离，它的几何回归得再准也织不出算力网络。",
+      none: "当前 {count} 条互不相同的轨道没有一个能闭合周期——再加一层，或按多壳层那一组给出的伴随壳层。",
+      family: "由这一层构造家族",
+      revolutions: "基准层每周期圈数",
+      familyDerived: "{shells} 层，每 {cycle} 回归一次",
+      facts: {
+        altitude: "高度",
+        altitudeTitle: "家族可以铺开的高度带——上避开内辐射带，下避开大气阻力",
+        inclination: "倾角",
+        inclinationTitle: "锁定的代价：把更高的壳层锁到这一层上要花倾角，因为 cos i₂ = cos i₁ · (a₂/a₁)^(7/2)——这也正是近极基准层能撑起更大家族的原因",
+        revolutions: "每周期圈数",
+        revolutionsTitle: "每层在一个家族周期里跑的完整圈数——落在这个带里的整数就是整个家族",
+      },
+      flyFamily: "放飞这个家族",
+      familyNote:
+        "这是<em>正向写出</em>一个划分，而不是去搜索它：定下基准层每周期跑多少圈，高度带内其余每个整数圈数就点名一层与之锁定的壳层。每一对都<em>按构造</em>回归，所以多加一层并不损失稳定性——" +
+        "代价是倾角跨度与周期变长，两者都在上面几行里。",
     },
 
     migration: {
