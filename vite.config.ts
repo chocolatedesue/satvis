@@ -121,7 +121,8 @@ export default defineConfig({
       ],
     }),
     VitePWA({
-      registerType: "prompt",
+      registerType: "autoUpdate",
+      injectRegister: "auto",
       manifest: {
         name: "Satellite Orbit Visualization",
         short_name: "SatVis",
@@ -136,6 +137,12 @@ export default defineConfig({
         theme_color: "#000000",
       },
       workbox: {
+        // The new SW takes over as soon as it is installed, rather than waiting
+        // for every tab the user has open to be closed. `prompt` would be the
+        // right choice for a PWA whose update might disrupt in-flight work; for
+        // a "load the app" PWA it only stranded a reader on stale assets.
+        skipWaiting: true,
+        clientsClaim: true,
         maximumFileSizeToCacheInBytes: 5000000,
         globPatterns: [
           "**/*.{js,css,html,svg,png,ico}",
