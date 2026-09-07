@@ -112,7 +112,22 @@ inside a fixed ellipse and never leaves it — that is what bounded means. The w
 deformation the paper's figure shows is visible only in the _non-rotating_ frame its caption names:
 the RIC basis captured at epoch and held still while the satellite flies on. Measuring the shape
 cycle in the rotating frame is how one concludes, wrongly, that nothing happens.
-`src/modules/util/relativeFrame.ts` holds both frames and the distinction.
+`src/modules/util/relativeFrame.ts` holds both frames and the distinction, and the orbit lab's
+**formation view** draws either one live — which is what actually delivers the picture, since the
+globe cannot. It propagates the members itself rather than reading the globe's positions, for two
+reasons that are the same reason: a formation is defined by its elements. The globe's positions are
+Earth-fixed, and an Earth-fixed velocity is the orbital one plus the ground's, which tilts the
+along-track axis by about four degrees at 550 km; and a reader of the geometry should not depend on
+whether the renderer built a component or which frame a camera mode put the scene in. Twenty-nine
+`propagate` calls are microseconds — the coupling would cost more than the arithmetic.
+
+**One thing that looked like a bug and was not.** The first cut of the demo asked for both `Orbit`
+and `Illumination arc`, saw `Orbit` missing from the manager's effective components, and recorded it
+as a stuck suppression. It is deliberate: the arc *is* the orbit line, cut from the same vertices and
+coloured, so `SatelliteManager.reconcile` suppresses the plain one while the arc is on rather than
+letting two polylines z-fight on identical geometry. Asking for both is asking for one to be ignored.
+Still open, and separate: neither line appears on the globe for a formation's members, where a Walker
+pattern's do.
 
 **Scale is the visualisation's whole problem, and the answer is to change it.** At globe range
 Suncatcher's kilometre is one point and one orbit line: the geometry is right and there is nothing

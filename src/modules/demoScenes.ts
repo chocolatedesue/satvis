@@ -316,11 +316,12 @@ export function applyClusterScene(satStore: SatStore, cesiumStore: CesiumStore, 
   satStore.cluster = [wire];
   satStore.pointColorMode = "illumination";
   satStore.pointSize = "large";
-  // One write, and it names "Orbit" itself rather than adding it on top of
-  // `withIlluminationComponents`: the orbit line per member is what makes this
-  // read as *several orbits* rather than a point cloud, which is the whole claim
-  // a formation makes, so it is not an afterthought to the illumination set.
-  satStore.enabledComponents = ["Point", "Label", "Orbit", "Illumination arc"];
+  // "Illumination arc" and not also "Orbit": the arc *is* the orbit line, cut from
+  // the same vertices and coloured, and `SatelliteManager.reconcile` suppresses
+  // the plain one while the arc is on so the two do not z-fight. Asking for both
+  // is asking for one of them to be ignored — which is what the first cut of this
+  // scene did, and then read the suppression back as a bug.
+  satStore.enabledComponents = ["Point", "Label", "Illumination arc"];
   showOnly(satStore, [clusterTagFor(preset.params)]);
   satStore.links = true;
   // The reference and the eight lattice points around it, which is the set

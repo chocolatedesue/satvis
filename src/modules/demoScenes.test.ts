@@ -278,12 +278,16 @@ describe("cluster", () => {
     expect(bonds.every((bond) => bond.verdict === "rigid" && bond.returns)).toBe(true);
   });
 
-  test("draws each member's own orbit and runs the clock fast enough to see the shape cycle", () => {
+  test("asks for the arc rather than the plain orbit, and runs the clock fast enough to see the shape cycle", () => {
+    // The arc is the orbit line coloured, and the manager suppresses the plain
+    // one while the arc is on so they do not z-fight on identical geometry.
+    // Asking for both is asking for one to be ignored.
     const s = stores();
     const clock = clockSpy();
     applyClusterScene(s.satStore, s.cesiumStore, clock);
 
-    expect(s.satStore.enabledComponents).toContain("Orbit");
+    expect(s.satStore.enabledComponents).toContain("Illumination arc");
+    expect(s.satStore.enabledComponents).not.toContain("Orbit");
     expect(s.cesiumStore.cameraMode).toBe("Inertial");
     expect(clock.multiplier).toBe(CLUSTER_MULTIPLIER);
     expect(clock.played).toBe(true);

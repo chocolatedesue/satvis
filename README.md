@@ -415,6 +415,20 @@ returns to **0.03 m** after one orbit — the "perfect repeat at zero delta-v" t
 for. Stating mean elements and reading osculating positions costs a static ~8 m distortion of the
 lattice, measured in the tests and flat over five orbits.
 
+**The formation view** is the answer to that, and it sits in the orbit lab under the layout section:
+a live version of the paper's own figure, drawn from the reference satellite rather than from the
+globe. It propagates the members itself instead of reading the globe's positions — an Earth-fixed
+velocity is the orbital one plus the ground's, which would tilt the radial/along-track split by
+about four degrees — and it offers both frames, because they answer different questions:
+
+- **Rotating**: the reference's axes rebuilt every instant. A bounded formation sits still inside a
+  fixed ellipse and never leaves it. That is what *bounded* means, and this frame shows no
+  deformation at all.
+- **Non-rotating**: those axes captured once and held while the satellite flies on. The ellipse
+  turns with the orbit and the formation deforms — flat, upright, flat — **twice per orbit**. Same
+  motion, different frame; this is the one the paper's figure is drawn in, and measuring the shape
+  cycle in the rotating frame is how one concludes, wrongly, that nothing happens.
+
 **Scale is the whole visualisation problem.** At globe range a 1 km cluster is one point and one
 orbit line: correct, and nothing to look at. `?demo=cluster` flies the same lattice at `R = 120 km`,
 where each member's orbit line separates into a braid, every pair is bonded in amber — two members

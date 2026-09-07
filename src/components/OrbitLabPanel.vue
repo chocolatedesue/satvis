@@ -79,6 +79,8 @@
       cluster relation visible throughout the orbit.
     </p>
 
+    <formation-view />
+
     <div class="toolbarTitle">Multi-shell layout</div>
     <button type="button" class="orbitLab__button orbitLab__button--wide" @click="stableShellsDemo">Stable-layout demo</button>
     <p class="orbitLab__note">
@@ -532,6 +534,7 @@ import {
   STABLE_REFERENCE,
 } from "../modules/demoScenes";
 import { parseGeneratedSatellite } from "../modules/util/constellationLinks";
+import FormationView from "./FormationView.vue";
 import { fleetContinuity, type FleetContinuity } from "../modules/util/fleetContinuity";
 import { illuminationTimeline } from "../modules/util/illumination";
 import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, maxReachableBetaDeg } from "../modules/util/orbitDesign";
