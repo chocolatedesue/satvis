@@ -5,6 +5,10 @@ measured numbers. It is a reference, not a decision — the decisions are
 `docs/adr/0010-stable-clusters.md` (across orbits) and `docs/adr/0012-orbit-formations.md`
 (inside one orbit), and this file exists because reading both to compare a threshold is tedious.
 
+For _which orbit to put a compute cluster in_ — how geometry, energy and inference pipeline
+depth constrain the choice together — see `docs/orbital-compute.md`. This file is the
+geometry and drag; that one is the synthesis.
+
 They are different scales with different maths, and the shared word is the only thing they have in
 common:
 

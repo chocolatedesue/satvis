@@ -12,8 +12,8 @@
 import type { SatRec } from "satellite.js";
 
 import type { IlluminationState, PanelAxis } from "../../config/illumination";
-import { isDark, isEclipsed } from "./energyStatistics";
-import { illuminationAt } from "./illumination";
+import { isDark, isEclipsed } from "./energyStatistics.ts";
+import { illuminationAt } from "./illumination.ts";
 
 /** The slot length the migration model discretises time into. */
 export const SLOT_SECONDS = 10;

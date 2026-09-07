@@ -25,13 +25,15 @@ import { clusterRadiusM, clusterSize, maxEccentricity, type ClusterFormationPara
 import { orbitalRates, type CircularOrbit } from "../src/modules/util/orbitModel.ts";
 import { orbitReport } from "../src/modules/util/orbitReport.ts";
 import { findStableClusters, searchStableShellLayouts, type ClusterMember } from "../src/modules/util/shellLayout.ts";
+import { reportDesign, usageDesign } from "./cluster-design.ts";
 
 const USAGE = `orbit-lab — closed-form orbit analysis, no globe
 
-  orbit     <altKm> <incDeg>            one orbit's own numbers
-  shells    <altKm> <incDeg> [limit]    companion shells that hold a fixed relation to it
-  clusters  <alt:inc>[,<alt:inc>...]    which of several orbits return together
+  orbit     <altKm> <incDeg>                     one orbit's own numbers
+  shells    <altKm> <incDeg> [limit]             companion shells that hold a fixed relation to it
+  clusters  <alt:inc>[,<alt:inc>...]             which of several orbits return together
   formation <altKm> <pitchM> <rings> [incDeg]    a free-flying lattice's size (default dawn-dusk SSO)
+  ${usageDesign()}
 
 Altitudes in km, angles in degrees, pitches in metres.`;
 
@@ -196,6 +198,17 @@ function main(argv: string[]): void {
     // designed for — a cluster is a compute cluster, and it wants the sun. Any
     // other inclination is a 4th argument.
     reportFormation({ altitudeKm, inclinationDeg: number(rest[3]) ?? 97.99, pitchM, rings });
+    return;
+  }
+
+  if (command === "design") {
+    const orbit = parseOrbit(`${rest[0] ?? ""}:${rest[1] ?? ""}`);
+    const perPlane = number(rest[2]) ?? 20;
+    if (!orbit) {
+      console.log(USAGE);
+      return;
+    }
+    reportDesign(orbit, perPlane);
     return;
   }
 

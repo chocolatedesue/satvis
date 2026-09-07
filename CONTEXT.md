@@ -344,6 +344,21 @@ discussion; sharpen them here when they drift.
   a host handing off _because_ it is going dark is the premise. When no lit chain
   reaches around, the stage is **stranded**, which is then the truth rather than a
   caveat (`docs/adr/0011-routing-around-the-earth.md`).
+- **Pipeline depth** (`P*`): how many stages a decode pipeline can be cut into
+  before the sun runs out — `⌊N(1−f_ecl)⌋`, the length of the lit arc of a ring
+  of N satellites of which a fraction `f_ecl` is dark (`optimalPipelineDepth`).
+  A pipeline serves only while **every** stage has power at once, so `P*` is a
+  cliff rather than a slope: at 550 km / 53° with N = 22 it is 15, and depth 16
+  collapses the served time from 4.9% to 0.3%. It is also **not one number per
+  shell** — `f_ecl` varies enough plane to plane that `P*` runs 13 to 22 across
+  one shell on one day. The counterpart for a fixed placement is
+  `p_full(P) = max(0, (1−f_ecl) − (P−1)/N)` (`fullyLitFraction`).
+- **Service opportunity**: the share of instants at which at least k satellites
+  are lit simultaneously, whatever they are — the ceiling live migration, relay
+  routing and incremental sync can reach, as against **static placement
+  continuity**, which is what a fixed mapping of the same pipeline achieves. The
+  gap between the two on a real fleet is what the migration machinery is worth
+  (`fleetContinuity`, `docs/orbital-compute.md`).
 - **Link horizon**: how far two circular shells can ever be apart and still see
   each other — `√(r₁²−R_b²) + √(r₂²−R_b²)` in range, `arccos(R_b/r₁) +
 arccos(R_b/r₂)` in Earth-central angle, against a blocking sphere raised 80 km
