@@ -12,12 +12,19 @@
           rings: params.rings,
           pitch: params.pitchM,
           members: memberCount,
-          radius: Math.round(radiusKm),
+          radius: formatMetres(radiusKm * 1000),
         })
       }}
       <span v-if="rotating" v-html="$t('formation.rotatingNote')"></span>
       <span v-else v-html="$t('formation.nonRotatingNote')"></span>
       {{ $t("formation.runClock") }}
+    </p>
+    <!-- The numbers behind the picture. A shape breathing twice an orbit is
+         visible; how much it breathes is not measurable off 512 pixels, and the
+         ellipse angle is the deformation stated outright. -->
+    <p v-if="spacing" class="formation__readout">
+      {{ $t("formation.spacing", { nearest: formatMetres(spacing.nearest), furthest: formatMetres(spacing.furthest) }) }}
+      <template v-if="!rotating"> · {{ $t("formation.turned", { degrees: ellipseDeg.toFixed(0) }) }}</template>
     </p>
   </div>
 </template>
@@ -25,6 +32,7 @@
 <script setup lang="ts">
 import { JulianDate } from "@cesium/engine";
 import { computed, onUnmounted, ref, shallowRef, watch } from "vue";
+import { useI18n } from "vue-i18n";
 
 import { useController } from "../composables/useController";
 import { CLUSTER_EPOCH_ISO, decodeCluster } from "../modules/util/clusterFormation";
@@ -32,7 +40,7 @@ import { formationBasis, formationSatrecs, formationSnapshot, meanMotionRadPerSe
 import { useSatStore } from "../stores/sat";
 
 /** Square, because the axes are the same span and a formation is not wider than it is tall. */
-const SIZE = 256;
+const SIZE = 512;
 
 /**
  * How often the canvas is redrawn.
@@ -42,6 +50,8 @@ const SIZE = 256;
  * than the picture can show and already more than it needs.
  */
 const REDRAW_MS = 50;
+
+const { t } = useI18n();
 
 const cc = useController();
 const satStore = useSatStore();
@@ -111,6 +121,37 @@ function colourOf(member: { i: number; j: number }, rings: number): string {
   return "#8f9cf0";
 }
 
+/**
+ * How far each member is from its own nearest neighbour, as a min and max over
+ * the lattice — in metres.
+ *
+ * This is the number that breathes. The picture shows the shape; this says how
+ * much, and it is what makes the 2:1 deformation legible on a canvas too small
+ * to measure: for Suncatcher's lattice the range runs 100–200 m over an orbit.
+ */
+const spacing = computed(() => {
+  const members = snapshot.value?.members ?? [];
+  let nearest = Number.POSITIVE_INFINITY;
+  let furthest = 0;
+  for (const member of members) {
+    let own = Number.POSITIVE_INFINITY;
+    for (const other of members) {
+      if (other === member) {
+        continue;
+      }
+      own = Math.min(own, Math.hypot(member.alongTrack - other.alongTrack, member.radial - other.radial));
+    }
+    if (Number.isFinite(own)) {
+      nearest = Math.min(nearest, own);
+      furthest = Math.max(furthest, own);
+    }
+  }
+  return Number.isFinite(nearest) ? { nearest, furthest } : undefined;
+});
+
+/** How far the bounding ellipse has turned in this frame — the whole of the deformation. */
+const ellipseDeg = computed(() => ((snapshot.value?.ellipseAngleRad ?? 0) * 180) / Math.PI);
+
 function draw(): void {
   const element = canvas.value;
   const shape = params.value;
@@ -173,10 +214,15 @@ function draw(): void {
     context.fill();
   }
 
-  context.fillStyle = "#8091b8";
-  context.font = "10px system-ui, sans-serif";
-  context.fillText(`±${Math.round(current.radiusM / 1000)} km`, 6, SIZE - 6);
-  context.fillText(rotating.value ? "rotating" : "non-rotating", 6, 14);
+  // On the canvas rather than translated: it is a drawing, and the language of
+  // the panel's own labels is already the reader's.
+  context.fillText(`±${formatMetres(current.radiusM)}`, 6, SIZE - 6);
+  context.fillText(rotating.value ? t("formation.rotating") : t("formation.nonRotating"), 6, 16);
+}
+
+/** Metres below a kilometre, kilometres above — a 1 km lattice and a 120 km one share this view. */
+function formatMetres(metres: number): string {
+  return metres < 1000 ? `${Math.round(metres)} m` : `${(metres / 1000).toFixed(metres < 10000 ? 2 : 0)} km`;
 }
 
 let timer: number | undefined;
@@ -238,6 +284,16 @@ onUnmounted(() => window.clearInterval(timer));
   font-size: 11px;
   line-height: 1.45;
   color: #98a6c6;
+}
+
+/* Monospace, because these are measurements rather than prose: a reader is
+   comparing two numbers that change every frame, and proportional digits make
+   that a fight. */
+.formation__readout {
+  margin: 4px 0 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: #cbd5f5;
 }
 
 .formation__button--on {

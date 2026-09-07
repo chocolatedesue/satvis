@@ -71,8 +71,10 @@ export default {
     rotating: "Rotating",
     nonRotating: "Non-rotating",
     summary:
-      "{rings} rings at {pitch} m — {members} members inside R = {radius} km, drawn from the reference satellite rather than from the globe, where the whole formation is a few " +
+      "{rings} rings at {pitch} m — {members} members inside R = {radius}, drawn from the reference satellite rather than from the globe, where the whole formation is a few " +
       "pixels wide.",
+    spacing: "nearest neighbours {nearest}–{furthest}",
+    turned: "ellipse turned {degrees}°",
     runClock: "Run the clock to watch it.",
     rotatingNote:
       "In the <strong>rotating</strong> frame the formation sits still inside its ellipse — twice as wide along-track as it is tall — and never leaves it. That is " +
@@ -258,10 +260,13 @@ export default {
       constellation: "Walker constellation",
       demos: "Scenes",
       marked: "Marked cluster",
+      formation: "Formation cluster",
+      formationCloseUp: "Formation close-up",
       shells: "Multi-shell layout",
       migration: "Multi-satellite compute & live migration",
       fleet: "Real fleet mapping",
       patterns: "Generated patterns",
+      clusterPatterns: "Generated formations",
       sunSync: "Sun-synchronous",
       illumination: "Illumination",
       log: "Migration log",
@@ -312,6 +317,34 @@ export default {
         'their length to within a part in a thousand, <span style="color: #a78bfa">violet inter-plane links</span> breathe as their planes cross, a link that passes behind ' +
         "the Earth is hidden rather than drawn through it, and the Walker Star seam is never wired — its endpoints sweep past each other at twice orbital rate.",
     },
+
+    // The generator for the formation cluster: four numbers, the same shape as
+    // the Walker form above, because a formation is four numbers too.
+    cluster: {
+      empty: "No formation yet — build one in the group below, or open ?demo=cluster.",
+      preset: "Preset",
+      rings: "Rings",
+      pitch: "Radial pitch m",
+      inclination: "Inclination °",
+      altitude: "Altitude km",
+      derived: "{members} members inside R = {radius} km",
+      pitchNote:
+        "The along-track pitch is <strong>twice</strong> the radial one, and is not settable — that is the epicycle's own axis ratio, and only that choice makes the extent a circle " +
+        "in lattice index rather than an ellipse.",
+      showOnly: "Show only",
+      regenerate: "Regenerate",
+      add: "Add",
+      hideAll: "Hide all",
+      showOnlyTitle: "Draw only {wire}",
+      addTitle: "Draw {wire} beside the others",
+    },
+
+    clusterPresetNotes: [
+      "Google's free-flying compute cluster: 81 satellites inside 1 km, dawn-dusk SSO, 100 m x 200 m lattice.",
+      "Two rings — the smallest lattice that still fills its bounding ellipse, and few enough to watch one member.",
+      "Three rings at 200 m pitch: R = 1.2 km, the same shape spread far enough apart to read at a distance.",
+      "The same three-ring formation blown up to R = 120 km — the same dynamics, at a size a globe can draw. Members are tens of kilometres apart, so the bonds between them are lines rather than a pixel.",
+    ],
 
     marked: {
       markColumn: "Mark one column",

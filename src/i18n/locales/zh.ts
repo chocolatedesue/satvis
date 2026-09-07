@@ -67,7 +67,9 @@ export default {
     title: "编队视图",
     rotating: "旋转系",
     nonRotating: "非旋转系",
-    summary: "{rings} 圈、节距 {pitch} m —— {members} 个成员在 R = {radius} km 之内，从参考卫星画出，而不是从地球上画：在那里整个编队只有几个像素宽。",
+    summary: "{rings} 圈、节距 {pitch} m —— {members} 个成员在 R = {radius} 之内，从参考卫星画出，而不是从地球上画：在那里整个编队只有几个像素宽。",
+    spacing: "最近邻 {nearest}–{furthest}",
+    turned: "椭圆已转过 {degrees}°",
     runClock: "运行时钟即可观察。",
     rotatingNote:
       "在<strong>旋转</strong>参考系里，编队静止地待在它的椭圆内——沿航向是径向的两倍宽——并且从不出界。这就是<em>有界</em>的含义，也是这个参考系下完全看不到形变的原因。",
@@ -249,10 +251,13 @@ export default {
       constellation: "Walker 星座",
       demos: "演示场景",
       marked: "标记集群",
+      formation: "编队集群",
+      formationCloseUp: "编队近视图",
       shells: "多壳层布局",
       migration: "多星协同与实时迁移",
       fleet: "真实星座映射",
       patterns: "已生成的星座",
+      clusterPatterns: "已生成的编队",
       sunSync: "太阳同步",
       illumination: "光照",
       log: "迁移日志",
@@ -297,6 +302,31 @@ export default {
         '<span style="color: #a78bfa">紫色的平面间链路</span>随平面交叉而伸缩，穿过地球背后的链路是隐藏而不是画穿过去，Walker Star 的接缝永远不接——' +
         "它的两端以两倍轨道角速度互相掠过。",
     },
+
+    // 编队集群的生成器：四个数字，与上面的 Walker 表单同形，因为编队也是四个数字。
+    cluster: {
+      empty: "还没有编队 —— 在下面那组里建一个，或者打开 ?demo=cluster。",
+      preset: "预设",
+      rings: "圈数",
+      pitch: "径向节距 m",
+      inclination: "倾角 °",
+      altitude: "高度 km",
+      derived: "{members} 个成员，在 R = {radius} km 之内",
+      pitchNote: "沿航向节距是径向节距的<strong>两倍</strong>，且不可设置 —— 那是本轮自身的轴比，也只有这个选择才能让包络在格点指标上是圆而不是椭圆。",
+      showOnly: "只显示",
+      regenerate: "重新生成",
+      add: "添加",
+      hideAll: "全部隐藏",
+      showOnlyTitle: "只绘制 {wire}",
+      addTitle: "把 {wire} 与其余的一起绘制",
+    },
+
+    clusterPresetNotes: [
+      "Google 的自由飞行算力集群：1 km 内的 81 颗卫星，晨昏太阳同步，100 m × 200 m 格点。",
+      "两圈 —— 仍能填满其外包椭圆的最小格点，也少到能盯住单个成员看。",
+      "200 m 节距的三圈：R = 1.2 km，同一个形状拉得够开，远看也能分辨。",
+      "同一个三圈编队放大到 R = 120 km —— 同样的动力学，只是尺度大到地球画得出来。成员间距几万公里，所以它们之间的连线是线而不是一个像素。",
+    ],
 
     marked: {
       markColumn: "标记一列",

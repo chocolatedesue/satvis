@@ -132,6 +132,100 @@
       </div>
     </details>
 
+    <details class="orbitLab__group" :open="hasCluster">
+      <summary class="orbitLab__summary">{{ $t("orbitLab.group.formationCloseUp") }}</summary>
+      <div class="orbitLab__body">
+        <formation-view v-if="hasCluster" />
+        <p v-else class="orbitLab__note">{{ $t("orbitLab.cluster.empty") }}</p>
+      </div>
+    </details>
+
+    <details class="orbitLab__group">
+      <summary class="orbitLab__summary">{{ $t("orbitLab.group.formation") }}</summary>
+      <div class="orbitLab__body">
+        <label class="orbitLab__field">
+          <span>{{ $t("orbitLab.cluster.preset") }}</span>
+          <select class="orbitLab__preset" :value="clusterPresetIndex" @change="applyClusterPreset(Number(($event.target as HTMLSelectElement).value))">
+            <option :value="-1">{{ $t("common.custom") }}</option>
+            <option v-for="(preset, index) in CLUSTER_PRESETS" :key="preset.label" :value="index">{{ preset.label }}</option>
+          </select>
+        </label>
+        <p v-if="clusterPresetNote" class="orbitLab__note">{{ clusterPresetNote }}</p>
+
+        <div class="orbitLab__grid">
+          <label class="orbitLab__field">
+            <span>{{ $t("orbitLab.cluster.rings") }}</span>
+            <input v-model.number="clusterDraft.rings" type="number" min="1" step="1" />
+          </label>
+          <label class="orbitLab__field">
+            <span>{{ $t("orbitLab.cluster.pitch") }}</span>
+            <input v-model.number="clusterDraft.pitchM" type="number" min="1" step="10" />
+          </label>
+          <label class="orbitLab__field">
+            <span>{{ $t("orbitLab.cluster.inclination") }}</span>
+            <input v-model.number="clusterDraft.inclinationDeg" type="number" min="0" max="180" step="0.01" />
+          </label>
+          <label class="orbitLab__field">
+            <span>{{ $t("orbitLab.cluster.altitude") }}</span>
+            <input v-model.number="clusterDraft.altitudeKm" type="number" min="150" step="10" />
+          </label>
+        </div>
+
+        <p class="orbitLab__derived">
+          {{ $t("orbitLab.cluster.derived", { members: clusterMembers, radius: (clusterRadius / 1000).toFixed(3) }) }}
+        </p>
+        <p class="orbitLab__note" v-html="$t('orbitLab.cluster.pitchNote')"></p>
+        <p v-if="clusterValidation.error" class="orbitLab__error">{{ clusterValidation.error }}</p>
+
+        <div class="orbitLab__actions">
+          <button
+            type="button"
+            class="orbitLab__button"
+            :disabled="!clusterValidation.ok"
+            :title="$t('orbitLab.cluster.showOnlyTitle', { wire: clusterWire })"
+            @click="generateCluster"
+          >
+            {{ clusterIsOnly ? $t("orbitLab.cluster.regenerate") : $t("orbitLab.cluster.showOnly") }}
+          </button>
+          <button
+            type="button"
+            class="orbitLab__button"
+            :disabled="!clusterValidation.ok || clusterPatterns.includes(clusterWire)"
+            :title="$t('orbitLab.cluster.addTitle', { wire: clusterWire })"
+            @click="addCluster"
+          >
+            {{ $t("orbitLab.cluster.add") }}
+          </button>
+          <button type="button" class="orbitLab__button" :disabled="!clusterActive" @click="clearClusters">{{ $t("orbitLab.cluster.hideAll") }}</button>
+        </div>
+
+        <template v-if="clusterPatterns.length > 0">
+          <div class="toolbarTitle">{{ $t("orbitLab.group.clusterPatterns") }}</div>
+          <ul class="orbitLab__patterns">
+            <li v-for="pattern in clusterPatterns" :key="pattern">
+              <button
+                type="button"
+                class="orbitLab__patternName"
+                :class="{ 'orbitLab__patternName--off': !satStore.enabledTags.includes(`Cluster ${pattern}`) }"
+                :title="$t('orbitLab.patterns.stopDrawing')"
+                @click="toggleCluster(pattern)"
+              >
+                <code>{{ pattern }}</code>
+              </button>
+              <button type="button" class="orbitLab__patternDrop" :title="$t('orbitLab.patterns.load')" @click="loadClusterIntoForm(pattern)">
+                {{ $t("orbitLab.patterns.edit") }}
+              </button>
+              <button type="button" class="orbitLab__patternDrop" :title="$t('orbitLab.patterns.forget')" @click="dropCluster(pattern)">×</button>
+            </li>
+          </ul>
+          <p class="orbitLab__note">
+            {{ $t("orbitLab.patterns.note") }}
+            <code>?cluster={{ clusterPatterns.join(",") }}</code>
+          </p>
+        </template>
+      </div>
+    </details>
+
     <details class="orbitLab__group">
       <summary class="orbitLab__summary">{{ $t("orbitLab.group.marked") }}</summary>
       <div class="orbitLab__body">
@@ -145,8 +239,6 @@
           {{ $t("orbitLab.marked.clear") }}
         </button>
         <p class="orbitLab__note" v-html="$t('orbitLab.marked.note')"></p>
-
-        <formation-view />
       </div>
     </details>
 
@@ -514,6 +606,17 @@ import {
   SHELLS_MULTIPLIER,
   STABLE_REFERENCE,
 } from "../modules/demoScenes";
+import {
+  CLUSTER_PRESETS,
+  clusterRadiusM,
+  clusterSize,
+  clusterTagFor,
+  decodeCluster,
+  encodeCluster,
+  isClusterTag,
+  validateClusterFormation,
+  type ClusterFormationParams,
+} from "../modules/util/clusterFormation";
 import { parseGeneratedSatellite } from "../modules/util/constellationLinks";
 import { fleetContinuity, type FleetContinuity } from "../modules/util/fleetContinuity";
 import { illuminationTimeline } from "../modules/util/illumination";
@@ -566,7 +669,7 @@ const { tm } = useI18n();
 
 const cc = useController();
 const satStore = useSatStore();
-const { pointColorMode, pointSize, panelAxis, walker, migration, migrationStages, migrationPolicy, migrationIncremental, links, marks } = storeToRefs(satStore);
+const { pointColorMode, pointSize, panelAxis, walker, cluster, migration, migrationStages, migrationPolicy, migrationIncremental, links, marks } = storeToRefs(satStore);
 
 // The clock is live viewer state rather than store state (see useViewerClock), and
 // this is the seam the clock deck writes it through — so the demo writes it the same
@@ -944,6 +1047,102 @@ function addCompanionShell(): void {
 /** Leave the records in the catalog and stop drawing them — the tag is the switch. */
 function clear(): void {
   satStore.setActivation({ enabledTags: satStore.enabledTags.filter((tag) => !isWalkerTag(tag)) });
+}
+
+// ---------------------------------------------------------------------------
+// Formation cluster
+//
+// The same four-knob form the Walker pattern has, because a formation is four
+// numbers too — inclination, rings, radial pitch, altitude — and the along-track
+// pitch is not one of them: it is twice the radial, because that is the
+// epicycle's own axis ratio. Until this existed, the only way to get a cluster
+// onto the globe was to edit the url, which meant the panel could *display* a
+// formation it had no way to build.
+// ---------------------------------------------------------------------------
+
+const clusterDraft = reactive<ClusterFormationParams>({ ...(CLUSTER_PRESETS[0] as (typeof CLUSTER_PRESETS)[number]).params });
+const clusterValidation = computed(() => validateClusterFormation(clusterDraft));
+const clusterWire = computed(() => (clusterValidation.value.ok ? encodeCluster(clusterDraft) : ""));
+const clusterPatterns = computed(() => cluster.value);
+const clusterMembers = computed(() => (clusterValidation.value.ok ? clusterSize(clusterDraft.rings) : 0));
+const clusterRadius = computed(() => (clusterValidation.value.ok ? clusterRadiusM(clusterDraft) : 0));
+const clusterActive = computed(() => satStore.enabledTags.some((tag) => isClusterTag(tag)));
+
+/** Whether the form's numbers are already on the globe, so the button can say which it will do. */
+const clusterIsOnly = computed(() => clusterPatterns.value.length === 1 && clusterPatterns.value[0] === clusterWire.value);
+
+function generateCluster(): void {
+  if (!clusterValidation.value.ok) {
+    return;
+  }
+  cluster.value = [clusterWire.value];
+  const kept = satStore.enabledTags.filter((tag) => !isClusterTag(tag));
+  // The tag, not just the wire. A cluster added without its tag is in the
+  // catalog and on nothing — no error, no satellite, which reads as "this does
+  // not work" rather than as "this is switched off".
+  satStore.setActivation({ enabledTags: [...kept, clusterTagFor(clusterDraft)] });
+}
+
+function addCluster(): void {
+  if (!clusterValidation.value.ok || clusterPatterns.value.includes(clusterWire.value)) {
+    return;
+  }
+  cluster.value = [...clusterPatterns.value, clusterWire.value];
+  satStore.setActivation({ enabledTags: [...satStore.enabledTags, clusterTagFor(clusterDraft)] });
+}
+
+function clearClusters(): void {
+  satStore.setActivation({ enabledTags: satStore.enabledTags.filter((tag) => !isClusterTag(tag)) });
+}
+
+function applyClusterPreset(index: number): void {
+  const preset = CLUSTER_PRESETS[index];
+  if (preset) {
+    Object.assign(clusterDraft, preset.params);
+  }
+}
+
+/**
+ * The close-up view is the only place a formation is legible — at globe range a
+ * 1 km cluster is one point — so the group holding it opens itself the moment
+ * there is one to look at. It does not force itself open on every render: the
+ * binding is to whether a cluster exists at all, not to a ref the user fights.
+ */
+const hasCluster = computed(() => clusterPatterns.value.length > 0);
+
+const clusterPresetIndex = computed(() => CLUSTER_PRESETS.findIndex((preset) => encodeCluster(preset.params) === clusterWire.value));
+
+// Prose, so it is translated here rather than read off the preset. Keyed by
+// position in `CLUSTER_PRESETS`; a preset added without a matching note falls
+// back to the English one rather than to nothing.
+const clusterPresetNote = computed(() => {
+  const index = clusterPresetIndex.value;
+  if (index < 0) {
+    return "";
+  }
+  const translated = tm(`orbitLab.clusterPresetNotes.${index}`);
+  return (typeof translated === "string" ? translated : CLUSTER_PRESETS[index]?.note) ?? "";
+});
+
+function toggleCluster(pattern: string): void {
+  const tag = clusterTagFor(decodeCluster(pattern) ?? clusterDraft);
+  const on = satStore.enabledTags.includes(tag);
+  satStore.setActivation({
+    enabledTags: on ? satStore.enabledTags.filter((candidate) => candidate !== tag) : [...satStore.enabledTags, tag],
+  });
+}
+
+function loadClusterIntoForm(pattern: string): void {
+  const params = decodeCluster(pattern);
+  if (params) {
+    Object.assign(clusterDraft, params);
+  }
+}
+
+function dropCluster(pattern: string): void {
+  cluster.value = clusterPatterns.value.filter((candidate) => candidate !== pattern);
+  const tag = clusterTagFor(decodeCluster(pattern) ?? clusterDraft);
+  satStore.setActivation({ enabledTags: satStore.enabledTags.filter((candidate) => candidate !== tag) });
 }
 
 /**
