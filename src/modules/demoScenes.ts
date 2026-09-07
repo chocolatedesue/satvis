@@ -311,19 +311,26 @@ export function applyClusterScene(satStore: SatStore, cesiumStore: CesiumStore, 
   if (!preset) {
     return;
   }
+  const { rings } = preset.params;
   const wire = encodeCluster(preset.params);
   satStore.cluster = [wire];
   satStore.pointColorMode = "illumination";
   satStore.pointSize = "large";
-  withIlluminationComponents(satStore);
-  // The orbit line per member is what makes this read as "several orbits", which
-  // is the thing a formation is and a point cloud does not show.
-  satStore.enabledComponents = [...new Set([...satStore.enabledComponents, "Orbit"])];
+  // One write, and it names "Orbit" itself rather than adding it on top of
+  // `withIlluminationComponents`: the orbit line per member is what makes this
+  // read as *several orbits* rather than a point cloud, which is the whole claim
+  // a formation makes, so it is not an afterthought to the illumination set.
+  satStore.enabledComponents = ["Point", "Label", "Orbit", "Illumination arc"];
   showOnly(satStore, [clusterTagFor(preset.params)]);
   satStore.links = true;
-  // Lattice indices are 1-based in a mark token and shifted by the ring count,
-  // the same way `parseClusterSatellite` reads them back.
-  satStore.marks = clusterLattice(preset.params.rings).map(([i, j]) => `${i + preset.params.rings + 1}-${j + preset.params.rings + 1}@${wire}`);
+  // The reference and the eight lattice points around it, which is the set
+  // Google's own figure picks out in magenta — and the set that keeps the bond
+  // count sane. Marking all 29 members would bond every pair: 406 lines through
+  // a 240 km box, which is a thicket rather than a cluster.
+  const token = (i: number, j: number) => `${i + rings + 1}-${j + rings + 1}@${wire}`;
+  satStore.marks = clusterLattice(rings)
+    .filter(([i, j]) => Math.abs(i) <= 1 && Math.abs(j) <= 1)
+    .map(([i, j]) => token(i, j));
   cesiumStore.cameraMode = "Inertial";
   clock.setMultiplier(CLUSTER_MULTIPLIER);
   clock.play();

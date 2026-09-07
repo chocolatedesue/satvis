@@ -23,7 +23,7 @@ import {
   SHELLS_MULTIPLIER,
   STABLE_REFERENCE,
 } from "./demoScenes";
-import { CLUSTER_EPOCH_ISO, clusterFormationRecords, clusterLattice, clusterNamePrefix, clusterRadiusM, clusterTagFor, decodeCluster } from "./util/clusterFormation";
+import { CLUSTER_EPOCH_ISO, clusterFormationRecords, clusterNamePrefix, clusterRadiusM, clusterTagFor, decodeCluster } from "./util/clusterFormation";
 import { parseGeneratedSatellite, resolveMarks } from "./util/constellationLinks";
 import { shellPairLayout } from "./util/shellLayout";
 import { decodeWalker, encodeWalker, isWalkerTag } from "./util/walkerDelta";
@@ -249,13 +249,15 @@ describe("cluster", () => {
     expect(s.satStore.walker).toEqual([]);
   });
 
-  test("marks every member, so every pair is bonded", () => {
+  test("marks the reference and its eight neighbours, not the whole lattice", () => {
+    // Every marked pair is bonded, so marking all 29 members would draw 406 lines
+    // inside a 240 km box — a thicket rather than a cluster. Nine is the set
+    // Google's own figure picks out in magenta, and 36 bonds.
     const s = stores();
     applyClusterScene(s.satStore, s.cesiumStore, clockSpy());
-    const params = decodeCluster(s.satStore.cluster[0]!)!;
 
-    expect(s.satStore.marks).toHaveLength(clusterLattice(params.rings).length);
-    expect(new Set(s.satStore.marks).size).toBe(s.satStore.marks.length);
+    expect(s.satStore.marks).toHaveLength(9);
+    expect(new Set(s.satStore.marks).size).toBe(9);
     expect(s.satStore.links).toBe(true);
   });
 
@@ -271,7 +273,8 @@ describe("cluster", () => {
     const endpoints = [...names].flatMap((name) => parseGeneratedSatellite(name) ?? []);
 
     const { members, bonds } = resolveMarks(s.satStore.marks, endpoints);
-    expect(members).toHaveLength(names.size);
+    expect(names.size).toBeGreaterThan(s.satStore.marks.length);
+    expect(members).toHaveLength(s.satStore.marks.length);
     expect(bonds.every((bond) => bond.verdict === "rigid" && bond.returns)).toBe(true);
   });
 
