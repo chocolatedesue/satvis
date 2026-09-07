@@ -16,7 +16,7 @@
 import type { useCesiumStore } from "../stores/cesium";
 import type { useSatStore } from "../stores/sat";
 import { CLUSTER_PRESETS, clusterLattice, clusterTagFor, encodeCluster } from "./util/clusterFormation";
-import { resonantCompanion } from "./util/shellLayout";
+import { resonantCompanion, shellFamily } from "./util/shellLayout";
 import { sunSyncWalkerParams } from "./util/sunSynchronous";
 import { encodeWalker, WALKER_EPOCH_ISO, WALKER_PRESETS, walkerPatternAt, walkerTagFor, type WalkerDeltaParams } from "./util/walkerDelta";
 
@@ -54,7 +54,7 @@ export const DEMO_MULTIPLIER = 60;
 export const SHELLS_MULTIPLIER = 600;
 
 /** The names `?demo=` understands. */
-export const DEMO_NAMES = ["two-orbit", "sso", "migration", "walker25", "shells", "stable-shells", "real-fleet", "cluster"] as const;
+export const DEMO_NAMES = ["two-orbit", "sso", "migration", "walker25", "shells", "stable-shells", "sso-family", "real-fleet", "cluster"] as const;
 export type DemoName = (typeof DEMO_NAMES)[number];
 
 function withIlluminationComponents(satStore: SatStore): void {
@@ -270,6 +270,88 @@ export function applyStableShellsScene(satStore: SatStore, cesiumStore: CesiumSt
   showOnly(satStore, shells.map(walkerTagFor));
   satStore.links = true;
   satStore.marks = shells.map((shell) => `1-1@${encodeWalker(shell)}`);
+  cesiumStore.cameraMode = "Inertial";
+  clock.setMultiplier(SHELLS_MULTIPLIER);
+  clock.play();
+}
+
+/**
+ * How many revolutions the family's reference shell makes in one family cycle.
+ *
+ * 15, because it is the count that fills the altitude band rather than half of
+ * it: with a 650 km dawn-dusk reference, the shells that fit between 300 and
+ * 2000 km are the ones turning 12 to 16 times in the reference's 15 - five
+ * shells from 356 km to 1776 km, returning every 24.4 hours. A shorter cycle
+ * admits fewer integers inside the same band, and a longer one pushes the
+ * outermost shells out of it rather than adding members to the middle.
+ */
+export const FAMILY_CYCLE_REVOLUTIONS = 15;
+
+/** The altitude band a family may spread across: above the drag, below the belt. */
+export const FAMILY_BAND_KM = { min: 300, max: 2000 };
+
+/**
+ * The reference the sun-synchronous family is built around: a dawn-dusk
+ * sun-synchronous shell at 650 km, the altitude a compute cluster is proposed at.
+ *
+ * Sun-synchrony is what makes this family worth flying rather than merely
+ * possible: node-locking a shell to this one gives it this one's node rate,
+ * which is the sun's own, so **every member of the family is sun-synchronous by
+ * construction** - the fleet holds a fixed local solar time *and* returns its
+ * cross-shell geometry on the cycle. The lever is the near-polar reference, whose
+ * co-precession ceiling is thousands of kilometres up, so five shells cost a few
+ * degrees of inclination spread where a mid-inclination family's fifth would
+ * cost far more.
+ */
+export function familyReference(): WalkerDeltaParams | undefined {
+  return sunSyncWalkerParams({ altitudeKm: 650, total: 24, planes: 3, plane: "dawn-dusk" }, new Date(WALKER_EPOCH_ISO));
+}
+
+/**
+ * A whole family, as the patterns the app draws.
+ *
+ * `shellFamily` returns orbits; this is the step that turns each of them into a
+ * flown shell, carrying the fewest satellites per plane whose ring links clear
+ * the Earth at that altitude. Any subset of a family is still a stable cluster -
+ * every pair in it returns by construction - so dropping a shell costs reach,
+ * not stability.
+ */
+export function familyPatterns(reference: WalkerDeltaParams, cycleRevolutions: number, band: { min: number; max: number } = FAMILY_BAND_KM): WalkerDeltaParams[] {
+  return shellFamily(reference, { cycleRevolutions, minAltitudeKm: band.min, maxAltitudeKm: band.max }).flatMap((shell) => {
+    const pattern = walkerPatternAt(reference, shell, shell.minPerPlane);
+    return pattern ? [pattern] : [];
+  });
+}
+
+/**
+ * A whole sun-synchronous family at once: five shells that all return on one
+ * cycle, each sun-synchronous because it is node-locked to a sun-synchronous
+ * reference.
+ *
+ * The stable-layout scene flies *one* designed companion and asks a reader to
+ * wait out its 12.7 h cycle. This one is the same claim at fleet scale, and the
+ * claim is not "one pair holds" but "N shells hold at once, on one cycle,
+ * without any of them having been designed against another" - which is what
+ * `shellFamily` writes forwards rather than searches for. The marked cluster is
+ * where it shows: one satellite per shell, bonded pairwise, every bond solid,
+ * because every pair in a family returns.
+ */
+export function applyFamilyScene(satStore: SatStore, cesiumStore: CesiumStore, clock: ClockControl): void {
+  const reference = familyReference();
+  if (!reference) {
+    return;
+  }
+  const shells = familyPatterns(reference, FAMILY_CYCLE_REVOLUTIONS);
+  if (shells.length < 2) {
+    return;
+  }
+  satStore.walker = shells.map(encodeWalker);
+  satStore.pointColorMode = "illumination";
+  satStore.pointSize = "large";
+  withIlluminationComponents(satStore);
+  showOnly(satStore, shells.map(walkerTagFor));
+  satStore.links = true;
+  satStore.marks = shells.map((shell) => "1-1@" + encodeWalker(shell));
   cesiumStore.cameraMode = "Inertial";
   clock.setMultiplier(SHELLS_MULTIPLIER);
   clock.play();

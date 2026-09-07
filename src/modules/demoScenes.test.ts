@@ -12,6 +12,7 @@ import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import {
   applyClusterScene,
+  applyFamilyScene,
   applyMigrationScene,
   applyShellsScene,
   applyStableShellsScene,
@@ -20,13 +21,15 @@ import {
   type ClockControl,
   CLUSTER_MULTIPLIER,
   DEMO_MULTIPLIER,
+  FAMILY_BAND_KM,
   SHELLS_MULTIPLIER,
   STABLE_REFERENCE,
 } from "./demoScenes";
 import { CLUSTER_EPOCH_ISO, clusterFormationRecords, clusterNamePrefix, clusterRadiusM, clusterTagFor, decodeCluster } from "./util/clusterFormation";
 import { parseGeneratedSatellite, resolveMarks } from "./util/constellationLinks";
-import { shellPairLayout } from "./util/shellLayout";
-import { decodeWalker, encodeWalker, isWalkerTag } from "./util/walkerDelta";
+import { shellPairLayout, shellRates } from "./util/shellLayout";
+import { SUN_DEG_PER_DAY } from "./util/sunSynchronous";
+import { decodeWalker, encodeWalker, isWalkerTag, type WalkerDeltaParams } from "./util/walkerDelta";
 
 /** Records what the scene did to the clock, which is not store state. */
 function clockSpy(): ClockControl & { multiplier?: number; played: boolean } {
@@ -231,6 +234,75 @@ describe("demo scenes", () => {
       expect(clock.multiplier).toBe(SHELLS_MULTIPLIER);
       expect(clock.played).toBe(true);
     });
+  });
+});
+
+describe("sso family", () => {
+  function applyFamily() {
+    const s = stores();
+    const clock = clockSpy();
+    applyFamilyScene(s.satStore, s.cesiumStore, clock);
+    return { s, clock };
+  }
+
+  function shellsOf(s: ReturnType<typeof stores>): WalkerDeltaParams[] {
+    return (s.satStore.walker as string[]).map((wire) => decodeWalker(wire)!);
+  }
+
+  test("flies a whole family, and shows only it", () => {
+    const { s } = applyFamily();
+    expect(s.satStore.walker.length).toBeGreaterThanOrEqual(3);
+    expect(s.satStore.enabledTags).toHaveLength(s.satStore.walker.length);
+    expect(s.satStore.enabledTags.every((tag) => isWalkerTag(tag))).toBe(true);
+    expect(s.satStore.enabledSatellites).toEqual([]);
+  });
+
+  test("every pair in the family returns — the claim a family makes", () => {
+    // A family is written forwards rather than searched for: fix the reference's
+    // revolutions per cycle and every other whole number in the band names one
+    // more node-locked shell, so every *pair* among them closes by construction.
+    // No pair of distinct shells can be rigid, so repeating is the ceiling here.
+    const { s } = applyFamily();
+    const shells = shellsOf(s);
+    for (let a = 0; a < shells.length; a += 1) {
+      for (let b = a + 1; b < shells.length; b += 1) {
+        expect(shellPairLayout(shells[a]!, shells[b]!).verdict).toBe("repeating");
+      }
+    }
+  });
+
+  test("every member is sun-synchronous, because every member is node-locked to one", () => {
+    // The reason this family is worth flying rather than merely possible: the
+    // node rate a member inherits is the reference's, which is the sun's own, so
+    // sun-synchrony is a consequence of the lock and not something each shell is
+    // designed for separately. A drifting shell sits degrees per day away.
+    const { s } = applyFamily();
+    for (const shell of shellsOf(s)) {
+      expect(shellRates(shell).nodeRateDegPerDay).toBeCloseTo(SUN_DEG_PER_DAY, 1);
+    }
+  });
+
+  test("spreads across the band rather than stacking up in one corner of it", () => {
+    const { s } = applyFamily();
+    const shells = shellsOf(s);
+    const altitudes = shells.map((shell) => shell.altitudeKm);
+    expect(new Set(altitudes).size).toBe(altitudes.length);
+    for (const altitudeKm of altitudes) {
+      expect(altitudeKm).toBeGreaterThanOrEqual(FAMILY_BAND_KM.min);
+      expect(altitudeKm).toBeLessThanOrEqual(FAMILY_BAND_KM.max);
+    }
+    // Node-locking costs inclination, and this is the bill: a handful of degrees
+    // across the whole family, which is the lever the near-polar reference buys.
+    const inclinations = shells.map((shell) => shell.inclinationDeg);
+    expect(Math.max(...inclinations) - Math.min(...inclinations)).toBeLessThan(15);
+  });
+
+  test("marks one satellite per shell and runs at the shells multiplier", () => {
+    const { s, clock } = applyFamily();
+    expect(s.satStore.marks).toHaveLength(s.satStore.walker.length);
+    expect(s.satStore.links).toBe(true);
+    expect(clock.multiplier).toBe(SHELLS_MULTIPLIER);
+    expect(clock.played).toBe(true);
   });
 });
 
