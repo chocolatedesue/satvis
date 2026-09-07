@@ -64,8 +64,11 @@
 
 ## 3. Next Steps / TODO (后续待办与进阶方向)
 
-- [ ] **把集群求解接到界面与真实舰队 (Wire the cluster finder to the panel and to a real fleet)**:
-  - `findStableClusters` / `shellFamily` 目前只在单测与推导脚本里跑。下一步：Orbit Lab 面板加"找出这批轨道里的稳定集群"（对当前 `walker` 图案 + 已激活的真实卫星，按 (a, i) 去重后送进求解器），把 Pareto 前沿列成表；再加一个近极/太阳同步家族的 demo 场景（`?demo=sso-family`）。
+- [x] **把集群求解接到界面与真实舰队 (Wire the cluster finder to the panel and to a real fleet)** — 界面那一半已完成：
+  - Orbit Lab 新增 **Stable clusters** 段：对当前 `walker` 图案按 (a, i) 去重后送进 `findStableClusters`，把 Pareto 前沿列成表（成员 / 周期 / 判据 / slip / 链路预算），每行一个 **Mark** 按钮把该集群画到地球上（每个成员标记一颗，按判据连线）；
+  - 同一段的 **Family from this shell** 用 `shellFamily` 正向构造家族：改"基准层每周期圈数"即可读出能容几层、真实周期、高度带与倾角跨度，**Fly this family** 一次放飞全部壳层并每层标记一颗；
+  - `?demo=sso-family`：650 km 晨昏太阳同步基准层，5 层（353 / 650 / 982 / 1355 / 1780 km，96.9°–103.5°），每层自动太阳同步，任意两层都在同一个 24.46 h 周期上回归。
+- [ ] **仍在真实舰队那一半**:
   - 对真实星座跑一遍：Starlink 各壳层、OneWeb、GNSS 之间是否存在天然的 `node-locked` 组？这既是求解器的真实数据检验，也直接回答"现网里已经存在哪些稳定集群"。
 - [ ] **跨壳接触时刻表 (Precomputed Cross-Shell Contact Schedule)**:
   - 回归周期已经证明跨壳几何是周期函数，下一步是把它变成可用的时刻表：对 `repeating` 壳层对预计算一个周期内的全部跨壳可见窗口，之后按周期复用，让迁移目标选择从"每帧搜索"变成"查表"。

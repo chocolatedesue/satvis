@@ -19,7 +19,7 @@ The sky view trades the globe for a ground-level camera aimed by your phone's co
 - Add OpenStreetMap buildings to the globe, or Google's photorealistic tiles under the sky view
 - Generate a Walker Delta or Walker Star constellation from its `i: T/P/F` specification and fly it beside the real catalog, with every per-satellite visual the real ones get
 - Wire the generated constellation into the stable inter-satellite topology a propagation derivation picks — rigid intra-plane rings, same-slot inter-plane links, the Walker Star seam dropped — and mark a small cluster of satellites, bonded pairwise even across shells, to watch its geometry hold or shear
-- Stack several shells in one scene (`?demo=shells`) with the clock fast enough that the relative motion between them is the thing you see, and design a second shell that holds against the first (`?demo=stable-shells`) instead of shearing away from it
+- Stack several shells in one scene (`?demo=shells`) with the clock fast enough that the relative motion between them is the thing you see, design a second shell that holds against the first (`?demo=stable-shells`) instead of shearing away from it, and fly a whole family of them at once (`?demo=sso-family`)
 - Fly a free-flying formation — dozens of satellites inside a kilometre of one orbit, Google's Suncatcher cluster among them — generated in closed form as an eccentricity-vector lattice rather than integrated, and drawn at a scale a globe can resolve
 - Colour satellites by what the sun is doing to them — eclipse (ν) _and_ solar panel incidence (κ) — as a point colour, and as the orbit line itself cut into sunlit, penumbra and back-sun arcs
 - Read one satellite's eclipse and back-sun budget over its next two orbits, as percentages and as a strip of colour
@@ -503,6 +503,17 @@ spread where a 53° family's eleventh shell has fallen to 17°. The sun-synchron
 strongest: every member of a family built on `Ω̇* = +0.9856°/day` is sun-synchronous too, so the
 whole fleet holds a fixed local solar time _and_ returns its cross-shell geometry every cycle.
 
+```
+# five shells at once, every pair of them returning on one 24.46 h cycle:
+# 353 / 650 / 982 / 1355 / 1780 km, all sun-synchronous, spanning 96.9°-103.5°
+https://satvis.space/?demo=sso-family
+```
+
+The orbit lab's **Stable clusters** section builds one from whatever is in its form: set how many
+revolutions per cycle the reference makes, read the family it can hold (shells, cycle, altitude band,
+inclination span), and **Fly this family** puts all of it on the globe with one satellite per shell
+marked, so every bond is a returning one.
+
 Going the other way — **given a fleet, which subsets hold?** — is a quotient, not a clustering
 problem: there is no k to choose, no centroid and no distance, because a k-means over orbital
 elements would impose an arbitrary partition on a space that has a canonical one. What needs an
@@ -511,6 +522,14 @@ output is the **maximal** ones on a Pareto front of size against cycle. `findSta
 in two exact stages: sort by `Ω̇` and take the maximal windows (an interval graph, `O(N log N)`),
 then sweep candidate cycles, each of which _names_ the subset that closes it. Reasoning, the
 derivation and the complexity: `docs/adr/0010-stable-clusters.md`.
+
+The orbit lab's **Stable clusters** section runs it over the patterns on screen — deduplicated by
+(altitude, inclination), because two patterns differing only in plane count are one shell in two
+pieces — and lists the front: each row is a set of shells, the cycle it closes, the worst slip a
+member carries into the next cycle, and the shortest range any pair in it could ever close.
+**Mark** bonds one satellite per member, which is how a row is read off the globe instead of off the
+table. The same shell can appear in several rows, and that is the answer rather than a bug: a subset
+that returns sooner is a different offer, not a worse one.
 
 `scripts/derive-isl-topology.ts` (studies 7–12) flies the result with SGP4 rather than
 asserting it. The designed companion's seam shears at **0.005°/day** against 5.21°/day for a
