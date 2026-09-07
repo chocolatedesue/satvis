@@ -63,25 +63,25 @@ describe("maxReachableBetaDeg", () => {
 describe("eclipseFreePlaneFraction", () => {
   it("is zero where no plane can reach the required β", () => {
     // 30° at 550 km can reach 53.4° and needs 67.0°.
-    expect(eclipseFreePlaneFraction(550, 30, 0)).toBe(0);
+    expect(eclipseFreePlaneFraction({ altitudeKm: 550, inclinationDeg: 30 }, 0)).toBe(0);
   });
 
   it("is positive at 53° / 550 km near a solstice, and zero at equinox", () => {
     // The finding from the Starlink report, reproduced from geometry alone: the shell
     // has eclipse-free planes at the solstices and none at the equinoxes.
-    expect(eclipseFreePlaneFraction(550, 53, -23.44)).toBeGreaterThan(0);
-    expect(eclipseFreePlaneFraction(550, 53, 23.44)).toBeGreaterThan(0);
-    expect(eclipseFreePlaneFraction(550, 53, 0)).toBe(0);
+    expect(eclipseFreePlaneFraction({ altitudeKm: 550, inclinationDeg: 53 }, -23.44)).toBeGreaterThan(0);
+    expect(eclipseFreePlaneFraction({ altitudeKm: 550, inclinationDeg: 53 }, 23.44)).toBeGreaterThan(0);
+    expect(eclipseFreePlaneFraction({ altitudeKm: 550, inclinationDeg: 53 }, 0)).toBe(0);
   });
 
   it("rises with altitude at a fixed inclination", () => {
-    const low = annualEclipseFreePlaneFraction(550, 70);
-    const high = annualEclipseFreePlaneFraction(1200, 70);
+    const low = annualEclipseFreePlaneFraction({ altitudeKm: 550, inclinationDeg: 70 });
+    const high = annualEclipseFreePlaneFraction({ altitudeKm: 1200, inclinationDeg: 70 });
     expect(high).toBeGreaterThan(low);
   });
 
   it("rises with inclination at a fixed altitude, up to polar", () => {
-    const fractions = [40, 55, 70, 85].map((inclination) => annualEclipseFreePlaneFraction(700, inclination));
+    const fractions = [40, 55, 70, 85].map((inclination) => annualEclipseFreePlaneFraction({ altitudeKm: 700, inclinationDeg: inclination }));
     for (const [index, fraction] of fractions.slice(1).entries()) {
       expect(fraction).toBeGreaterThanOrEqual(fractions[index]!);
     }
@@ -90,7 +90,7 @@ describe("eclipseFreePlaneFraction", () => {
   it("never exceeds one or falls below zero", () => {
     for (const altitude of [400, 900, 2000]) {
       for (const inclination of [0, 45, 90, 135, 180]) {
-        const fraction = annualEclipseFreePlaneFraction(altitude, inclination);
+        const fraction = annualEclipseFreePlaneFraction({ altitudeKm: altitude, inclinationDeg: inclination });
         expect(fraction).toBeGreaterThanOrEqual(0);
         expect(fraction).toBeLessThanOrEqual(1);
       }
@@ -173,7 +173,7 @@ describe("the map against the territory", () => {
     for (const node of [0, 45, 90, 135]) {
       expect(propagatedEclipseFraction(550, 30, node, new Date("2026-06-21T12:00:00Z"))).toBeGreaterThan(0.15);
     }
-    expect(annualEclipseFreePlaneFraction(550, 30)).toBe(0);
+    expect(annualEclipseFreePlaneFraction({ altitudeKm: 550, inclinationDeg: 30 })).toBe(0);
   });
 
   it("places a sun-synchronous dawn-dusk plane where ssoRaanDeg puts it", () => {
@@ -187,7 +187,7 @@ describe("the map against the territory", () => {
 
 describe("designPoint", () => {
   it("reports both sides of the comparison and the verdict", () => {
-    const point = designPoint(550, 53, -23.44);
+    const point = designPoint({ altitudeKm: 550, inclinationDeg: 53 }, -23.44);
     expect(point.requiredBetaDeg).toBeCloseTo(eclipseFreeBetaDeg(550), 9);
     expect(point.maxBetaDeg).toBeCloseTo(76.44, 1);
     expect(point.everEclipseFree).toBe(true);
@@ -197,7 +197,7 @@ describe("designPoint", () => {
   });
 
   it("says never for a low-inclination low orbit", () => {
-    const point = designPoint(400, 20, 0);
+    const point = designPoint({ altitudeKm: 400, inclinationDeg: 20 }, 0);
     expect(point.everEclipseFree).toBe(false);
     expect(point.planeFractionAnnual).toBe(0);
   });

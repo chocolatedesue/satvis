@@ -120,6 +120,15 @@ export class SampledTrajectory {
   }
 
   /**
+   * The orbital period in seconds. Every window calculation here works in
+   * seconds, and `Orbit.orbitalPeriod` is in minutes like the rest of the
+   * domain — so the conversion lives here rather than at three call sites.
+   */
+  get #periodSeconds(): number {
+    return this.#orbit.orbitalPeriod * 60;
+  }
+
+  /**
    * Fixed-frame samples, irregular-capable. What path graphics need: Cesium's
    * PathVisualizer sub-samples a `SampledPositionProperty` at its stored sample
    * times and anything else at `resolution`, which would be far coarser.
@@ -286,7 +295,7 @@ export class SampledTrajectory {
 
   positionsForNextOrbit(start: JulianDate, reference: "inertial" | "fixed" = "inertial", loop = true): unknown[] {
     if (!this.#data) return [];
-    const end = JulianDate.addSeconds(start, this.#orbit.orbitalPeriod * 60, new JulianDate());
+    const end = JulianDate.addSeconds(start, this.#periodSeconds, new JulianDate());
     let positions: unknown[];
     if (reference === "fixed") {
       // The grid holds the same samples and always exists, so asking for the
@@ -321,7 +330,7 @@ export class SampledTrajectory {
    */
   positionsForTrack(start: JulianDate): Cartesian3[] {
     if (!this.#data) return [];
-    const end = JulianDate.addSeconds(start, this.#orbit.orbitalPeriod * 60, new JulianDate());
+    const end = JulianDate.addSeconds(start, this.#periodSeconds, new JulianDate());
     const head = this.position(start);
     const samples = this.#positionsBetween(start, end);
     // A head with nothing behind it — a clock jump, or the moment after a gap
@@ -646,7 +655,7 @@ export class SampledTrajectory {
    */
   start(viewer: Viewer, callback: () => void): () => void {
     callback();
-    const samplingRefreshRate = (this.#orbit.orbitalPeriod * 60) / 4;
+    const samplingRefreshRate = this.#periodSeconds / 4;
     const removeCallback = CesiumCallbackHelper.createPeriodicTimeCallback(viewer, samplingRefreshRate, (time) => {
       void this.ensure(time).then(() => {
         // Torn down while the top-up was in flight.

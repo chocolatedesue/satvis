@@ -17,11 +17,11 @@
 // orbit — this is the map, not the territory, and the report cross-checks a few points
 // of it against `orbitEnergyProfile`.
 
-import { eclipseFreeBetaDeg, SUN_MAX_DECLINATION_DEG } from "./sunSynchronous";
+import { circularSemiMajorAxisKm, WGS72_EARTH_RADIUS_KM, type CircularOrbit } from "./orbitModel.ts";
+import { eclipseFreeBetaDeg, SUN_MAX_DECLINATION_DEG } from "./sunSynchronous.ts";
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
-const EARTH_RADIUS_KM = 6378.135;
 
 /**
  * The sun's elevation above an orbit plane, in degrees.
@@ -59,7 +59,8 @@ const YEAR_SAMPLES = 37;
  * That is the fact a router can act on: it is not a property of a satellite or of an
  * instant, it is a property of the shell's *design*, and it is knowable before launch.
  */
-export function eclipseFreePlaneFraction(altitudeKm: number, inclinationDeg: number, sunDeclinationDeg: number): number {
+export function eclipseFreePlaneFraction(orbit: CircularOrbit, sunDeclinationDeg: number): number {
+  const { altitudeKm, inclinationDeg } = orbit;
   const required = eclipseFreeBetaDeg(altitudeKm);
   let clear = 0;
   for (let sample = 0; sample < NODE_SAMPLES; sample += 1) {
@@ -79,12 +80,12 @@ export function eclipseFreePlaneFraction(altitudeKm: number, inclinationDeg: num
  * even sweep of *declination* would overweight the solstices, where it lingers, and
  * report a rosier average than the year delivers.
  */
-export function annualEclipseFreePlaneFraction(altitudeKm: number, inclinationDeg: number): number {
+export function annualEclipseFreePlaneFraction(orbit: CircularOrbit): number {
   let total = 0;
   for (let sample = 0; sample < YEAR_SAMPLES; sample += 1) {
     const eclipticLongitude = (sample * 360) / YEAR_SAMPLES;
     const declination = Math.asin(Math.sin(SUN_MAX_DECLINATION_DEG * DEG_TO_RAD) * Math.sin(eclipticLongitude * DEG_TO_RAD)) * RAD_TO_DEG;
-    total += eclipseFreePlaneFraction(altitudeKm, inclinationDeg, declination);
+    total += eclipseFreePlaneFraction(orbit, declination);
   }
   return total / YEAR_SAMPLES;
 }
@@ -135,15 +136,14 @@ export function minInclinationForEclipseFreeDeg(altitudeKm: number): number | un
  * radiation dose, and those are what actually decide.
  */
 export function betaExchangeRateKmPerDegree(altitudeKm: number): number {
-  const semiMajorAxisKm = EARTH_RADIUS_KM + altitudeKm;
-  const ratio = EARTH_RADIUS_KM / semiMajorAxisKm;
-  const derivativeDegPerKm = (EARTH_RADIUS_KM / (semiMajorAxisKm * semiMajorAxisKm * Math.sqrt(1 - ratio * ratio))) * RAD_TO_DEG;
+  const semiMajorAxisKm = circularSemiMajorAxisKm(altitudeKm);
+  const ratio = WGS72_EARTH_RADIUS_KM / semiMajorAxisKm;
+  const derivativeDegPerKm = (WGS72_EARTH_RADIUS_KM / (semiMajorAxisKm * semiMajorAxisKm * Math.sqrt(1 - ratio * ratio))) * RAD_TO_DEG;
   return 1 / derivativeDegPerKm;
 }
 
-export interface DesignPoint {
-  altitudeKm: number;
-  inclinationDeg: number;
+/** One cell of the design sweep: the orbit, and what the shadow does to it. */
+export interface DesignPoint extends CircularOrbit {
   /** |β| the shadow demands at this altitude. */
   requiredBetaDeg: number;
   /** The best |β| any plane here can reach, at the best moment of the year. */
@@ -157,7 +157,8 @@ export interface DesignPoint {
 }
 
 /** One cell of the design sweep. */
-export function designPoint(altitudeKm: number, inclinationDeg: number, sunDeclinationDeg: number): DesignPoint {
+export function designPoint(orbit: CircularOrbit, sunDeclinationDeg: number): DesignPoint {
+  const { altitudeKm, inclinationDeg } = orbit;
   const requiredBetaDeg = eclipseFreeBetaDeg(altitudeKm);
   const maxBeta = maxReachableBetaDeg(inclinationDeg);
   return {
@@ -165,8 +166,8 @@ export function designPoint(altitudeKm: number, inclinationDeg: number, sunDecli
     inclinationDeg,
     requiredBetaDeg,
     maxBetaDeg: maxBeta,
-    planeFractionNow: eclipseFreePlaneFraction(altitudeKm, inclinationDeg, sunDeclinationDeg),
-    planeFractionAnnual: annualEclipseFreePlaneFraction(altitudeKm, inclinationDeg),
+    planeFractionNow: eclipseFreePlaneFraction(orbit, sunDeclinationDeg),
+    planeFractionAnnual: annualEclipseFreePlaneFraction(orbit),
     everEclipseFree: maxBeta >= requiredBetaDeg,
   };
 }

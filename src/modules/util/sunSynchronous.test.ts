@@ -86,46 +86,48 @@ describe("nodalPrecessionDegPerDay", () => {
   it("gives the sun's own rate back at a sun-synchronous inclination", () => {
     for (const altitude of [500, 700, 1000, 1500]) {
       const inclination = sunSyncInclinationDeg(altitude)!;
-      expect(nodalPrecessionDegPerDay(altitude, inclination)).toBeCloseTo(SUN_DEG_PER_DAY, 6);
+      expect(nodalPrecessionDegPerDay({ altitudeKm: altitude, inclinationDeg: inclination })).toBeCloseTo(SUN_DEG_PER_DAY, 6);
     }
   });
 
   it("regresses westward for a prograde orbit, at about 5°/day for the ISS", () => {
     // 420 km, 51.6°: the textbook figure is about −5°/day.
-    expect(nodalPrecessionDegPerDay(420, 51.6)).toBeCloseTo(-5, 0);
+    expect(nodalPrecessionDegPerDay({ altitudeKm: 420, inclinationDeg: 51.6 })).toBeCloseTo(-5, 0);
   });
 
   it("is zero for a polar orbit, where the bulge has no lever arm", () => {
-    expect(nodalPrecessionDegPerDay(700, 90)).toBeCloseTo(0, 9);
+    expect(nodalPrecessionDegPerDay({ altitudeKm: 700, inclinationDeg: 90 })).toBeCloseTo(0, 9);
   });
 
   it("is slower for a higher orbit, because the bulge is further away", () => {
-    expect(Math.abs(nodalPrecessionDegPerDay(2000, 51.6))).toBeLessThan(Math.abs(nodalPrecessionDegPerDay(400, 51.6)));
+    expect(Math.abs(nodalPrecessionDegPerDay({ altitudeKm: 2000, inclinationDeg: 51.6 }))).toBeLessThan(
+      Math.abs(nodalPrecessionDegPerDay({ altitudeKm: 400, inclinationDeg: 51.6 })),
+    );
   });
 
   it("says an orbit is nearly fixed, not exactly: a few degrees a day at most in LEO", () => {
     // The claim the panel makes. Equatorial LEO is the fastest case.
-    expect(Math.abs(nodalPrecessionDegPerDay(300, 0))).toBeLessThan(11);
+    expect(Math.abs(nodalPrecessionDegPerDay({ altitudeKm: 300, inclinationDeg: 0 }))).toBeLessThan(11);
   });
 
   it("declines inputs it cannot mean", () => {
-    expect(nodalPrecessionDegPerDay(-10, 51.6)).toBeNaN();
-    expect(nodalPrecessionDegPerDay(700, Number.NaN)).toBeNaN();
+    expect(nodalPrecessionDegPerDay({ altitudeKm: -10, inclinationDeg: 51.6 })).toBeNaN();
+    expect(nodalPrecessionDegPerDay({ altitudeKm: 700, inclinationDeg: Number.NaN })).toBeNaN();
   });
 });
 
 describe("betaCycleDays", () => {
   it("puts a 53° / 550 km Starlink plane on a roughly two-month cycle", () => {
-    expect(betaCycleDays(550, 53)).toBeGreaterThan(50);
-    expect(betaCycleDays(550, 53)).toBeLessThan(70);
+    expect(betaCycleDays({ altitudeKm: 550, inclinationDeg: 53 })).toBeGreaterThan(50);
+    expect(betaCycleDays({ altitudeKm: 550, inclinationDeg: 53 })).toBeLessThan(70);
   });
 
   it("is infinite for a sun-synchronous orbit, which never comes back round", () => {
-    expect(betaCycleDays(700, sunSyncInclinationDeg(700)!)).toBe(Number.POSITIVE_INFINITY);
+    expect(betaCycleDays({ altitudeKm: 700, inclinationDeg: sunSyncInclinationDeg(700)! })).toBe(Number.POSITIVE_INFINITY);
   });
 
   it("is a year for a polar orbit, where only the sun moves", () => {
-    expect(betaCycleDays(700, 90)).toBeCloseTo(365.24, 0);
+    expect(betaCycleDays({ altitudeKm: 700, inclinationDeg: 90 })).toBeCloseTo(365.24, 0);
   });
 });
 

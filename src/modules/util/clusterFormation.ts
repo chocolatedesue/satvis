@@ -73,7 +73,8 @@
 // The along-track pitch is therefore not a parameter here. It is dynamics.
 
 import type { GpRecord } from "./gp";
-import { meanMotionRevPerDay, WALKER_EPOCH_ISO } from "./walkerDelta";
+import { raanOffsetError, WGS72_EARTH_RADIUS_KM, wrapDegrees360, type OrientedCircularOrbit } from "./orbitModel.ts";
+import { meanMotionRevPerDay, WALKER_EPOCH_ISO } from "./walkerDelta.ts";
 
 /**
  * A free-flying cluster: where it flies, how tightly it is packed, and how far
@@ -82,11 +83,13 @@ import { meanMotionRevPerDay, WALKER_EPOCH_ISO } from "./walkerDelta";
  * Deliberately four numbers rather than a satellite count. A cluster's size is
  * *derived* — the integer points of a disc — because the alternative is a count
  * that does not correspond to any lattice and has to be rounded to one anyway.
+ *
+ * `altitudeKm`, `inclinationDeg` and `raanOffsetDeg` come from `CircularOrbit` and
+ * `OrientedCircularOrbit` rather than being restated: the orbit a cluster flies is
+ * the same two numbers a Walker pattern and a shell are made of, so
+ * `walkerPatternAt` and `./shellLayout.ts` can hand one straight to it.
  */
-export interface ClusterFormationParams {
-  /** The reference satellite's altitude. Every member shares it, exactly. */
-  altitudeKm: number;
-  inclinationDeg: number;
+export interface ClusterFormationParams extends OrientedCircularOrbit {
   /**
    * The radial lattice pitch, in metres. The along-track pitch is twice this and
    * is not separately settable — see the file header: the 2:1 is the epicycle's
@@ -96,19 +99,7 @@ export interface ClusterFormationParams {
   pitchM: number;
   /** How many rings out the lattice goes: every `(i, j)` with `i² + j² <= rings²`. */
   rings: number;
-  /**
-   * Where the reference plane's ascending node sits, in absolute right ascension.
-   *
-   * The same parameter `WalkerDeltaParams` carries, and load-bearing for the same
-   * reason: a dawn-dusk plane and a noon-midnight one at the same altitude and
-   * inclination differ by this and by nothing else, and only one of them keeps a
-   * cluster in sunlight (`./sunSynchronous.ts`). Optional, defaulting to 0.
-   */
-  raanOffsetDeg?: number;
 }
-
-/** WGS-72, matching `./walkerDelta.ts` and therefore SGP4's own recovered elements. */
-const EARTH_RADIUS_KM = 6378.135;
 
 /** Metres in a kilometre, named because it appears in element arithmetic where a bare 1000 reads as a count. */
 const M_PER_KM = 1000;
@@ -139,7 +130,7 @@ export const MAX_ECCENTRICITY = 0.01;
 
 /** The eccentricity of the outermost member: the whole formation's size, as an element. */
 export function maxEccentricity(params: ClusterFormationParams): number {
-  return (params.pitchM * params.rings) / ((EARTH_RADIUS_KM + params.altitudeKm) * M_PER_KM);
+  return (params.pitchM * params.rings) / ((WGS72_EARTH_RADIUS_KM + params.altitudeKm) * M_PER_KM);
 }
 
 /**
@@ -213,18 +204,14 @@ export function validateClusterFormation(params: ClusterFormationParams): Cluste
   if (maxEccentricity(params) > MAX_ECCENTRICITY) {
     return {
       ok: false,
-      error: `Cluster radius exceeds the ${Math.round(2 * MAX_ECCENTRICITY * (EARTH_RADIUS_KM + altitudeKm))} km the linear formation model holds at this altitude; reduce pitch or rings.`,
+      error: `Cluster radius exceeds the ${Math.round(2 * MAX_ECCENTRICITY * (WGS72_EARTH_RADIUS_KM + altitudeKm))} km the linear formation model holds at this altitude; reduce pitch or rings.`,
     };
   }
-  if (raanOffsetDeg !== undefined && (!Number.isFinite(raanOffsetDeg) || raanOffsetDeg < 0 || raanOffsetDeg >= 360)) {
-    return { ok: false, error: "RAAN offset must be at least 0° and below 360°." };
+  const raanOffset = raanOffsetError(raanOffsetDeg);
+  if (raanOffset !== undefined) {
+    return { ok: false, error: raanOffset };
   }
   return { ok: true };
-}
-
-/** Normalize into [0, 360). */
-function wrapDegrees(value: number): number {
-  return ((value % 360) + 360) % 360;
 }
 
 const RAD_TO_DEG = 180 / Math.PI;
@@ -251,15 +238,15 @@ export function latticeMemberElements(
   argOfLatitudeDeg = 0,
 ): { eccentricity: number; argOfPericenterDeg: number; meanAnomalyDeg: number } {
   if (i === 0 && j === 0) {
-    return { eccentricity: 0, argOfPericenterDeg: 0, meanAnomalyDeg: wrapDegrees(argOfLatitudeDeg) };
+    return { eccentricity: 0, argOfPericenterDeg: 0, meanAnomalyDeg: wrapDegrees360(argOfLatitudeDeg) };
   }
   const amplitudeM = pitchM * Math.hypot(i, j);
   const phaseDeg = Math.atan2(i, j) * RAD_TO_DEG;
   const meanAnomalyDeg = phaseDeg + 90;
   return {
     eccentricity: amplitudeM / semiMajorAxisM,
-    argOfPericenterDeg: wrapDegrees(argOfLatitudeDeg - meanAnomalyDeg),
-    meanAnomalyDeg: wrapDegrees(meanAnomalyDeg),
+    argOfPericenterDeg: wrapDegrees360(argOfLatitudeDeg - meanAnomalyDeg),
+    meanAnomalyDeg: wrapDegrees360(meanAnomalyDeg),
   };
 }
 
@@ -283,10 +270,10 @@ export function clusterFormationRecords(params: ClusterFormationParams, epoch: D
   if (!validateClusterFormation(params).ok) {
     return [];
   }
-  const semiMajorAxisM = (EARTH_RADIUS_KM + params.altitudeKm) * M_PER_KM;
+  const semiMajorAxisM = (WGS72_EARTH_RADIUS_KM + params.altitudeKm) * M_PER_KM;
   const meanMotion = meanMotionRevPerDay(params.altitudeKm);
   const epochIso = epoch.toISOString();
-  const raan = wrapDegrees(params.raanOffsetDeg ?? 0);
+  const raan = wrapDegrees360(params.raanOffsetDeg ?? 0);
   return clusterLattice(params.rings).map(([i, j], index) => {
     const { eccentricity, argOfPericenterDeg, meanAnomalyDeg } = latticeMemberElements(i, j, params.pitchM, semiMajorAxisM);
     return {

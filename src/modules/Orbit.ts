@@ -3,6 +3,7 @@ import * as satellitejs from "satellite.js";
 
 import type { SwathExtents } from "../config/satelliteMetadata";
 import { createSatrec, recordTleLines, type GpRecord } from "./util/gp";
+import { propagatedPeriodMinutes } from "./util/orbitModel";
 
 const deg2rad = Math.PI / 180;
 const rad2deg = 180 / Math.PI;
@@ -105,10 +106,13 @@ export default class Orbit {
     return this.satrec.jdsatepoch;
   }
 
+  /**
+   * The orbital period in minutes — `propagatedPeriodMinutes` over this orbit's
+   * satrec, so it is the period SGP4 actually flies rather than the two-body one
+   * the generators quote.
+   */
   get orbitalPeriod(): number {
-    const meanMotionRad = this.satrec.no;
-    const period = (2 * Math.PI) / meanMotionRad;
-    return period;
+    return propagatedPeriodMinutes(this.satrec);
   }
 
   positionECI(time: Date): satellitejs.EciVec3<number> | null {

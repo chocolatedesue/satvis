@@ -15,25 +15,35 @@
 // only vocabulary the rest of the app reads.
 
 import type { GpRecord } from "./gp";
+// `./orbitModel.ts` with the extension spelled out, unlike every other import in
+// this folder: `scripts/derive-isl-topology.ts` runs this file through node's own
+// type stripping, which resolves no specifier a bundler would have to. A
+// type-only import would be erased and could drop the extension; a runtime one
+// cannot. See the header of ./orbitModel.ts.
+import { circularMeanMotionRevPerDay, raanOffsetError, wrapDegrees360, type CircularOrbit, type OrientedCircularOrbit } from "./orbitModel.ts";
 
 /**
  * A Walker Delta pattern, in the notation it is quoted in — `i: T/P/F` — plus the
- * altitude that fixes its period.
+ * orbit it flies at.
  *
  * `phasing` is Walker's F: the along-track offset between adjacent planes, in
  * units of 360°/T. It is what decides whether satellites in neighbouring planes
  * pass each other abreast (F = 0) or interleaved, and so what the inter-plane
  * geometry looks like; it changes nothing about any single orbit.
+ *
+ * `altitudeKm`, `inclinationDeg` and `raanOffsetDeg` come from `CircularOrbit` and
+ * `OrientedCircularOrbit` rather than being restated: the orbit a pattern flies is
+ * the same two numbers every other design-time orbit here is made of, so a shell
+ * (`./shellLayout.ts`), a design sweep cell (`./orbitDesign.ts`) and this are
+ * interchangeable at the call site.
  */
-export interface WalkerDeltaParams {
+export interface WalkerDeltaParams extends OrientedCircularOrbit {
   /** Total satellites, Walker's T. Must equal planes × satsPerPlane. */
   total: number;
   /** Orbital planes, Walker's P. */
   planes: number;
   /** Phasing factor, Walker's F. Meaningful modulo `planes`. */
   phasing: number;
-  inclinationDeg: number;
-  altitudeKm: number;
   /**
    * How much right ascension the planes are spread over.
    *
@@ -43,17 +53,6 @@ export interface WalkerDeltaParams {
    * flag because it is one, and because a partial span is a real design.
    */
   raanSpanDeg: number;
-  /**
-   * Where the first plane's ascending node sits, in absolute right ascension.
-   *
-   * A Walker pattern is normally quoted without one, because the notation describes
-   * how the planes sit relative to *each other* and a rigid rotation of the whole
-   * constellation is not a different pattern. It becomes load-bearing the moment the
-   * sun is in the picture: a sun-synchronous orbit at 06:00 local time and the same
-   * orbit at noon differ by exactly this and by nothing else, and one of them never
-   * enters the Earth's shadow (`./sunSynchronous.ts`). Optional, defaulting to 0.
-   */
-  raanOffsetDeg?: number;
 }
 
 /** Satellites per plane. Derived, never stored: T and P are what the notation gives. */
@@ -71,26 +70,16 @@ export function satsPerPlane(params: WalkerDeltaParams): number {
  */
 export const MAX_WALKER_SATELLITES = 5000;
 
-/** WGS-72 values, so the derived mean motion is in the same system SGP4 works in. */
-const EARTH_RADIUS_KM = 6378.135;
-const MU_KM3_S2 = 398600.8;
-const SECONDS_PER_DAY = 86400;
-
 /**
  * Mean motion in revolutions per day for a circular orbit at this altitude.
  *
- * The two-body value. SGP4 reads MEAN_MOTION as a Kozai mean motion and recovers
- * a semi-major axis from it with the J2 term included, so the altitude it
- * actually flies is a few km off the one asked for — around 6 km at 550 km,
- * checked in the tests. That is inside the band a constellation design is quoted
- * to and far outside anything worth a Newton iteration here; a caller that needs
- * the flown altitude should read it off the satrec's apsides, as the info panel
- * already does.
+ * `circularMeanMotionRevPerDay` under a name this folder has always exported: the
+ * generators, `./clusterFormation.ts`, `./sunSynchronous.ts` and the derivation
+ * script all read it from here. See `./orbitModel.ts` for what the two-body value
+ * costs against the one SGP4 flies.
  */
 export function meanMotionRevPerDay(altitudeKm: number): number {
-  const a = EARTH_RADIUS_KM + altitudeKm;
-  const radiansPerSecond = Math.sqrt(MU_KM3_S2 / (a * a * a));
-  return (radiansPerSecond * SECONDS_PER_DAY) / (2 * Math.PI);
+  return circularMeanMotionRevPerDay(altitudeKm);
 }
 
 export interface WalkerValidation {
@@ -128,16 +117,11 @@ export function validateWalkerDelta(params: WalkerDeltaParams): WalkerValidation
   if (!Number.isFinite(raanSpanDeg) || raanSpanDeg <= 0 || raanSpanDeg > 360) {
     return { ok: false, error: "RAAN span must be greater than 0° and at most 360°." };
   }
-  const { raanOffsetDeg } = params;
-  if (raanOffsetDeg !== undefined && (!Number.isFinite(raanOffsetDeg) || raanOffsetDeg < 0 || raanOffsetDeg >= 360)) {
-    return { ok: false, error: "RAAN offset must be at least 0° and below 360°." };
+  const raanOffset = raanOffsetError(params.raanOffsetDeg);
+  if (raanOffset !== undefined) {
+    return { ok: false, error: raanOffset };
   }
   return { ok: true };
-}
-
-/** Normalize into [0, 360). */
-function wrapDegrees(value: number): number {
-  return ((value % 360) + 360) % 360;
 }
 
 /**
@@ -161,9 +145,9 @@ export function walkerDeltaRecords(params: WalkerDeltaParams, epoch: Date, nameP
   const epochIso = epoch.toISOString();
   const records: GpRecord[] = [];
   for (let plane = 0; plane < params.planes; plane += 1) {
-    const raan = wrapDegrees((params.raanOffsetDeg ?? 0) + (plane * params.raanSpanDeg) / params.planes);
+    const raan = wrapDegrees360((params.raanOffsetDeg ?? 0) + (plane * params.raanSpanDeg) / params.planes);
     for (let slot = 0; slot < perPlane; slot += 1) {
-      const meanAnomaly = wrapDegrees((slot * 360) / perPlane + (plane * params.phasing * 360) / params.total);
+      const meanAnomaly = wrapDegrees360((slot * 360) / perPlane + (plane * params.phasing * 360) / params.total);
       const index = plane * perPlane + slot;
       const satnum = satnumBase + index;
       records.push({
@@ -322,7 +306,7 @@ export function planeSlotOf(name: string | undefined): string | undefined {
  * Undefined when the result is not a buildable pattern, which is the same check
  * the panel's form makes, for the same reason.
  */
-export function walkerPatternAt(reference: WalkerDeltaParams, orbit: { altitudeKm: number; inclinationDeg: number }, minPerPlane = 1): WalkerDeltaParams | undefined {
+export function walkerPatternAt(reference: WalkerDeltaParams, orbit: CircularOrbit, minPerPlane = 1): WalkerDeltaParams | undefined {
   const perPlane = Math.max(satsPerPlane(reference), minPerPlane);
   const params: WalkerDeltaParams = {
     total: perPlane * reference.planes,

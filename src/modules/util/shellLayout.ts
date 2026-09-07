@@ -43,80 +43,33 @@
 // `scripts/derive-isl-topology.ts` measures exactly that, and refines both
 // against the propagator, which is the honest way round.
 
-// No runtime imports on purpose: scripts/derive-isl-topology.ts runs this file
-// through node's own type stripping, which resolves nothing that a bundler would
-// have to. The mean motion below is therefore restated rather than imported from
-// ./walkerDelta.ts, and the tests assert the two agree to the last bit — a
-// duplicated formula that is checked is a seam; one that is not is a bug waiting
-// for the day someone changes only one of them.
+// Runtime imports carry the `.ts` extension on purpose: `scripts/derive-isl-
+// topology.ts` runs this file through node's own type stripping, which resolves
+// no specifier a bundler would have to. `./orbitModel.ts` is therefore imported
+// rather than restated — the two secular rates are a property of any circular
+// orbit, not of a shell.
+//
+// The tests that used to assert the restated formulas agree with their
+// originals are still here; they now assert one implementation against the
+// physics rather than two against each other.
 
-/** WGS-72, matching walkerDelta and therefore SGP4's own recovered elements. */
-const EARTH_RADIUS_KM = 6378.135;
-const MU_KM3_S2 = 398600.8;
-const SECONDS_PER_DAY = 86400;
-const J2 = 0.001082616;
+import { circularSemiMajorAxisKm, orbitalRates, WGS72_EARTH_RADIUS_KM, type CircularOrbit, type OrbitalRates } from "./orbitModel.ts";
+
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
 
-/** Revolutions a day for a circular orbit at this altitude — `walkerDelta.meanMotionRevPerDay`. */
-function keplerianRevPerDay(altitudeKm: number): number {
-  const a = EARTH_RADIUS_KM + altitudeKm;
-  return (Math.sqrt(MU_KM3_S2 / (a * a * a)) * SECONDS_PER_DAY) / (2 * Math.PI);
-}
-
 /** A shell, reduced to the two numbers its rates depend on. */
-export interface ShellOrbit {
-  altitudeKm: number;
-  inclinationDeg: number;
-}
+export type ShellOrbit = CircularOrbit;
 
 /** The secular rates that decide how a shell moves relative to any other. */
-export interface ShellRates {
-  /** Revolutions a day, the two-body value `walkerDeltaRecords` states. */
-  meanMotionRevPerDay: number;
-  /** Orbital period in minutes, the Keplerian one. */
-  periodMinutes: number;
-  /** Ω̇ in degrees a day: negative for a prograde orbit, positive for a retrograde one. */
-  nodeRateDegPerDay: number;
-  /**
-   * u̇ in degrees a day: how fast the satellite runs round its own orbit,
-   * measured from the ascending node.
-   *
-   * Not quite 360°/period: J₂ moves the node the satellite is measured from and
-   * the perigee it is measured to, and the along-track rate is what is left when
-   * both are folded in — `ṁ + ω̇`, which for a circular orbit is the whole of the
-   * motion that matters. The correction is a part in a thousand, which is
-   * invisible in one orbit and a degree of phase after a hundred.
-   */
-  alongTrackRateDegPerDay: number;
-}
-
-/** The semi-major axis of a circular orbit at this altitude. */
-function semiMajorAxisKm(altitudeKm: number): number {
-  return EARTH_RADIUS_KM + altitudeKm;
-}
+export type ShellRates = OrbitalRates;
 
 /**
- * The two secular rates of a circular orbit at this altitude and inclination.
- *
- * `Ω̇ = −(3/2) J₂ n (Rₑ/a)² cos i` is the same expression `./sunSynchronous.ts`
- * inverts for the sun-synchronous inclination; it is repeated through here rather
- * than imported so a shell's two rates are read off one object, and the two files
- * are checked against each other in the tests.
+ * This module's name for `orbitalRates`: a shell *is* a circular orbit, and the
+ * two rates that decide what it does to another shell are the two any circular
+ * orbit has.
  */
-export function shellRates(orbit: ShellOrbit): ShellRates {
-  const { altitudeKm, inclinationDeg } = orbit;
-  const revPerDay = keplerianRevPerDay(altitudeKm);
-  const axisRatioSquared = (EARTH_RADIUS_KM / semiMajorAxisKm(altitudeKm)) ** 2;
-  const cosine = Math.cos(inclinationDeg * DEG_TO_RAD);
-  const degPerDay = revPerDay * 360;
-  return {
-    meanMotionRevPerDay: revPerDay,
-    periodMinutes: 1440 / revPerDay,
-    nodeRateDegPerDay: -1.5 * J2 * degPerDay * axisRatioSquared * cosine,
-    alongTrackRateDegPerDay: degPerDay * (1 + J2 * axisRatioSquared * (6 * cosine * cosine - 1.5)),
-  };
-}
+export const shellRates = orbitalRates;
 
 /**
  * The inclination at `altitudeKm` whose node rate matches the reference shell's,
@@ -134,10 +87,10 @@ export function shellRates(orbit: ShellOrbit): ShellRates {
  * reports where it falls.
  */
 export function coPrecessingInclinationDeg(reference: ShellOrbit, altitudeKm: number): number | undefined {
-  if (!Number.isFinite(altitudeKm) || altitudeKm <= -EARTH_RADIUS_KM) {
+  if (!Number.isFinite(altitudeKm) || altitudeKm <= -WGS72_EARTH_RADIUS_KM) {
     return undefined;
   }
-  const ratio = semiMajorAxisKm(altitudeKm) / semiMajorAxisKm(reference.altitudeKm);
+  const ratio = circularSemiMajorAxisKm(altitudeKm) / circularSemiMajorAxisKm(reference.altitudeKm);
   const cosine = Math.cos(reference.inclinationDeg * DEG_TO_RAD) * ratio ** 3.5;
   if (cosine < -1 || cosine > 1) {
     return undefined;
@@ -164,7 +117,7 @@ export function coPrecessingCeilingKm(reference: ShellOrbit): number {
   if (cosine <= 0) {
     return Number.POSITIVE_INFINITY;
   }
-  return semiMajorAxisKm(reference.altitudeKm) * cosine ** (-2 / 7) - EARTH_RADIUS_KM;
+  return circularSemiMajorAxisKm(reference.altitudeKm) * cosine ** (-2 / 7) - WGS72_EARTH_RADIUS_KM;
 }
 
 /**
@@ -184,7 +137,7 @@ export function coPrecessingCeilingKm(reference: ShellOrbit): number {
  * extra satellite.
  */
 export function minSatellitesPerRing(altitudeKm: number, marginKm = 0): number {
-  return Math.ceil(Math.PI / Math.acos((EARTH_RADIUS_KM + marginKm) / semiMajorAxisKm(altitudeKm)));
+  return Math.ceil(Math.PI / Math.acos((WGS72_EARTH_RADIUS_KM + marginKm) / circularSemiMajorAxisKm(altitudeKm)));
 }
 
 /**
@@ -212,9 +165,9 @@ export const LINK_MARGIN_KM = 80;
  * conservative way round here.
  */
 export function maxLinkRangeKm(altitudeAKm: number, altitudeBKm: number, marginKm = LINK_MARGIN_KM): number {
-  const blocking = EARTH_RADIUS_KM + marginKm;
+  const blocking = WGS72_EARTH_RADIUS_KM + marginKm;
   const reach = (altitudeKm: number) => {
-    const radius = semiMajorAxisKm(altitudeKm);
+    const radius = circularSemiMajorAxisKm(altitudeKm);
     return radius <= blocking ? 0 : Math.sqrt(radius * radius - blocking * blocking);
   };
   return reach(altitudeAKm) + reach(altitudeBKm);
@@ -229,9 +182,9 @@ export function maxLinkRangeKm(altitudeAKm: number, altitudeBKm: number, marginK
  * how far apart the pair may be before the limb comes between them.
  */
 export function linkHorizonAngleDeg(altitudeAKm: number, altitudeBKm: number, marginKm = LINK_MARGIN_KM): number {
-  const blocking = EARTH_RADIUS_KM + marginKm;
+  const blocking = WGS72_EARTH_RADIUS_KM + marginKm;
   const horizon = (altitudeKm: number) => {
-    const radius = semiMajorAxisKm(altitudeKm);
+    const radius = circularSemiMajorAxisKm(altitudeKm);
     return radius <= blocking ? 0 : Math.acos(blocking / radius) * RAD_TO_DEG;
   };
   return horizon(altitudeAKm) + horizon(altitudeBKm);

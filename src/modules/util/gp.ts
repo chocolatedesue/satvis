@@ -85,6 +85,12 @@ function classifyingElements(r: GpRecord): { meanMotionRevPerDay: number; eccent
  * Good enough for anything that only needs a window's approximate extent — and
  * not good enough for placing samples in time, which is why the sampler derives
  * its own grid rather than being told one. See sgp4Worker.
+ *
+ * One of three period entries, and the only one that needs no satrec — which is
+ * why it survives rather than being folded into the others. The other two live in
+ * `./orbitModel.ts`: `circularPeriodMinutes` for a designed circular orbit that
+ * has no element set yet, and `propagatedPeriodMinutes` for the period SGP4
+ * recovers from one. Use those for anything that places a satellite in time.
  */
 export function approximatePeriodMinutes(r: GpRecord): number {
   const { meanMotionRevPerDay } = classifyingElements(r);

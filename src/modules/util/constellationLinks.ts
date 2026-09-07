@@ -46,9 +46,9 @@
 // active: a pattern with missing satellites links the ones it has, closing the
 // ring over the active slots rather than the nominal ones.
 
-import { decodeCluster, latticeIndexOf } from "./clusterFormation";
-import { configurationReturns, shellPairLayout, type ShellPairVerdict } from "./shellLayout";
-import { decodeWalker, type WalkerDeltaParams } from "./walkerDelta";
+import { decodeCluster, latticeIndexOf } from "./clusterFormation.ts";
+import { configurationReturns, shellPairLayout, type ShellPairVerdict } from "./shellLayout.ts";
+import { decodeWalker, type WalkerDeltaParams } from "./walkerDelta.ts";
 
 /** One end of a link: the satellite's catalog name plus where it sits in its pattern. */
 export interface LinkEndpoint {

@@ -2,6 +2,11 @@ node_modules/
 /dist/
 /dev-dist/
 
+# pnpm's content-addressable store, when it lands next to the project rather than
+# in XDG's default spot. Nearly a gigabyte of hard links into node_modules — never
+# part of the tree, and large enough that an accidental `git add .` is noticeable.
+.pnpm-store/
+
 # OS
 .DS_Store
 

@@ -693,13 +693,13 @@ const reachableVsDemanded = computed(() => {
   return `${reachable.toFixed(1)}° vs ${demanded.toFixed(1)}°${reachable >= demanded ? " ✓" : ""}`;
 });
 const eclipseFreePlanes = computed(() => {
-  const fraction = annualEclipseFreePlaneFraction(draft.altitudeKm, draft.inclinationDeg);
+  const fraction = annualEclipseFreePlaneFraction(draft);
   return fraction === 0 ? "none, ever" : `${(fraction * 100).toFixed(1)}% of the year`;
 });
 const exchangeRate = computed(() => `${betaExchangeRateKmPerDegree(draft.altitudeKm).toFixed(0)} km of altitude`);
 
 const nodeDrift = computed(() => {
-  const rate = nodalPrecessionDegPerDay(draft.altitudeKm, draft.inclinationDeg);
+  const rate = nodalPrecessionDegPerDay(draft);
   return Number.isFinite(rate) ? `${rate >= 0 ? "+" : ""}${rate.toFixed(3)}°/day` : "—";
 });
 const ssoInclination = computed(() => (ssoFacts.value.inclinationDeg === undefined ? "none" : `${ssoFacts.value.inclinationDeg.toFixed(2)}°`));

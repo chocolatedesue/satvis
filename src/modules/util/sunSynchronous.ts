@@ -16,16 +16,12 @@
 
 import { jday, sunPos } from "satellite.js";
 
-import type { WalkerDeltaParams } from "./walkerDelta";
-import { meanMotionRevPerDay } from "./walkerDelta";
+import { WGS72_EARTH_RADIUS_KM, WGS72_J2, type CircularOrbit } from "./orbitModel.ts";
+import { meanMotionRevPerDay, type WalkerDeltaParams } from "./walkerDelta.ts";
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
 const MINUTES_PER_DAY = 1440;
-
-/** WGS-72, matching walkerDelta and therefore SGP4's own recovered elements. */
-const EARTH_RADIUS_KM = 6378.135;
-const J2 = 0.001082616;
 
 /**
  * The sun's mean motion in right ascension: 360° over a tropical year.
@@ -64,15 +60,16 @@ export const SUN_MAX_DECLINATION_DEG = 23.4392911;
  * `./orbitFacts.ts` applies to a satrec — this one takes the numbers a pattern is
  * quoted in, so the panel can report it before anything is generated.
  */
-export function nodalPrecessionDegPerDay(altitudeKm: number, inclinationDeg: number, eccentricity = 0): number {
-  const semiMajorAxisKm = EARTH_RADIUS_KM + altitudeKm;
-  if (!Number.isFinite(altitudeKm) || semiMajorAxisKm <= EARTH_RADIUS_KM || !Number.isFinite(inclinationDeg) || eccentricity < 0 || eccentricity >= 1) {
+export function nodalPrecessionDegPerDay(orbit: CircularOrbit, eccentricity = 0): number {
+  const { altitudeKm, inclinationDeg } = orbit;
+  const semiMajorAxisKm = WGS72_EARTH_RADIUS_KM + altitudeKm;
+  if (!Number.isFinite(altitudeKm) || semiMajorAxisKm <= WGS72_EARTH_RADIUS_KM || !Number.isFinite(inclinationDeg) || eccentricity < 0 || eccentricity >= 1) {
     return Number.NaN;
   }
   const meanMotionRadPerMinute = (meanMotionRevPerDay(altitudeKm) * 2 * Math.PI) / MINUTES_PER_DAY;
-  const axisRatio = semiMajorAxisKm / EARTH_RADIUS_KM;
+  const axisRatio = semiMajorAxisKm / WGS72_EARTH_RADIUS_KM;
   const oneMinusESquared = 1 - eccentricity * eccentricity;
-  const ratePerMinute = (-1.5 * J2 * meanMotionRadPerMinute * Math.cos(inclinationDeg * DEG_TO_RAD)) / (axisRatio * axisRatio * oneMinusESquared * oneMinusESquared);
+  const ratePerMinute = (-1.5 * WGS72_J2 * meanMotionRadPerMinute * Math.cos(inclinationDeg * DEG_TO_RAD)) / (axisRatio * axisRatio * oneMinusESquared * oneMinusESquared);
   return ratePerMinute * RAD_TO_DEG * MINUTES_PER_DAY;
 }
 
@@ -93,8 +90,8 @@ export function nodalPrecessionDegPerDay(altitudeKm: number, inclinationDeg: num
  */
 const SYNCHRONOUS_RATE_TOLERANCE_DEG_PER_DAY = 1e-6;
 
-export function betaCycleDays(altitudeKm: number, inclinationDeg: number): number {
-  const relative = Math.abs(nodalPrecessionDegPerDay(altitudeKm, inclinationDeg) - SUN_DEG_PER_DAY);
+export function betaCycleDays(orbit: CircularOrbit): number {
+  const relative = Math.abs(nodalPrecessionDegPerDay(orbit) - SUN_DEG_PER_DAY);
   return relative < SYNCHRONOUS_RATE_TOLERANCE_DEG_PER_DAY ? Number.POSITIVE_INFINITY : 360 / relative;
 }
 
@@ -113,15 +110,15 @@ export function betaCycleDays(altitudeKm: number, inclinationDeg: number): numbe
  * which is a real limit and not a failure to converge.
  */
 export function sunSyncInclinationDeg(altitudeKm: number, eccentricity = 0): number | undefined {
-  const semiMajorAxisKm = EARTH_RADIUS_KM + altitudeKm;
-  if (!Number.isFinite(altitudeKm) || semiMajorAxisKm <= EARTH_RADIUS_KM || eccentricity < 0 || eccentricity >= 1) {
+  const semiMajorAxisKm = WGS72_EARTH_RADIUS_KM + altitudeKm;
+  if (!Number.isFinite(altitudeKm) || semiMajorAxisKm <= WGS72_EARTH_RADIUS_KM || eccentricity < 0 || eccentricity >= 1) {
     return undefined;
   }
   const meanMotionRadPerMinute = (meanMotionRevPerDay(altitudeKm) * 2 * Math.PI) / MINUTES_PER_DAY;
   const targetRadPerMinute = (SUN_DEG_PER_DAY * DEG_TO_RAD) / MINUTES_PER_DAY;
-  const axisRatio = semiMajorAxisKm / EARTH_RADIUS_KM;
+  const axisRatio = semiMajorAxisKm / WGS72_EARTH_RADIUS_KM;
   const oneMinusESquared = 1 - eccentricity * eccentricity;
-  const cosine = -(targetRadPerMinute * axisRatio * axisRatio * oneMinusESquared * oneMinusESquared) / (1.5 * J2 * meanMotionRadPerMinute);
+  const cosine = -(targetRadPerMinute * axisRatio * axisRatio * oneMinusESquared * oneMinusESquared) / (1.5 * WGS72_J2 * meanMotionRadPerMinute);
   if (cosine < -1 || cosine > 1) {
     return undefined;
   }
@@ -143,7 +140,7 @@ export function sunSyncInclinationDeg(altitudeKm: number, eccentricity = 0): num
  * exists.
  */
 export function eclipseFreeBetaDeg(altitudeKm: number): number {
-  return Math.asin(EARTH_RADIUS_KM / (EARTH_RADIUS_KM + altitudeKm)) * RAD_TO_DEG;
+  return Math.asin(WGS72_EARTH_RADIUS_KM / (WGS72_EARTH_RADIUS_KM + altitudeKm)) * RAD_TO_DEG;
 }
 
 /**

@@ -514,6 +514,55 @@ propagator (1199.2 km at 34.685°), which is the last 0.2° a secular model cann
 so the solid bond returning to its shape and the dashed one wandering are on screen at once.
 Reasoning and numbers: `docs/adr/0009-multi-shell-layouts.md`.
 
+### Orbit analysis without a globe
+
+None of the questions above need one. `src/modules/util/` is Cesium-free and Vue-free on purpose —
+a circular orbit's period, its two secular rates `Ω̇` and `u̇`, whether its planes ever escape the
+shadow and which other orbits hold a fixed relation to it are all closed form — so the same modules
+the orbit lab reads can be driven from a terminal, with no build step and no browser:
+
+```sh
+pnpm orbit-lab orbit 550 53        # one orbit: period, Ω̇, u̇, β budget, sun-sync check
+pnpm orbit-lab shells 550 53       # companion shells that hold a fixed relation to it
+pnpm orbit-lab clusters 550:53,600:97.79,1200:70    # which of several orbits return together
+pnpm orbit-lab formation 650 100 5 # a free-flying lattice's size and validity
+```
+
+`orbit` on a 53° / 550 km shell reports the numbers this section quotes — a 95.65 min period,
+`Ω̇ = −4.49°/day`, the 67° β a 550 km shadow demands against the 76° any 53° plane can reach, and
+the 1632 km co-precession ceiling. Altitudes are km, angles are degrees, pitches are metres; the
+whole model is `CircularOrbit` in `src/modules/util/orbitModel.ts`, and `orbit` on any design-time
+orbit the app can build is the same two numbers.
+
+Node ≥ 22 strips the types of the imported modules natively, so the script runs directly; the one
+constraint that imposes is that a module a script can reach carries its own `.ts` extension on
+import. `scripts/derive-isl-topology.ts` is the same idea a level deeper — it flies the geometry
+with SGP4 rather than reading it off a closed form.
+
+### Orbit analysis from the terminal
+
+Nothing in the orbit lab needs a globe to answer. `src/modules/util/` is Cesium-free and Vue-free on
+purpose — a circular orbit's period, its two secular rates, whether its planes ever escape the
+shadow and which other orbits hold a fixed relation to it are all closed form — so the same modules
+the panel reads can be driven from a shell, with no build step and no browser:
+
+```sh
+pnpm orbit-lab orbit 550 53          # one orbit's own numbers
+pnpm orbit-lab shells 550 53         # companion shells that hold a fixed relation to it
+pnpm orbit-lab clusters 550:53,1200:70,600:97.79
+pnpm orbit-lab formation 650 100 5   # a free-flying lattice: 81 satellites inside 1 km
+```
+
+`orbit` is the model reduced to one screen: period, `Ω̇`, `u̇`, the inclination that would make it
+sun-synchronous, the `|β|` the shadow demands against the best any plane here reaches, and the
+co-precession ceiling above which no companion keeps its node rate. `shells` and `clusters` are the
+relative questions — which second orbit holds against this one, and which subsets of a fleet return
+together (`docs/adr/0009` and `0010`). What is printed is a property of a design, not of a date: no
+drag, no third body, no station-keeping.
+
+The script runs under `node --experimental-strip-types`, which is also why an import a script can
+reach carries its `.ts` extension — node resolves no specifier a bundler would have to.
+
 ### Multi-satellite Space Compute & Live Migration (多星协同与日照区 GPU 利用率优化)
 
 The **"GPU pipeline collaboration demo"** (`?demo=migration` or `?mig=true`) puts a distributed space AI inference pipeline across the constellation. An inference workload (e.g. LLM decode pipeline) is partitioned into 4 stages (1–8 selectable via `?migst=`), each holding its own 2 GB KV cache on distinct satellites connected via 100 Gbps inter-satellite links (ISLs).

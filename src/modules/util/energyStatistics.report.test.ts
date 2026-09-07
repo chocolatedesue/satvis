@@ -200,11 +200,11 @@ describe.skipIf(!ENABLED)("the Starlink energy report", () => {
       // checked one solstice and reported 59° for the 97.6° shells, which is their
       // *worst* case, not their best.
       const maxBeta = dawnDuskBetaRangeDeg(inclinationDeg).maxDeg;
-      const cycleDays = betaCycleDays(altitudeKm, inclinationDeg);
+      const cycleDays = betaCycleDays({ altitudeKm: altitudeKm, inclinationDeg: inclinationDeg });
       // Ten years is not a cycle anyone routes around; say what it is instead.
       const cycle = cycleDays > 3650 ? "frozen — quasi-SSO" : `${cycleDays.toFixed(0)} days`;
       lines.push(
-        `| ${shell.name} | ${total} | ${planes} | ${profile.periodMinutes.toFixed(1)} min | ${nodalPrecessionDegPerDay(altitudeKm, inclinationDeg).toFixed(2)}°/day | ${cycle} | ${maxBeta.toFixed(1)}° | ${eclipseFreeBetaDeg(altitudeKm).toFixed(1)}° |`,
+        `| ${shell.name} | ${total} | ${planes} | ${profile.periodMinutes.toFixed(1)} min | ${nodalPrecessionDegPerDay({ altitudeKm: altitudeKm, inclinationDeg: inclinationDeg }).toFixed(2)}°/day | ${cycle} | ${maxBeta.toFixed(1)}° | ${eclipseFreeBetaDeg(altitudeKm).toFixed(1)}° |`,
       );
     }
     lines.push("");
@@ -319,7 +319,7 @@ describe.skipIf(!ENABLED)("the Starlink energy report", () => {
     lines.push(`| --- | ${INCLINATIONS.map(() => "---").join(" | ")} |`);
     for (const altitude of ALTITUDES) {
       const cells = INCLINATIONS.map((inclination) => {
-        const fraction = annualEclipseFreePlaneFraction(altitude, inclination);
+        const fraction = annualEclipseFreePlaneFraction({ altitudeKm: altitude, inclinationDeg: inclination });
         return fraction === 0 ? "—" : percent(fraction);
       });
       lines.push(`| **${altitude} km** | ${cells.join(" | ")} |`);
@@ -327,9 +327,9 @@ describe.skipIf(!ENABLED)("the Starlink energy report", () => {
     lines.push("");
     // Quoted from the table rather than typed: the first draft of this paragraph said 7%,
     // "four times" and "half the shell", none of which the sweep actually produces.
-    const starlinkCase = annualEclipseFreePlaneFraction(550, 53);
-    const steeper = annualEclipseFreePlaneFraction(550, 70);
-    const higherAndSteeper = annualEclipseFreePlaneFraction(1200, 70);
+    const starlinkCase = annualEclipseFreePlaneFraction({ altitudeKm: 550, inclinationDeg: 53 });
+    const steeper = annualEclipseFreePlaneFraction({ altitudeKm: 550, inclinationDeg: 70 });
+    const higherAndSteeper = annualEclipseFreePlaneFraction({ altitudeKm: 1200, inclinationDeg: 70 });
     lines.push(`Read it as: at 550 km and 53° — the Starlink case — **${percent(starlinkCase)}** of planes are eclipse-free`);
     lines.push("averaged over the year, and none at all at the equinoxes. Holding the altitude and taking the");
     lines.push(`inclination to 70° gives **${percent(steeper)}**, a factor of ${(steeper / starlinkCase).toFixed(1)}. Taking that 70° shell up to 1200 km`);
@@ -452,21 +452,21 @@ describe.skipIf(!ENABLED)("the Starlink energy report", () => {
     }
     // The quasi-sun-synchronous claim about S4/S5, checked rather than asserted in prose.
     for (const shell of SHELLS.filter((candidate) => candidate.params.inclinationDeg > 95)) {
-      const drift = nodalPrecessionDegPerDay(shell.params.altitudeKm, shell.params.inclinationDeg);
+      const drift = nodalPrecessionDegPerDay(shell.params);
       expect(Math.abs(drift - SUN_DEG_PER_DAY), `${shell.name} drift vs the sun`).toBeLessThan(0.05);
     }
     // And that the 53° shells are not frozen, which is the contrast the text draws.
-    expect(betaCycleDays(550, 53)).toBeLessThan(120);
+    expect(betaCycleDays({ altitudeKm: 550, inclinationDeg: 53 })).toBeLessThan(120);
 
     // The sweep's own claims, checked: monotone in both knobs, and the two numbers the
     // prose quotes.
-    expect(annualEclipseFreePlaneFraction(550, 30)).toBe(0);
-    expect(annualEclipseFreePlaneFraction(550, 70)).toBeGreaterThan(annualEclipseFreePlaneFraction(550, 53));
-    expect(annualEclipseFreePlaneFraction(1200, 70)).toBeGreaterThan(annualEclipseFreePlaneFraction(550, 70));
-    expect(designPoint(550, 53, 0).planeFractionNow).toBe(0);
+    expect(annualEclipseFreePlaneFraction({ altitudeKm: 550, inclinationDeg: 30 })).toBe(0);
+    expect(annualEclipseFreePlaneFraction({ altitudeKm: 550, inclinationDeg: 70 })).toBeGreaterThan(annualEclipseFreePlaneFraction({ altitudeKm: 550, inclinationDeg: 53 }));
+    expect(annualEclipseFreePlaneFraction({ altitudeKm: 1200, inclinationDeg: 70 })).toBeGreaterThan(annualEclipseFreePlaneFraction({ altitudeKm: 550, inclinationDeg: 70 }));
+    expect(designPoint({ altitudeKm: 550, inclinationDeg: 53 }, 0).planeFractionNow).toBe(0);
     // The two shapes the prose points at.
-    expect(annualEclipseFreePlaneFraction(700, 97.6)).toBeLessThan(annualEclipseFreePlaneFraction(700, 90));
-    expect(annualEclipseFreePlaneFraction(1500, 30)).toBe(0);
+    expect(annualEclipseFreePlaneFraction({ altitudeKm: 700, inclinationDeg: 97.6 })).toBeLessThan(annualEclipseFreePlaneFraction({ altitudeKm: 700, inclinationDeg: 90 }));
+    expect(annualEclipseFreePlaneFraction({ altitudeKm: 1500, inclinationDeg: 30 })).toBe(0);
 
     // And the finding: at least one shell/date combination has a plane with no eclipse
     // at all. If this ever stops holding, the prose above is wrong.

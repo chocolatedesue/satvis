@@ -27,7 +27,8 @@
     "update-custom-data": "bash data/custom/update-custom-data.sh",
     "deploy": "pnpm build && pnpm --filter satvis-worker deploy",
     "deploy:preview": "pnpm build && pnpm --filter satvis-worker deploy:preview",
-    "energy-report": "ENERGY_REPORT=1 vitest run src/modules/util/energyStatistics.report.test.ts"
+    "energy-report": "ENERGY_REPORT=1 vitest run src/modules/util/energyStatistics.report.test.ts",
+    "orbit-lab": "node --experimental-strip-types scripts/orbit-lab.ts"
   },
   "dependencies": {
     "@cesium/engine": "^26.2.0",

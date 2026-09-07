@@ -49,7 +49,7 @@ describe("shellRates", () => {
       [1200, 97.6],
       [400, 51.6],
     ] as const) {
-      expect(shellRates({ altitudeKm, inclinationDeg }).nodeRateDegPerDay).toBeCloseTo(nodalPrecessionDegPerDay(altitudeKm, inclinationDeg), 12);
+      expect(shellRates({ altitudeKm, inclinationDeg }).nodeRateDegPerDay).toBeCloseTo(nodalPrecessionDegPerDay({ altitudeKm: altitudeKm, inclinationDeg: inclinationDeg }), 12);
     }
   });
 

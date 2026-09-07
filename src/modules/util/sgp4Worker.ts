@@ -29,7 +29,8 @@
 
 import * as satellitejs from "satellite.js";
 
-import { createSatrec, type GpRecord } from "./gp";
+import { createSatrec, type GpRecord } from "./gp.ts";
+import { propagatedPeriodMinutes } from "./orbitModel.ts";
 import { fixedRotationAt, type FixedRotation } from "./temeToFixed";
 import { SAMPLES_PER_ORBIT } from "./trajectoryWindow";
 
@@ -132,8 +133,9 @@ export function gridStepSeconds(satrec: satellitejs.SatRec): number {
   if (!Number.isFinite(meanMotionRad) || meanMotionRad <= 0) {
     return 0;
   }
-  const orbitalPeriodMinutes = (2 * Math.PI) / meanMotionRad;
-  return (orbitalPeriodMinutes * 60) / SAMPLES_PER_ORBIT;
+  // `propagatedPeriodMinutes` reads the same `no`; the guard above is what a grid
+  // needs and a period does not — a satrec it fails for has no period to divide.
+  return (propagatedPeriodMinutes(satrec) * 60) / SAMPLES_PER_ORBIT;
 }
 
 /**

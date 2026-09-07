@@ -25,9 +25,12 @@
 
 import { propagate, type SatRec } from "satellite.js";
 
-import { clusterFormationRecords, clusterLattice, clusterRadiusM, type ClusterFormationParams } from "./clusterFormation";
-import { createSatrec } from "./gp";
-import { offsetIn, ricBasis, type RicBasis, type Vec3 } from "./relativeFrame";
+import { clusterFormationRecords, clusterLattice, clusterRadiusM, type ClusterFormationParams } from "./clusterFormation.ts";
+import { createSatrec } from "./gp.ts";
+import { circularMeanMotionRevPerDay } from "./orbitModel.ts";
+import { offsetIn, ricBasis, type RicBasis, type Vec3 } from "./relativeFrame.ts";
+
+const SECONDS_PER_DAY = 86400;
 
 /** One member, placed. Offsets in metres. */
 export interface FormationMember {
@@ -137,10 +140,7 @@ export function formationSnapshot(
   };
 }
 
-/** Radians a second, for the ellipse angle. Derived from the same two-body value the records state. */
+/** Radians a second, for the ellipse angle. The same two-body mean motion the records state. */
 export function meanMotionRadPerSec(params: ClusterFormationParams): number {
-  const EARTH_RADIUS_KM = 6378.135;
-  const MU_KM3_S2 = 398600.8;
-  const a = EARTH_RADIUS_KM + params.altitudeKm;
-  return Math.sqrt(MU_KM3_S2 / (a * a * a));
+  return (circularMeanMotionRevPerDay(params.altitudeKm) * 2 * Math.PI) / SECONDS_PER_DAY;
 }

@@ -17,7 +17,8 @@
 import type { SatRec } from "satellite.js";
 
 import type { IlluminationState, PanelAxis } from "../../config/illumination";
-import { illuminationAt, illuminationTimeline } from "./illumination";
+import { illuminationAt, illuminationTimeline } from "./illumination.ts";
+import { propagatedPeriodMinutes } from "./orbitModel.ts";
 
 /** Whether this state leaves the satellite with no usable power under the panel model. */
 export function isDark(state: IlluminationState): boolean {
@@ -99,7 +100,7 @@ export interface OrbitEnergyProfile {
  * figures are then the window's divided by the orbits sampled.
  */
 export function orbitEnergyProfile(satrec: SatRec, start: Date, axis: PanelAxis, stepSeconds = 10, orbits = 2): OrbitEnergyProfile {
-  const periodMinutes = (2 * Math.PI) / satrec.no;
+  const periodMinutes = propagatedPeriodMinutes(satrec);
   const windowSeconds = periodMinutes * 60 * orbits;
   const timeline = illuminationTimeline(satrec, start, windowSeconds, stepSeconds, axis);
   const states = timeline.samples.map((sample) => sample.state);

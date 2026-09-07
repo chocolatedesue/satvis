@@ -18,7 +18,8 @@ workspace package). One `pnpm install` at the root covers both.
   holds against the first (0009), stable clusters — the partition orbit space
   already has, and why it is not a clustering problem (0010), routing around the
   Earth rather than through it (0011), formations — a cluster as an
-  eccentricity-vector lattice rather than an integration (0012).
+  eccentricity-vector lattice rather than an integration (0012), the orbit model —
+  one designed orbit, and an analysis layer that needs no globe (0013).
 - **`docs/manual-verification.md`** — the checks jsdom cannot run. Rerun the ones
   covering code you change, and record what they returned.
 - **`worker/src/gp/types.ts`** — the group and satellite-table config schema,
@@ -47,6 +48,15 @@ workspace package). One `pnpm install` at the root covers both.
   the bag or the frontend applies its defaults (`src/config/satelliteMetadata.ts`).
 - `data/` also holds the generated Cesium assets and the 3D-model plugins, copied
   into `dist/` at build time. Entrypoints are the MPA inputs in `vite.config.ts`.
+- An orbit has two faces, and only one of them can be propagated. A **GP element
+  set** (`GpRecord`, built by `src/modules/util/gp.ts`) is the contract the whole
+  app agrees on; a **circular orbit** (`CircularOrbit`,
+  `src/modules/util/orbitModel.ts`) is a design that is not an element set yet —
+  an altitude, an inclination and optionally a node offset, which is all the
+  closed forms need. The generators turn the second into the first. See ADR 0013.
+- `src/modules/util/` is Cesium-free and Vue-free on purpose, which is what lets
+  `scripts/` run under node with no build step — `pnpm orbit-lab orbit 550 53`
+  answers the same questions the orbit lab panel does, from a terminal.
 
 ## Commands
 
@@ -59,6 +69,9 @@ workspace package). One `pnpm install` at the root covers both.
 - Full-stack dev is `pnpm dev:worker` plus
   `SATVIS_API_PROXY=http://localhost:8080 pnpm dev`. Plain `pnpm dev` proxies
   `/api` to <https://satvis.space>.
+- `pnpm orbit-lab <command>` runs closed-form orbit analysis in the terminal, with
+  no browser — `orbit`, `shells`, `clusters`, `formation`. See README,
+  "Orbit analysis without a globe".
 - A fresh `git worktree` has no submodules. Run `git submodule update --init`, or
   `data/models` stays empty and the 3D models have no fallback for that yet.
 
@@ -111,6 +124,15 @@ workspace package). One `pnpm install` at the root covers both.
 - **Run `pnpm update-imagery` before `pnpm deploy`.** `data/imagery/` levels 0–2
   are committed and 3–5 are generated, and the build only warns about their
   absence — so a forgotten run ships a globe capped at level 2.
+- **A module a script can reach must import with its `.ts` extension.**
+  `scripts/` load `src/modules/util/*.ts` through node's own type stripping, which
+  resolves no specifier a bundler would have to — so `./orbitModel` fails there
+  where it works everywhere else, and the analysis modules spell it
+  `./orbitModel.ts`. `@vue/tsconfig` already sets `allowImportingTsExtensions`, so
+  nothing else has to change. Type-only imports are erased and can drop it; runtime
+  ones cannot. Worth knowing before adding an import to `walkerDelta`,
+  `clusterFormation`, `shellLayout`, `sunSynchronous`, `orbitDesign`,
+  `formationSnapshot` or `constellationLinks` — all of them are node-reachable.
 - **Everything under `data/` ships.** The static-copy glob takes it wholesale,
   which is why the generators live under `scripts/`.
 

@@ -194,6 +194,18 @@ discussion; sharpen them here when they drift.
   defaults, not initial state: the URL carries only deviations from the
   preset's values, so the same query string means different things on different
   routes (`src/config/presets.ts`).
+- **Circular orbit**: a designed orbit, stated as the two numbers its behaviour
+  depends on — `altitudeKm` and `inclinationDeg` — before it is an element set
+  (`CircularOrbit`, `src/modules/util/orbitModel.ts`). Period, mean motion, `Ω̇`,
+  `u̇` and the sun's elevation above the plane are all closed form in those two,
+  so a design question is answerable without propagating anything. It is the
+  other half of **GP element set**: an element set can be flown, a circular orbit
+  can be _reasoned about_, and the generators turn the second into the first.
+  Every design-time orbit in the app is one — a Walker pattern's, a cluster's, a
+  shell's (`ShellOrbit`) and one cell of a design sweep (`DesignPoint`) are all
+  this type under a local name, which is what lets them be handed to each other.
+  `OrientedCircularOrbit` adds `raanOffsetDeg`, the one number that matters once
+  the sun is in the picture.
 - **Walker pattern**: a constellation specified rather than catalogued — `i: T/P/F`
   plus an altitude, expanded into circular element sets at a fixed epoch
   (`walkerDeltaRecords`). T satellites in P planes, each plane offset along-track
