@@ -364,6 +364,8 @@ arccos(R_b/r₂)` in Earth-central angle, against a blocking sphere raised 80 km
   and the output is the **maximal** ones, on a Pareto front of size against
   cycle. A subset that returns _sooner_ than the cluster containing it is a
   different offer, not a worse one, and is kept.
+  Formulas, thresholds and measured numbers: `docs/cluster-math.md`
+  (`docs/adr/0010-stable-clusters.md`).
 - **Shell family**: the same statement written forwards — fix the reference's
   revolutions per cycle, and every other whole number of revolutions inside the
   altitude band names one more node-locked shell (`shellFamily`). Every pair
@@ -373,6 +375,20 @@ arccos(R_b/r₂)` in Earth-central angle, against a blocking sphere raised 80 km
   near-polar reference's co-precession ceiling is 9407 km against 1632 km at 53°
   and its ten shells fit inside a 3° inclination spread
   (`docs/adr/0010-stable-clusters.md`).
+- **Formation cluster**: the _other_ thing called a cluster — dozens of
+  satellites inside one orbit, separated by tens of metres, where the quantity
+  worth reading is a hundred metres (`clusterFormationRecords`). A 2:1 epicycle
+  about a circular reference is **a small eccentricity and nothing else**, so the
+  formation is a lattice in `(e cos ω, e sin ω)` rather than an integration: the
+  members share `a`, `i` and `Ω` exactly — that is the bounded-motion condition,
+  not a choice — and differ in `e` and `ω` and in nothing else. The along-track
+  pitch is therefore **twice** the radial one and is not settable: it is the
+  epicycle's own axis ratio, and any other choice makes the extent an ellipse in
+  lattice index instead of a circle. `R = 2 · pitch · rings`, and the member
+  count is the integer points of a disc. Not to be confused with a **stable
+  cluster**, which is about orbits rather than satellites.
+  Formulas, limits and measured numbers: `docs/cluster-math.md`
+  (`docs/adr/0012-orbit-formations.md`).
 - **Repeat cycle**: how long a `repeating` pair takes to return to the same
   relative configuration — `p` orbits of one shell against `q` of the other.
   Every cross-shell range and every contact window repeats on it, so a schedule

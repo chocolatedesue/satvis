@@ -22,6 +22,10 @@ workspace package). One `pnpm install` at the root covers both.
   one designed orbit, and an analysis layer that needs no globe (0013).
 - **`docs/manual-verification.md`** — the checks jsdom cannot run. Rerun the ones
   covering code you change, and record what they returned.
+- **`docs/cluster-math.md`** — the two things called a cluster (stable clusters
+  across orbits, formations inside one), as formulas, thresholds and measured
+  numbers in one place. A crib sheet over ADRs 0010 and 0012 rather than a
+  decision of its own; update it when a threshold or a measured figure moves.
 - **`worker/src/gp/types.ts`** — the group and satellite-table config schema,
   field by field.
 - **`src/modules/benchmark/README.md`** — the benchmark framework, and how the
