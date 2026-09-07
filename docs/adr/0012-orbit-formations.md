@@ -35,10 +35,10 @@ u = ω + ν ≈ ω + M + 2e sin M ⇒ along-track  = 2 a e sin M
 
 which is the epicycle, 90° out of phase, to first order in `e`. Reading it as a map:
 
-| epicycle           | element                                     |
-| ------------------ | ------------------------------------------- |
-| amplitude `A`      | `e = A / a`                                  |
-| phase `φ`          | `ω` (with `M = φ + 90°`)                     |
+| epicycle            | element                                      |
+| ------------------- | -------------------------------------------- |
+| amplitude `A`       | `e = A / a`                                  |
+| phase `φ`           | `ω` (with `M = φ + 90°`)                     |
 | centre offset `y_c` | where `ω + M` sits relative to the reference |
 
 Every member shares `a`, `i` and `Ω` — that is not a choice but the bounded-motion condition,
@@ -123,7 +123,7 @@ whether the renderer built a component or which frame a camera mode put the scen
 
 **One thing that looked like a bug and was not.** The first cut of the demo asked for both `Orbit`
 and `Illumination arc`, saw `Orbit` missing from the manager's effective components, and recorded it
-as a stuck suppression. It is deliberate: the arc *is* the orbit line, cut from the same vertices and
+as a stuck suppression. It is deliberate: the arc _is_ the orbit line, cut from the same vertices and
 coloured, so `SatelliteManager.reconcile` suppresses the plain one while the arc is on rather than
 letting two polylines z-fight on identical geometry. Asking for both is asking for one to be ignored.
 Still open, and separate: neither line appears on the globe for a formation's members, where a Walker

@@ -534,7 +534,6 @@ import {
   STABLE_REFERENCE,
 } from "../modules/demoScenes";
 import { parseGeneratedSatellite } from "../modules/util/constellationLinks";
-import FormationView from "./FormationView.vue";
 import { fleetContinuity, type FleetContinuity } from "../modules/util/fleetContinuity";
 import { illuminationTimeline } from "../modules/util/illumination";
 import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, maxReachableBetaDeg } from "../modules/util/orbitDesign";
@@ -563,6 +562,7 @@ import {
 } from "../modules/util/walkerDelta";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
+import FormationView from "./FormationView.vue";
 
 /** How often the census and the selected satellite's readout are recomputed. */
 const REFRESH_MS = 500;

@@ -211,7 +211,10 @@ export function validateClusterFormation(params: ClusterFormationParams): Cluste
   // percent of the formation's own size, which is the point past which the
   // drawing stops being of the formation asked for.
   if (maxEccentricity(params) > MAX_ECCENTRICITY) {
-    return { ok: false, error: `Cluster radius exceeds the ${Math.round(2 * MAX_ECCENTRICITY * (EARTH_RADIUS_KM + altitudeKm))} km the linear formation model holds at this altitude; reduce pitch or rings.` };
+    return {
+      ok: false,
+      error: `Cluster radius exceeds the ${Math.round(2 * MAX_ECCENTRICITY * (EARTH_RADIUS_KM + altitudeKm))} km the linear formation model holds at this altitude; reduce pitch or rings.`,
+    };
   }
   if (raanOffsetDeg !== undefined && (!Number.isFinite(raanOffsetDeg) || raanOffsetDeg < 0 || raanOffsetDeg >= 360)) {
     return { ok: false, error: "RAAN offset must be at least 0° and below 360°." };

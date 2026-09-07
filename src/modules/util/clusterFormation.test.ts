@@ -99,7 +99,12 @@ describe("latticeMemberElements", () => {
   it("states the epicycle amplitude as an eccentricity", () => {
     // The outermost members all reach A = pitch * rings = 500 m, whichever
     // direction they sit in — that is what the 1:2 lattice buys.
-    for (const [i, j] of [[5, 0], [0, 5], [3, 4], [-4, -3]] as Array<[number, number]>) {
+    for (const [i, j] of [
+      [5, 0],
+      [0, 5],
+      [3, 4],
+      [-4, -3],
+    ] as Array<[number, number]>) {
       const { eccentricity } = latticeMemberElements(i, j, 100, semiMajorAxisM);
       expect(eccentricity * semiMajorAxisM).toBeCloseTo(500, 6);
     }

@@ -15,9 +15,9 @@
 
 import type { useCesiumStore } from "../stores/cesium";
 import type { useSatStore } from "../stores/sat";
+import { CLUSTER_PRESETS, clusterLattice, clusterTagFor, encodeCluster } from "./util/clusterFormation";
 import { resonantCompanion } from "./util/shellLayout";
 import { sunSyncWalkerParams } from "./util/sunSynchronous";
-import { CLUSTER_PRESETS, clusterLattice, clusterTagFor, encodeCluster } from "./util/clusterFormation";
 import { encodeWalker, WALKER_EPOCH_ISO, WALKER_PRESETS, walkerPatternAt, walkerTagFor, type WalkerDeltaParams } from "./util/walkerDelta";
 
 type SatStore = ReturnType<typeof useSatStore>;
@@ -274,7 +274,6 @@ export function applyStableShellsScene(satStore: SatStore, cesiumStore: CesiumSt
   clock.setMultiplier(SHELLS_MULTIPLIER);
   clock.play();
 }
-
 
 /**
  * How fast the formation demo runs the clock.

@@ -388,15 +388,15 @@ design flies 81 of, and what a Walker pattern cannot express: its smallest addre
 is one slot of mean anomaly, hundreds of kilometres at LEO.
 
 The trick is that such a cluster needs no integrator. A bounded formation is an **eccentricity-vector
-lattice**: every member shares `a`, `i` and `Ω` (that is what bounded *means* — equal periods want
+lattice**: every member shares `a`, `i` and `Ω` (that is what bounded _means_ — equal periods want
 equal altitude), and they differ in `e` and `ω` and in nothing else. A 2:1 relative epicycle of
-amplitude `A` about a circular reference simply *is* an eccentricity `e = A/a` with the phase
+amplitude `A` about a circular reference simply _is_ an eccentricity `e = A/a` with the phase
 carried in `ω`. So a formation is a closed-form set of element sets, flown by SGP4 exactly like the
 real catalog, J₂ included — and J₂ does not disperse it, because members sharing `a` and `i` share
 `ω̇` and `Ω̇`, so the whole lattice precesses as one.
 
 A formation is four numbers — inclination, ring count, radial pitch, altitude — in the wire form
-`i:ringsXpitch@altKm`. The along-track pitch is *not* a parameter: it is twice the radial one,
+`i:ringsXpitch@altKm`. The along-track pitch is _not_ a parameter: it is twice the radial one,
 because that is the epicycle's own axis ratio, and only that choice makes the extent a circle in
 lattice index rather than an ellipse. The radius `R = 2·pitch·rings` and the member count follow.
 
@@ -422,7 +422,7 @@ velocity is the orbital one plus the ground's, which would tilt the radial/along
 about four degrees — and it offers both frames, because they answer different questions:
 
 - **Rotating**: the reference's axes rebuilt every instant. A bounded formation sits still inside a
-  fixed ellipse and never leaves it. That is what *bounded* means, and this frame shows no
+  fixed ellipse and never leaves it. That is what _bounded_ means, and this frame shows no
   deformation at all.
 - **Non-rotating**: those axes captured once and held while the satellite flies on. The ellipse
   turns with the orbit and the formation deforms — flat, upright, flat — **twice per orbit**. Same
@@ -432,7 +432,7 @@ about four degrees — and it offers both frames, because they answer different 
 **Scale is the whole visualisation problem.** At globe range a 1 km cluster is one point and one
 orbit line: correct, and nothing to look at. `?demo=cluster` flies the same lattice at `R = 120 km`,
 where each member's orbit line separates into a braid, every pair is bonded in amber — two members
-of one formation share an altitude *and* an inclination, so the bond verdict is `rigid` and the line
+of one formation share an altitude _and_ an inclination, so the bond verdict is `rigid` and the line
 is solid, which no pair of distinct shells can manage — and the 2:1 breathing is a shape rather than
 a sub-pixel wobble.
 

@@ -222,9 +222,7 @@ describe("cluster members in the marked-cluster overlay", () => {
   // non-negative, so the existing `<plane>-<slot>@<wire>` token grammar names a
   // member with no new syntax.
   const wire = "97.99:2x100@650";
-  const names = clusterFormationRecords(decodeCluster(wire)!, new Date(CLUSTER_EPOCH_ISO), `C${wire}`).flatMap((record) =>
-    record.kind === "omm" ? [record.omm.OBJECT_NAME] : [],
-  );
+  const names = clusterFormationRecords(decodeCluster(wire)!, new Date(CLUSTER_EPOCH_ISO), `C${wire}`).flatMap((record) => (record.kind === "omm" ? [record.omm.OBJECT_NAME] : []));
 
   test("reads a member's lattice position as a link endpoint", () => {
     const centre = parseClusterSatellite(`C${wire} L+00+00`);

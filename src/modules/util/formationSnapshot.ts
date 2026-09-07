@@ -113,7 +113,7 @@ export function formationSnapshot(
   at: Date,
   basis: RicBasis,
   frameEpoch: Date,
-  meanMotionRadPerSec: number,
+  rateRadPerSec: number,
 ): FormationSnapshot {
   const lattice = clusterLattice(params.rings);
   const reference = satrecs[0] && stateAt(satrecs[0], at);
@@ -133,7 +133,7 @@ export function formationSnapshot(
   return {
     members,
     radiusM: clusterRadiusM(params),
-    ellipseAngleRad: ((at.getTime() - frameEpoch.getTime()) / 1000) * meanMotionRadPerSec,
+    ellipseAngleRad: ((at.getTime() - frameEpoch.getTime()) / 1000) * rateRadPerSec,
   };
 }
 
