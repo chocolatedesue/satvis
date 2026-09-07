@@ -11,6 +11,7 @@ import { getConfigPreset } from "./config/presets";
 import { CesiumController } from "./modules/CesiumController";
 import { createViewer } from "./modules/createViewer";
 import {
+  applyClusterScene,
   applyMigrationScene,
   applyShellsScene,
   applyRealFleetScene,
@@ -118,6 +119,8 @@ app.mount("#app");
         applyStableShellsScene(satStore, cesiumStore, clock);
       } else if (requested === "real-fleet") {
         applyRealFleetScene(satStore, cesiumStore, clock);
+      } else if (requested === "cluster") {
+        applyClusterScene(satStore, cesiumStore, clock);
       } else {
         applyTwoOrbitScene(satStore, cesiumStore, clock);
       }

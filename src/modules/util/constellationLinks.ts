@@ -46,6 +46,7 @@
 // active: a pattern with missing satellites links the ones it has, closing the
 // ring over the active slots rather than the nominal ones.
 
+import { decodeCluster, latticeIndexOf } from "./clusterFormation";
 import { configurationReturns, shellPairLayout, type ShellPairVerdict } from "./shellLayout";
 import { decodeWalker, type WalkerDeltaParams } from "./walkerDelta";
 
@@ -98,10 +99,25 @@ export function parseMarkToken(token: string): { plane: number; slot: number; wi
     return undefined;
   }
   const wire = token.slice(at + 1);
-  if (!decodeWalker(wire)) {
+  if (!decodeWalker(wire) && !decodeCluster(wire)) {
     return undefined;
   }
   return { plane: Number(pair[1]) - 1, slot: Number(pair[2]) - 1, wire };
+}
+
+/**
+ * The orbit a wire names, whichever kind of generated geometry it is.
+ *
+ * Both `WalkerDeltaParams` and `ClusterFormationParams` carry an altitude and an
+ * inclination, which is all `./shellLayout.ts` needs to say what two orbits do to
+ * each other — so a bond between two cluster members, or between a cluster member
+ * and a satellite of a Walker shell, is judged by exactly the same rule as any
+ * other pair, with no case of its own. Two members of one cluster share both, so
+ * the verdict comes back `rigid`, which is the truth: a formation is the one
+ * arrangement where the shells are not merely commensurate but identical.
+ */
+function orbitOfWire(wire: string): { altitudeKm: number; inclinationDeg: number } | undefined {
+  return decodeWalker(wire) ?? decodeCluster(wire);
 }
 
 /**
@@ -151,7 +167,7 @@ export function resolveMarks(tokens: readonly string[], satellites: readonly Lin
       members.push(member);
     }
   }
-  const orbitOf = new Map(members.map((member) => [member.name, decodeWalker(member.wire)]));
+  const orbitOf = new Map(members.map((member) => [member.name, orbitOfWire(member.wire)]));
   const bonds: MarkedBond[] = [];
   for (let a = 0; a < members.length; a += 1) {
     for (let b = a + 1; b < members.length; b += 1) {
@@ -187,6 +203,41 @@ export function parseWalkerSatellite(name: string): LinkEndpoint | undefined {
     return undefined;
   }
   return { name, wire, plane: Number(plane) - 1, slot: Number(slot) - 1 };
+}
+
+/**
+ * The same, for a generated cluster member: `C<wire> L+00+05`.
+ *
+ * A cluster has no planes and no slots, so the lattice indices take their place —
+ * shifted to be non-negative, since `plane` and `slot` are positions in a list
+ * and a mark token spells them as ordinary 1-based numbers. Row `i` of `rings`
+ * rings therefore becomes plane `i + rings`, and the reference member of a
+ * five-ring cluster is `6-6@<wire>`: the centre of an eleven-by-eleven grid.
+ *
+ * Deliberately a second parser rather than a widened first one. `parseWalkerSatellite`
+ * is what decides who gets ring and inter-plane links, and neither means anything
+ * across a formation — every member of a cluster is already a neighbour of every
+ * other. A cluster member is a *markable* satellite, not a wirable one.
+ */
+export function parseClusterSatellite(name: string): LinkEndpoint | undefined {
+  const match = /^C(.+) L[+-]\d{2}[+-]\d{2}$/.exec(name);
+  const lattice = latticeIndexOf(name);
+  const wire = match?.[1];
+  if (!lattice || wire === undefined) {
+    return undefined;
+  }
+  const params = decodeCluster(wire);
+  return params ? { name, wire, plane: lattice.i + params.rings, slot: lattice.j + params.rings } : undefined;
+}
+
+/**
+ * Either kind of generated satellite, or undefined for a catalogued one.
+ *
+ * What callers asking "is this ours, and where does it sit" want, now that there
+ * are two ways for a satellite to have been generated.
+ */
+export function parseGeneratedSatellite(name: string): LinkEndpoint | undefined {
+  return parseWalkerSatellite(name) ?? parseClusterSatellite(name);
 }
 
 /**

@@ -17,7 +17,7 @@ import {
 import type { Viewer } from "@cesium/widgets";
 
 import type { SatelliteManager } from "./SatelliteManager";
-import { constellationLinks, parseWalkerSatellite, resolveMarks, type LinkEndpoint, type SatelliteLink } from "./util/constellationLinks";
+import { constellationLinks, parseGeneratedSatellite, parseWalkerSatellite, resolveMarks, type LinkEndpoint, type SatelliteLink } from "./util/constellationLinks";
 import { hasLineOfSight } from "./util/migration";
 import { planeSlotOf } from "./util/walkerDelta";
 
@@ -144,7 +144,11 @@ export class ConstellationLinksLayer {
   #rebuildMarks(): void {
     const endpoints: LinkEndpoint[] = [];
     for (const sat of this.#sats.activeSatellites) {
-      const parsed = parseWalkerSatellite(sat.props.name);
+      // Generated, not just Walker: a formation's members are markable — that is
+      // the whole point of a formation — while #refresh below stays Walker-only,
+      // because rings and inter-plane links describe a shell and a cluster has
+      // neither.
+      const parsed = parseGeneratedSatellite(sat.props.name);
       if (parsed) {
         endpoints.push(parsed);
       }

@@ -17,6 +17,7 @@ import type { useCesiumStore } from "../stores/cesium";
 import type { useSatStore } from "../stores/sat";
 import { resonantCompanion } from "./util/shellLayout";
 import { sunSyncWalkerParams } from "./util/sunSynchronous";
+import { CLUSTER_PRESETS, clusterLattice, clusterTagFor, encodeCluster } from "./util/clusterFormation";
 import { encodeWalker, WALKER_EPOCH_ISO, WALKER_PRESETS, walkerPatternAt, walkerTagFor, type WalkerDeltaParams } from "./util/walkerDelta";
 
 type SatStore = ReturnType<typeof useSatStore>;
@@ -53,7 +54,7 @@ export const DEMO_MULTIPLIER = 60;
 export const SHELLS_MULTIPLIER = 600;
 
 /** The names `?demo=` understands. */
-export const DEMO_NAMES = ["two-orbit", "sso", "migration", "walker25", "shells", "stable-shells", "real-fleet"] as const;
+export const DEMO_NAMES = ["two-orbit", "sso", "migration", "walker25", "shells", "stable-shells", "real-fleet", "cluster"] as const;
 export type DemoName = (typeof DEMO_NAMES)[number];
 
 function withIlluminationComponents(satStore: SatStore): void {
@@ -271,6 +272,60 @@ export function applyStableShellsScene(satStore: SatStore, cesiumStore: CesiumSt
   satStore.marks = shells.map((shell) => `1-1@${encodeWalker(shell)}`);
   cesiumStore.cameraMode = "Inertial";
   clock.setMultiplier(SHELLS_MULTIPLIER);
+  clock.play();
+}
+
+
+/**
+ * How fast the formation demo runs the clock.
+ *
+ * The story is one revolution of the epicycle, which is one orbit — 95 minutes at
+ * 550 km — and the formation's shape cycle is twice that fast. 120x puts a full
+ * orbit at about 48 s and a shape cycle at 24 s, so the bounding ellipse turns
+ * from flat to upright while someone is watching, without the members smearing.
+ */
+export const CLUSTER_MULTIPLIER = 120;
+
+/**
+ * A free-flying formation, drawn the way the rest of the app draws a
+ * constellation: every member's own orbit line, every member bonded to every
+ * other, at a scale a globe can resolve.
+ *
+ * The preset is the visible one rather than Google's, and that is the whole
+ * decision this scene makes. Suncatcher's cluster is 1 km across, which at globe
+ * range is one point and one orbit line — the geometry is right and there is
+ * nothing to see. The same lattice at 120 km puts its members far enough apart
+ * that the bonds between them are lines, the 81 near-identical orbit lines
+ * separate into a braid, and the 2:1 breathing is a shape rather than a
+ * sub-pixel wobble. Nothing about the dynamics changes: same eccentricity-vector
+ * lattice, same bounded motion, same two shape cycles per orbit.
+ *
+ * Every member is marked, so every pair is bonded — for a formation that is the
+ * honest wiring, because unlike a shell there is no near and far: the members all
+ * share an orbit, and each one holds its geometry against every other. The bonds
+ * come back `rigid` and are drawn solid, which is the verdict a formation earns
+ * and no pair of distinct shells can.
+ */
+export function applyClusterScene(satStore: SatStore, cesiumStore: CesiumStore, clock: ClockControl): void {
+  const preset = CLUSTER_PRESETS.find((candidate) => candidate.label.startsWith("Visible"));
+  if (!preset) {
+    return;
+  }
+  const wire = encodeCluster(preset.params);
+  satStore.cluster = [wire];
+  satStore.pointColorMode = "illumination";
+  satStore.pointSize = "large";
+  withIlluminationComponents(satStore);
+  // The orbit line per member is what makes this read as "several orbits", which
+  // is the thing a formation is and a point cloud does not show.
+  satStore.enabledComponents = [...new Set([...satStore.enabledComponents, "Orbit"])];
+  showOnly(satStore, [clusterTagFor(preset.params)]);
+  satStore.links = true;
+  // Lattice indices are 1-based in a mark token and shifted by the ring count,
+  // the same way `parseClusterSatellite` reads them back.
+  satStore.marks = clusterLattice(preset.params.rings).map(([i, j]) => `${i + preset.params.rings + 1}-${j + preset.params.rings + 1}@${wire}`);
+  cesiumStore.cameraMode = "Inertial";
+  clock.setMultiplier(CLUSTER_MULTIPLIER);
   clock.play();
 }
 

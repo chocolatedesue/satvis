@@ -56,6 +56,15 @@ export const useSatStore = defineStore(
     const panelAxis = ref<PanelAxis>(DEFAULT_POINT_PAINT.panelAxis);
     const walker = ref<string[]>([]);
 
+    // `cluster` is the same idea one scale down: a list of whole free-flying
+    // formations, each in the `i:ringsXpitch@alt` form of
+    // modules/util/clusterFormation.ts. Separate from `walker` rather than a
+    // second syntax inside it, because the two describe different objects — a
+    // Walker pattern spreads satellites over a sphere and a cluster packs them
+    // into an eccentricity-vector lattice inside one orbit — and a url that could
+    // spell one as the other would be a url that could say something untrue.
+    const cluster = ref<string[]>([]);
+
     // The naive KV-cache live-migration overlay: one workload hopping between
     // satellites as its host loses power. A free boolean rather than a satellite
     // component, because a migration is a relation between two satellites and
@@ -205,6 +214,7 @@ export const useSatStore = defineStore(
       pointSize,
       panelAxis,
       walker,
+      cluster,
       migration,
       links,
       marks,
@@ -237,6 +247,7 @@ export const useSatStore = defineStore(
         { name: "pointSize", url: "psize", kind: enumString(POINT_SIZES) },
         { name: "panelAxis", url: "panel", kind: enumString(PANEL_AXES) },
         { name: "walker", url: "walker", kind: stringList() },
+        { name: "cluster", url: "cluster", kind: stringList() },
         { name: "migration", url: "mig", kind: boolean() },
         { name: "migrationStages", url: "migst", kind: numberChoice(PIPELINE_STAGE_CHOICES) },
         { name: "migrationPolicy", url: "migpol", kind: enumString(MIGRATION_POLICIES) },

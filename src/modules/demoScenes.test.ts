@@ -11,16 +11,20 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 import {
+  applyClusterScene,
   applyMigrationScene,
   applyShellsScene,
   applyStableShellsScene,
   applySunSyncScene,
   applyTwoOrbitScene,
   type ClockControl,
+  CLUSTER_MULTIPLIER,
   DEMO_MULTIPLIER,
   SHELLS_MULTIPLIER,
   STABLE_REFERENCE,
 } from "./demoScenes";
+import { CLUSTER_EPOCH_ISO, clusterFormationRecords, clusterLattice, clusterNamePrefix, clusterRadiusM, clusterTagFor, decodeCluster } from "./util/clusterFormation";
+import { parseGeneratedSatellite, resolveMarks } from "./util/constellationLinks";
 import { shellPairLayout } from "./util/shellLayout";
 import { decodeWalker, encodeWalker, isWalkerTag } from "./util/walkerDelta";
 
@@ -227,5 +231,58 @@ describe("demo scenes", () => {
       expect(clock.multiplier).toBe(SHELLS_MULTIPLIER);
       expect(clock.played).toBe(true);
     });
+  });
+});
+
+describe("cluster", () => {
+  test("draws one formation, at a size a globe can resolve", () => {
+    const s = stores();
+    applyClusterScene(s.satStore, s.cesiumStore, clockSpy());
+
+    expect(s.satStore.cluster).toHaveLength(1);
+    const params = decodeCluster(s.satStore.cluster[0]!)!;
+    expect(params).toBeDefined();
+    // The whole point of the preset choice: Suncatcher's own kilometre is one
+    // point at globe range, so the scene flies the same lattice blown up.
+    expect(clusterRadiusM(params)).toBeGreaterThan(50_000);
+    expect(s.satStore.enabledTags).toEqual([clusterTagFor(params)]);
+    expect(s.satStore.walker).toEqual([]);
+  });
+
+  test("marks every member, so every pair is bonded", () => {
+    const s = stores();
+    applyClusterScene(s.satStore, s.cesiumStore, clockSpy());
+    const params = decodeCluster(s.satStore.cluster[0]!)!;
+
+    expect(s.satStore.marks).toHaveLength(clusterLattice(params.rings).length);
+    expect(new Set(s.satStore.marks).size).toBe(s.satStore.marks.length);
+    expect(s.satStore.links).toBe(true);
+  });
+
+  test("resolves each mark against a satellite the scene actually generates", () => {
+    // A token that names nothing draws nothing and says so nowhere, so the
+    // lattice-index shift is worth pinning against the generator itself.
+    const s = stores();
+    applyClusterScene(s.satStore, s.cesiumStore, clockSpy());
+    const params = decodeCluster(s.satStore.cluster[0]!)!;
+    const names = new Set(
+      clusterFormationRecords(params, new Date(CLUSTER_EPOCH_ISO), clusterNamePrefix(params)).flatMap((record) => (record.kind === "omm" ? [record.omm.OBJECT_NAME] : [])),
+    );
+    const endpoints = [...names].flatMap((name) => parseGeneratedSatellite(name) ?? []);
+
+    const { members, bonds } = resolveMarks(s.satStore.marks, endpoints);
+    expect(members).toHaveLength(names.size);
+    expect(bonds.every((bond) => bond.verdict === "rigid" && bond.returns)).toBe(true);
+  });
+
+  test("draws each member's own orbit and runs the clock fast enough to see the shape cycle", () => {
+    const s = stores();
+    const clock = clockSpy();
+    applyClusterScene(s.satStore, s.cesiumStore, clock);
+
+    expect(s.satStore.enabledComponents).toContain("Orbit");
+    expect(s.cesiumStore.cameraMode).toBe("Inertial");
+    expect(clock.multiplier).toBe(CLUSTER_MULTIPLIER);
+    expect(clock.played).toBe(true);
   });
 });

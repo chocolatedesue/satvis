@@ -20,6 +20,7 @@ The sky view trades the globe for a ground-level camera aimed by your phone's co
 - Generate a Walker Delta or Walker Star constellation from its `i: T/P/F` specification and fly it beside the real catalog, with every per-satellite visual the real ones get
 - Wire the generated constellation into the stable inter-satellite topology a propagation derivation picks — rigid intra-plane rings, same-slot inter-plane links, the Walker Star seam dropped — and mark a small cluster of satellites, bonded pairwise even across shells, to watch its geometry hold or shear
 - Stack several shells in one scene (`?demo=shells`) with the clock fast enough that the relative motion between them is the thing you see, and design a second shell that holds against the first (`?demo=stable-shells`) instead of shearing away from it
+- Fly a free-flying formation — dozens of satellites inside a kilometre of one orbit, Google's Suncatcher cluster among them — generated in closed form as an eccentricity-vector lattice rather than integrated, and drawn at a scale a globe can resolve
 - Colour satellites by what the sun is doing to them — eclipse (ν) _and_ solar panel incidence (κ) — as a point colour, and as the orbit line itself cut into sunlit, penumbra and back-sun arcs
 - Read one satellite's eclipse and back-sun budget over its next two orbits, as percentages and as a strip of colour
 - Share the exact view you are looking at as a link: the url carries the satellites, the components, the ground station and the map layers
@@ -378,6 +379,53 @@ shear away from them.
 clock at 600× so the low shell laps the high ones about every 76 seconds while the amber
 triangle shears. The low shell flies 10 per plane on purpose — a ring link clears the Earth
 only when `a·cos(π/S) > R`, which at 550 km asks for at least 8 satellites per plane.
+
+### Formations: a cluster inside one orbit
+
+Everything above spreads satellites over a sphere. A **formation** does the opposite — dozens of
+satellites inside a kilometre of each other, in one orbit — which is what Google's Suncatcher
+design flies 81 of, and what a Walker pattern cannot express: its smallest addressable separation
+is one slot of mean anomaly, hundreds of kilometres at LEO.
+
+The trick is that such a cluster needs no integrator. A bounded formation is an **eccentricity-vector
+lattice**: every member shares `a`, `i` and `Ω` (that is what bounded *means* — equal periods want
+equal altitude), and they differ in `e` and `ω` and in nothing else. A 2:1 relative epicycle of
+amplitude `A` about a circular reference simply *is* an eccentricity `e = A/a` with the phase
+carried in `ω`. So a formation is a closed-form set of element sets, flown by SGP4 exactly like the
+real catalog, J₂ included — and J₂ does not disperse it, because members sharing `a` and `i` share
+`ω̇` and `Ω̇`, so the whole lattice precesses as one.
+
+A formation is four numbers — inclination, ring count, radial pitch, altitude — in the wire form
+`i:ringsXpitch@altKm`. The along-track pitch is *not* a parameter: it is twice the radial one,
+because that is the epicycle's own axis ratio, and only that choice makes the extent a circle in
+lattice index rather than an ellipse. The radius `R = 2·pitch·rings` and the member count follow.
+
+```
+# Google's Suncatcher cluster: 81 satellites inside 1 km, 650 km dawn-dusk SSO
+https://satvis.space/?cluster=97.99:5x100@650&tags=Cluster%2097.99:5x100@650&elements=Point,Orbit&camera=Inertial
+
+# the same lattice at a size a globe can resolve, wired and marked
+https://satvis.space/?demo=cluster
+```
+
+Flown against SGP4 the Suncatcher cluster reproduces the paper's own numbers: the outermost member
+reaches apogee `a+R/2` a quarter of the way round the orbit and perigee `a−R/2` three quarters,
+nearest neighbours oscillate over 100–200 m and diagonals over 141–283 m, and the configuration
+returns to **0.03 m** after one orbit — the "perfect repeat at zero delta-v" the design is quoted
+for. Stating mean elements and reading osculating positions costs a static ~8 m distortion of the
+lattice, measured in the tests and flat over five orbits.
+
+**Scale is the whole visualisation problem.** At globe range a 1 km cluster is one point and one
+orbit line: correct, and nothing to look at. `?demo=cluster` flies the same lattice at `R = 120 km`,
+where each member's orbit line separates into a braid, every pair is bonded in amber — two members
+of one formation share an altitude *and* an inclination, so the bond verdict is `rigid` and the line
+is solid, which no pair of distinct shells can manage — and the 2:1 breathing is a shape rather than
+a sub-pixel wobble.
+
+One frame note, because it decides what you see: in the **rotating** frame a bounded formation sits
+inside a fixed ellipse and never leaves it. The wide-to-tall-to-wide deformation, twice per orbit,
+is visible only in the **non-rotating** frame — the reference's axes captured once and held still.
+Reasoning, the derivation and the measured numbers: `docs/adr/0012-orbit-formations.md`.
 
 ### Multi-shell layout: the second shell that holds
 

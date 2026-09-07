@@ -26,6 +26,7 @@ import type { CatalogEntry } from "./SatelliteCatalog";
 import type { DesiredScene } from "./SatelliteManager";
 import type { Observer } from "./SkyView";
 import type { GpRecord } from "./util/gp";
+import { CLUSTER_EPOCH_ISO, clusterFormationRecords, clusterNamePrefix, clusterSatnumBase, clusterTagFor, decodeCluster } from "./util/clusterFormation";
 import { repositioned } from "./util/groundStationEdits";
 import { toMinuteIso } from "./util/urlCodec";
 import { decodeWalker, WALKER_EPOCH_ISO, walkerDeltaRecords, walkerNamePrefix, walkerSatnumBase, walkerTagFor } from "./util/walkerDelta";
@@ -453,6 +454,33 @@ export function startSceneSync(cc: SceneTarget): void {
         generated.add(wire);
         const records = walkerDeltaRecords(params, new Date(WALKER_EPOCH_ISO), walkerNamePrefix(params), walkerSatnumBase(params));
         cc.sats.addCustomRecords(records, [walkerTagFor(params)]);
+      }
+    },
+    { deep: true, immediate: true },
+  );
+
+  // The generated formations, on exactly the terms above: expanded once per
+  // distinct wire, never removed, switched off by their own tag. Kept as a second
+  // watcher rather than folded into the first because the two lists are
+  // independent — a scene can carry a shell, a cluster, or both — and a shared
+  // `generated` set would make the two wire grammars share a namespace they have
+  // no reason to.
+  const generatedClusters = new Set<string>();
+  watch(
+    () => satStore.cluster,
+    (wires) => {
+      for (const wire of wires) {
+        if (!wire || generatedClusters.has(wire)) {
+          continue;
+        }
+        const params = decodeCluster(wire);
+        if (!params) {
+          console.warn(`Ignoring unusable cluster "${wire}"`);
+          continue;
+        }
+        generatedClusters.add(wire);
+        const records = clusterFormationRecords(params, new Date(CLUSTER_EPOCH_ISO), clusterNamePrefix(params), clusterSatnumBase(params));
+        cc.sats.addCustomRecords(records, [clusterTagFor(params)]);
       }
     },
     { deep: true, immediate: true },

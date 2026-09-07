@@ -531,7 +531,7 @@ import {
   SHELLS_MULTIPLIER,
   STABLE_REFERENCE,
 } from "../modules/demoScenes";
-import { parseWalkerSatellite } from "../modules/util/constellationLinks";
+import { parseGeneratedSatellite } from "../modules/util/constellationLinks";
 import { fleetContinuity, type FleetContinuity } from "../modules/util/fleetContinuity";
 import { illuminationTimeline } from "../modules/util/illumination";
 import { annualEclipseFreePlaneFraction, betaExchangeRateKmPerDegree, maxReachableBetaDeg } from "../modules/util/orbitDesign";
@@ -1014,7 +1014,7 @@ const migrationStatus = ref(cc.migrationStatus);
  * sizes itself against. Zero disables the evaluate button rather than showing a
  * report about nothing.
  */
-const realSatelliteCount = computed(() => cc.sats.activeSatellites.filter((sat) => !parseWalkerSatellite(sat.props.name)).length);
+const realSatelliteCount = computed(() => cc.sats.activeSatellites.filter((sat) => !parseGeneratedSatellite(sat.props.name)).length);
 
 /** The last continuity report, shown until the fleet changes enough to re-run. */
 const fleetReport = ref<FleetContinuity | undefined>(undefined);
@@ -1052,7 +1052,7 @@ function evaluateContinuity(): void {
   evaluatingFleet.value = true;
   try {
     const date = JulianDate.toDate(cc.viewer.clock.currentTime);
-    const real = cc.sats.activeSatellites.filter((sat) => !parseWalkerSatellite(sat.props.name));
+    const real = cc.sats.activeSatellites.filter((sat) => !parseGeneratedSatellite(sat.props.name));
     if (real.length === 0) {
       fleetReport.value = undefined;
       return;

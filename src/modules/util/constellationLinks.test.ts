@@ -4,7 +4,19 @@
 // never linked.
 import { describe, expect, test } from "vitest";
 
-import { constellationLinks, parseMarkToken, parseWalkerSatellite, planeRaanDeg, planesAgree, resolveMarks, wrapPlanesAgree, type LinkEndpoint } from "./constellationLinks";
+import { CLUSTER_EPOCH_ISO, clusterFormationRecords, decodeCluster } from "./clusterFormation";
+import {
+  constellationLinks,
+  parseClusterSatellite,
+  parseGeneratedSatellite,
+  parseMarkToken,
+  parseWalkerSatellite,
+  planeRaanDeg,
+  planesAgree,
+  resolveMarks,
+  wrapPlanesAgree,
+  type LinkEndpoint,
+} from "./constellationLinks";
 import { resonantCompanion } from "./shellLayout";
 import { encodeWalker, walkerNamePrefix, walkerPatternAt, type WalkerDeltaParams } from "./walkerDelta";
 
@@ -200,5 +212,51 @@ describe("constellationLinks", () => {
     const links = constellationLinks(fleet(DELTA));
     const keys = links.map((l) => [l.a, l.b].toSorted().join("|"));
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+describe("cluster members in the marked-cluster overlay", () => {
+  // A formation gets no ring or inter-plane links — it has no planes — but its
+  // members are exactly what marking is for, so the amber bonds have to reach
+  // them. The lattice indices stand in for plane and slot, shifted to be
+  // non-negative, so the existing `<plane>-<slot>@<wire>` token grammar names a
+  // member with no new syntax.
+  const wire = "97.99:2x100@650";
+  const names = clusterFormationRecords(decodeCluster(wire)!, new Date(CLUSTER_EPOCH_ISO), `C${wire}`).flatMap((record) =>
+    record.kind === "omm" ? [record.omm.OBJECT_NAME] : [],
+  );
+
+  test("reads a member's lattice position as a link endpoint", () => {
+    const centre = parseClusterSatellite(`C${wire} L+00+00`);
+    expect(centre).toEqual({ name: `C${wire} L+00+00`, wire, plane: 2, slot: 2 });
+    expect(parseClusterSatellite(`C${wire} L-02+01`)).toMatchObject({ plane: 0, slot: 3 });
+  });
+
+  test("refuses a name whose wire is not a cluster", () => {
+    expect(parseClusterSatellite("C53:40/4/1@550 L+00+00")).toBeUndefined();
+    expect(parseClusterSatellite("W53:40/4/1@550 P01-01")).toBeUndefined();
+    expect(parseClusterSatellite("ISS (ZARYA)")).toBeUndefined();
+  });
+
+  test("gives a cluster member no ring or inter-plane links", () => {
+    expect(parseWalkerSatellite(`C${wire} L+00+00`)).toBeUndefined();
+    expect(constellationLinks(names.flatMap((name) => parseWalkerSatellite(name) ?? []))).toEqual([]);
+  });
+
+  test("bonds two members of one formation as rigid", () => {
+    // Equal altitude and equal inclination, so equal period and equal node rate:
+    // the one verdict shellLayout reserves for orbits that are not merely
+    // commensurate but identical. Drawn solid, because the geometry comes back.
+    const endpoints = names.flatMap((name) => parseGeneratedSatellite(name) ?? []);
+    const { members, bonds } = resolveMarks([`3-3@${wire}`, `1-3@${wire}`], endpoints);
+    expect(members.map((member) => member.name)).toEqual([`C${wire} L+00+00`, `C${wire} L-02+00`]);
+    expect(bonds).toHaveLength(1);
+    expect(bonds[0]!.verdict).toBe("rigid");
+    expect(bonds[0]!.returns).toBe(true);
+  });
+
+  test("accepts a cluster wire in a mark token", () => {
+    expect(parseMarkToken(`3-3@${wire}`)).toEqual({ plane: 2, slot: 2, wire });
+    expect(parseMarkToken("3-3@not-a-wire")).toBeUndefined();
   });
 });

@@ -522,6 +522,60 @@ describe("startSceneSync", () => {
       expect(secondSatnums.some((satnum) => firstSatnums.has(satnum))).toBe(false);
     });
 
+    test("expands a formation into element sets under its own cluster tag", async () => {
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      satStore.cluster = ["97.99:1x100@650"];
+      await settle();
+
+      expect(calls.customRecords).toHaveLength(1);
+      expect(calls.customRecords[0]?.tags).toEqual(["Cluster 97.99:1x100@650"]);
+      // One ring: the reference plus the four lattice points around it.
+      expect(calls.customRecords[0]?.records).toHaveLength(5);
+      expect(recordName(calls.customRecords[0]!.records[0]!)).toBe("C97.99:1x100@650 L+00+00");
+    });
+
+    test("keeps a formation off the Walker patterns' satnums", async () => {
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      satStore.walker = ["53:6/3/1@550"];
+      satStore.cluster = ["97.99:1x100@650"];
+      await settle();
+
+      const [walker, cluster] = calls.customRecords;
+      const walkerSatnums = new Set((walker?.records ?? []).map((record) => recordSatnum(record)));
+      expect((cluster?.records ?? []).some((record) => walkerSatnums.has(recordSatnum(record)))).toBe(false);
+    });
+
+    test("expands each formation once, however often the list is rewritten", async () => {
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      const satStore = useSatStore();
+
+      satStore.cluster = ["97.99:1x100@650"];
+      await settle();
+      satStore.cluster = [];
+      await settle();
+      satStore.cluster = ["97.99:1x100@650"];
+      await settle();
+
+      expect(calls.customRecords).toHaveLength(1);
+    });
+
+    test("ignores a formation the url cannot mean", async () => {
+      const { target, calls } = fakeTarget();
+      startSceneSync(target);
+      // Past the linear model's reach, so decodeCluster refuses it.
+      useSatStore().cluster = ["97.99:5x99999@650"];
+      await settle();
+
+      expect(calls.customRecords).toEqual([]);
+    });
+
     test("draws the same geometry on every load, whatever the wall clock says", async () => {
       const { target: first, calls: firstCalls } = fakeTarget();
       startSceneSync(first);

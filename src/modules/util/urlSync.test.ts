@@ -149,6 +149,28 @@ describe("hydration ordering", () => {
     expect(router.currentRoute.value.query.walker).toBe("53:20/2/1@550~180");
   });
 
+  test("a formation travels in the url the way a pattern does", async () => {
+    // `cluster` is its own key rather than a second grammar inside `walker`, so a
+    // link can carry a shell and a formation at once without either being able to
+    // spell the other.
+    const router = mountUnhydrated("/", {});
+    const satStore = useSatStore();
+    await whenHydrated();
+    satStore.cluster = ["53:3x20000@550"];
+    satStore.walker = ["53:20/2/1@550~180"];
+    await flush();
+    expect(router.currentRoute.value.query.cluster).toBe("53:3x20000@550");
+    expect(router.currentRoute.value.query.walker).toBe("53:20/2/1@550~180");
+  });
+
+  test("reads a formation back off the url", async () => {
+    mountUnhydrated("/?cluster=53:3x20000@550", {});
+    const satStore = useSatStore();
+    await whenHydrated();
+    await flush();
+    expect(satStore.cluster).toEqual(["53:3x20000@550"]);
+  });
+
   test("whenHydrated covers a store created before the call, not only the first one", async () => {
     const router = mountUnhydrated("/", {});
     await whenHydrated();
