@@ -20,8 +20,8 @@
 <template>
   <div class="bench" :class="{ 'bench--below-fps': showFps }">
     <div class="bench__bar">
-      <span class="bench__title">BENCHMARK</span>
-      <button type="button" class="bench__x" title="Close" @click="emit('close')">×</button>
+      <span class="bench__title">{{ $t("bench.title") }}</span>
+      <button type="button" class="bench__x" :title="$t('bench.close')" @click="emit('close')">×</button>
     </div>
 
     <!-- Pinned with the readout it invalidates rather than filed away in the
@@ -29,8 +29,8 @@
          all means something switched it back on, and every figure below is the
          gap between requested frames instead of a frame rate. -->
     <div v-if="renderOnDemand" class="bench__alert">
-      render-on-demand is on — these are gaps between requested frames, not a frame rate.
-      <button type="button" @click="disableRenderOnDemand()">turn off</button>
+      {{ $t("bench.renderOnDemand") }}
+      <button type="button" @click="disableRenderOnDemand()">{{ $t("bench.turnOff") }}</button>
     </div>
 
     <div class="bench__live">
@@ -59,7 +59,8 @@
         {{ live.heapMb === undefined ? "n/a" : `${live.heapMb.toFixed(0)} MB` }}
       </div>
       <div class="bench__row bench__dim">
-        {{ live.satellites }} sats · {{ live.components || "no components" }} · ×{{ live.clock }} · {{ live.entities }} entities · {{ live.primitives }} primitives
+        {{ $t("bench.sats", { count: live.satellites }) }} · {{ live.components || $t("bench.noComponents") }} · ×{{ live.clock }} ·
+        {{ $t("bench.entities", { count: live.entities }) }} · {{ $t("bench.primitives", { count: live.primitives }) }}
       </div>
     </div>
 
@@ -73,16 +74,16 @@
              away never means forgetting what is about to run. -->
         <button type="button" class="bench__fold" :aria-expanded="settingsOpen" @click="settingsOpen = !settingsOpen">
           <span class="bench__chevron">{{ settingsOpen ? "▾" : "▸" }}</span>
-          settings
+          {{ $t("bench.settings") }}
           <span v-if="!settingsOpen" class="bench__dim">{{ settingsSummary }}</span>
         </button>
         <template v-if="settingsOpen">
           <label class="bench__field">
-            <span>counts</span>
+            <span>{{ $t("bench.counts") }}</span>
             <input v-model="countsText" type="text" spellcheck="false" :disabled="running" />
           </label>
           <div class="bench__field">
-            <span>sat comps</span>
+            <span>{{ $t("bench.satComps") }}</span>
             <div class="bench__modes">
               <label v-for="option in MODES" :key="option.value" class="bench__mode" :title="option.hint">
                 <input v-model="mode" type="radio" :value="option.value" :disabled="running" />
@@ -94,35 +95,35 @@
                the sampled trajectory refreshes on a simulation-time schedule, so a
                faster clock re-propagates the same satellites more often. -->
           <label class="bench__field">
-            <span>clock</span>
+            <span>{{ $t("bench.clock") }}</span>
             <input v-model="clocksText" type="text" spellcheck="false" :disabled="running" />
             <span class="bench__dim">×</span>
           </label>
           <div class="bench__field">
-            <span>timing</span>
+            <span>{{ $t("bench.timing") }}</span>
             <div class="bench__inline">
-              <label>warmup <input v-model.number="warmupMs" type="number" min="0" step="250" :disabled="running" /></label>
-              <label>sample <input v-model.number="sampleMs" type="number" min="250" step="250" :disabled="running" /></label>
+              <label>{{ $t("bench.warmup") }} <input v-model.number="warmupMs" type="number" min="0" step="250" :disabled="running" /></label>
+              <label>{{ $t("bench.sample") }} <input v-model.number="sampleMs" type="number" min="250" step="250" :disabled="running" /></label>
               <span class="bench__dim">ms</span>
             </div>
           </div>
           <div class="bench__field">
-            <span>extras</span>
+            <span>{{ $t("bench.extras") }}</span>
             <div class="bench__inline">
-              <label><input v-model="withGroundStation" type="checkbox" :disabled="running" /> ground station (pass prediction)</label>
+              <label><input v-model="withGroundStation" type="checkbox" :disabled="running" /> {{ $t("bench.groundStation") }}</label>
               <!-- The expensive one. Disabled rather than hidden when it cannot
                    work, because "not cross-origin isolated" is a fact about how the
                    page was served that nothing else in the app ever surfaces. -->
               <label :title="footprintHint">
                 <input v-model="withFootprint" type="checkbox" :disabled="running || !footprintAvailable" />
-                accurate memory footprint (measureUAM, ~17 s/step)
+                {{ $t("bench.footprint") }}
               </label>
             </div>
           </div>
         </template>
         <div class="bench__row">
-          <button type="button" class="bench__run" :disabled="running || plan.length === 0" @click="void start()">Run {{ plan.length }} steps</button>
-          <button type="button" :disabled="!running" @click="cancel()">Cancel</button>
+          <button type="button" class="bench__run" :disabled="running || plan.length === 0" @click="void start()">{{ $t("bench.run", { steps: plan.length }) }}</button>
+          <button type="button" :disabled="!running" @click="cancel()">{{ $t("bench.cancel") }}</button>
           <span class="bench__dim">≈ {{ estimateText }}</span>
         </div>
         <div class="bench__row bench__dim">{{ status }}</div>
@@ -132,24 +133,24 @@
          deltas are built out of these rows, so a thin sample makes every table
          below noise and each one would otherwise read as a result. -->
       <div v-if="thin > 0" class="bench__block bench__warn">
-        {{ thin }}/{{ rows.length }} steps sampled under {{ MIN_TRUSTWORTHY_FRAMES }} frames — those rows, and everything derived from them, are noise. Keep the tab in front.
+        {{ $t("bench.thin", { thin, total: rows.length, min: MIN_TRUSTWORTHY_FRAMES }) }}
       </div>
 
       <div v-if="rows.length > 0" class="bench__block bench__block--table">
         <table class="bench__table">
           <thead>
             <tr>
-              <th class="bench__num">sats</th>
-              <th class="bench__num">vis</th>
-              <th v-if="clockSwept" class="bench__num">clock</th>
+              <th class="bench__num">{{ $t("bench.head.sats") }}</th>
+              <th class="bench__num">{{ $t("bench.head.vis") }}</th>
+              <th v-if="clockSwept" class="bench__num">{{ $t("bench.head.clock") }}</th>
               <th class="bench__num">fps</th>
-              <th class="bench__num">frame</th>
+              <th class="bench__num">{{ $t("bench.head.frame") }}</th>
               <th class="bench__num">p95</th>
               <th class="bench__num">cpu</th>
               <th v-if="gpuColumn" class="bench__num">gpu</th>
-              <th class="bench__num">build</th>
-              <th v-if="footprintColumn" class="bench__num">footprint</th>
-              <th>components</th>
+              <th class="bench__num">{{ $t("bench.head.build") }}</th>
+              <th v-if="footprintColumn" class="bench__num">{{ $t("bench.head.footprint") }}</th>
+              <th>{{ $t("bench.head.components") }}</th>
             </tr>
           </thead>
           <tbody>
@@ -160,7 +161,7 @@
               <td class="bench__num">{{ row.sats }}</td>
               <td class="bench__num">{{ row.visible }}</td>
               <td v-if="clockSwept" class="bench__num">×{{ row.clock }}</td>
-              <td :class="['bench__num', row.fps < FPS_BAD ? 'bench__bad' : row.fps < FPS_WARN ? 'bench__warn' : '']" :title="`${row.frames} frames sampled`">
+              <td :class="['bench__num', row.fps < FPS_BAD ? 'bench__bad' : row.fps < FPS_WARN ? 'bench__warn' : '']" :title="$t('bench.framesSampled', { frames: row.frames })">
                 {{ row.fps.toFixed(1) }}
               </td>
               <td class="bench__num">{{ row.frameMs.toFixed(2) }}</td>
@@ -170,7 +171,7 @@
               <td class="bench__num">{{ row.buildMs.toFixed(0) }}</td>
               <td v-if="footprintColumn" class="bench__num">{{ row.footprintMb === "" ? "—" : row.footprintMb }}</td>
               <td>
-                {{ row.components }}<span v-if="row.drawn" class="bench__warn"> → drew {{ row.drawn }}</span>
+                {{ row.components }}<span v-if="row.drawn" class="bench__warn">{{ $t("bench.drew", { count: row.drawn }) }}</span>
               </td>
             </tr>
           </tbody>
@@ -178,15 +179,15 @@
       </div>
 
       <div v-if="fits.length > 0" class="bench__block bench__block--table">
-        <div class="bench__caption">scaling (main-thread ms per 1,000 satellites; floor is GPU plus vsync)</div>
+        <div class="bench__caption">{{ $t("bench.scalingCaption") }}</div>
         <table class="bench__table">
           <thead>
             <tr>
-              <th>series</th>
+              <th>{{ $t("bench.head.series") }}</th>
               <th class="bench__num">ms/1k</th>
-              <th class="bench__num">base</th>
+              <th class="bench__num">{{ $t("bench.head.base") }}</th>
               <th class="bench__num">r²</th>
-              <th class="bench__num">floor</th>
+              <th class="bench__num">{{ $t("bench.head.floor") }}</th>
               <th class="bench__num">sats@60</th>
             </tr>
           </thead>
@@ -208,15 +209,15 @@
          footprint and an absolute figure printed here would invite exactly the
          misreading that sent someone after a leak that did not exist. -->
       <div v-if="memory.length > 0" class="bench__block bench__block--table">
-        <div class="bench__caption">memory (heap growth per 1,000 satellites — relative; within 2% of a forced GC when r² holds)</div>
+        <div class="bench__caption">{{ $t("bench.memoryCaption") }}</div>
         <table class="bench__table">
           <thead>
             <tr>
-              <th>series</th>
+              <th>{{ $t("bench.head.series") }}</th>
               <th class="bench__num">MB/1k</th>
               <th class="bench__num">KB/sat</th>
-              <th v-if="footprintColumn" class="bench__num" title="The same slope from absolute footprints, with its own r². Agreement with KB/sat means both can be trusted.">
-                absolute
+              <th v-if="footprintColumn" class="bench__num" :title="$t('bench.absoluteTitle')">
+                {{ $t("bench.head.absolute") }}
               </th>
               <th class="bench__num">r²</th>
             </tr>
@@ -243,25 +244,24 @@
              negative slope that is the tell — so the r² cell turns red and this
              line says what it means. -->
         <div v-if="memory.some((fit) => fit.r2 !== undefined && !memoryFitTrustworthy(fit))" class="bench__row bench__bad">
-          that slope cannot be read — it needs {{ MIN_MEMORY_FIT_POINTS }}+ counts and r² {{ MIN_TRUSTWORTHY_MEMORY_R2 }}, or a garbage collection landed inside the series and its
-          offset is not common to the rows. Sweep more counts, or re-run.
+          {{ $t("bench.memoryWarning", { points: MIN_MEMORY_FIT_POINTS, r2: MIN_TRUSTWORTHY_MEMORY_R2 }) }}
         </div>
       </div>
 
       <!-- Only when the clock was swept: an empty table here would read as
          "propagation is free" rather than "nobody asked". -->
       <div v-if="propagation.length > 0" class="bench__block bench__block--table">
-        <div class="bench__caption">propagation (clock-tick ms over the same scene at ×1)</div>
+        <div class="bench__caption">{{ $t("bench.propagationCaption") }}</div>
         <table class="bench__table">
           <thead>
             <tr>
-              <th class="bench__num">sats</th>
-              <th class="bench__num">clock</th>
-              <th class="bench__num">tick</th>
+              <th class="bench__num">{{ $t("bench.head.sats") }}</th>
+              <th class="bench__num">{{ $t("bench.head.clock") }}</th>
+              <th class="bench__num">{{ $t("bench.head.tick") }}</th>
               <th class="bench__num">Δ</th>
               <th class="bench__num">µs/sat</th>
               <th class="bench__num">cpu</th>
-              <th>components</th>
+              <th>{{ $t("bench.head.components") }}</th>
             </tr>
           </thead>
           <tbody>
@@ -283,17 +283,17 @@
          measured differently the second time, the app moved under the sweep and
          every trend above is partly that. -->
       <div v-if="repeats.length > 0" class="bench__block bench__block--table">
-        <div class="bench__caption">first step re-run at the end (drift)</div>
+        <div class="bench__caption">{{ $t("bench.repeatsCaption") }}</div>
         <table class="bench__table">
           <thead>
             <tr>
-              <th class="bench__num">sats</th>
-              <th class="bench__num">main 1st</th>
-              <th class="bench__num">main again</th>
-              <th class="bench__num">drift</th>
-              <th class="bench__num">build 1st</th>
-              <th class="bench__num">build again</th>
-              <th class="bench__num">drift</th>
+              <th class="bench__num">{{ $t("bench.head.sats") }}</th>
+              <th class="bench__num">{{ $t("bench.head.mainFirst") }}</th>
+              <th class="bench__num">{{ $t("bench.head.mainAgain") }}</th>
+              <th class="bench__num">{{ $t("bench.head.drift") }}</th>
+              <th class="bench__num">{{ $t("bench.head.buildFirst") }}</th>
+              <th class="bench__num">{{ $t("bench.head.buildAgain") }}</th>
+              <th class="bench__num">{{ $t("bench.head.drift") }}</th>
             </tr>
           </thead>
           <tbody>
@@ -311,10 +311,10 @@
       </div>
 
       <div class="bench__block bench__row">
-        <button type="button" :disabled="rows.length === 0" @click="logToConsole()">Log</button>
-        <button type="button" :disabled="rows.length === 0" @click="void copy('csv')">Copy CSV</button>
-        <button type="button" :disabled="rows.length === 0" @click="void copy('json')">Copy JSON</button>
-        <button type="button" :disabled="rows.length === 0" @click="void copy('text')">Copy table</button>
+        <button type="button" :disabled="rows.length === 0" @click="logToConsole()">{{ $t("bench.log") }}</button>
+        <button type="button" :disabled="rows.length === 0" @click="void copy('csv')">{{ $t("bench.copyCsv") }}</button>
+        <button type="button" :disabled="rows.length === 0" @click="void copy('json')">{{ $t("bench.copyJson") }}</button>
+        <button type="button" :disabled="rows.length === 0" @click="void copy('text')">{{ $t("bench.copyTable") }}</button>
         <span v-if="copied" class="bench__dim">{{ copied }}</span>
       </div>
     </div>
@@ -324,6 +324,7 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 
 import { useController } from "../composables/useController";
 import {
@@ -366,6 +367,7 @@ import { useCesiumStore } from "../stores/cesium";
 import { useSatStore } from "../stores/sat";
 
 const emit = defineEmits<{ close: [] }>();
+const { t } = useI18n();
 
 const cc = useController();
 const cesiumStore = useCesiumStore();
@@ -412,7 +414,7 @@ const footprintHint = footprintAvailable
   ? "performance.measureUserAgentSpecificMemory(): an absolute footprint with garbage excluded, against the relative slope the default reports. It resolves only when a collection happens, which is the ~17 s."
   : "Unavailable: this page is not cross-origin isolated, so the API is not exposed. pnpm dev and pnpm preview send the headers that enable it; a deployed satvis.space does not.";
 const running = ref(false);
-const status = ref("idle");
+const status = ref(t("bench.idle"));
 const copied = ref("");
 // Open to begin with: the settings are the first thing anyone touches, and a
 // panel that opens showing nothing but a Run button hides what it would run.
@@ -739,10 +741,10 @@ async function copy(format: "csv" | "json" | "text"): Promise<void> {
   const text = format === "csv" ? toCsv(current) : format === "json" ? toJson(current) : formatTable(current);
   try {
     await navigator.clipboard.writeText(text);
-    copied.value = `copied ${format}`;
+    copied.value = t("bench.copied", { format });
   } catch {
     console.log(text);
-    copied.value = "clipboard refused — logged instead";
+    copied.value = t("bench.clipboardRefused");
   }
   setTimeout(() => {
     copied.value = "";

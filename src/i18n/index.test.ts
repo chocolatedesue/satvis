@@ -65,6 +65,7 @@ describe("component keys", () => {
   // the record of how far the conversion has got.
   const components = [
     "src/components/AboutDialog.vue",
+    "src/components/BenchmarkPanel.vue",
     "src/components/ClockDeck.vue",
     "src/components/EntityInfoPanel.vue",
     "src/components/FormationView.vue",
