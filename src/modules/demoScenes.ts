@@ -303,8 +303,12 @@ export const FAMILY_BAND_KM = { min: 300, max: 2000 };
  * degrees of inclination spread where a mid-inclination family's fifth would
  * cost far more.
  */
+// 16 in 2 planes rather than 24 in 3: five shells is already a lot of globe, and
+// every generated satellite carries a label — three planes put 126 of them on
+// screen, where two put 84 and still keep every ring link above the minimum that
+// clears the Earth. The family is the thing being shown, not the fleet size.
 export function familyReference(): WalkerDeltaParams | undefined {
-  return sunSyncWalkerParams({ altitudeKm: 650, total: 24, planes: 3, plane: "dawn-dusk" }, new Date(WALKER_EPOCH_ISO));
+  return sunSyncWalkerParams({ altitudeKm: 650, total: 16, planes: 2, plane: "dawn-dusk" }, new Date(WALKER_EPOCH_ISO));
 }
 
 /**

@@ -288,7 +288,7 @@
       </div>
     </details>
 
-    <details class="orbitLab__group">
+    <details class="orbitLab__group" :open="clusterRows.length > 0">
       <summary class="orbitLab__summary">{{ $t("orbitLab.group.clusters") }}</summary>
       <div class="orbitLab__body">
         <p class="orbitLab__note" v-html="$t('orbitLab.clusters.note')"></p>
@@ -300,14 +300,18 @@
         <template v-if="clusterRows.length > 0">
           <table class="orbitLab__facts">
             <tbody>
-              <tr v-for="row in clusterRows" :key="row.key">
+              <tr v-for="row in clusterRows" :key="row.key" :class="{ 'orbitLab__row--marked': markedClusterKey === row.key }">
                 <td class="orbitLab__factName" :title="row.detail">
                   <code>{{ row.members }}</code>
+                  <span class="orbitLab__factSub">{{ $t("orbitLab.clusters.range", { closest: row.closest, horizon: row.horizon }) }}</span>
                 </td>
                 <td class="orbitLab__factValue">{{ row.cycle }}</td>
                 <td class="orbitLab__factMark">
                   <button type="button" class="orbitLab__patternDrop" :title="$t('orbitLab.clusters.markTitle')" @click="markCluster(row)">
-                    {{ $t("orbitLab.clusters.mark") }}
+                    {{ markedClusterKey === row.key ? $t("orbitLab.clusters.marked") : $t("orbitLab.clusters.mark") }}
+                  </button>
+                  <button type="button" class="orbitLab__patternDrop" :title="$t('orbitLab.clusters.watchTitle', { seconds: WATCH_CYCLE_SECONDS })" @click="watchCluster(row)">
+                    {{ $t("orbitLab.clusters.watch") }}
                   </button>
                 </td>
               </tr>
@@ -322,7 +326,7 @@
           <span>{{ $t("orbitLab.clusters.revolutions") }}</span>
           <input v-model.number="familyRevolutions" type="number" min="2" max="60" step="1" />
         </label>
-        <p class="orbitLab__derived">{{ $t("orbitLab.clusters.familyDerived", { shells: familyShellPatterns.length, cycle: familyCycleText }) }}</p>
+        <p class="orbitLab__derived">{{ $t("orbitLab.clusters.familyDerived", { shells: familyShellPatterns.length, sats: familySatellites, cycle: familyCycleText }) }}</p>
         <table v-if="familyShells.length > 0" class="orbitLab__facts">
           <tbody>
             <tr :title="$t('orbitLab.clusters.facts.altitudeTitle')">
@@ -690,6 +694,7 @@ import {
   findStableClusters,
   type ClusterMember,
   MAX_CLUSTER_CYCLE_HOURS,
+  minSeparationKm,
   searchStableShellLayouts,
   shellFamily,
   shellPairLayout,
@@ -1182,6 +1187,11 @@ interface ClusterRow {
   wires: string[];
   members: string;
   cycle: string;
+  /** The cycle in hours, so the watch action can set the clock to it. */
+  cycleHours: number;
+  /** The closest any two members can ever come, and the range they can see over. */
+  closest: string;
+  horizon: string;
   detail: string;
 }
 
@@ -1192,19 +1202,53 @@ function orbitLabel(wireForm: string): string {
 }
 
 const clusterRows = computed<ClusterRow[]>(() =>
-  stableClusters.value.map((found) => ({
-    key: found.members.toSorted().join("|"),
-    wires: [...found.members],
-    members: found.members.map(orbitLabel).join(" + "),
-    cycle: `${found.cycleHours.toFixed(2)} h · ${found.verdict}`,
-    detail: [
-      `${found.revolutions.join(", ")} revolutions per cycle`,
-      `slip ${found.slipDegPerCycle.toFixed(2)}° per cycle`,
-      `node spread ${found.nodeSpreadDegPerDay.toFixed(4)}°/day`,
-      `tightest link budget ${found.maxLinkRangeKm.toFixed(0)} km`,
-    ].join(" · "),
-  })),
+  stableClusters.value.map((found) => {
+    const altitudes = found.members.flatMap((wireForm) => {
+      const params = decodeWalker(wireForm);
+      return params ? [params.altitudeKm] : [];
+    });
+    let closestKm = Infinity;
+    for (let a = 0; a < altitudes.length; a += 1) {
+      for (let b = a + 1; b < altitudes.length; b += 1) {
+        closestKm = Math.min(closestKm, minSeparationKm(altitudes[a] as number, altitudes[b] as number));
+      }
+    }
+    return {
+      key: found.members.toSorted().join("|"),
+      wires: [...found.members],
+      members: found.members.map(orbitLabel).join(" + "),
+      cycle: `${found.cycleHours.toFixed(2)} h · ${found.verdict}`,
+      cycleHours: found.cycleHours,
+      closest: Number.isFinite(closestKm) ? `${closestKm.toFixed(0)} km` : "—",
+      horizon: `${found.maxLinkRangeKm.toFixed(0)} km`,
+      detail: [
+        `${found.revolutions.join(", ")} revolutions per cycle`,
+        `slip ${found.slipDegPerCycle.toFixed(2)}° per cycle`,
+        `node spread ${found.nodeSpreadDegPerDay.toFixed(4)}°/day`,
+        `closest approach ${Number.isFinite(closestKm) ? closestKm.toFixed(0) : "—"} km against a ${found.maxLinkRangeKm.toFixed(0)} km link horizon`,
+      ].join(" · "),
+    };
+  }),
 );
+
+/**
+ * How long one cluster cycle should take to watch.
+ *
+ * 90 seconds: long enough that the return is a thing seen rather than guessed,
+ * short enough that nobody switches away mid-cycle. Everything else about the
+ * clock is a rung the reader picks; this is the one the panel can compute,
+ * because the cycle is a number it just printed.
+ */
+const WATCH_CYCLE_SECONDS = 90;
+
+/** Whether this row's cluster is the one currently bonded on the globe. */
+const markedClusterKey = computed(() => {
+  const marks = satStore.marks;
+  if (marks.length === 0) {
+    return undefined;
+  }
+  return clusterRows.value.find((row) => row.wires.length === marks.length && row.wires.every((wireForm) => marks.includes(`1-1@${wireForm}`)))?.key;
+});
 
 /**
  * Bond one satellite per cluster member, which is what makes a cluster visible
@@ -1212,9 +1256,29 @@ const clusterRows = computed<ClusterRow[]>(() =>
  * bonded in the verdict's line style. A cluster that returns draws solid and
  * comes back to the same shape; pressing this on two rows in turn is how the
  * Pareto front is read off the globe rather than off the table.
+ *
+ * A toggle rather than a one-way write, because the point of marking two rows in
+ * turn is comparing them, and a reader who has to find the clear button between
+ * two comparisons does not make the second one.
  */
 function markCluster(row: ClusterRow): void {
+  satStore.marks = markedClusterKey.value === row.key ? [] : row.wires.map((wireForm) => `1-1@${wireForm}`);
+}
+
+/**
+ * Bond the cluster and run the clock at the one rate that shows what the row
+ * claims: a whole cycle in {@link WATCH_CYCLE_SECONDS}.
+ *
+ * "Returns every 24.46 h" is not a sentence a reader can check at 1x, and the
+ * multiplier that makes it checkable is not one anybody would guess — it is the
+ * cycle divided by the time you are willing to watch. Marking and playing at the
+ * panel's default rate is how a stable cluster looks exactly as convincing as a
+ * drifting one for as long as anyone looks at it.
+ */
+function watchCluster(row: ClusterRow): void {
   satStore.marks = row.wires.map((wireForm) => `1-1@${wireForm}`);
+  clockControl.setMultiplier((row.cycleHours * 3600) / WATCH_CYCLE_SECONDS);
+  clockControl.play();
 }
 
 /** The family the form's own shell can hold, as orbits. */
@@ -1249,6 +1313,9 @@ const familyInclinationText = computed(() => {
 });
 
 const familyRevolutionsText = computed(() => familyShells.value.map((shell) => shell.revolutions).join(", "));
+
+/** What pressing Fly actually puts on the globe — a five-shell family is not five satellites. */
+const familySatellites = computed(() => familyShellPatterns.value.reduce((total, shell) => total + shell.total, 0));
 
 /**
  * Fly the whole family the form's shell can hold.
@@ -1894,6 +1961,21 @@ watch(panelAxis, () => refresh());
 .orbitLab__factMark {
   padding-left: 6px;
   white-space: nowrap;
+}
+
+/* Which cluster the halos on the globe belong to. The marks are amber and the
+   table is not, so without this a reader who marks a row and looks up has no way
+   to tell which of several near-identical rows is on screen. */
+.orbitLab__row--marked .orbitLab__factName {
+  color: #fbbf24;
+}
+
+/* A second line inside a fact cell: the closest approach and the link horizon,
+   which are the two numbers that decide whether a returning geometry is a
+   usable one, and are too long to sit beside the cycle. */
+.orbitLab__factSub {
+  display: block;
+  opacity: 0.65;
 }
 
 .orbitLab__legend {

@@ -174,6 +174,24 @@ export function maxLinkRangeKm(altitudeAKm: number, altitudeBKm: number, marginK
 }
 
 /**
+ * The closest two circular shells can ever come: the difference of their radii.
+ *
+ * The counterpart to `maxLinkRangeKm`, and the other half of "can this cluster
+ * talk". Two shells hold their relative geometry by holding their rates, and
+ * where in that geometry they sit is set by constants this module does not
+ * carry — so the most that can be said from two altitudes is a *bound*: no
+ * choice of nodes or phases brings a pair closer than the gap between their
+ * radii, and a pair whose node offset is zero reaches exactly that.
+ *
+ * Read it against `maxLinkRangeKm`. A cluster whose closest approach is beyond
+ * its link horizon returns to a geometry in which no member ever sees another,
+ * however exact the return is.
+ */
+export function minSeparationKm(altitudeAKm: number, altitudeBKm: number): number {
+  return Math.abs(altitudeAKm - altitudeBKm);
+}
+
+/**
  * The widest Earth-central angle two shells can span and still see each other:
  * `arccos(R_b/r₁) + arccos(R_b/r₂)`.
  *

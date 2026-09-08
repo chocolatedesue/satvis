@@ -380,14 +380,18 @@ export default {
         "<code>?demo=sso-family</code>",
       foundTitle: "已生成图案中的稳定集群（{count}）",
       mark: "标记",
+      marked: "已标记",
       markTitle: "给每个成员各标记一颗星，让集群能被看见，而不只是躺在表里",
+      watch: "看一圈",
+      watchTitle: "标记该集群，并把时钟调到让整个周期在 {seconds} 秒内跑完——只有这个倍率下“每 X 小时回归一次”才是可验证的",
+      range: "最近 {closest} / 地平 {horizon}",
       foundNote:
         "所有能闭合同一周期的极大集合，按优劣排序——比包含它的集群<em>更早</em>回归的子集是另一种报价，而不是更差的报价，所以同一层可能出现在多行里。<strong>slip</strong> 是成员进入下一个周期时携带的最大沿迹误差；" +
         "<strong>链路预算</strong> 是集群内任意一对可能达到的最短距离——若成员永远走不进这个距离，它的几何回归得再准也织不出算力网络。",
       none: "当前 {count} 条互不相同的轨道没有一个能闭合周期——再加一层，或按多壳层那一组给出的伴随壳层。",
       family: "由这一层构造家族",
       revolutions: "基准层每周期圈数",
-      familyDerived: "{shells} 层，每 {cycle} 回归一次",
+      familyDerived: "{shells} 层、{sats} 颗星，每 {cycle} 回归一次",
       facts: {
         altitude: "高度",
         altitudeTitle: "家族可以铺开的高度带——上避开内辐射带，下避开大气阻力",

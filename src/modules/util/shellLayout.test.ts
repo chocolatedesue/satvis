@@ -18,6 +18,7 @@ import {
   MAX_REPEAT_REVOLUTIONS,
   maxLinkRangeKm,
   minSatellitesPerRing,
+  minSeparationKm,
   NODE_LOCK_TOLERANCE_DEG_PER_DAY,
   nodeLockedGroups,
   resonantCompanion,
@@ -512,5 +513,28 @@ describe("the Earth's constraint on a layout", () => {
     expect(minSatellitesPerRing(550)).toBe(8);
     // Asking the ring to clear the atmosphere too wants one more satellite.
     expect(minSatellitesPerRing(550, LINK_MARGIN_KM)).toBe(9);
+  });
+
+  test("the closest two shells can ever come is the gap between their radii", () => {
+    // A bound rather than a prediction: where in the geometry a pair sits is set
+    // by node and phase offsets this module does not carry, so all that is
+    // knowable from two altitudes is the floor — and a coplanar pair reaches it.
+    expect(minSeparationKm(550, 1200)).toBe(650);
+    expect(minSeparationKm(1200, 550)).toBe(650);
+    expect(minSeparationKm(550, 550)).toBe(0);
+  });
+
+  test("a designed family returns to a geometry it can actually talk across", () => {
+    // The two numbers are decided by different things — the return by the rates,
+    // the reach by the altitudes — so a family that repeats is not automatically
+    // a family that links. For a near-polar family it happens to be both, and
+    // saying so is what lets the panel print the two side by side.
+    const family = shellFamily(STARLINK_SHELL, { cycleRevolutions: 15 });
+    const altitudes = family.map((shell) => shell.altitudeKm).toSorted((a, b) => a - b);
+    for (let a = 0; a + 1 < altitudes.length; a += 1) {
+      const low = altitudes[a] as number;
+      const high = altitudes[a + 1] as number;
+      expect(minSeparationKm(low, high)).toBeLessThan(maxLinkRangeKm(low, high));
+    }
   });
 });

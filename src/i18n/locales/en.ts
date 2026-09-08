@@ -406,7 +406,11 @@ export default {
         "{revolutions} times per cycle; each other shell takes a whole number of turns beside it. <code>?demo=sso-family</code>",
       foundTitle: "Stable clusters among the generated patterns ({count})",
       mark: "Mark",
+      marked: "Marked",
       markTitle: "Bond one satellite per member, so the cluster is watchable rather than only tabulated",
+      watch: "Watch",
+      watchTitle: 'Bond the cluster and run one whole cycle in {seconds} s — the only rate at which "returns every X h" is checkable',
+      range: "closest {closest} / horizon {horizon}",
       foundNote:
         "Every maximal set of shells that closes one cycle, best first — a subset that returns <em>sooner</em> than the cluster containing it is a different offer rather than a worse one, which is why " +
         "one shell can appear in several rows. <strong>slip</strong> is the worst along-track error a member carries into the next cycle; the <strong>link budget</strong> is the shortest range any pair " +
@@ -414,7 +418,7 @@ export default {
       none: "No cluster closes a cycle among the {count} distinct orbits on screen — add a second shell, or press beside the companion the multi-shell group solves for.",
       family: "Family from this shell",
       revolutions: "Reference revolutions per cycle",
-      familyDerived: "{shells} shells, returning every {cycle}",
+      familyDerived: "{shells} shells, {sats} satellites, returning every {cycle}",
       facts: {
         altitude: "Altitudes",
         altitudeTitle: "The band a family may spread across — above the drag, below the inner belt",
