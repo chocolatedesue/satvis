@@ -300,21 +300,33 @@
         <template v-if="clusterRows.length > 0">
           <table class="orbitLab__facts">
             <tbody>
-              <tr v-for="row in clusterRows" :key="row.key" :class="{ 'orbitLab__row--marked': markedClusterKey === row.key }">
-                <td class="orbitLab__factName" :title="row.detail">
-                  <code>{{ row.members }}</code>
-                  <span class="orbitLab__factSub">{{ $t("orbitLab.clusters.range", { closest: row.closest, horizon: row.horizon }) }}</span>
-                </td>
-                <td class="orbitLab__factValue">{{ row.cycle }}</td>
-                <td class="orbitLab__factMark">
-                  <button type="button" class="orbitLab__patternDrop" :title="$t('orbitLab.clusters.markTitle')" @click="markCluster(row)">
-                    {{ markedClusterKey === row.key ? $t("orbitLab.clusters.marked") : $t("orbitLab.clusters.mark") }}
-                  </button>
-                  <button type="button" class="orbitLab__patternDrop" :title="$t('orbitLab.clusters.watchTitle', { seconds: WATCH_CYCLE_SECONDS })" @click="watchCluster(row)">
-                    {{ $t("orbitLab.clusters.watch") }}
-                  </button>
-                </td>
-              </tr>
+              <template v-for="row in clusterRows" :key="row.key">
+                <tr :class="{ 'orbitLab__row--marked': markedClusterKey === row.key }">
+                  <td class="orbitLab__factName" :title="row.detail">
+                    <code>{{ row.members }}</code>
+                    <span class="orbitLab__factSub">{{ $t("orbitLab.clusters.range", { closest: row.closest, horizon: row.horizon }) }}</span>
+                    <span class="orbitLab__factSub">{{ $t("orbitLab.clusters.contact", { share: row.contactShare }) }}</span>
+                  </td>
+                  <td class="orbitLab__factValue">{{ row.cycle }}</td>
+                  <td class="orbitLab__factMark">
+                    <button type="button" class="orbitLab__patternDrop" :title="$t('orbitLab.clusters.markTitle')" @click="markCluster(row)">
+                      {{ markedClusterKey === row.key ? $t("orbitLab.clusters.marked") : $t("orbitLab.clusters.mark") }}
+                    </button>
+                    <button type="button" class="orbitLab__patternDrop" :title="$t('orbitLab.clusters.watchTitle', { seconds: WATCH_CYCLE_SECONDS })" @click="watchCluster(row)">
+                      {{ $t("orbitLab.clusters.watch") }}
+                    </button>
+                  </td>
+                </tr>
+                <tr class="orbitLab__sparkRow">
+                  <td colspan="3">
+                    <svg class="orbitLab__spark" :viewBox="`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`" preserveAspectRatio="none" :title="row.detail">
+                      <rect v-for="(bar, index) in row.spark.windows" :key="index" class="orbitLab__sparkWindow" :x="bar.x" :y="SPARK_HEIGHT - 2" :width="bar.width" height="2" />
+                      <line class="orbitLab__sparkHorizon" x1="0" :y1="row.spark.horizonY" :x2="SPARK_WIDTH" :y2="row.spark.horizonY" />
+                      <polyline class="orbitLab__sparkLine" :points="row.spark.points" />
+                    </svg>
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
           <p class="orbitLab__note" v-html="$t('orbitLab.clusters.foundNote')"></p>
@@ -684,6 +696,7 @@ import {
   validateClusterFormation,
   type ClusterFormationParams,
 } from "../modules/util/clusterFormation";
+import { contactSeries, type ContactSeries, type OrbitPhase } from "../modules/util/clusterRange";
 import { parseGeneratedSatellite } from "../modules/util/constellationLinks";
 import { fleetContinuity, type FleetContinuity } from "../modules/util/fleetContinuity";
 import { illuminationTimeline } from "../modules/util/illumination";
@@ -1192,6 +1205,10 @@ interface ClusterRow {
   /** The closest any two members can ever come, and the range they can see over. */
   closest: string;
   horizon: string;
+  /** Share of one cycle in which at least one pair is inside its link horizon. */
+  contactShare: string;
+  /** The curve, already scaled to the sparkline's own box. */
+  spark: Spark;
   detail: string;
 }
 
@@ -1201,12 +1218,74 @@ function orbitLabel(wireForm: string): string {
   return params ? `${params.inclinationDeg}°/${params.altitudeKm}` : wireForm;
 }
 
+/**
+ * The contact curve, scaled into the sparkline's box.
+ *
+ * Precomputed rather than built in the template because the template runs on every
+ * render and the series does not change unless the patterns do. The vertical scale
+ * is shared with the horizon line — the horizon is the whole point of the drawing,
+ * so it has to be on the same axis as the ranges it judges.
+ */
+interface Spark {
+  points: string;
+  horizonY: number;
+  /** Runs of consecutive samples with something in contact, as bars along the bottom. */
+  windows: Array<{ x: number; width: number }>;
+}
+
+const SPARK_WIDTH = 132;
+const SPARK_HEIGHT = 30;
+const SPARK_SAMPLES = 120;
+
+function sparkOf(series: ContactSeries): Spark {
+  const samples = series.samples;
+  const top = Math.max(...samples.map((sample) => sample.closestKm), series.horizonKm) * 1.05;
+  const x = (index: number) => (index / Math.max(1, samples.length - 1)) * SPARK_WIDTH;
+  const y = (km: number) => SPARK_HEIGHT - (top > 0 ? (km / top) * SPARK_HEIGHT : 0);
+  const windows: Array<{ x: number; width: number }> = [];
+  let start: number | undefined;
+  for (let index = 0; index <= samples.length; index += 1) {
+    const linked = index < samples.length && (samples[index] as (typeof samples)[number]).linkedPairs > 0;
+    if (linked && start === undefined) {
+      start = index;
+    } else if (!linked && start !== undefined) {
+      windows.push({ x: x(start), width: Math.max(0.8, x(index) - x(start)) });
+      start = undefined;
+    }
+  }
+  return {
+    points: samples.map((sample, index) => `${x(index).toFixed(1)},${y(sample.closestKm).toFixed(1)}`).join(" "),
+    horizonY: y(series.horizonKm),
+    windows,
+  };
+}
+
+/**
+ * A pattern's marked satellite, as the closed form needs it.
+ *
+ * Slot 1 of plane 1 is the satellite every mark token names, and the generator
+ * puts it at the pattern's node with no phase offset — so the two angles the
+ * contact curve starts from are the pattern's own RAAN offset and zero.
+ */
+function markedMember(wireForm: string): OrbitPhase | undefined {
+  const params = decodeWalker(wireForm);
+  return params ? { altitudeKm: params.altitudeKm, inclinationDeg: params.inclinationDeg, nodeDeg: params.raanOffsetDeg ?? 0, phaseDeg: 0 } : undefined;
+}
+
 const clusterRows = computed<ClusterRow[]>(() =>
   stableClusters.value.map((found) => {
     const altitudes = found.members.flatMap((wireForm) => {
       const params = decodeWalker(wireForm);
       return params ? [params.altitudeKm] : [];
     });
+    const contact = contactSeries(
+      found.members.flatMap((wireForm) => {
+        const member = markedMember(wireForm);
+        return member ? [member] : [];
+      }),
+      found.cycleHours,
+      SPARK_SAMPLES,
+    );
     let closestKm = Infinity;
     for (let a = 0; a < altitudes.length; a += 1) {
       for (let b = a + 1; b < altitudes.length; b += 1) {
@@ -1221,11 +1300,14 @@ const clusterRows = computed<ClusterRow[]>(() =>
       cycleHours: found.cycleHours,
       closest: Number.isFinite(closestKm) ? `${closestKm.toFixed(0)} km` : "—",
       horizon: `${found.maxLinkRangeKm.toFixed(0)} km`,
+      contactShare: pct(contact.linkedFraction),
+      spark: sparkOf(contact),
       detail: [
         `${found.revolutions.join(", ")} revolutions per cycle`,
         `slip ${found.slipDegPerCycle.toFixed(2)}° per cycle`,
         `node spread ${found.nodeSpreadDegPerDay.toFixed(4)}°/day`,
         `closest approach ${Number.isFinite(closestKm) ? closestKm.toFixed(0) : "—"} km against a ${found.maxLinkRangeKm.toFixed(0)} km link horizon`,
+        `returns to within ${contact.closureKm.toFixed(1)} km of where it started`,
       ].join(" · "),
     };
   }),
@@ -1243,11 +1325,11 @@ const WATCH_CYCLE_SECONDS = 90;
 
 /** Whether this row's cluster is the one currently bonded on the globe. */
 const markedClusterKey = computed(() => {
-  const marks = satStore.marks;
-  if (marks.length === 0) {
+  const marked = satStore.marks;
+  if (marked.length === 0) {
     return undefined;
   }
-  return clusterRows.value.find((row) => row.wires.length === marks.length && row.wires.every((wireForm) => marks.includes(`1-1@${wireForm}`)))?.key;
+  return clusterRows.value.find((row) => row.wires.length === marked.length && row.wires.every((wireForm) => marked.includes(`1-1@${wireForm}`)))?.key;
 });
 
 /**
@@ -1976,6 +2058,39 @@ watch(panelAxis, () => refresh());
 .orbitLab__factSub {
   display: block;
   opacity: 0.65;
+}
+
+/* One cycle of the cluster's internal geometry. The globe cannot show a return —
+   five shells nested inside each other look the same whether the configuration
+   comes back or not — so the return is drawn instead: the curve's last sample is
+   its first, and the bars along the bottom are the windows in which some pair is
+   actually inside its link horizon. */
+.orbitLab__sparkRow td {
+  padding-bottom: 4px;
+}
+
+.orbitLab__spark {
+  display: block;
+  width: 100%;
+  height: 30px;
+}
+
+.orbitLab__sparkLine {
+  fill: none;
+  stroke: #fbbf24;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.orbitLab__sparkHorizon {
+  stroke: #94a3b8;
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.orbitLab__sparkWindow {
+  fill: #34d399;
 }
 
 .orbitLab__legend {
