@@ -1,9 +1,9 @@
 // Orbit analysis, off the screen.
 //
-//   node --experimental-strip-types scripts/orbit-lab.ts orbit 550 53
-//   node --experimental-strip-types scripts/orbit-lab.ts shells 550 53
-//   node --experimental-strip-types scripts/orbit-lab.ts clusters 550:53,1200:70,600:97.79
-//   node --experimental-strip-types scripts/orbit-lab.ts formation 650 100 5
+//   node --experimental-strip-types scripts/research/orbit-lab.ts orbit 550 53
+//   node --experimental-strip-types scripts/research/orbit-lab.ts shells 550 53
+//   node --experimental-strip-types scripts/research/orbit-lab.ts clusters 550:53,1200:70,600:97.79
+//   node --experimental-strip-types scripts/research/orbit-lab.ts formation 650 100 5
 //
 // Or through pnpm, which supplies the flag: `pnpm orbit-lab orbit 550 53`.
 //
@@ -21,10 +21,10 @@
 // extension, because node resolves no specifier a bundler would have to. See the
 // header of src/modules/util/orbitModel.ts.
 
-import { clusterRadiusM, clusterSize, maxEccentricity, type ClusterFormationParams } from "../src/modules/util/clusterFormation.ts";
-import { orbitalRates, type CircularOrbit } from "../src/modules/util/orbitModel.ts";
-import { orbitReport } from "../src/modules/util/orbitReport.ts";
-import { findStableClusters, searchStableShellLayouts, type ClusterMember } from "../src/modules/util/shellLayout.ts";
+import { clusterRadiusM, clusterSize, maxEccentricity, type ClusterFormationParams } from "../../src/modules/util/clusterFormation.ts";
+import { orbitalRates, type CircularOrbit } from "../../src/modules/util/orbitModel.ts";
+import { orbitReport } from "../../src/modules/util/orbitReport.ts";
+import { findStableClusters, searchStableShellLayouts, type ClusterMember } from "../../src/modules/util/shellLayout.ts";
 import { reportDesign, usageDesign } from "./cluster-design.ts";
 import { reportCapacity, reportEvaluation, usageCapacity, usageEvaluate } from "./compute-design.ts";
 

@@ -243,7 +243,7 @@ happens.
 Everything above is secular J₂ in a vacuum. At 550–650 km there is still air,
 and two satellites that differ in area-to-mass do not lose altitude at the same
 rate — which is a phase difference, and phase differences are what both claims
-are made of. `scripts/drag-budget.ts` computes the size of it:
+are made of. `scripts/research/drag-budget.ts` computes the size of it:
 
 ```
 ȧ  = −ρ B √(μ a)          B = C_d·A/m
@@ -308,5 +308,5 @@ pnpm orbit-lab formation 650 100 5
 pnpm orbit-lab shells 550 53
 ```
 
-`scripts/derive-isl-topology.ts` is the same ideas a level deeper — it flies the geometry with SGP4
+`scripts/research/derive-isl-topology.ts` is the same ideas a level deeper — it flies the geometry with SGP4
 rather than reading it off a closed form, and is where the measured numbers above come from.

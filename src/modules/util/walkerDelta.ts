@@ -16,7 +16,7 @@
 
 import type { GpRecord } from "./gp";
 // `./orbitModel.ts` with the extension spelled out, unlike every other import in
-// this folder: `scripts/derive-isl-topology.ts` runs this file through node's own
+// this folder: `scripts/research/derive-isl-topology.ts` runs this file through node's own
 // type stripping, which resolves no specifier a bundler would have to. A
 // type-only import would be erased and could drop the extension; a runtime one
 // cannot. See the header of ./orbitModel.ts.

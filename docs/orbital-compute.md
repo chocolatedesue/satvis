@@ -7,7 +7,7 @@ functions the app itself runs, and every one is reproducible:
 ```sh
 pnpm orbit-lab design 550 53 22      # one orbit, all three layers at once
 pnpm orbit-lab shells 780 86.4       # companion shells that hold
-scripts/drag-budget.ts               # how long the vacuum holds
+scripts/research/drag-budget.ts               # how long the vacuum holds
 pnpm energy-report                   # docs/starlink-energy-report.md, regenerated
 ```
 
@@ -196,7 +196,7 @@ one, and should be quoted as such.
 5. **Choose the cluster scale last.** Hundreds of kilometres apart (a shell) if you want the
    geometry to survive without thrust; metres to a kilometre (a formation, `docs/adr/0012`) if
    you want the link budget, and then budget the station-keeping.
-6. **Check the drag budget before quoting a cycle.** `scripts/drag-budget.ts`.
+6. **Check the drag budget before quoting a cycle.** `scripts/research/drag-budget.ts`.
 
 ---
 

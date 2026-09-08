@@ -99,7 +99,7 @@ added, and a shared cycle does not grow at all.
 - **The count is bounded by the band, and the band is bounded by the reference's inclination.** The
   altitude floor and the co-precession ceiling fix a ratio of periods, and the shells are the
   integers that fit inside it — about **one more shell per six hours of cycle** at 550 km.
-  `scripts/derive-isl-topology.ts` study 11 measures it:
+  `scripts/research/derive-isl-topology.ts` study 11 measures it:
 
   | reference      | cycle  | shells | inclination span |
   | -------------- | ------ | ------ | ---------------- |

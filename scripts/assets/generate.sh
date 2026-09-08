@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run one of the containerised asset generators.
 #
-#   pnpm update-imagery          the offline base map      (scripts/imagery)
-#   pnpm update-starmap          the sky box faces         (scripts/starmap)
+#   pnpm update-imagery          the offline base map      (scripts/assets/imagery)
+#   pnpm update-starmap          the sky box faces         (scripts/assets/starmap)
 #
 # Anything after the target is passed through to the generator, so
 # `pnpm update-starmap --res 32k` and `pnpm update-imagery --help` do what they
@@ -53,7 +53,7 @@ case "$TARGET" in
     ;;
 esac
 
-CONTEXT="$REPO_ROOT/scripts/$TARGET"
+CONTEXT="$REPO_ROOT/scripts/assets/$TARGET"
 CACHE_DIR="$CONTEXT/.cache"
 
 if ! docker info >/dev/null 2>&1; then

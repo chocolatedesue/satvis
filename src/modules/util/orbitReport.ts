@@ -2,7 +2,7 @@
 //
 // The numbers a designer actually reads, assembled in one call — and returned as
 // values rather than as a printed report, so a panel, a script and a test can all
-// read the same thing. `scripts/orbit-lab.ts` is the formatter on top of this;
+// read the same thing. `scripts/research/orbit-lab.ts` is the formatter on top of this;
 // `src/components/OrbitLabPanel.vue` reads the same functions piecemeal because it
 // wants them live against a form.
 //
@@ -13,7 +13,7 @@
 //
 // The caveat that travels with all of it: these are secular J₂ two-body answers
 // in WGS-72. Against SGP4 the inclination they name lands within about a tenth of
-// a degree and the altitude within a few km; `scripts/derive-isl-topology.ts`
+// a degree and the altitude within a few km; `scripts/research/derive-isl-topology.ts`
 // measures exactly that and refines against the propagator, which is the honest
 // way round.
 

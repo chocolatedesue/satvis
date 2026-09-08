@@ -7,13 +7,13 @@
 // budget, and prints the two columns that matter: what the placement delivers,
 // and what migration could add on top of it.
 //
-//   node --experimental-strip-types scripts/orbit-lab.ts capacity <alt>:<inc> [sats] [gpusPerSat] [stages]
+//   node --experimental-strip-types scripts/research/orbit-lab.ts capacity <alt>:<inc> [sats] [gpusPerSat] [stages]
 //
 // See docs/compute-capacity.md for what the sweep found.
 
-import { capacityReport, fleetUtilization, powerSeries, selectHosts, selectHostsRandom, selectHostsSunniest, type OrbitPhase } from "../src/modules/util/computeCapacity.ts";
-import { shellFamily, familyCycleHours, minSatellitesPerRing } from "../src/modules/util/shellLayout.ts";
-import { walkerDeltaRecords, WALKER_EPOCH_ISO, type WalkerDeltaParams } from "../src/modules/util/walkerDelta.ts";
+import { capacityReport, fleetUtilization, powerSeries, selectHosts, selectHostsRandom, selectHostsSunniest, type OrbitPhase } from "../../src/modules/util/computeCapacity.ts";
+import { shellFamily, familyCycleHours, minSatellitesPerRing } from "../../src/modules/util/shellLayout.ts";
+import { walkerDeltaRecords, WALKER_EPOCH_ISO, type WalkerDeltaParams } from "../../src/modules/util/walkerDelta.ts";
 
 /** The epoch every generated pattern is stated at, so a design is a date as well as a geometry. */
 const EPOCH = new Date(WALKER_EPOCH_ISO);

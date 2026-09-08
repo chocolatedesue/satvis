@@ -14,7 +14,7 @@ to watch as a unit.
 ## Decision
 
 **The drawn topology is the one the derivation picks, not the one a viewer can tune.**
-`scripts/derive-isl-topology.mjs` expands the same Walker patterns the orbit lab generates,
+`scripts/research/derive-isl-topology.ts` expands the same Walker patterns the orbit lab generates,
 flies them with SGP4, and scores every candidate wiring on two quantities: link-length
 discipline (how far a link stretches over an orbit, as a coefficient of variation) and
 identity stability (how often each satellite's nearest neighbour in the neighbouring plane

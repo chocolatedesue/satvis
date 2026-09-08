@@ -217,7 +217,7 @@ The sharp levels are built on demand:
 pnpm update-imagery
 ```
 
-That runs a container (`scripts/imagery/`) which fetches [Natural Earth
+That runs a container (`scripts/assets/imagery/`) which fetches [Natural Earth
 II](https://www.naturalearthdata.com/downloads/10m-raster-data/) at 10m, applies the
 colour grade the original Cesium tileset was cut with, and writes levels 3–5 into the
 gitignored part of `data/imagery/` — about 17.2 MB more, and a minute on a warm cache.
@@ -351,7 +351,7 @@ are the story:
   — a second RAAN offset, a phased sub-constellation — and it is wired as one, each plane to
   the plane of the other pattern nearest it in right ascension.
 
-These are not tastes but the output of `scripts/derive-isl-topology.mjs`, which flies the
+These are not tastes but the output of `scripts/research/derive-isl-topology.ts`, which flies the
 patterns with SGP4 and scores every candidate wiring on length discipline and
 nearest-neighbour identity stability. Reasoning and numbers: `docs/adr/0008-constellation-links.md`.
 
@@ -544,7 +544,7 @@ comes back or not — so the return is drawn, and the curve's last sample is its
 (`src/modules/util/clusterRange.ts`): two secular rates, a position from them, a straight-line range.
 No propagation, and the cycle it is sampled over is the one the solver just reported.
 
-`scripts/derive-isl-topology.ts` (studies 7–12) flies the result with SGP4 rather than
+`scripts/research/derive-isl-topology.ts` (studies 7–12) flies the result with SGP4 rather than
 asserting it. The designed companion's seam shears at **0.005°/day** against 5.21°/day for a
 97.6° shell at the same altitude, and one repeat cycle later **99.7%** of satellites find the
 same cross-shell partner at a median range change of 4 km — against **79.3%** and 398 km for
@@ -592,7 +592,7 @@ orbit the app can build is the same two numbers.
 
 Node ≥ 22 strips the types of the imported modules natively, so the script runs directly; the one
 constraint that imposes is that a module a script can reach carries its own `.ts` extension on
-import. `scripts/derive-isl-topology.ts` is the same idea a level deeper — it flies the geometry
+import. `scripts/research/derive-isl-topology.ts` is the same idea a level deeper — it flies the geometry
 with SGP4 rather than reading it off a closed form.
 
 ### Orbit analysis from the terminal
@@ -655,7 +655,7 @@ Key metrics and constraints:
   store-and-forward over every leg.
 - **Simulated Timebase Ledger**: GPU utilization and served/stalled seconds are tracked accurately against simulated orbit time.
 
-`node scripts/verify-migration.mjs <base-url> <out-dir>` verifies placement, live ISL packet progress, zero-stall serving, and that **every leg** of every hand-off is inside the
+`node scripts/verify/verify-migration.mjs <base-url> <out-dir>` verifies placement, live ISL packet progress, zero-stall serving, and that **every leg** of every hand-off is inside the
 line-of-sight horizon, in headless Chromium. Per leg rather than per hand-off: a 9000 km hand-off is fine as two 4500 km legs and impossible as one chord. The bound is derived from
 the radius the orbits actually reach (6933 km, so 5079.6 km), not from the 550 km label — see `docs/adr/0011-routing-around-the-earth.md`.
 

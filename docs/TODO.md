@@ -41,14 +41,14 @@
   - 建立壳层间稳定性的两条闭式判据：J2 升交点进动率匹配（`cos i₂ = cos i₁ · (a₂/a₁)^(7/2)`，锁定轨道面相对排布）与沿迹角速率小整数共振（锁定相位回归周期）；
   - 证明"两个不同壳层不可能刚性静止"（冻结相位需同高度、冻结轨道面需同倾角，两者同时成立即同一壳层），因此稳定的定义应为**周期性回归**而非静止；
   - 实现伴随壳层求解器 `resonantCompanion` 与全域搜索 `searchStableShellLayouts`（含共进动高度天花板 1632 km @ 53°/550 km）；
-  - SGP4 实测验证（`scripts/derive-isl-topology.ts` 研究 7–10）：设计壳层缝隙漂移 0.005°/天（对照组 5.21°/天），一个回归周期后 **99.7%** 卫星找到同一跨壳伙伴（对照组 79.3%）；
+  - SGP4 实测验证（`scripts/research/derive-isl-topology.ts` 研究 7–10）：设计壳层缝隙漂移 0.005°/天（对照组 5.21°/天），一个回归周期后 **99.7%** 卫星找到同一跨壳伙伴（对照组 79.3%）；
   - 五档壳层配对判定（`rigid` / `repeating` / `phase-locked` / `node-locked` / `drifting`）接入标记集群连线样式、拓扑跨壳桥接链路与 Orbit Lab 面板。
 - [x] **地球遮挡约束与绕地多跳路由 (Earth occlusion & multi-hop routing)**:
   - 迁移目标选择由"通视优先、必要时穿地"改为**通视硬约束 + 绕地路由**：`routesFrom` 在可视图上做 Dijkstra，`chooseRouteExcluding` 保留四档优先级（前瞻安全且直连 / 直连 / 前瞻安全经中继 / 经中继）；
   - 端到端实测：原先 8149–11215 km 的穿地单弦已全部消失，改为每条腿约 4283 km 的绕地多段路径，`verify-migration.mjs` 的断言从"整跳"下沉到"每条腿" 29/29 通过；
-  - 布局侧同步补上地球约束：`maxLinkRangeKm` / `linkHorizonAngleDeg` 给出闭式链路地平（550 km 对 550 km 为 42.5° / 5017 km），`StableShellLayout` 与 `StableCluster` 各自带上能达成的最长链路——一个永远回归却永远互相看不见的布局，是没有算力织物的布局（`docs/adr/0011-routing-around-the-earth.md`）。
+  - 布局侧同步补上地球约束：`maxLinkRangeKm` / `linkHorizonAngleDeg` 给出闭式链路地平（550 km 对 550 km 为 42.5° / 5017 km），`StableShellLayout` 与 `StableCluster` 各自带上能达成的最长链路——一个永远回归却永远互相看不见的布局，是没有算力织物的布局（`adr/0011-routing-around-the-earth.md`）。
 - [x] **稳定集群与壳层家族 (Stable Clusters & Shell Families)**:
-  - 从 J2 长期项完整推导：环绕轨道的相对运动只由 `ΔΩ̇`（轨道面剪切）与 `Δu̇`（相位滑移）两个差值决定，对应"刚性 / 周期回归 / 漂移"三档，与编队飞行的 `δa = 0` 无漂移条件对齐（`docs/adr/0010-stable-clusters.md`）；
+  - 从 J2 长期项完整推导：环绕轨道的相对运动只由 `ΔΩ̇`（轨道面剪切）与 `Δu̇`（相位滑移）两个差值决定，对应"刚性 / 周期回归 / 漂移"三档，与编队飞行的 `δa = 0` 无漂移条件对齐（`adr/0010-stable-clusters.md`）；
   - 证明两条判据均为等价关系 ⇒ 轨道空间已被划分，N 个壳层只需 N 个约束而非 N²；k-means 之类的聚类会给一个已有正则划分的空间强加任意划分；
   - 实现 `nodeLockedGroups`（区间图极大团）、`commonRepeatCycle`（带预算的联立有理逼近）、`findStableClusters`（输出 size × cycle 的 Pareto 前沿，容差下集群重叠而非划分）；
   - 实现家族构造 `shellFamily` / `familyCycleHours`：定一个公共周期 + 每层整数圈数，两两回归由构造保证，周期不随成员数增长；

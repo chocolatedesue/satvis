@@ -23,7 +23,7 @@ import { planeSlotOf } from "./util/walkerDelta";
 
 /**
  * The stable-constellation link overlay: every generated Walker satellite on
- * screen wired into the topology scripts/derive-isl-topology.mjs derived —
+ * screen wired into the topology scripts/research/derive-isl-topology.ts derived —
  * rigid rings inside each plane, same-slot links between planes that rotate
  * the same way, nothing across the Walker Star seam, nothing across shells, and
  * bridges across the one cross-pattern case whose offsets are frozen: a pair

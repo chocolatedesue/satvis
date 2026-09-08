@@ -6,7 +6,7 @@
 // through node's own type stripping.
 //
 // **Imported with the `.ts` extension spelled out**, unlike the rest of `src/`.
-// `scripts/derive-isl-topology.ts` loads `./walkerDelta.ts` through node's type
+// `scripts/research/derive-isl-topology.ts` loads `./walkerDelta.ts` through node's type
 // stripping, which resolves no specifier a bundler would have to — so anything
 // reachable from a generator has to carry its own extension, and that is this
 // module from here on. The cost is one unusual specifier per importer; the

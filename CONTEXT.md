@@ -298,7 +298,7 @@ discussion; sharpen them here when they drift.
   between them is frozen — one shell in two pieces, wired as one, each plane to
   the plane of the other pattern nearest it in right ascension. Rules in
   `constellationLinks.ts`; the derivation they come from is
-  `scripts/derive-isl-topology.ts` (`docs/adr/0008-constellation-links.md`,
+  `scripts/research/derive-isl-topology.ts` (`docs/adr/0008-constellation-links.md`,
   narrowed by `0009`).
 - **Marked cluster**: a small fleet named to be watched as a unit, as
   `<plane>-<slot>@<wire>` tokens in the `mark=` url parameter. Each active

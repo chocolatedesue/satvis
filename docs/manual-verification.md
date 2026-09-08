@@ -738,7 +738,7 @@ WebGL. jsdom has none of those. What a browser can answer, and a unit test canno
 is whether a pattern typed into the panel ends up as satellites on a globe with
 plausible physics attached.
 
-**Procedure.** `node scripts/verify-orbit-lab.mjs <baseUrl> <outDir>` — serve
+**Procedure.** `node scripts/verify/verify-orbit-lab.mjs <baseUrl> <outDir>` — serve
 `pnpm build`'s output statically, then drive headless Chromium over CDP
 (`--enable-unsafe-swiftshader` for a WebGL context). Pin the clock with
 `?time=2026-01-01T00:00` — the sun geometry decides every state count, so an
@@ -857,7 +857,7 @@ puppeteer), against a built deployment or local server serving `dist`, opened on
 
 ```sh
 pnpm build && (cd dist && python3 -m http.server 8791 --bind 127.0.0.1 &)
-node scripts/verify-links.mjs http://127.0.0.1:8791 /tmp/satvis-links-verify
+node scripts/verify/verify-links.mjs http://127.0.0.1:8791 /tmp/satvis-links-verify
 ```
 
 Every run starts with a fresh user profile directory (`mkdtempSync`), avoiding any

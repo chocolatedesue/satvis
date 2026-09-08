@@ -40,11 +40,11 @@
 // `./walkerDelta.ts` generates. It is a design tool, not a mission analysis: no
 // drag, no third body, no J₃, no station-keeping. Against SGP4 the inclination it
 // picks lands within about a tenth of a degree and the altitude within a few km —
-// `scripts/derive-isl-topology.ts` measures exactly that, and refines both
+// `scripts/research/derive-isl-topology.ts` measures exactly that, and refines both
 // against the propagator, which is the honest way round.
 
-// Runtime imports carry the `.ts` extension on purpose: `scripts/derive-isl-
-// topology.ts` runs this file through node's own type stripping, which resolves
+// Runtime imports carry the `.ts` extension on purpose: `scripts/research/
+// derive-isl-topology.ts` runs this file through node's own type stripping, which resolves
 // no specifier a bundler would have to. `./orbitModel.ts` is therefore imported
 // rather than restated — the two secular rates are a property of any circular
 // orbit, not of a shell.

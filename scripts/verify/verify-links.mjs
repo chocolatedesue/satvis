@@ -6,7 +6,7 @@
 // (`phase-locked`, `repeating`), dashed where it does not (`drifting`).
 //
 //   pnpm build && (cd dist && python3 -m http.server 8791) &
-//   node scripts/verify-links.mjs http://127.0.0.1:8791 /tmp/links-out
+//   node scripts/verify/verify-links.mjs http://127.0.0.1:8791 /tmp/links-out
 
 /* eslint-disable no-await-in-loop -- polling a live browser is sequential. */
 

@@ -63,7 +63,7 @@ schedule and spends latitude coverage; a fleet that needs both needs a third she
 different solution to this one.
 
 **The claim is checked against a propagator, not against itself.**
-`scripts/derive-isl-topology.ts` studies 7–10 fly the designed pair with SGP4 and measure it:
+`scripts/research/derive-isl-topology.ts` studies 7–10 fly the designed pair with SGP4 and measure it:
 
 - **Node lock (study 8).** The designed 8:7 companion shears at **0.0048°/day** — a degree of
   seam every 209 days — against 5.21°/day for the 97.6° shell at the same altitude and

@@ -382,7 +382,7 @@ export default {
       addNote:
         "Solved from the form's altitude and inclination: the companion's inclination comes from <code>cos i₂ = cos i₁ · (a₂/a₁)^(7/2)</code>, which is where the node " +
         "rates agree, and its altitude from the resonance that closes the cycle. Secular J₂, so the propagator wants about a tenth of a degree more — " +
-        "<code>scripts/derive-isl-topology.ts</code> refines both against SGP4 and prints the correction. The price of the lock is inclination: the higher the companion, " +
+        "<code>scripts/research/derive-isl-topology.ts</code> refines both against SGP4 and prints the correction. The price of the lock is inclination: the higher the companion, " +
         "the shallower it has to fly.",
       verdictsNote:
         "Every pair of generated patterns, by what it does to the other: <strong>rigid</strong> (one shell in two pieces — every offset frozen, and the only case the " +

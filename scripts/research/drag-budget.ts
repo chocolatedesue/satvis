@@ -10,11 +10,11 @@
 // a forecast: exponential atmosphere, fixed ballistic coefficients, circular
 // orbits, no attitude or solar-activity modelling beyond a range.
 //
-//   node --experimental-strip-types scripts/drag-budget.ts
+//   node --experimental-strip-types scripts/research/drag-budget.ts
 
-import { clusterRadiusM } from "../src/modules/util/clusterFormation.ts";
-import { arcLengthM, differentialDragDriftM, RHO_550_KG_M3, SCALE_HEIGHT_KM } from "../src/modules/util/differentialDrag.ts";
-import { orbitalRates } from "../src/modules/util/orbitModel.ts";
+import { clusterRadiusM } from "../../src/modules/util/clusterFormation.ts";
+import { arcLengthM, differentialDragDriftM, RHO_550_KG_M3, SCALE_HEIGHT_KM } from "../../src/modules/util/differentialDrag.ts";
+import { orbitalRates } from "../../src/modules/util/orbitModel.ts";
 
 /** The drift, from the law in `src/modules/util/differentialDrag.ts`. */
 

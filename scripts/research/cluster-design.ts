@@ -7,17 +7,17 @@
 // against them one at a time is how a shell ends up with a pipeline deeper than
 // its own sunlit arc.
 //
-//   node --experimental-strip-types scripts/orbit-lab.ts design <altKm> <incDeg> <satsPerPlane>
+//   node --experimental-strip-types scripts/research/orbit-lab.ts design <altKm> <incDeg> <satsPerPlane>
 //
 // See docs/cluster-math.md for the derivations and docs/orbital-compute.md for
 // how the three layers fit together.
 
-import { arcLengthM, ballisticCoefficient, differentialDragDriftM } from "../src/modules/util/differentialDrag.ts";
-import { fullyLitFraction, optimalPipelineDepth } from "../src/modules/util/energyTrace.ts";
-import { annualEclipseFreePlaneFraction, maxReachableBetaDeg } from "../src/modules/util/orbitDesign.ts";
-import { orbitalRates, type CircularOrbit } from "../src/modules/util/orbitModel.ts";
-import { coPrecessingCeilingKm, minSatellitesPerRing } from "../src/modules/util/shellLayout.ts";
-import { betaCycleDays, eclipseFreeBetaDeg, sunSyncInclinationDeg, SUN_DEG_PER_DAY } from "../src/modules/util/sunSynchronous.ts";
+import { arcLengthM, ballisticCoefficient, differentialDragDriftM } from "../../src/modules/util/differentialDrag.ts";
+import { fullyLitFraction, optimalPipelineDepth } from "../../src/modules/util/energyTrace.ts";
+import { annualEclipseFreePlaneFraction, maxReachableBetaDeg } from "../../src/modules/util/orbitDesign.ts";
+import { orbitalRates, type CircularOrbit } from "../../src/modules/util/orbitModel.ts";
+import { coPrecessingCeilingKm, minSatellitesPerRing } from "../../src/modules/util/shellLayout.ts";
+import { betaCycleDays, eclipseFreeBetaDeg, sunSyncInclinationDeg, SUN_DEG_PER_DAY } from "../../src/modules/util/sunSynchronous.ts";
 
 /** The per-stage KV working set and the single ISL rate the migration model assumes. */
 const KV_GIGABYTES = 2;

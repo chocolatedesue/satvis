@@ -249,7 +249,7 @@ export function stableShellPatterns(): WalkerDeltaParams[] | undefined {
  * planes then hold their arrangement and the phases come back every 12.7
  * simulated hours — the derivation measures 99.7% of satellites finding the same
  * cross-shell partner a cycle later, against 79% for the shell that was not
- * designed (`scripts/derive-isl-topology.ts`, studies 7-10).
+ * designed (`scripts/research/derive-isl-topology.ts`, studies 7-10).
  *
  * The marked cluster is where the difference is visible without reading a number:
  * one satellite from each shell, bonded pairwise. The bond to the designed

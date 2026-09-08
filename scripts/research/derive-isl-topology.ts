@@ -16,7 +16,7 @@
 //     re-wired forever, which is the station-keeping bill real constellations
 //     pay in the plane-precession terms they burn propellant to cancel.
 //
-//   node scripts/derive-isl-topology.mjs
+//   node scripts/research/derive-isl-topology.ts
 //
 // Node >= 24 strips the types of the imported src modules natively, the same
 // way worker/scripts/update-static-gp.mjs runs the worker's TS pipeline.
@@ -28,8 +28,8 @@
 
 import { json2satrec, propagate } from "satellite.js";
 
-import { hasLineOfSight } from "../src/modules/util/migration.ts";
-import { walkerDeltaRecords, WALKER_EPOCH_ISO, type WalkerDeltaParams } from "../src/modules/util/walkerDelta.ts";
+import { hasLineOfSight } from "../../src/modules/util/migration.ts";
+import { walkerDeltaRecords, WALKER_EPOCH_ISO, type WalkerDeltaParams } from "../../src/modules/util/walkerDelta.ts";
 
 const EPOCH = new Date(WALKER_EPOCH_ISO);
 
@@ -376,7 +376,7 @@ import {
   shellPairLayout,
   shellRates,
   type ShellOrbit,
-} from "../src/modules/util/shellLayout.ts";
+} from "../../src/modules/util/shellLayout.ts";
 
 /** The reference shell every layout study is measured against. */
 const REFERENCE: ShellOrbit = { altitudeKm: 550, inclinationDeg: 53 };

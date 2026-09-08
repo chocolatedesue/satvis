@@ -8,9 +8,9 @@
 // devDependency.
 //
 //   pnpm build && pnpm preview                       # or any static host
-//   node scripts/verify-orbit-lab.mjs http://localhost:4173 /tmp/verify-out
+//   node scripts/verify/verify-orbit-lab.mjs http://localhost:4173 /tmp/verify-out
 //
-//   VERIFY_PROXY=http://127.0.0.1:8080 node scripts/verify-orbit-lab.mjs https://satvis.space /tmp/out
+//   VERIFY_PROXY=http://127.0.0.1:8080 node scripts/verify/verify-orbit-lab.mjs https://satvis.space /tmp/out
 //
 // Exits non-zero on the first failed expectation, and writes screenshots plus a
 // report.json into the output directory either way.

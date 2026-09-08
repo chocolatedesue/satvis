@@ -61,7 +61,7 @@ layout with no fabric on it, and nothing before this said so.
   is why the search is per host rather than per host-candidate pair.
 - **Serialisation was charged once, not per leg — this has since been fixed.** As shipped here
   the transfer cost was one serialisation plus propagation over the whole wire, a cut-through
-  relay, and the alternative was left in `TODO.md` rather than assumed. It was taken up:
+  relay, and the alternative was left in `docs/TODO.md` rather than assumed. It was taken up:
   `routeTransferCost` now prices a route leg by leg, because a relay receives the _complete_
   cache before sending it on, so the serialisation term is paid once per hop (~160 ms per leg
   for 2 GB at 100 Gbps) while propagation sums the legs' light time. Relaying is therefore more

@@ -83,7 +83,7 @@ the worker's copy: the two have deliberately opposite error policies.
 
 The second half of this decision is that none of it needs a browser. `src/modules/util/` is
 Cesium-free and Vue-free, so the same modules the orbit lab panel reads are driven from a
-terminal by `scripts/orbit-lab.ts` (`pnpm orbit-lab orbit 550 53`), with no build step. That is a
+terminal by `scripts/research/orbit-lab.ts` (`pnpm orbit-lab orbit 550 53`), with no build step. That is a
 property worth defending: a closed-form model whose only reader is a Vue panel cannot be checked
 against a paper without loading a globe.
 

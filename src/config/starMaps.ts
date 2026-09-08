@@ -35,7 +35,7 @@
  *
  * The generated pair are WebP where Cesium's own faces are JPEG, which is not a
  * preference: this sky is nearly black and JPEG spends its error budget exactly
- * where the content is. See `FORMAT` in scripts/starmap/cubemap.py for the
+ * where the content is. See `FORMAT` in scripts/assets/starmap/cubemap.py for the
  * measurements. It buys nothing in memory — every format decodes to RGBA8, and
  * `CubeMap` has no compressed-texture path the way `Texture` does — so this is
  * about what arrives, not what is resident.

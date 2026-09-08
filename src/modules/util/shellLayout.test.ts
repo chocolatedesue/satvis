@@ -1,6 +1,6 @@
 // The multi-shell layout rules: the two secular rates, the companion they pick
 // out, and the four verdicts a shell pair can earn. The numbers here are the
-// ones scripts/derive-isl-topology.ts then flies with SGP4 — this file checks
+// ones scripts/research/derive-isl-topology.ts then flies with SGP4 — this file checks
 // the closed form is self-consistent and agrees with the modules it restates,
 // the script checks it agrees with a propagator.
 import { describe, expect, test } from "vitest";

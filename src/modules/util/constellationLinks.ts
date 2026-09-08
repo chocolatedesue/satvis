@@ -2,7 +2,7 @@
 // pure link graph over satellite names.
 //
 // "Stable" is the operative word, and it is a derived result, not a taste:
-// scripts/derive-isl-topology.mjs flies the patterns with SGP4 and scores every
+// scripts/research/derive-isl-topology.ts flies the patterns with SGP4 and scores every
 // candidate wiring on link-length discipline (how far a link stretches over an
 // orbit) and identity stability (how often the nearest neighbour changes). The
 // rules below are what survived:

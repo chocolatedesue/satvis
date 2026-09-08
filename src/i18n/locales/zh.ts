@@ -361,7 +361,7 @@ export default {
       add: "添加这个伴生壳层",
       addNote:
         "由表单里的高度和倾角解出：伴生的倾角来自 <code>cos i₂ = cos i₁ · (a₂/a₁)^(7/2)</code>，也就是节点率一致的那个点；高度则来自闭合周期的共振。" +
-        "这是长期 J₂ 的结果，传播器实际需要再多约十分之一度——<code>scripts/derive-isl-topology.ts</code> 会拿 SGP4 对两者做精化并打印修正量。" +
+        "这是长期 J₂ 的结果，传播器实际需要再多约十分之一度——<code>scripts/research/derive-isl-topology.ts</code> 会拿 SGP4 对两者做精化并打印修正量。" +
         "锁定的代价是倾角：伴生越高，它就得飞得越平。",
       verdictsNote:
         "每一对已生成的星座图案，按它对另一条所做的事来分：<strong>rigid</strong>（一个壳层拆成两半——所有偏移都冻结，也是唯一会被拓扑用" +

@@ -1,12 +1,12 @@
 // Headless-Chromium check for the naive KV-cache migration overlay, over CDP with
-// no puppeteer — same approach as scripts/verify-orbit-lab.mjs. Drives a *built*
+// no puppeteer — same approach as scripts/verify/verify-orbit-lab.mjs. Drives a *built*
 // deployment: opens the demo, asserts the pipeline is placed one stage per
 // satellite with all its entities, then winds the clock forward until the model
 // actually migrates stages, the pipeline is seen stalled, and the ledger has
 // accounted served and stalled time.
 //
 //   pnpm build && (cd dist && python3 -m http.server 8791) &
-//   node scripts/verify-migration.mjs http://127.0.0.1:8791 /tmp/mig-out
+//   node scripts/verify/verify-migration.mjs http://127.0.0.1:8791 /tmp/mig-out
 
 /* eslint-disable no-await-in-loop -- polling a live browser is sequential. */
 

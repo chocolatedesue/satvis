@@ -89,7 +89,7 @@ export const useSatStore = defineStore(
     const migrationIncremental = ref<boolean>(DEFAULT_KV_INCREMENTAL);
 
     // The stable-constellation link overlay: every generated Walker satellite
-    // wired into the topology scripts/derive-isl-topology.mjs derived — rings
+    // wired into the topology scripts/research/derive-isl-topology.ts derived — rings
     // inside each plane, same-slot links between same-rotating planes, the
     // Walker Star seam dropped, nothing across shells. On by default: a
     // constellation without its topology is just points, and the whole reason

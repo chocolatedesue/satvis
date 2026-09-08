@@ -43,7 +43,7 @@
   $\dot u_1 : \dot u_2$ is a small-integer ratio makes the whole configuration return every
   repeat cycle. Against 53° / 550 km: 6:5 at 1455.8 km / 22.30° (9.56 h), 8:7 at
   1201.9 km / 34.47° (12.75 h), and so on.
-- **Measured, not asserted** (`scripts/derive-isl-topology.ts`, studies 7–10): the designed
+- **Measured, not asserted** (`scripts/research/derive-isl-topology.ts`, studies 7–10): the designed
   companion's seam shears **0.005°/day** against 5.21°/day for a shell picked for coverage, and
   one repeat cycle later **99.7%** of satellites find the same cross-shell partner at a median
   range change of 4 km, against **79.3%** / 398 km. The script also refines the pair against
@@ -76,8 +76,8 @@
   where a 53° family's eleventh has fallen to 17°. A sun-synchronous family is the strongest case
   — every member is sun-synchronous by construction, so the fleet holds a fixed local solar time
   _and_ returns its cross-shell geometry every cycle.
-- Derivation, algorithm and complexity: [`docs/adr/0010-stable-clusters.md`](docs/adr/0010-stable-clusters.md);
-  measurements: `scripts/derive-isl-topology.ts` studies 11–12.
+- Derivation, algorithm and complexity: [`docs/adr/0010-stable-clusters.md`](adr/0010-stable-clusters.md);
+  measurements: `scripts/research/derive-isl-topology.ts` studies 11–12.
 
 ### E. Space AI Compute & Multi-Satellite Collaboration (多星协同)
 
@@ -90,7 +90,7 @@
 - **Naive Reactive Policy**: Migrates only _after_ power loss, causing periodic pipeline stalls and reducing sunlit GPU utilization to ~30%–45%.
 - **Predictive Illumination-Aware Pre-Handoff (`predictive`)**:
   - Uses orbital illumination geometry to anticipate eclipse entry within a 90-second lookahead window (`MIGRATION_PREDICTIVE_LOOKAHEAD_SIM_SECONDS`).
-  - Proactively triggers KV-cache transfer to an idle peer that has line of sight and maximum remaining sunlit duration — or, when the limb is in the way, around it through lit relays (`routesFrom`, Dijkstra over the visibility graph). **A chord through the Earth is not a link**, so it is never taken: when no lit chain reaches around, the stage is `stranded` (`docs/adr/0011-routing-around-the-earth.md`).
+  - Proactively triggers KV-cache transfer to an idle peer that has line of sight and maximum remaining sunlit duration — or, when the limb is in the way, around it through lit relays (`routesFrom`, Dijkstra over the visibility graph). **A chord through the Earth is not a link**, so it is never taken: when no lit chain reaches around, the stage is `stranded` (`adr/0011-routing-around-the-earth.md`).
   - Handoff completes before shadow ingress, achieving **zero pipeline stalls** and **near 100% sunlit GPU utilization**.
 
 ### G. Store-and-Forward Relays, Incremental KV Sync, Real-Fleet Mapping & Per-Frame Occlusion (存储转发 / 增量传输 / 真实星座映射 / 逐帧遮挡)
@@ -106,7 +106,7 @@
 
 ```bash
 # 0. The derivation behind the topology and the layout rules (node >= 24)
-node scripts/derive-isl-topology.ts
+node scripts/research/derive-isl-topology.ts
 
 # 1. Toolchain & Dependencies
 mise trust && mise install
@@ -124,8 +124,8 @@ pnpm build
 python3 -m http.server 8791 --directory dist &
 PID=$!
 sleep 2
-node scripts/verify-migration.mjs http://127.0.0.1:8791 /tmp/mig-verify
-node scripts/verify-links.mjs http://127.0.0.1:8791 /tmp/links-verify   # ?demo=shells and ?demo=stable-shells
+node scripts/verify/verify-migration.mjs http://127.0.0.1:8791 /tmp/mig-verify
+node scripts/verify/verify-links.mjs http://127.0.0.1:8791 /tmp/links-verify   # ?demo=shells and ?demo=stable-shells
 kill $PID
 
 # 5. Production Deployment (Cloudflare Pages)
