@@ -26,6 +26,7 @@ import { orbitalRates, type CircularOrbit } from "../src/modules/util/orbitModel
 import { orbitReport } from "../src/modules/util/orbitReport.ts";
 import { findStableClusters, searchStableShellLayouts, type ClusterMember } from "../src/modules/util/shellLayout.ts";
 import { reportDesign, usageDesign } from "./cluster-design.ts";
+import { reportCapacity, usageCapacity } from "./compute-design.ts";
 
 const USAGE = `orbit-lab — closed-form orbit analysis, no globe
 
@@ -34,6 +35,7 @@ const USAGE = `orbit-lab — closed-form orbit analysis, no globe
   clusters  <alt:inc>[,<alt:inc>...]             which of several orbits return together
   formation <altKm> <pitchM> <rings> [incDeg]    a free-flying lattice's size (default dawn-dusk SSO)
   ${usageDesign()}
+  ${usageCapacity()}
 
 Altitudes in km, angles in degrees, pitches in metres.`;
 
@@ -209,6 +211,16 @@ function main(argv: string[]): void {
       return;
     }
     reportDesign(orbit, perPlane);
+    return;
+  }
+
+  if (command === "capacity") {
+    const orbit = parseOrbit(rest[0] ?? "");
+    if (!orbit) {
+      console.log(USAGE);
+      return;
+    }
+    reportCapacity(orbit, number(rest[1]) ?? 60, number(rest[2]) ?? 8, number(rest[3]) ?? 4);
     return;
   }
 

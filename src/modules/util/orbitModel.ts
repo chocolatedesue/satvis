@@ -137,6 +137,34 @@ export function circularPeriodMinutes(orbit: CircularOrbit): number {
 }
 
 /**
+ * Where a satellite on this orbit is, in kilometres, in the equatorial frame.
+ *
+ * The closed-form counterpart of a propagated position: the node has run on by
+ * `Ω̇` and the satellite by `u̇`, both of them linear, and the rest is the
+ * rotation from orbital to equatorial coordinates. No satrec, no epoch handling —
+ * which is what lets a design study sample thousands of positions without
+ * propagating anything.
+ *
+ * `nodeDeg` and `phaseDeg` are the angles at `hours = 0`: where the plane sits
+ * and where the satellite sits on it. For a generated pattern those are the
+ * plane's own RAAN and the slot's mean anomaly.
+ */
+export function circularPositionKm(orbit: CircularOrbit, nodeDeg: number, phaseDeg: number, hours = 0): [number, number, number] {
+  const rates = orbitalRates(orbit);
+  const node = ((nodeDeg + rates.nodeRateDegPerDay * (hours / 24)) * Math.PI) / 180;
+  const along = ((phaseDeg + rates.alongTrackRateDegPerDay * (hours / 24)) * Math.PI) / 180;
+  const tilt = (orbit.inclinationDeg * Math.PI) / 180;
+  const radius = circularSemiMajorAxisKm(orbit.altitudeKm);
+  const cosU = Math.cos(along);
+  const sinU = Math.sin(along);
+  return [
+    radius * (Math.cos(node) * cosU - Math.sin(node) * sinU * Math.cos(tilt)),
+    radius * (Math.sin(node) * cosU + Math.cos(node) * sinU * Math.cos(tilt)),
+    radius * sinU * Math.sin(tilt),
+  ];
+}
+
+/**
  * The four numbers a circular orbit's own motion reduces to.
  *
  * The first two say how fast it goes round; the last two are the **secular J₂**
