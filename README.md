@@ -561,11 +561,14 @@ the number a service lives on — 60 satellites in one shell are lit 80.5% of th
 all eight stages lit 70.4% of the time. `pnpm orbit-lab capacity <alt>:<inc> [sats] [gpus] [stages]`
 sweeps the knobs a designer holds at a fixed budget, and picks the hosts whose _joint_ power is
 steadiest: two satellites in one plane go dark together and are never both chosen, which is the whole
-content of the result. What it found at 60 satellites and 8 GPUs each — spend the budget on **shells
-before planes** (two shells take a sun-synchronous family from 0.704 to 1.000 and remove the stalls
-outright, while more planes inside one shell make it _worse_), and the **ring minimum** is the real
-cap on how many shells the budget can be split into. Reasoning and the measured tables:
-`docs/compute-capacity.md`.
+content of the result. `pnpm orbit-lab evaluate` runs the same model as an experiment — four
+baselines (random, sunniest-first, single shell, oracle ceiling) and seven ablations. What it found at
+60 satellites and 8 GPUs each: spend the budget on **shells before planes** (two shells take a
+sun-synchronous family from 0.804 to 1.000 and remove an 18-minute stall outright, while more planes
+inside one shell make it _worse_); the **ring minimum** is the real cap on how many shells the budget
+can be split into; fleet utilisation **peaks at 16 stages and collapses by 32**; and every number is
+**seasonal** — the same design measures 1.000 in January and 0.536 in October. Abstract, tables and
+threats to validity: `docs/compute-capacity.md`.
 
 ### Orbit analysis without a globe
 

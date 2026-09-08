@@ -57,6 +57,15 @@ export interface PowerOptions {
   hours: number;
   /** Sample step in seconds. Default 60 — a tenth of the shortest eclipse worth planning around. */
   stepSeconds?: number;
+  /**
+   * Whether the sun moves during the window. Default true.
+   *
+   * Held still only for the model ablation: a 24-hour window is a degree of the
+   * sun's own motion, and freezing it is the error that makes a one-cycle sample
+   * look like a year. Kept as an option so the size of that error is a number in
+   * the paper instead of an assumption in it.
+   */
+  moveSun?: boolean;
 }
 
 /**
@@ -87,12 +96,13 @@ function poweredAt(position: [number, number, number], sun: [number, number, num
  */
 export function powerSeries(members: readonly OrbitPhase[], options: PowerOptions): PowerSeries {
   const stepSeconds = options.stepSeconds ?? 60;
+  const moveSun = options.moveSun ?? true;
   const samples = Math.max(1, Math.round((options.hours * 3600) / stepSeconds));
   const powered: boolean[][] = [];
   const lit = members.map(() => 0);
   for (let index = 0; index <= samples; index += 1) {
     const hours = (index / samples) * options.hours;
-    const date = new Date(options.start.getTime() + index * stepSeconds * 1000);
+    const date = moveSun ? new Date(options.start.getTime() + index * stepSeconds * 1000) : options.start;
     const sun = sunDirectionKm(date);
     const row = members.map((member, at) => {
       const on = poweredAt(circularPositionKm(member, member.nodeDeg, member.phaseDeg, hours), sun);
@@ -171,6 +181,57 @@ export function selectHosts(series: PowerSeries, count: number, candidates?: rea
     chosen.push(pick);
   }
   return chosen;
+}
+
+/**
+ * The baseline the whole selection rests on: pick the sunniest satellites.
+ *
+ * Wrong on purpose, and worth measuring because it is what a power budget
+ * suggests — maximise each host's own illumination. It ignores correlation, and
+ * correlation is the entire phenomenon: two satellites in one plane are both
+ * bright and both dark at the same instant.
+ */
+export function selectHostsSunniest(series: PowerSeries, count: number): number[] {
+  return series.litFraction
+    .map((fraction, index) => ({ fraction, index }))
+    .toSorted((a, b) => b.fraction - a.fraction || a.index - b.index)
+    .slice(0, Math.max(0, count))
+    .map((entry) => entry.index);
+}
+
+/**
+ * A random placement, and the floor any selection has to beat.
+ *
+ * Deterministic: a linear congruential generator with a stated seed, so a table
+ * in the paper is the table anyone reruns. Averaged over seeds by the caller.
+ */
+export function selectHostsRandom(series: PowerSeries, count: number, seed = 1): number[] {
+  const pool = series.litFraction.map((_, index) => index);
+  let state = (seed * 1103515245 + 12345) >>> 0;
+  const next = () => {
+    state = (state * 1103515245 + 12345) >>> 0;
+    return state / 0x100000000;
+  };
+  for (let at = pool.length - 1; at > 0; at -= 1) {
+    const swap = Math.floor(next() * (at + 1));
+    const held = pool[at] as number;
+    pool[at] = pool[swap] as number;
+    pool[swap] = held;
+  }
+  return pool.slice(0, Math.max(0, count));
+}
+
+/**
+ * What the whole fleet's GPU budget is actually producing.
+ *
+ * The headline number for a fixed budget: delivered GPU-hours over every GPU
+ * every satellite carries, lit or not. A design can score a perfect serving
+ * fraction and still waste its budget, if the pipeline is cut too shallow to
+ * use the fleet it is flying on.
+ */
+export function fleetUtilization(report: CapacityReport, satellites: number, gpusPerSat = 1, hours = 1): number {
+  const budget = satellites * gpusPerSat * hours;
+  return budget > 0 ? report.gpuHours / budget : 0;
 }
 
 export interface CapacityReport {

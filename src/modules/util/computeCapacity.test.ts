@@ -6,7 +6,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { OrbitPhase } from "./clusterRange";
-import { capacityReport, jointLitFraction, powerSeries, selectHosts } from "./computeCapacity";
+import { capacityReport, fleetUtilization, jointLitFraction, powerSeries, selectHosts, selectHostsRandom, selectHostsSunniest } from "./computeCapacity";
 import { sunSyncWalkerParams, type SsoPlane } from "./sunSynchronous";
 import { walkerDeltaRecords, WALKER_EPOCH_ISO, type WalkerDeltaParams } from "./walkerDelta";
 
@@ -15,7 +15,9 @@ const EPOCH = new Date(WALKER_EPOCH_ISO);
 /** A pattern's satellites, as the closed form wants them. */
 function membersOf(params: WalkerDeltaParams): OrbitPhase[] {
   return walkerDeltaRecords(params, EPOCH).flatMap((record) =>
-    record.kind === "omm" ? [{ altitudeKm: params.altitudeKm, inclinationDeg: params.inclinationDeg, nodeDeg: Number(record.omm.RA_OF_ASC_NODE), phaseDeg: Number(record.omm.MEAN_ANOMALY) }] : [],
+    record.kind === "omm"
+      ? [{ altitudeKm: params.altitudeKm, inclinationDeg: params.inclinationDeg, nodeDeg: Number(record.omm.RA_OF_ASC_NODE), phaseDeg: Number(record.omm.MEAN_ANOMALY) }]
+      : [],
   );
 }
 
@@ -99,5 +101,47 @@ describe("compute capacity", () => {
     const report = capacityReport(series, [], 8);
     expect(report.servingFraction).toBe(0);
     expect(report.gpuHours).toBe(0);
+  });
+
+  test("the sunniest satellites are not the steadiest set", () => {
+    // The baseline the paper ablates: maximise each host's own illumination. It
+    // ignores correlation, and correlation is the phenomenon — so it lands below
+    // the joint selection on the pool where the choice is hard (one plane's
+    // worth of diversity).
+    const series = seriesOf(membersOf({ total: 24, planes: 2, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 }));
+    const sunniest = selectHostsSunniest(series, 4);
+    const greedy = selectHosts(series, 4);
+    expect(sunniest).toHaveLength(4);
+    expect(jointLitFraction(series, greedy)).toBeGreaterThanOrEqual(jointLitFraction(series, sunniest));
+    // And the sunniest set really is the sunniest: it is the top four by fraction.
+    const ranked = [...series.litFraction].toSorted((a, b) => b - a);
+    expect(sunniest.map((at) => series.litFraction[at])).toEqual(ranked.slice(0, 4));
+  });
+
+  test("random placement is deterministic, and different seeds give different answers", () => {
+    const series = seriesOf(membersOf({ total: 24, planes: 4, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 }));
+    expect(selectHostsRandom(series, 4, 7)).toEqual(selectHostsRandom(series, 4, 7));
+    expect(selectHostsRandom(series, 4, 7)).not.toEqual(selectHostsRandom(series, 4, 8));
+    // A permutation of the pool, not a sample with replacement.
+    expect(new Set(selectHostsRandom(series, 6, 3)).size).toBe(6);
+  });
+
+  test("fleet utilisation is delivered against every GPU the fleet flies", () => {
+    const series = seriesOf(membersOf({ total: 24, planes: 4, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 }));
+    const report = capacityReport(series, selectHosts(series, 4), 8);
+    // 4 hosts x 8 GPUs, over 24 h, against 24 satellites x 8 GPUs x 24 h.
+    expect(fleetUtilization(report, 24, 8, 24)).toBeCloseTo((4 * 8 * report.servingFraction * 24) / (24 * 8 * 24), 9);
+    expect(fleetUtilization(report, 0, 8, 24)).toBe(0);
+  });
+
+  test("a shallower window is not a different answer: step size does not move the serving fraction", () => {
+    // The 60 s step is a tenth of the shortest eclipse; halving it must not move
+    // the number, or every table in the paper is a sampling artefact.
+    const params = { total: 24, planes: 4, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 };
+    const members = membersOf(params);
+    const coarse = powerSeries(members, { start: EPOCH, hours: 24, stepSeconds: 60 });
+    const fine = powerSeries(members, { start: EPOCH, hours: 24, stepSeconds: 30 });
+    const hosts = selectHosts(coarse, 4);
+    expect(capacityReport(fine, hosts, 8).servingFraction).toBeCloseTo(capacityReport(coarse, hosts, 8).servingFraction, 1);
   });
 });
