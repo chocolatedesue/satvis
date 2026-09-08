@@ -554,6 +554,19 @@ propagator (1199.2 km at 34.685°), which is the last 0.2° a secular model cann
 so the solid bond returning to its shape and the dashed one wandering are on screen at once.
 Reasoning and numbers: `docs/adr/0009-multi-shell-layouts.md`.
 
+### Compute capacity: what a design actually delivers
+
+A pipeline only runs while **every stage has power at once**, so the fleet's mean illumination is not
+the number a service lives on — 60 satellites in one shell are lit 80.5% of the time each and have
+all eight stages lit 70.4% of the time. `pnpm orbit-lab capacity <alt>:<inc> [sats] [gpus] [stages]`
+sweeps the knobs a designer holds at a fixed budget, and picks the hosts whose _joint_ power is
+steadiest: two satellites in one plane go dark together and are never both chosen, which is the whole
+content of the result. What it found at 60 satellites and 8 GPUs each — spend the budget on **shells
+before planes** (two shells take a sun-synchronous family from 0.704 to 1.000 and remove the stalls
+outright, while more planes inside one shell make it _worse_), and the **ring minimum** is the real
+cap on how many shells the budget can be split into. Reasoning and the measured tables:
+`docs/compute-capacity.md`.
+
 ### Orbit analysis without a globe
 
 None of the questions above need one. `src/modules/util/` is Cesium-free and Vue-free on purpose —
