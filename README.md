@@ -537,6 +537,13 @@ every 24.46 h" is not a claim anyone can check at 1×. The same shell can appear
 that is the answer rather than a bug: a subset that returns sooner is a different offer, not a worse
 one.
 
+Under each row the panel **draws one cycle**: the closest pair's range against the row's link horizon,
+with the windows in which some pair is actually inside that horizon marked along the bottom. The globe
+cannot show a return — five shells nested inside each other look the same whether the configuration
+comes back or not — so the return is drawn, and the curve's last sample is its first. It is closed form
+(`src/modules/util/clusterRange.ts`): two secular rates, a position from them, a straight-line range.
+No propagation, and the cycle it is sampled over is the one the solver just reported.
+
 `scripts/derive-isl-topology.ts` (studies 7–12) flies the result with SGP4 rather than
 asserting it. The designed companion's seam shears at **0.005°/day** against 5.21°/day for a
 97.6° shell at the same altitude, and one repeat cycle later **99.7%** of satellites find the
