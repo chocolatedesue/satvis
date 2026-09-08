@@ -22,6 +22,10 @@ workspace package). One `pnpm install` at the root covers both.
   one designed orbit, and an analysis layer that needs no globe (0013).
 - **`docs/manual-verification.md`** — the checks jsdom cannot run. Rerun the ones
   covering code you change, and record what they returned.
+- **`docs/cluster-math-primer.md`** — both cluster derivations from scratch: how a
+  small eccentricity becomes a 2:1 epicycle, and how two secular rate differences
+  become the three shell verdicts. Read it — not the ADRs — when the reader is new
+  to the maths; it carries no measurements, so nothing in it goes stale.
 - **`docs/elements-to-clusters.md`** — the six orbital elements, reduced: why only
   `ΔΩ̇` and `Δu̇` decide whether a set of orbits holds together, and where those
   two rates come from. Read it before `cluster-math.md` when the reduction itself
