@@ -527,9 +527,15 @@ The orbit lab's **Stable clusters** section runs it over the patterns on screen 
 (altitude, inclination), because two patterns differing only in plane count are one shell in two
 pieces — and lists the front: each row is a set of shells, the cycle it closes, the worst slip a
 member carries into the next cycle, and the shortest range any pair in it could ever close.
+Each row also prints its **closest approach against its link horizon** — the geometry returning is
+decided by the rates, and whether any of that geometry is near enough to exchange a packet is
+decided by the altitudes, so a cluster can repeat forever without once coming within reach.
+
 **Mark** bonds one satellite per member, which is how a row is read off the globe instead of off the
-table. The same shell can appear in several rows, and that is the answer rather than a bug: a subset
-that returns sooner is a different offer, not a worse one.
+table; **Watch** does that and sets the clock so one whole cycle takes 90 seconds, because "returns
+every 24.46 h" is not a claim anyone can check at 1×. The same shell can appear in several rows, and
+that is the answer rather than a bug: a subset that returns sooner is a different offer, not a worse
+one.
 
 `scripts/derive-isl-topology.ts` (studies 7–12) flies the result with SGP4 rather than
 asserting it. The designed companion's seam shears at **0.005°/day** against 5.21°/day for a
