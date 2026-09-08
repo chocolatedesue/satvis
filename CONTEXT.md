@@ -404,6 +404,22 @@ arccos(R_b/r₂)` in Earth-central angle, against a blocking sphere raised 80 km
   cluster**, which is about orbits rather than satellites.
   Formulas, limits and measured numbers: `docs/cluster-math.md`
   (`docs/adr/0012-orbit-formations.md`).
+- **Contact window**: a span of the **repeat cycle** in which two shells are
+  inside their **link horizon** — close enough that a link exists at all. The
+  cycle makes contact periodic, so the windows are the same every cycle and a
+  schedule computed once holds; their union is what a cross-shell fabric can be
+  built on, and the share of the cycle they cover is the honest measure of how
+  much of a returning geometry is also a usable one.
+- **Contact series**: one repeat cycle of a cluster's internal geometry, sampled —
+  the closest pair's range at each instant, and how many pairs are in contact.
+  Drawn under a cluster row because the globe cannot show a return: five shells
+  nested inside each other look the same whether the configuration comes back or
+  not. Closed form, no propagation: two secular rates, a position from them, a
+  straight-line range.
+- **Closure**: the gap between a contact series' last sample and its first, in
+  kilometres — the return, measured rather than asserted. A cluster that closes
+  its cycle puts this near zero; a set that was not designed leaves the slip the
+  solver reported, which is how a wrong verdict becomes visible on screen.
 - **Repeat cycle**: how long a `repeating` pair takes to return to the same
   relative configuration — `p` orbits of one shell against `q` of the other.
   Every cross-shell range and every contact window repeats on it, so a schedule
