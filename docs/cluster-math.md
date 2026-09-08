@@ -9,6 +9,10 @@ For _which orbit to put a compute cluster in_ — how geometry, energy and infer
 depth constrain the choice together — see `docs/orbital-compute.md`. This file is the
 geometry and drag; that one is the synthesis.
 
+For _why the geometry reduces to two rates at all_, read from the six classical elements —
+see `docs/elements-to-clusters.md`. This file assumes that reduction and tabulates what
+follows from it.
+
 They are different scales with different maths, and the shared word is the only thing they have in
 common:
 
