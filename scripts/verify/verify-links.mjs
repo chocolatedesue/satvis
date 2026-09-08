@@ -37,7 +37,12 @@ const chromium = spawn(
     `--user-data-dir=${mkdtempSync(`${tmpdir()}/satvis-links-`)}`,
     "about:blank",
   ],
-  { stdio: ["ignore", "pipe", "pipe"] },
+  {
+    stdio: ["ignore", "pipe", "pipe"],
+    // Same reason as verify-orbit-lab.mjs: the reports read the English UI, and
+    // chromium takes the language it reports from the environment.
+    env: { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8", LANGUAGE: "en_US" },
+  },
 );
 let chromeLog = "";
 chromium.stderr.on("data", (chunk) => (chromeLog += chunk));

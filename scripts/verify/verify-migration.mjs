@@ -36,7 +36,13 @@ const chromium = spawn(
     `--user-data-dir=${mkdtempSync(`${tmpdir()}/satvis-mig-`)}`,
     "about:blank",
   ],
-  { stdio: ["ignore", "pipe", "pipe"] },
+  {
+    stdio: ["ignore", "pipe", "pipe"],
+    // The checks below match the English UI — see the same comment in
+    // verify-orbit-lab.mjs. `navigator.language` comes from the environment, so a
+    // zh_CN host renders the panel in Chinese and the demo button is not found.
+    env: { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8", LANGUAGE: "en_US" },
+  },
 );
 let chromeLog = "";
 chromium.stderr.on("data", (chunk) => (chromeLog += chunk));
@@ -135,6 +141,12 @@ function record(name, actual, expectation) {
 await send("Page.enable");
 await send("Runtime.enable");
 
+// Pin the language before the app boots — see the same step in
+// verify-orbit-lab.mjs. The expectations below match the English UI.
+await send("Page.navigate", { url: `${BASE}/404.html` });
+await sleep(500);
+await evaluate(`(() => { try { localStorage.setItem("satvis.locale", "en"); return "stored"; } catch { return "blocked"; } })()`);
+
 await send("Page.navigate", { url: `${BASE}/?tags=&elements=Point,Illumination%20arc&time=2026-01-01T00:00` });
 await until("document.querySelectorAll('#toolbarLeft .toolbarButtons button').length >= 7", "the toolbar");
 await until("!!document.querySelector('canvas')", "the Cesium canvas");
@@ -145,6 +157,8 @@ await evaluate("document.querySelectorAll('#toolbarLeft .toolbarButtons button')
 await until("!!document.querySelector('.orbitLab')", "the orbit lab panel");
 
 // One click: the migration demo.
+// See verify-orbit-lab.mjs: the sections mount a tick behind the panel.
+await until("[...document.querySelectorAll('.orbitLab__button')].some((b) => /KV-cache.*migration demo/i.test(b.textContent))", "the migration demo button");
 await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /KV-cache.*migration demo/i.test(b.textContent)).click()");
 await until("/mig=true/.test(window.location.search)", "the migration flag in the url");
 

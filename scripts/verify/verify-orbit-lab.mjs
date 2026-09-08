@@ -60,7 +60,14 @@ const chromium = spawn(
     `--user-data-dir=${mkdtempSync(`${tmpdir()}/satvis-verify-`)}`,
     "about:blank",
   ],
-  { stdio: ["ignore", "pipe", "pipe"] },
+  {
+    stdio: ["ignore", "pipe", "pipe"],
+    // The checks below match the English UI, so the browser has to ask for it:
+    // `detectLocale()` reads `navigator.language`, which chromium takes from the
+    // environment, so a zh_CN host renders the panel in Chinese and every text
+    // match here silently misses.
+    env: { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8", LANGUAGE: "en_US" },
+  },
 );
 let chromeLog = "";
 chromium.stderr.on("data", (chunk) => (chromeLog += chunk));
@@ -154,6 +161,15 @@ await send("Page.enable");
 await send("Runtime.enable");
 
 // ── The app loads at all ─────────────────────────────────────────────────────
+// Pin the language before the app boots. `detectLocale()` prefers the stored
+// choice over `navigator.language`, and every expectation below is written
+// against the English UI — so on a host whose environment is zh_CN, which
+// chromium is happy to report, the panel would otherwise open in Chinese and
+// each text match would miss without failing for a visible reason.
+await send("Page.navigate", { url: `${BASE}/404.html` });
+await sleep(500);
+await evaluate(`(() => { try { localStorage.setItem("satvis.locale", "en"); return "stored"; } catch { return "blocked"; } })()`);
+
 const PINNED_TIME = "2026-01-01T00:00";
 await send("Page.navigate", { url: `${BASE}/?elements=Point,Orbit&tags=&time=${PINNED_TIME}` });
 // The whole toolbar, not its first button: Vue mounts the row before it has filled
@@ -167,9 +183,17 @@ record("toolbar carries the orbit lab button", await evaluate("document.querySel
 // ── The lab panel opens ──────────────────────────────────────────────────────
 await evaluate("document.querySelectorAll('#toolbarLeft .toolbarButtons button')[3].click()");
 await until("!!document.querySelector('.orbitLab')", "the orbit lab panel");
+// The panel's sections are `<details>`, and only the first ships open. A collapsed
+// one still renders its children, so clicking a button inside it works — but it
+// contributes no height, so nothing below it can be scrolled to, and the readout
+// at the end of the panel is what the scroll check looks for.
+await evaluate("document.querySelectorAll('.orbitLab__group').forEach((group) => { group.open = true; })");
 record("panel offers all five illumination states", await evaluate("document.querySelectorAll('.orbitLab__legend tbody tr').length"), (value) => value === 5);
 
 // ── The one-click two-orbit demo ─────────────────────────────────────────────
+// The panel's sections mount a tick behind the panel itself, so the button the
+// click needs is not there the moment `.orbitLab` is.
+await until("[...document.querySelectorAll('.orbitLab__button')].some((b) => /Two-orbit demo/.test(b.textContent))", "the two-orbit demo button");
 await evaluate("[...document.querySelectorAll('.orbitLab__button')].find((b) => /Two-orbit demo/.test(b.textContent)).click()");
 await until("/walker=53%3A20|walker=53:20/.test(window.location.search)", "the demo pattern in the url");
 record(
