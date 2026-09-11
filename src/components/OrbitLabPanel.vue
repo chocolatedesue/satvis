@@ -684,6 +684,7 @@ import {
   familyReference,
   SHELLS_MULTIPLIER,
   STABLE_REFERENCE,
+  WALKER25_PARAMS,
 } from "../modules/demoScenes";
 import {
   CLUSTER_PRESETS,
@@ -1052,8 +1053,7 @@ function migrationDemo(): void {
   applyMigrationScene(satStore, cesiumStore, clockControl);
 }
 function walker25Demo(): void {
-  const params = { total: 100, planes: 25, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 };
-  Object.assign(draft, params);
+  Object.assign(draft, WALKER25_PARAMS);
   applyWalker25Scene(satStore, cesiumStore, clockControl);
 }
 function useSunSyncInclination(): void {

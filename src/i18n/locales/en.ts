@@ -437,7 +437,7 @@ export default {
 
     migration: {
       kvDemo: "KV-cache & GPU migration demo",
-      fleetDemo: "25x4 fleet migration demo",
+      fleetDemo: "25x10 fleet migration demo",
       overlay: "Show migration overlay",
       stages: "Pipeline stages",
       incremental: "Incremental KV sync (differential snapshot)",

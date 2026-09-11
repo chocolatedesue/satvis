@@ -116,13 +116,40 @@ export function applyMigrationScene(satStore: SatStore, cesiumStore: CesiumStore
 }
 
 /**
- * The migration overlay over a larger fleet: 25 planes x 4 satellites, the
+ * The migration overlay over a larger fleet: 25 planes x 10 satellites, the
  * scenario the KV-cache line asks for. Same two-orbit look — illumination
  * colouring, labels, large points, inertial frame, 60x clock — but spread over
  * enough planes that an eclipse is always happening somewhere.
+ *
+ * The 25 planes stay: a Walker Delta spreads them 14.4° of RAAN apart, so one
+ * is always crossing into shadow somewhere and the migration overlay never runs
+ * out of lit hosts — that is the scene's whole selling point. What changed is
+ * the count per plane: four satellites put the ring neighbours 90° apart, so an
+ * orbit read as a sparse dotted line, which is what "same orbit, far too few
+ * satellites" was about. Ten (36° apart, total 250) keep the same-plane
+ * angular spacing under 45° and make the orbit legible without approaching the
+ * thousands the presets fly.
+ *
+ * **Known observation, not a defect: in the inertial camera a satellite on the
+ * far side of the globe traces the screen in the opposite direction to one on
+ * the near side.** Both fly the same prograde orbit — same RAAN, same
+ * inclination, so the same angular-momentum vector (pinned by
+ * walkerDelta.test.ts) — and the reversal is the perspective of a ring seen
+ * from outside: as the ring passes behind the Earth its projected motion flips,
+ * exactly as a clock's hands would if you walked around the clock. Neighbouring
+ * planes compound the impression, because their 14.4° RAAN gap lets a near-side
+ * satellite of one sit close on screen to a far-side satellite of the next. The
+ * per-plane orbit ring is what disambiguates the two halves: the scene draws it
+ * through the trajectory itself (the `Illumination arc` component, whose
+ * ellipse is the same closed loop for every satellite of a plane) and through
+ * the green intra-plane ring links, so the far-side arc reads as the back of the
+ * same ellipse rather than as a second orbit pointing the other way.
  */
+export const WALKER25_PARAMS: WalkerDeltaParams = { total: 250, planes: 25, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 };
+
+/** The migration overlay scene, over {@link WALKER25_PARAMS}. */
 export function applyWalker25Scene(satStore: SatStore, cesiumStore: CesiumStore, clock: ClockControl): void {
-  const params: WalkerDeltaParams = { total: 100, planes: 25, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 };
+  const params = WALKER25_PARAMS;
   satStore.walker = [encodeWalker(params)];
   satStore.pointColorMode = "illumination";
   satStore.pointSize = "large";

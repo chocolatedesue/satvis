@@ -18,18 +18,20 @@ import {
   applyStableShellsScene,
   applySunSyncScene,
   applyTwoOrbitScene,
+  applyWalker25Scene,
   type ClockControl,
   CLUSTER_MULTIPLIER,
   DEMO_MULTIPLIER,
   FAMILY_BAND_KM,
   SHELLS_MULTIPLIER,
   STABLE_REFERENCE,
+  WALKER25_PARAMS,
 } from "./demoScenes";
 import { CLUSTER_EPOCH_ISO, clusterFormationRecords, clusterNamePrefix, clusterRadiusM, clusterTagFor, decodeCluster } from "./util/clusterFormation";
 import { parseGeneratedSatellite, resolveMarks } from "./util/constellationLinks";
 import { shellPairLayout, shellRates } from "./util/shellLayout";
 import { SUN_DEG_PER_DAY } from "./util/sunSynchronous";
-import { decodeWalker, encodeWalker, isWalkerTag, type WalkerDeltaParams } from "./util/walkerDelta";
+import { decodeWalker, encodeWalker, isWalkerTag, satsPerPlane, walkerTagFor, type WalkerDeltaParams } from "./util/walkerDelta";
 
 /** Records what the scene did to the clock, which is not store state. */
 function clockSpy(): ClockControl & { multiplier?: number; played: boolean } {
@@ -234,6 +236,49 @@ describe("demo scenes", () => {
       expect(clock.multiplier).toBe(SHELLS_MULTIPLIER);
       expect(clock.played).toBe(true);
     });
+  });
+});
+
+describe("walker25", () => {
+  function applyWalker25() {
+    const s = stores();
+    const clock = clockSpy();
+    applyWalker25Scene(s.satStore, s.cesiumStore, clock);
+    return { s, clock };
+  }
+
+  test("keeps all 25 planes and densifies each to ten satellites", () => {
+    // The 25 planes are the scene's point — 14.4° of RAAN apart, so one is always
+    // crossing into shadow. The count per plane was four, which put same-plane
+    // neighbours 90° apart and read as a sparse dotted orbit; ten (36° apart) is
+    // the density fix, and the scene's own constant is what the panel drafts into
+    // its form so the two cannot drift.
+    const { s } = applyWalker25();
+    expect(WALKER25_PARAMS).toEqual({ total: 250, planes: 25, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 });
+    expect(s.satStore.walker).toEqual([encodeWalker(WALKER25_PARAMS)]);
+    const params = decodeWalker(s.satStore.walker[0]!)!;
+    expect(params.planes).toBe(25);
+    expect(satsPerPlane(params)).toBe(10);
+    expect(params.total).toBe(250);
+    // Same-plane angular spacing is 360°/S, and the report asked for at most 45°.
+    expect(360 / satsPerPlane(params)).toBeLessThanOrEqual(45);
+  });
+
+  test("shows only the pattern, in the illumination view, with the overlays on", () => {
+    const { s, clock } = applyWalker25();
+    expect(s.satStore.enabledTags).toEqual([walkerTagFor(WALKER25_PARAMS)]);
+    expect(s.satStore.enabledSatellites).toEqual([]);
+    expect(s.satStore.pointColorMode).toBe("illumination");
+    // The arc is the orbit ring the scene leans on to make the two halves of a
+    // projected orbit read as one loop — the readability answer to the
+    // "opposite directions" report.
+    expect(s.satStore.enabledComponents).toContain("Illumination arc");
+    expect(s.cesiumStore.cameraMode).toBe("Inertial");
+    // The topology overlay and the migration overlay are both part of the scene.
+    expect(s.satStore.links).toBe(true);
+    expect(s.satStore.migration).toBe(true);
+    expect(clock.multiplier).toBe(DEMO_MULTIPLIER);
+    expect(clock.played).toBe(true);
   });
 });
 

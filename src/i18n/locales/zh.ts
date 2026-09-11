@@ -409,7 +409,7 @@ export default {
 
     migration: {
       kvDemo: "KV 缓存与 GPU 迁移演示",
-      fleetDemo: "25×4 星座迁移演示",
+      fleetDemo: "25×10 星座迁移演示",
       overlay: "显示迁移叠加层",
       stages: "流水线级数",
       incremental: "增量 KV 同步（差分快照）",

@@ -238,6 +238,64 @@ describe("the records SGP4 makes of them", () => {
   });
 });
 
+describe("same-plane direction (the ?demo=walker25 report)", () => {
+  // 25 planes x 10 satellites: the walker25 scene's pattern. It was reported as
+  // "satellites in the same orbit move in different directions", so this pins
+  // what the generator actually does. Every element set of a plane shares one
+  // RAAN and one inclination, so they are one orbit; SGP4 then puts their
+  // angular momentum on one normal, prograde. Nothing here can point two ways,
+  // which is the evidence that the report is about perspective and not a sign
+  // or a frame error.
+  const fleet: WalkerDeltaParams = { total: 250, planes: 25, phasing: 1, inclinationDeg: 53, altitudeKm: 550, raanSpanDeg: 360 };
+
+  function planeOf(record: ReturnType<typeof walkerDeltaRecords>[number]): number {
+    return Number(/P(\d+)-/.exec(String(ommOf(record).OBJECT_NAME))?.[1]);
+  }
+
+  /** Unit specific angular momentum r x v — the orbit's normal. */
+  function orbitNormal(record: ReturnType<typeof walkerDeltaRecords>[number]): { x: number; y: number; z: number } {
+    const state = propagate(createSatrec(record), EPOCH)!;
+    const { position: r, velocity: v } = state;
+    const h = { x: r.y * v.z - r.z * v.y, y: r.z * v.x - r.x * v.z, z: r.x * v.y - r.y * v.x };
+    const magnitude = Math.sqrt(h.x ** 2 + h.y ** 2 + h.z ** 2);
+    return { x: h.x / magnitude, y: h.y / magnitude, z: h.z / magnitude };
+  }
+
+  it("gives every satellite of a plane one RAAN and one inclination", () => {
+    const byPlane = new Map<number, { raan: number; inclination: number }[]>();
+    for (const record of walkerDeltaRecords(fleet, EPOCH)) {
+      const omm = ommOf(record);
+      const plane = planeOf(record);
+      byPlane.set(plane, [...(byPlane.get(plane) ?? []), { raan: Number(omm.RA_OF_ASC_NODE), inclination: Number(omm.INCLINATION) }]);
+    }
+    expect(byPlane.size).toBe(25);
+    for (const members of byPlane.values()) {
+      expect(members).toHaveLength(10);
+      expect(new Set(members.map((member) => member.raan)).size).toBe(1);
+      expect(new Set(members.map((member) => member.inclination)).size).toBe(1);
+    }
+  });
+
+  it("propagates each plane onto a single prograde normal, not two opposing ones", () => {
+    const byPlane = new Map<number, { x: number; y: number; z: number }[]>();
+    for (const record of walkerDeltaRecords(fleet, EPOCH)) {
+      const plane = planeOf(record);
+      byPlane.set(plane, [...(byPlane.get(plane) ?? []), orbitNormal(record)]);
+    }
+    expect(byPlane.size).toBe(25);
+    for (const normals of byPlane.values()) {
+      const reference = normals[0]!;
+      for (const normal of normals) {
+        // Parallel, same sense: 1 is identical, -1 is the "opposite direction"
+        // the report described. J2's short-period wobble keeps it just shy of 1.
+        expect(normal.x * reference.x + normal.y * reference.y + normal.z * reference.z).toBeGreaterThan(0.999);
+      }
+      // And prograde — every plane of a Walker Delta circulates the same way.
+      expect(reference.z).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe("the wire form", () => {
   it("writes Walker's own notation", () => {
     expect(encodeWalker(starlinkShell1)).toBe("53:1584/72/17@550");
