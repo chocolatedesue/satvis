@@ -8,11 +8,13 @@ functions the app itself runs, and every one is reproducible:
 pnpm orbit-lab design 550 53 22      # one orbit, all three layers at once
 pnpm orbit-lab shells 780 86.4       # companion shells that hold
 scripts/research/drag-budget.ts               # how long the vacuum holds
+scripts/research/migration-reach.ts           # how far the satellite that takes over is
 pnpm energy-report                   # docs/starlink-energy-report.md, regenerated
 ```
 
 This file is the synthesis. The derivations live in `docs/cluster-math.md` (geometry and
-drag), `docs/starlink-energy-report.md` (energy, measured over real shells) and
+drag), `docs/starlink-energy-report.md` (energy, measured over real shells),
+`docs/migration-reach.md` (how far a hand-off reaches, and what the link fabric costs it) and
 `docs/adr/0010`, `0012` (why the two things called a cluster are built the way they are).
 
 ---
@@ -124,6 +126,14 @@ constraint — **the churn rate is**. Incremental sync (ship only the KV growth 
 transfer, ~25.6 MB per simulated second) turns a gigabyte-scale migration into hundreds of
 megabytes.
 
+**Handoff distance.** The satellite that takes over is one lattice step away — 1274 km p50 at
+550 km / 53°, a single leg, never stranded — and that is the cheap case, not the typical one.
+Demanding the target still be lit 1800 s later moves it to 7979 km and two legs; routing over
+the ISL topology the app actually draws rather than the direct chord costs **4 hops instead of
+1**, which is 0.64 s instead of 0.164 s for the same hand-off. And the naive policy's median
+target is dark again 140 s later, which is what "the churn rate is the constraint" costs in
+kilometres. Numbers and sweeps: `docs/migration-reach.md`.
+
 **The Earth is opaque.** A chord through the planet is not a long link, it is no link. A
 handoff therefore goes to a host the current one can _see_, and when none is visible it goes
 **around the limb** through a lit relay — charged for the whole wire.
@@ -213,3 +223,7 @@ one, and should be quoted as such.
   results.** Neither survives contact with station-keeping or differential drag unqualified.
 - **Nothing here models the compute** — FLOPs per watt, memory bandwidth, the model-parallel
   split, or what a 160 ms handoff does to a decode loop's latency budget.
+- **The two link fabrics are not reconciled.** `migration.ts` hands off over the visibility
+  graph and `constellationLinks.ts` draws a fixed ring-and-same-slot lattice; they disagree by
+  ~4× on what a hand-off costs (`docs/migration-reach.md`), and which one a design should be
+  budgeted against is an open question, not a settled one.

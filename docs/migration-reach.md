@@ -1,0 +1,239 @@
+# How far is the satellite that takes over?
+
+When a host goes dark the workload has to go somewhere. **Where — and how long before that one
+goes dark too.**
+
+`docs/starlink-energy-report.md` answers how much of an orbit has power.
+`src/modules/util/migration.ts` answers where a KV cache goes on this frame. Neither answers
+the question between them, which is the one a hand-off budget is built on. This file does, by
+propagation:
+
+```sh
+node --experimental-strip-types scripts/research/migration-reach.ts        # every sweep
+node --experimental-strip-types scripts/research/migration-reach.ts power  # panel vs eclipse
+node --experimental-strip-types scripts/research/migration-reach.ts season # four dates
+```
+
+Same SGP4 the app flies, same ν/κ channels the globe is painted with (`illuminationOf`), same
+line-of-sight rule and around-the-limb routing the hand-off actually takes (`hasLineOfSight`,
+`routesFrom`). The script asserts its own fast path against `chooseRouteExcluding` on every
+run, so these are the app's policy rather than a second implementation of it.
+
+---
+
+## Three answers, in order of how much they move the number
+
+The eclipse fraction is not one of them. Every 53° row below sits at 33.6% eclipsed and 46%
+unpowered, and the hand-off distance still ranges over a factor of six. What moves it:
+
+1. **How much remaining sunlight you demand of the target** — 1274 km at zero, 7979 km at
+   1800 s. A factor of six.
+2. **Inclination** — 1274 km at 53°, 506 km at 97.6°, and at 87.9° the demand becomes free.
+3. **Which link fabric the hand-off is allowed to use** — the direct chord, or a walk across
+   the ISL lattice the app actually draws. A factor of four in transfer time, and it is the
+   one nobody budgets for.
+
+Density (T, P, S) sets a floor under the first and does nothing to the rest.
+
+---
+
+## The base case
+
+53° / 550 km, 10 planes × 22, at the instant a host loses power. p50 over 636 eclipse entries,
+3 revolutions at 20 s steps, March equinox.
+
+| the target must stay lit | nearest such satellite | legs | free-space transfer | over the fixed ISL lattice |
+| ------------------------ | ---------------------- | ---- | ------------------- | -------------------------- |
+| ≥ 0 s (just lit now)     | **1274 km**            | 1    | 0.164 s             | 4 hops, 0.64 s             |
+| ≥ 180 s                  | 1598 km                | 1    | 0.165 s             | 5 hops, 0.80 s             |
+| ≥ 600 s                  | 3467 km                | 1    | 0.172 s             | 2 hops, 0.32 s             |
+| ≥ 1200 s                 | 5505 km                | 2    | **0.338 s**         | 6 hops, 0.96 s             |
+| ≥ 1800 s                 | 7979 km                | 2    | 0.347 s             | 6 hops, 0.96 s             |
+
+**At zero demand the hand-off is one lattice step.** 1274 km, against a median
+nearest-neighbour spacing of 873 km and a ring chord of 1972 km. This holds across every
+pattern measured — 428–1428 km, **always a single leg, never relayed, never stranded**. The
+naive model's old through-the-Earth chords of 8149–11 215 km (`docs/adr/0011`) were never the
+geometry; they were the bug.
+
+**Demanding dwell is what costs.** 1274 → 3467 → 7979 km for 0 / 600 / 1800 s. A target that
+must still be lit half an hour from now is most of the way to the sub-solar side, and past
+5053 km at this altitude there is no direct link at all (`maxLinkRangeKm`) — which is the
+1-leg → 2-leg step in the table.
+
+**The cost of distance is hops, not light.** 2 GB over 100 Gbps is 160 ms of serialisation;
+1274 km of light is 4.2 ms and 7979 km is 26.6 ms. Distance is nearly free right up to the
+horizon and then costs a whole second serialisation, because a relay receives the entire cache
+before forwarding it (`routeTransferCost`). The curve is flat, flat, flat, **+160 ms**.
+
+---
+
+## The hand-off does not go to your neighbour
+
+Median Δplane at zero demand is **4**, in a 10-plane pattern. Not 1. The pattern holds across
+the sweep: the target sits roughly 0.4 P planes away — 7 of 20, 8 of 20, 3 of 10 — which is
+something like 140° of right ascension.
+
+That is the mechanism behind everything else here. Two 53° planes 144° apart in RAAN
+*intersect*, so satellites from them pass close; and because their nodes are far apart their β
+differs, so they are at different points in their own sunlit arcs. **Far in RAAN is what
+decorrelates the sun phase, and plane crossings are what make far-in-RAAN geometrically near.**
+Your actual nearest neighbour is no use to you: it is crossing the same terminator you are.
+
+Which is why the naive policy churns, and the exception proves the rule:
+
+| policy                | hand-off p50 | target dwell p50 | target dark < 60 s |
+| --------------------- | ------------ | ---------------- | ------------------ |
+| naive (reactive, 0 s) | 1279 km      | **140 s**        | **20%**            |
+| predictive 90 s       | 988 km       | 200 s            | 0%                 |
+| predictive 300 s      | 1066 km      | 460 s            | 0%                 |
+| predictive 600 s      | 954 km       | 900 s            | 0%                 |
+
+A naive hand-off is the first of a chain, not a fix: its median target is itself dark 140 s
+later, and the dark arc is ~2640 s at 550 km. And predicting 90 s ahead is cheaper **in
+distance as well as in stalls** — 988 against 1279 km — because deciding before the terminator
+means the near satellites have not yet turned into the ones going dark with you.
+
+Do not read that table as a cost curve, though. A lookahead window moves two things at once: it
+decides *earlier*, when the whole neighbourhood is still lit, and it demands *more* of the
+target. Those push opposite ways, which is why the column does not order, and why the dwell
+table above — decision instant fixed, demand varied — is the one to budget from.
+
+---
+
+## The link fabric is worth as much as the geometry
+
+The migration model routes over the **visibility graph**: any two satellites that can see each
+other are one hop apart. The topology the app draws is not that graph —
+`constellationLinks.ts` wires a ring inside each plane and a same-slot link between *adjacent*
+planes, and nothing else (`docs/adr/0008`). A fleet whose radios are installed that way cannot
+take the direct chord to a satellite four planes over, however clearly it can see it. It has to
+walk, and every step is a store-and-forward leg.
+
+At the base case that is **4 hops and 0.64 s against 1 hop and 0.164 s — 3.9×**, for the same
+hand-off, between two assumptions that are both defensible.
+
+And it inverts the density conclusion. At fixed N = 220, priced over the fixed lattice:
+
+| shape                     | reach ≥ 0 s | free space  | over the lattice    |
+| ------------------------- | ----------- | ----------- | ------------------- |
+| 5 planes × 44 (long rings) | 989 km      | 1 leg, 0.163 s | **1 hop, 0.16 s** |
+| 10 × 22 (square)          | 1274 km     | 1 leg, 0.164 s | 4 hops, 0.64 s      |
+| 20 × 11 (short rings)     | 1008 km     | 1 leg, 0.163 s | 5 hops, 0.80 s      |
+
+In the 5 × 44 pattern the hand-off goes to the next satellite in the *same ring* — 989 km is
+the ring chord to within a kilometre — which is one hop on a link that already exists and never
+changes length (`CV ≈ 0.001`, `derive-isl-topology.ts`). Free space cannot tell these three
+patterns apart. The lattice says one of them is four times cheaper.
+
+The caveat is that this only holds at low demand: at ≥ 600 s the same 5 × 44 pattern is the
+*worst* of the three over the lattice (11 hops, 1.76 s), because a deeply-lit target is far
+along-track and a long ring is many ring steps. Long rings make cheap reactive hand-offs and
+expensive predictive ones.
+
+---
+
+## What each Walker parameter is worth
+
+p50 at zero demand and at 600 s, 3 revolutions, March equinox. Base 53:220/10/1@550 unless
+stated.
+
+| sweep            | pattern            | nearest neighbour | reach ≥ 0 s | reach ≥ 600 s | eclipsed |
+| ---------------- | ------------------ | ----------------- | ----------- | ------------- | -------- |
+| **per plane**    | S = 11             | 1056 km           | 1404 km     | 3412 km       | 33.6%    |
+|                  | S = 22             | 873 km            | 1274 km     | 3467 km       | 33.6%    |
+|                  | S = 44             | 535 km            | 984 km      | 3255 km       | 33.6%    |
+| **planes**       | P = 5              | 1380 km           | 1400 km     | 4716 km       | 33.6%    |
+|                  | P = 10             | 873 km            | 1274 km     | 3467 km       | 33.6%    |
+|                  | P = 20             | 562 km            | 875 km      | 3315 km       | 33.6%    |
+| **shape, N=220** | 5 × 44             | 988 km            | 989 km      | 4118 km       | 33.6%    |
+|                  | 10 × 22            | 873 km            | 1274 km     | 3467 km       | 33.6%    |
+|                  | 20 × 11            | 856 km            | 1008 km     | 3816 km       | 33.6%    |
+| **altitude**     | h = 350 km         | 849 km            | 1242 km     | 3369 km       | 36.9%    |
+|                  | h = 550 km         | 873 km            | 1274 km     | 3467 km       | 33.6%    |
+|                  | h = 1200 km        | 960 km            | 1385 km     | 3559 km       | 25.8%    |
+| **inclination**  | i = 53°            | 873 km            | 1274 km     | 3467 km       | 33.6%    |
+|                  | i = 70°            | 838 km            | 1428 km     | **2294 km**   | 28.1%    |
+|                  | i = 97.6°          | 831 km            | **506 km**  | **1657 km**   | 21.2%    |
+| **phasing**      | F = 0              | 750 km            | 1104 km     | 3433 km       | 33.6%    |
+|                  | F = 1              | 873 km            | 1274 km     | 3467 km       | 33.6%    |
+|                  | F = 5              | 713 km            | 1200 km     | 3666 km       | 33.6%    |
+| **span**         | 87.9° Delta, 360°  | 569 km            | 521 km      | **521 km**    | 21.1%    |
+|                  | 87.9° Star, 180°   | 1514 km           | 428 km      | 678 km        | 23.3%    |
+
+### Density sets the floor, and only the floor
+
+At zero demand the reach tracks local spacing, and spacing is set by **N**, not by how N is
+split. 110 → 220 → 440 satellites takes the reach from ~1400 to ~1270 to ~980 km whether the
+extras go into the rings or into new planes; at fixed N = 220 the three shapes land within
+300 km of each other.
+
+It is the wrong knob to reach for: halving the reach costs **4× the fleet**, and the 600 s
+column barely moves across the entire density sweep (3255–4716 km). **You cannot buy dwell with
+satellites.**
+
+### Inclination is the lever, and it is a large one
+
+The one parameter that moves both columns, and it moves them together:
+
+- **53°** — 1274 km now, 3467 km for 600 s of dwell.
+- **70°** — 1428 km now, **2294 km** for 600 s.
+- **97.6°** — **506 km** now, **1657 km** for 600 s, and 2 lattice hops rather than 4.
+- **87.9° Delta** — 521 km at *every* demand out to 1800 s. The dwell curve is flat.
+
+At high inclination the planes converge near the poles, so a satellite's near neighbours are
+drawn from many planes at once — and those planes have different β, so a deeply-lit satellite
+is already a neighbour. At 53° the planes run closer to parallel through the region where the
+terminator is crossed, so to find a neighbour that is not about to go dark you have to leave
+the neighbourhood.
+
+Which is the same conclusion `docs/orbital-compute.md` reaches for energy, seen from the other
+side, and worth one sentence: **the inclination that raises β is also the inclination that puts
+a long-dwell hand-off target within one hop.** 87.9° needs 521 km and one leg for a target still
+lit half an hour later; 53° needs 7979 km and two.
+
+### Altitude buys reach, not distance
+
+Altitude barely moves the hand-off (1242 / 1274 / 1385 km at 350 / 550 / 1200 km) but it moves
+the **horizon**: 3822 / 5053 / 7953 km. At 1200 km an 1800 s target is still a single leg
+(6779 km, inside the horizon); at 550 km the same demand needs a relay. Altitude is how a
+demanding policy stays one hop — and it cuts the eclipse from 36.9% to 25.8%.
+
+### Phasing and span are second-order here
+
+F shifts the lattice and moves the reach ~15% (1104–1274 km across F = 0/1/5). The Walker Star's
+180° span gives closer lit neighbours than the Delta (428 vs 521 km) and much worse dwell
+(median target dark in 60 s, 27% within 60 s, against 3020 s and 0%) — the seam puts a
+counter-rotating satellite alongside you briefly, which is a neighbour you cannot keep.
+
+---
+
+## How much of this depends on the modelling choices
+
+**The panel model does not change the answer.** Under eclipse-only power — umbra and penumbra,
+no attitude model at all — the base case reads 1141 km at zero demand against 1274 km, and 6124
+against 5505 at 1200 s. The dark fraction differs a lot between the two models (46% vs 34%);
+the reach does not.
+
+**The date does, but only at the demanding end.** Over four dates the naive hand-off holds at
+1044–1279 km, while the 1800 s reach runs 7683–10 297 km and the relay share swings 70–100%. A
+hand-off budget quoted at zero demand is a property of the pattern; one quoted at high demand is
+a property of the pattern *and the season*, and needs the range.
+
+## Where these numbers stop
+
+- Two-body Walker geometry propagated with SGP4: no drag, no station-keeping, no manoeuvres,
+  one epoch per pattern. A pattern is a shape held still.
+- κ is this repo's zenith-panel model, not a measurement — nothing in an element set describes
+  attitude (`docs/starlink-energy-report.md`).
+- The chord is a stand-in for an ISL. No antenna, no pointing time, no link budget, no
+  contention: *reachable* means the Earth is not in the way by more than the 80 km atmospheric
+  margin.
+- The lattice column prices hops, not the lattice's own availability — it assumes each ring and
+  same-slot link is up, which `derive-isl-topology.ts` supports for length stability but which
+  says nothing about a relay that is itself dark.
+- Dwell is measured against a 3-revolution window, so a target that outlives the window counts
+  as satisfying any demand. At the base case none do (`never dark 0%`); where they exist the
+  summary line says so.
+- Sampling is 20 s, so every time figure is quantised to 20 s and every distance is the one at
+  that sample, not at the exact crossing.
