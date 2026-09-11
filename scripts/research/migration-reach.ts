@@ -111,6 +111,15 @@ interface Flight {
   power: boolean[][];
   /** `eclipsed[step][sat]` — umbra or penumbra, independent of the panel model. */
   eclipsed: boolean[][];
+  /**
+   * `latitude[step][sat]` in degrees, geocentric.
+   *
+   * Here because *where* on the orbit a hand-off happens is part of the answer: the
+   * planes of an inclined constellation converge towards the turning latitude, so a
+   * hand-off made up there is between satellites that are close for a reason that has
+   * nothing to do with how many of them there are.
+   */
+  latitude: number[][];
   stepSeconds: number;
   steps: number;
 }
@@ -164,12 +173,14 @@ function fly(params: WalkerDeltaParams, epoch: Date, orbits: number, stepSeconds
   const positions: Flight["positions"] = [];
   const power: boolean[][] = [];
   const eclipsed: boolean[][] = [];
+  const latitude: number[][] = [];
   for (let step = 0; step < steps; step += 1) {
     const time = new Date(epoch.getTime() + step * stepSeconds * 1000);
     const sun = sunGeometry(time);
     const framePositions: Array<{ x: number; y: number; z: number }> = [];
     const framePower: boolean[] = [];
     const frameEclipsed: boolean[] = [];
+    const frameLatitude: number[] = [];
     for (let sat = 0; sat < satrecs.length; sat += 1) {
       const satrec = satrecs[sat];
       const state = satrec ? propagate(satrec, time) : undefined;
@@ -177,6 +188,7 @@ function fly(params: WalkerDeltaParams, epoch: Date, orbits: number, stepSeconds
         framePositions.push({ x: 0, y: 0, z: 0 });
         framePower.push(false);
         frameEclipsed.push(true);
+        frameLatitude.push(Number.NaN);
         continue;
       }
       // Position in metres for migration.ts; illumination takes the same vector in km.
@@ -185,12 +197,17 @@ function fly(params: WalkerDeltaParams, epoch: Date, orbits: number, stepSeconds
       const illuminationState = illumination?.state ?? "umbra";
       framePower.push(poweredIn(illuminationState, model));
       frameEclipsed.push(illuminationState === "umbra" || illuminationState === "penumbra");
+      // Geocentric latitude: enough to say *where on the orbit*, and it needs no earth
+      // model, unlike the geodetic one.
+      const radiusKm = Math.hypot(state.position.x, state.position.y, state.position.z);
+      frameLatitude.push((Math.asin(state.position.z / radiusKm) * 180) / Math.PI);
     }
     positions.push(framePositions);
     power.push(framePower);
     eclipsed.push(frameEclipsed);
+    latitude.push(frameLatitude);
   }
-  return { names, planes, slots, positions, power, eclipsed, stepSeconds, steps };
+  return { names, planes, slots, positions, power, eclipsed, latitude, stepSeconds, steps };
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +309,25 @@ interface PolicyResult {
   events: number;
   stranded: number;
   samples: HandoffSample[];
+}
+
+/**
+ * Steps until `sat` gets power back, from `step` inclusive. `Infinity` when it does
+ * not inside the flight.
+ *
+ * The alternative every hand-off is competing with, and the one the model never
+ * costs: **do nothing and wait for the sun.** A migration is only worth its transfer
+ * and its stall if the host's own dark interval is longer than the stall — and near
+ * the turning latitude of an inclined orbit that is not obvious, which is why this is
+ * measured rather than assumed.
+ */
+function stepsUntilLight(flight: Flight, sat: number, step: number): number {
+  for (let at = step; at < flight.steps; at += 1) {
+    if (flight.power[at]?.[sat] === true) {
+      return at - step;
+    }
+  }
+  return Infinity;
 }
 
 /** Steps until `sat` loses power, from `step` inclusive. `Infinity` when it never does. */
@@ -450,6 +486,295 @@ function measureReach(flight: Flight, demands: readonly number[], planeCount: nu
     }
   }
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Which satellite you hand to: nearest lit, or the next one round your own ring
+// ---------------------------------------------------------------------------
+
+/**
+ * The target-selection rules worth comparing, and why they are not the same question
+ * as the lookahead window.
+ *
+ * `nearest` is what `chooseTarget` does: the closest lit satellite anywhere in the
+ * fleet. The measurements above show where that lands — a plane roughly 140° away in
+ * right ascension, on a link that exists only in the visibility graph.
+ *
+ * `ring` is the other obvious rule, and the one the drawn topology can actually
+ * carry: stay in your own orbital plane and hand to the next lit satellite round the
+ * ring. It has a property nothing else here has — **the link never changes length**
+ * (`CV ≈ 0.001`, `derive-isl-topology.ts`), so it is the one hand-off whose cost is
+ * known before the pass starts.
+ *
+ * It also has a hard limit, and it is arithmetic rather than measurement. Every
+ * satellite in a ring shares a plane, so it shares a β and a terminator: the
+ * satellite k slots behind you enters eclipse exactly k·T/S seconds after you do.
+ * Going round the ring therefore buys dwell in fixed quanta, and buying more means
+ * reaching further — until the chord `2r·sin(kπ/S)` runs past the link horizon and
+ * the ring hand-off has to be relayed round its own ring.
+ *
+ * `adjacent` is the third rule the lattice can carry in one hop: same slot, next
+ * plane over. Included because it is what an ISL topology already wired for routing
+ * would reach for first, and it is worth knowing what it costs in dwell.
+ */
+type TargetRule = "nearest" | "ring" | "ring-far" | "adjacent";
+
+const TARGET_RULES: ReadonlyArray<{ rule: TargetRule; label: string }> = [
+  { rule: "nearest", label: "nearest lit, any plane" },
+  { rule: "ring", label: "same plane, next lit slot" },
+  { rule: "ring-far", label: "same plane, furthest lit slot in view" },
+  { rule: "adjacent", label: "adjacent plane only" },
+];
+
+/**
+ * The route a rule picks, which is not always the shortest one.
+ *
+ * Every rule here except `ring-far` prefers the shortest wire, because that is what
+ * `chooseTarget` does and what a transfer is charged for. `ring-far` deliberately
+ * does the opposite: **inside a ring, distance and dwell are the same quantity.**
+ * Every satellite in the ring shares a terminator, so the one k slots back is both
+ * `2r·sin(kπ/S)` away and `k·T/S` seconds later into the shadow — and hopping to the
+ * nearest one buys the *least* possible dwell, which is a treadmill. Reaching as far
+ * back as the link horizon allows is the same hand-off done once instead of k times.
+ *
+ * It is the only rule here that spends distance on purpose, and the ring is the only
+ * place where doing so is a clean trade rather than a gamble, because the
+ * relationship is exact.
+ */
+function selectRoute(
+  flight: Flight,
+  step: number,
+  source: MigrationHost,
+  candidates: readonly MigrationHost[],
+  pool: readonly MigrationHost[],
+  rule: TargetRule,
+): MigrationRoute | undefined {
+  if (rule !== "ring-far") {
+    return chooseRoute(source, candidates, false, pool);
+  }
+  let best: MigrationRoute | undefined;
+  let bestDwell = -1;
+  for (const candidate of candidates) {
+    if (candidate.name === source.name || !hasLineOfSight(source.position, candidate.position)) {
+      continue;
+    }
+    const dwell = stepsUntilDark(flight, flight.names.indexOf(candidate.name), step);
+    if (dwell > bestDwell) {
+      bestDwell = dwell;
+      const km = distanceKm(source.position, candidate.position);
+      best = { hops: [source.name, candidate.name], legsKm: [km], linkKm: km };
+    }
+  }
+  // Nothing in view round the ring: fall back to the shortest relayed path, same as
+  // every other rule, rather than reporting a reachable hand-off as impossible.
+  return best ?? chooseRoute(source, candidates, false, pool);
+}
+
+/** Whether `candidate` is eligible under `rule`, given the host it is replacing. */
+function eligibleUnder(flight: Flight, rule: TargetRule, host: number, candidate: number, planeCount: number, wrapsPlanes: boolean): boolean {
+  if (rule === "nearest") {
+    return true;
+  }
+  const hostPlane = flight.planes[host] as number;
+  const candidatePlane = flight.planes[candidate] as number;
+  if (rule === "ring" || rule === "ring-far") {
+    return hostPlane === candidatePlane;
+  }
+  const gap = Math.abs(candidatePlane - hostPlane);
+  return (wrapsPlanes ? Math.min(gap, planeCount - gap) : gap) === 1;
+}
+
+/**
+ * How many slots round the ring a hand-off can reach before the Earth stops it, and
+ * what that is worth in dwell.
+ *
+ * Closed form, checked against the measurement: the chord to the satellite k slots
+ * away is `2r·sin(kπ/S)`, the link horizon is `2√(r² − (Rₑ+margin)²)`, and each slot
+ * is `T/S` seconds of the orbit. So the ring hand-off's reachable dwell is bounded by
+ * the *geometry of the ring*, not by the eclipse — and a ring dense enough to keep
+ * its links short is also a ring whose neighbours go dark right after it does.
+ */
+function ringReach(params: WalkerDeltaParams): { slots: number; chordKm: number; dwellSeconds: number; slotSeconds: number } {
+  const radiusKm = 6378.135 + params.altitudeKm;
+  const perPlane = satsPerPlane(params);
+  const slotSeconds = periodSeconds(params.altitudeKm) / perPlane;
+  const horizon = horizonKm(params.altitudeKm);
+  let slots = 0;
+  for (let k = 1; k <= Math.floor(perPlane / 2); k += 1) {
+    if (2 * radiusKm * Math.sin((k * Math.PI) / perPlane) > horizon) {
+      break;
+    }
+    slots = k;
+  }
+  return { slots, chordKm: 2 * radiusKm * Math.sin((slots * Math.PI) / perPlane), dwellSeconds: slots * slotSeconds, slotSeconds };
+}
+
+interface RuleResult {
+  rule: TargetRule;
+  label: string;
+  km: number[];
+  dwell: number[];
+  legs: number[];
+  lattice: number[];
+  /** |latitude| of the target when it was chosen. */
+  targetLatitude: number[];
+  unreachable: number;
+  events: number;
+}
+
+/** Each rule's hand-off, measured on the same eclipse entries. */
+function measureRules(flight: Flight, planeCount: number, slotCount: number, wrapsPlanes: boolean): RuleResult[] {
+  const results: RuleResult[] = TARGET_RULES.map(({ rule, label }) => ({ rule, label, km: [], dwell: [], legs: [], lattice: [], targetLatitude: [], unreachable: 0, events: 0 }));
+  for (let step = 1; step < flight.steps; step += 1) {
+    for (let sat = 0; sat < flight.names.length; sat += 1) {
+      if (flight.power[step - 1]?.[sat] !== true || flight.power[step]?.[sat] === true) {
+        continue;
+      }
+      const hosts = hostsAt(flight, step, 0);
+      const source = hosts[sat] as MigrationHost;
+      for (const result of results) {
+        result.events += 1;
+        const candidates = hosts.filter((host, candidate) => host.hasPower && eligibleUnder(flight, result.rule, sat, candidate, planeCount, wrapsPlanes));
+        // The relay pool is the rule's own fabric. A ring hand-off that cannot reach
+        // its target directly relays *round its own ring* — which is the whole point
+        // of the rule, since those links already exist and never change length. Letting
+        // it borrow another plane's satellites would be measuring a different rule.
+        const pool = result.rule.startsWith("ring") ? hosts.filter((_, candidate) => eligibleUnder(flight, "ring", sat, candidate, planeCount, wrapsPlanes)) : hosts;
+        const route = selectRoute(flight, step, source, candidates, pool, result.rule);
+        if (!route) {
+          result.unreachable += 1;
+          continue;
+        }
+        const target = flight.names.indexOf(route.hops[route.hops.length - 1] as string);
+        result.km.push(route.linkKm);
+        result.dwell.push(stepsUntilDark(flight, target, step) * flight.stepSeconds);
+        result.legs.push(route.legsKm.length);
+        result.lattice.push(latticeHops(flight, sat, target, planeCount, slotCount, wrapsPlanes));
+        result.targetLatitude.push(Math.abs(flight.latitude[step]?.[target] as number));
+      }
+    }
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// The whole fleet migrates, not one workload
+// ---------------------------------------------------------------------------
+
+/**
+ * What one workload actually does over an orbit, followed hop by hop.
+ *
+ * Everything above measures single decisions. This measures the *consequence*: a
+ * workload is placed on a satellite and followed, migrating whenever its policy says
+ * to, for the whole flight. That is what turns "the median target is dark 140 s
+ * later" into a migration count — and a migration count is what a bandwidth figure
+ * needs, because the fleet does not migrate once, it migrates continuously.
+ *
+ * No contention, matching the model it is measuring: every workload is followed
+ * independently, so two of them may choose the same target and neither is charged
+ * for the other. `measureHotspots` says how wrong that is.
+ */
+interface ChainResult {
+  label: string;
+  migrations: number;
+  workloads: number;
+  km: number[];
+  legs: number[];
+  darkSteps: number;
+  totalSteps: number;
+  stranded: number;
+}
+
+function followChains(flight: Flight, label: string, rule: TargetRule, lookaheadSeconds: number, planeCount: number, wrapsPlanes: boolean, sampleEvery: number): ChainResult {
+  const lookaheadSteps = Math.round(lookaheadSeconds / flight.stepSeconds);
+  const result: ChainResult = { label, migrations: 0, workloads: 0, km: [], legs: [], darkSteps: 0, totalSteps: 0, stranded: 0 };
+  for (let start = 0; start < flight.names.length; start += sampleEvery) {
+    let host = start;
+    result.workloads += 1;
+    for (let step = 0; step < flight.steps - lookaheadSteps; step += 1) {
+      result.totalSteps += 1;
+      const powered = flight.power[step]?.[host] === true;
+      if (!powered) {
+        result.darkSteps += 1;
+      }
+      // Predictive fires before the power goes *and* still reacts once it has —
+      // `decideStageMigration` falls through to the reactive branch when the host is
+      // already dark, and a chain that did not would simply sit in the shadow.
+      const aboutToGoDark = lookaheadSteps > 0 && powered && flight.power[step + lookaheadSteps]?.[host] !== true;
+      if (!aboutToGoDark && powered) {
+        continue;
+      }
+      const hosts = hostsAt(flight, step, lookaheadSteps);
+      const source = hosts[host] as MigrationHost;
+      const lit = hosts.filter((candidate, index) => index !== host && candidate.hasPower && eligibleUnder(flight, rule, host, index, planeCount, wrapsPlanes));
+      // Lookahead-safety is a *preference*, not a filter — the app expresses it as the
+      // top two tiers of `chooseRouteExcluding`, which fall through to any lit target
+      // rather than declaring the stage stranded. Filtering on it instead was what left
+      // predictive chains sitting dark.
+      const safe = lookaheadSteps === 0 ? lit : lit.filter((candidate) => flight.power[step + lookaheadSteps]?.[flight.names.indexOf(candidate.name)] === true);
+      const candidates = safe.length > 0 ? safe : lit;
+      const pool = rule.startsWith("ring") ? hosts.filter((_, index) => eligibleUnder(flight, "ring", host, index, planeCount, wrapsPlanes)) : hosts;
+      const route = selectRoute(flight, step, source, candidates, pool, rule);
+      if (!route) {
+        result.stranded += 1;
+        continue;
+      }
+      host = flight.names.indexOf(route.hops[route.hops.length - 1] as string);
+      result.migrations += 1;
+      result.km.push(route.linkKm);
+      result.legs.push(route.legsKm.length);
+    }
+  }
+  return result;
+}
+
+/**
+ * How many workloads would pick the *same* satellite at the same instant.
+ *
+ * The single-workload model cannot see this and the pipeline model only avoids it
+ * inside one pipeline (`taken`). But a fleet that computes everywhere has a workload
+ * on every satellite, and they all cross the terminator on their own schedule — so
+ * "nearest lit" is a rule every dark satellite applies at once, to a lit set that is
+ * the same for all of them. Where they converge is a receiver that has to serialise
+ * several caches in a row, and that is the first place a bandwidth figure stops being
+ * per-link and starts being per-node.
+ */
+function measureHotspots(flight: Flight, rule: TargetRule, planeCount: number, wrapsPlanes: boolean): { peak: number; mean: number; busiestStep: number } {
+  let peak = 0;
+  let sum = 0;
+  let samples = 0;
+  let busiestStep = 0;
+  for (let step = 1; step < flight.steps; step += 1) {
+    const entering: number[] = [];
+    for (let sat = 0; sat < flight.names.length; sat += 1) {
+      if (flight.power[step - 1]?.[sat] === true && flight.power[step]?.[sat] !== true) {
+        entering.push(sat);
+      }
+    }
+    if (entering.length === 0) {
+      continue;
+    }
+    const hosts = hostsAt(flight, step, 0);
+    const inbound = new Map<string, number>();
+    for (const sat of entering) {
+      const candidates = hosts.filter((host, candidate) => host.hasPower && eligibleUnder(flight, rule, sat, candidate, planeCount, wrapsPlanes));
+      const route = selectRoute(flight, step, hosts[sat] as MigrationHost, candidates, hosts, rule);
+      if (!route) {
+        continue;
+      }
+      const target = route.hops[route.hops.length - 1] as string;
+      inbound.set(target, (inbound.get(target) ?? 0) + 1);
+    }
+    for (const count of inbound.values()) {
+      if (count > peak) {
+        peak = count;
+        busiestStep = step;
+      }
+    }
+    sum += entering.length;
+    samples += 1;
+  }
+  return { peak, mean: samples === 0 ? 0 : sum / samples, busiestStep };
 }
 
 /**
@@ -648,6 +973,108 @@ function reportPattern(label: string, params: WalkerDeltaParams, options: RunOpt
         `${reach.events === 0 ? "—" : `${((100 * reach.unreachable) / reach.events).toFixed(1)}%`} |`,
     );
   }
+
+  reportRules(flight, params);
+}
+
+/**
+ * Where the hand-off goes under each target rule, and what waiting instead would
+ * have cost.
+ */
+function reportRules(flight: Flight, params: WalkerDeltaParams): void {
+  const wrapsPlanes = params.raanSpanDeg === 360;
+  const ring = ringReach(params);
+  const perPlane = satsPerPlane(params);
+
+  // The alternative the hand-off is competing with, measured on the same entries.
+  const waits: number[] = [];
+  const entryLatitudes: number[] = [];
+  for (let step = 1; step < flight.steps; step += 1) {
+    for (let sat = 0; sat < flight.names.length; sat += 1) {
+      if (flight.power[step - 1]?.[sat] === true && flight.power[step]?.[sat] !== true) {
+        waits.push(stepsUntilLight(flight, sat, step) * flight.stepSeconds);
+        entryLatitudes.push(Math.abs(flight.latitude[step]?.[sat] as number));
+      }
+    }
+  }
+
+  console.log("");
+  console.log(
+    `Ring arithmetic: ${perPlane} slots × ${fixed(ring.slotSeconds)} s each; a direct ring hop reaches ${ring.slots} slot(s) ` +
+      `(${fixed(ring.chordKm)} km ≤ ${fixed(horizonKm(params.altitudeKm))} km horizon) = ${fixed(ring.dwellSeconds)} s of dwell. Beyond that it relays round its own ring.`,
+  );
+  console.log(
+    `Host goes dark at |lat| p50 ${fixed(percentile(entryLatitudes, 0.5))}° and is back in sunlight after p50 ${fixed(percentile(waits, 0.5))} s (p10 ${fixed(percentile(waits, 0.1))} s).`,
+  );
+  console.log("");
+  console.log("| target rule | hand-off km p50 | legs p50 | lattice hops p50 | target dwell p50 | target \\|lat\\| p50 | unreachable |");
+  console.log("| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+  for (const result of measureRules(flight, params.planes, perPlane, wrapsPlanes)) {
+    console.log(
+      `| ${result.label} | ${fixed(percentile(result.km, 0.5))} | ${fixed(percentile(result.legs, 0.5))} | ${fixed(percentile(result.lattice, 0.5))} | ` +
+        `${fixed(percentile(result.dwell, 0.5))} s | ${fixed(percentile(result.targetLatitude, 0.5))}° | ` +
+        `${result.events === 0 ? "—" : `${((100 * result.unreachable) / result.events).toFixed(1)}%`} |`,
+    );
+  }
+}
+
+/**
+ * What the fleet, rather than one workload, is doing — and whether the link can carry
+ * it.
+ *
+ * One workload per satellite is the premise of the whole fork: a constellation that
+ * computes everywhere. Every one of those satellites loses power once a revolution,
+ * so the migration rate is not a property of a demo, it is `N / T` before any churn
+ * is added. This prices that.
+ */
+function reportLoad(label: string, params: WalkerDeltaParams, options: RunOptions): void {
+  const flight = fly(params, options.epoch, options.orbits, options.stepSeconds, options.model);
+  const wrapsPlanes = params.raanSpanDeg === 360;
+  const period = periodSeconds(params.altitudeKm);
+  const sampleEvery = Math.max(1, Math.round(params.total / 24));
+
+  console.log(`\n### ${label} — ${encodeWalker(params)}`);
+  console.log(`Following ${Math.ceil(params.total / sampleEvery)} workloads for ${options.orbits} revolutions, one policy at a time.`);
+  console.log("");
+  console.log("| policy | migrations per workload per orbit | hop km p50 | KV moved per workload per orbit | dark, this cadence | dark at 5 s cadence | fleet ISL duty |");
+  console.log("| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+
+  const chains: Array<{ label: string; rule: TargetRule; lookahead: number }> = [
+    { label: "naive, nearest lit", rule: "nearest", lookahead: 0 },
+    { label: "naive, next lit slot in ring", rule: "ring", lookahead: 0 },
+    { label: "naive, furthest lit slot in ring", rule: "ring-far", lookahead: 0 },
+    { label: "predictive 90 s, nearest lit", rule: "nearest", lookahead: 90 },
+    { label: "predictive 90 s, furthest lit slot in ring", rule: "ring-far", lookahead: 90 },
+  ];
+  for (const spec of chains) {
+    const chain = followChains(flight, spec.label, spec.rule, spec.lookahead, params.planes, wrapsPlanes, sampleEvery);
+    const orbitsFlown = (chain.totalSteps * flight.stepSeconds) / period;
+    const perWorkloadPerOrbit = chain.migrations / (orbitsFlown || 1);
+    const legs = percentile(chain.legs, 0.5);
+    const gbPerOrbit = perWorkloadPerOrbit * DEFAULT_KV_GIGABYTES * (Number.isFinite(legs) ? legs : 1);
+    // One ISL-second is one link busy for one second. A leg occupies one for the
+    // serialisation time, so the fleet's duty cycle is link-seconds demanded over
+    // link-seconds available — one ISL per satellite.
+    const dutyCycle = (perWorkloadPerOrbit * (Number.isFinite(legs) ? legs : 1) * ((DEFAULT_KV_GIGABYTES * 8) / ISL_GBPS)) / period;
+    // A reactive policy notices it is dark only when it next looks, so its downtime is
+    // migrations × evaluation cadence and nothing to do with the geometry. Quoting the
+    // measured figure alone would be quoting this script's step size; the second column
+    // rescales it to MIGRATION_EVAL_SIM_SECONDS, which is what the app actually runs.
+    const darkAtAppCadence = spec.lookahead > 0 ? (100 * chain.darkSteps) / chain.totalSteps : (100 * perWorkloadPerOrbit * 5) / period;
+    console.log(
+      `| ${spec.label} | ${perWorkloadPerOrbit.toFixed(1)} | ${fixed(percentile(chain.km, 0.5))} | ${gbPerOrbit.toFixed(1)} GB | ` +
+        `${((100 * chain.darkSteps) / chain.totalSteps).toFixed(1)}% | ${darkAtAppCadence.toFixed(1)}% | ${(100 * dutyCycle).toFixed(3)}% |`,
+    );
+  }
+
+  console.log("");
+  for (const rule of ["nearest", "ring-far"] as TargetRule[]) {
+    const hotspot = measureHotspots(flight, rule, params.planes, wrapsPlanes);
+    console.log(
+      `Convergence, ${rule}: ${hotspot.mean.toFixed(1)} satellites enter eclipse per ${flight.stepSeconds} s step fleet-wide; ` +
+        `the busiest receiver is chosen by **${hotspot.peak}** of them at once.`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -702,7 +1129,7 @@ const SWEEPS: Record<string, Array<{ label: string; params: WalkerDeltaParams }>
 };
 
 function usage(): void {
-  console.log("usage: migration-reach.ts [base|perplane|planes|altitude|inclination|phasing|span|shape|power|season|all]");
+  console.log("usage: migration-reach.ts [base|perplane|planes|altitude|inclination|phasing|span|shape|power|season|load|all]");
 }
 
 function main(): void {
@@ -717,6 +1144,20 @@ function main(): void {
   if (which === "power") {
     for (const model of ["panel", "eclipse"] as PowerModel[]) {
       reportPattern(`power model ${model}`, BASE, { ...options, model }, model === "panel");
+    }
+    return;
+  }
+  if (which === "load") {
+    for (const [label, params] of [
+      ["base 10 × 22", BASE],
+      ["long rings 5 × 44", withOverrides({ total: 220, planes: 5 })],
+      ["short rings 20 × 11", withOverrides({ total: 220, planes: 20 })],
+      ["quasi-SSO 97.6°", withOverrides({ inclinationDeg: 97.6 })],
+    ] as Array<[string, WalkerDeltaParams]>) {
+      // 5 s is MIGRATION_EVAL_SIM_SECONDS: at a coarser step the reactive policies'
+      // downtime is the step size rather than the policy. Two revolutions keeps that
+      // affordable.
+      reportLoad(label, params, { ...options, orbits: 2, stepSeconds: 5 });
     }
     return;
   }

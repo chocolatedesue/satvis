@@ -10,6 +10,7 @@ propagation:
 
 ```sh
 node --experimental-strip-types scripts/research/migration-reach.ts        # every sweep
+node --experimental-strip-types scripts/research/migration-reach.ts load   # fleet-wide rate and bandwidth
 node --experimental-strip-types scripts/research/migration-reach.ts power  # panel vs eclipse
 node --experimental-strip-types scripts/research/migration-reach.ts season # four dates
 ```
@@ -32,6 +33,10 @@ unpowered, and the hand-off distance still ranges over a factor of six. What mov
 3. **Which link fabric the hand-off is allowed to use** — the direct chord, or a walk across
    the ISL lattice the app actually draws. A factor of four in transfer time, and it is the
    one nobody budgets for.
+4. **Which satellite you hand to** — nearest lit, or several slots back round your own ring.
+   The ring hand-off is 3× further and 5× cheaper in hops, and cuts the migration rate 3.5×.
+
+Bandwidth is not on the list: the busiest policy measured occupies 0.21% of one ISL.
 
 Density (T, P, S) sets a floor under the first and does nothing to the rest.
 
@@ -130,6 +135,122 @@ The caveat is that this only holds at low demand: at ≥ 600 s the same 5 × 44 
 *worst* of the three over the lattice (11 hops, 1.76 s), because a deeply-lit target is far
 along-track and a long ring is many ring steps. Long rings make cheap reactive hand-offs and
 expensive predictive ones.
+
+
+---
+
+## Same plane or nearest? They are different hand-offs
+
+"Nearest lit" and "the next sunlit satellite round my own ring" are not variants of one
+choice. Inside a ring, **distance and dwell are the same quantity** — every satellite in a
+plane shares a β and therefore a terminator, so the one k slots behind is both
+`2r·sin(kπ/S)` away and `k·T/S` seconds later into the shadow. That makes the ring the only
+place in the constellation where reaching further buys a known amount of time.
+
+At 53° / 550 km, 10 × 22 — 22 slots of **261 s** each:
+
+| target rule                    | hand-off km | ISL lattice hops | target dwell | target \|lat\| |
+| ------------------------------ | ----------- | ---------------- | ------------ | ------------- |
+| nearest lit, any plane         | 1279 km     | **5**            | 140 s        | 44°           |
+| same plane, next lit slot      | 1973 km     | **1**            | 260 s        | 42°           |
+| same plane, furthest in view   | 3906 km     | **2**            | **520 s**    | 38°           |
+| adjacent plane only            | 1392 km     | 2                | 120 s        | 48°           |
+
+So the same-plane hand-off is **3× further in kilometres and 5× cheaper in hops**, and it
+buys nearly 4× the dwell. Distance was never the cost; hops are.
+
+**Hopping several slots is the whole point.** Handing to the *next* lit slot buys the least
+dwell there is — 261 s, then you do it again. It is a treadmill. Reaching as far back as the
+horizon allows does the same hand-off once instead of k times, and how far that is, is
+arithmetic:
+
+```
+slots reachable directly:  max k  where  2r·sin(kπ/S) ≤ 2√(r² − (Rₑ+80)²)
+```
+
+At 550 km with S = 22 that is **k = 2** — 3904 km, 522 s. Measured: 3906 km, 520 s. Beyond
+k = 2 the ring hand-off has to relay round its own ring, which costs another 160 ms per slot
+on links that already exist.
+
+**And the ring's cost is a constant.** 1971–1974 km and 260 s per slot at *every* inclination
+and both RAAN spans measured — because it depends on `S`, `h` and nothing else. Every other
+rule's numbers move with inclination, β and the date; this one does not. For a hand-off budget
+that is worth more than being 700 km closer.
+
+### The horizon sets a floor on the migration rate
+
+One direct hop can never buy more dwell than the link horizon subtends:
+
+| altitude | link horizon | arc it spans | max dwell per hop | floor, migrations/orbit |
+| -------- | ------------ | ------------ | ----------------- | ----------------------- |
+| 350 km   | 3822 km      | 33.0°        | 504 s             | **10.9**                |
+| 550 km   | 5053 km      | 42.8°        | 682 s             | **8.4**                 |
+| 1200 km  | 7953 km      | 63.3°        | 1154 s            | **5.7**                 |
+
+Every furthest-slot-in-ring chain measured at 550 km lands at **7.6–9.5** migrations per
+workload per orbit, whatever the fleet shape. That is the floor, not the policy. **Altitude is
+the only parameter that lowers it**, which is a second reason to go up alongside the eclipse
+fraction.
+
+---
+
+## The whole fleet migrates, and bandwidth is not what stops it
+
+Every satellite loses power once a revolution, so with a workload on each one the migration
+rate is `N/T` before any churn is added. Following 25 workloads for 2 revolutions at the app's
+own 5 s evaluation cadence (`MIGRATION_EVAL_SIM_SECONDS`), 53° / 550 km, 10 × 22:
+
+| policy                        | migrations /workload /orbit | hop km | KV moved /workload /orbit | workload dark | fleet ISL duty |
+| ----------------------------- | --------------------------- | ------ | ------------------------- | ------------- | -------------- |
+| naive, nearest lit            | **32.2**                    | 1254   | 64.3 GB                   | 2.8%          | 0.090%         |
+| naive, next lit slot in ring  | 17.9                        | 1973   | 35.7 GB                   | 1.6%          | 0.050%         |
+| naive, furthest slot in ring  | **9.2**                     | 3906   | 18.4 GB                   | 0.8%          | 0.026%         |
+| predictive 90 s, nearest lit  | 37.8                        | 1174   | 75.5 GB                   | **0.7%**      | 0.105%         |
+| predictive 90 s, furthest slot | 9.3                        | 3905   | 18.5 GB                   | 2.7%          | 0.026%         |
+
+**Reaching further round the ring cuts the migration count 3.5×** — 32.2 to 9.2 — while
+*tripling* the distance of each hop. The same inversion as the rules table, at fleet scale.
+
+**Bandwidth is not a constraint and is not close to one.** The busiest policy measured
+occupies **0.21%** of one ISL per satellite (97.6°, naive nearest, 73.9 migrations and 148 GB
+per workload per orbit); the ring policies sit at 0.02–0.05%. A 2 GB cache over a 100 Gbps
+link is 160 ms, and even 32 of those per orbit is 5 s out of 5739. Bandwidth would have to
+change by **~100×** — a 200 GB working set, or a 1 Gbps link — before the duty cycle reached
+10%. What the naive policy costs is not bits; it is 32 opportunities per orbit for a
+consistency failure, and 32 stalls whose length is the *evaluation cadence*, not the transfer.
+
+That last point is worth separating, because it is easy to measure the wrong thing: a reactive
+policy's downtime is `migrations × how often it looks`, not a property of the orbit. At a 20 s
+sampling step the same chains read 3.4–4.6% dark; at the app's 5 s cadence, 0.8–2.8%. The
+geometry did not change.
+
+**Nor is there contention.** Across every configuration, 1.0–1.5 satellites of 220 enter
+eclipse per 5 s step fleet-wide, and the busiest receiver is chosen by **1** of them at a time
+(2 in one configuration). The no-contention assumption in `migration.ts` is not a
+simplification at this scale — it is accurate. It would stop being so at a fleet where the
+terminator crossings bunch, which is a different question this does not answer.
+
+---
+
+## Where the hand-off happens, and why waiting is not an option
+
+Eclipse entry clusters at the orbit's **turning latitude**: |lat| p50 43° at i = 53°, 61° at
+70°, 80° at 97.6°. That is also where an inclined constellation's planes converge, which is
+why the nearest lit satellite gets dramatically closer as inclination rises — **506 km at
+97.6°** against 1279 km at 53°, for the same fleet size.
+
+But near is not the same as good, and two measurements say so:
+
+- **The close high-latitude target has the *shortest* dwell.** At 97.6° the nearest lit
+  satellite is 506 km away and dark again in **80 s** — the worst of any rule measured. It is
+  close because the planes are bunched there, and it is about to go dark for the same reason
+  the host just did. The exception is the 87.9° Delta, where the nearest target is 521 km away
+  *and* lit for 3020 s — there the plane convergence and the β spread happen to line up.
+- **Nobody gets a short eclipse.** The host is back in sunlight after **p50 2640 s at every
+  inclination measured** (p10 2260–2580 s). There is no latitude at which a satellite dips
+  into shadow briefly and comes out. So "wait for the sun instead of migrating" is never the
+  cheaper option at LEO — the wait is ~44 minutes, and it is ~44 minutes at 53°, at 70°, at
+  97.6°, at the equator crossing and at the pole alike.
 
 ---
 
@@ -235,5 +356,11 @@ a property of the pattern *and the season*, and needs the range.
 - Dwell is measured against a 3-revolution window, so a target that outlives the window counts
   as satisfying any demand. At the base case none do (`never dark 0%`); where they exist the
   summary line says so.
-- Sampling is 20 s, so every time figure is quantised to 20 s and every distance is the one at
-  that sample, not at the exact crossing.
+- Sampling is 20 s for the reach tables and 5 s for the fleet-load table, so every time figure
+  is quantised to that step and every distance is the one at that sample, not at the exact
+  crossing. A reactive policy's downtime is a function of the step and is reported as such.
+- The chains are followed independently, with no contention: two workloads may choose the same
+  target and neither is charged for the other. The convergence measurement says that is
+  accurate at this fleet size, not that it is accurate in general.
+- The ring rule's relay pool is its own ring, which is what the drawn topology gives it. A
+  fleet with more ISLs than that would do better and is not measured here.
