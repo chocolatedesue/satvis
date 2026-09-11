@@ -108,6 +108,21 @@ describe("coPrecessingInclinationDeg", () => {
     expect(coPrecessingInclinationDeg(STARLINK_SHELL, ceiling)).toBeCloseTo(0, 3);
   });
 
+  test("the ceiling is defined for a retrograde reference, where the cosine rounds past ±1", () => {
+    // cos i · (a_ceiling/a_ref)^3.5 is mathematically exactly −1 at the ceiling,
+    // but the power rounds: on Node 24 the product lands at −1.0000000000000004,
+    // where Node 22 lands just inside at −0.9999999999999997. A bare [-1, 1]
+    // guard therefore refused the ceiling altitude on Node 24 — which is the
+    // endpoint resonantCompanion evaluates — and every family silently collapsed
+    // to its single reference shell. Pinned because the failure was version- and
+    // machine-specific and produced no error of its own.
+    const reference: ShellOrbit = { altitudeKm: 650, inclinationDeg: 97.99 };
+    const ceiling = coPrecessingCeilingKm(reference);
+    expect(coPrecessingInclinationDeg(reference, ceiling)).toBeCloseTo(180, 3);
+    // The refusal past it is still a refusal, not a clamped answer.
+    expect(coPrecessingInclinationDeg(reference, ceiling + 10)).toBeUndefined();
+  });
+
   test("a polar reference has all but no ceiling — its node barely moves, and any polar companion matches", () => {
     // cos 90° is 6e-17 rather than 0, so the ceiling is a number rather than
     // Infinity — but a number past the moon, which is the same answer.

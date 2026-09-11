@@ -92,10 +92,22 @@ export function coPrecessingInclinationDeg(reference: ShellOrbit, altitudeKm: nu
   }
   const ratio = circularSemiMajorAxisKm(altitudeKm) / circularSemiMajorAxisKm(reference.altitudeKm);
   const cosine = Math.cos(reference.inclinationDeg * DEG_TO_RAD) * ratio ** 3.5;
-  if (cosine < -1 || cosine > 1) {
+  // At the co-precession ceiling this product is mathematically exactly ±1, but
+  // `ratio ** 3.5` and `Math.cos` round. V8 13 (Node 24) returns
+  // −1.0000000000000004 for a 97.99° reference where V8 12 (Node 22) returns
+  // −0.9999999999999997, and a bare `cosine < −1` guard then refuses the ceiling
+  // altitude itself — which is exactly the endpoint (`high = ceilingKm`)
+  // `resonantCompanion` evaluates. Every companion then comes back undefined,
+  // `shellFamily` collapses to its reference alone, and a one-member "family"
+  // draws a flat, empty contact curve. Treat an overshoot within this tolerance
+  // as the boundary it is and clamp into the acos domain; anything genuinely
+  // past the ceiling overshoots by ~3e-4 per kilometre, so nothing real slips
+  // through and the function still refuses it.
+  const CLAMP_TOLERANCE = 1e-9;
+  if (cosine < -1 - CLAMP_TOLERANCE || cosine > 1 + CLAMP_TOLERANCE) {
     return undefined;
   }
-  return Math.acos(cosine) * RAD_TO_DEG;
+  return Math.acos(Math.max(-1, Math.min(1, cosine))) * RAD_TO_DEG;
 }
 
 /**
