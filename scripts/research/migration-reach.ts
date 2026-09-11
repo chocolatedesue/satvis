@@ -705,6 +705,8 @@ interface ChainResult {
   workloads: number;
   km: number[];
   legs: number[];
+  /** Seconds of power the workload actually held after each migration: the arc it bought. */
+  bought: number[];
   darkSteps: number;
   totalSteps: number;
   stranded: number;
@@ -712,7 +714,7 @@ interface ChainResult {
 
 function followChains(flight: Flight, label: string, rule: TargetRule, lookaheadSeconds: number, planeCount: number, wrapsPlanes: boolean, sampleEvery: number): ChainResult {
   const lookaheadSteps = Math.round(lookaheadSeconds / flight.stepSeconds);
-  const result: ChainResult = { label, migrations: 0, workloads: 0, km: [], legs: [], darkSteps: 0, totalSteps: 0, stranded: 0 };
+  const result: ChainResult = { label, migrations: 0, workloads: 0, km: [], legs: [], bought: [], darkSteps: 0, totalSteps: 0, stranded: 0 };
   for (let start = 0; start < flight.names.length; start += sampleEvery) {
     let host = start;
     result.workloads += 1;
@@ -746,6 +748,9 @@ function followChains(flight: Flight, label: string, rule: TargetRule, lookahead
       }
       host = flight.names.indexOf(route.hops[route.hops.length - 1] as string);
       result.migrations += 1;
+      // What this migration actually bought, which is the only honest way to check the
+      // arithmetic: migrations per orbit should be the orbit divided by this.
+      result.bought.push(stepsUntilDark(flight, host, step) * flight.stepSeconds);
       result.km.push(route.linkKm);
       result.legs.push(route.legsKm.length);
     }
@@ -1117,9 +1122,9 @@ function reportLoad(label: string, params: WalkerDeltaParams, options: RunOption
   console.log(`Following ${Math.ceil(params.total / sampleEvery)} workloads for ${options.orbits} revolutions, one policy at a time.`);
   console.log("");
   console.log(
-    "| policy | migrations per workload per orbit | hop km p50 | legs p50 | transfer per migration | KV moved per workload per orbit | dark at 5 s cadence | fleet ISL duty |",
+    "| policy | migrations per workload per orbit | arc bought per migration | per leg | hop km p50 | legs p50 | KV moved per workload per orbit | dark at 5 s cadence | fleet ISL duty |",
   );
-  console.log("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+  console.log("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
 
   const chains: Array<{ label: string; rule: TargetRule; lookahead: number }> = [
     { label: "naive, nearest lit", rule: "nearest", lookahead: 0 },
@@ -1153,8 +1158,16 @@ function reportLoad(label: string, params: WalkerDeltaParams, options: RunOption
           Array.from({ length: legs }, () => percentile(chain.km, 0.5) / legs),
         ).totalSeconds
       : Number.NaN;
+    void perMigration;
+    // Degrees of orbital arc, because that is the unit the geometry is actually in: a
+    // migration buys phase against a terminator that is fixed in inertial space, and
+    // the link horizon caps how much phase one leg can span.
+    const boughtSeconds = percentile(chain.bought, 0.5);
+    const boughtDeg = (360 * boughtSeconds) / period;
+    const perLegDeg = Number.isFinite(legs) && legs > 0 ? boughtDeg / legs : Number.NaN;
     console.log(
-      `| ${spec.label} | ${perWorkloadPerOrbit.toFixed(1)} | ${fixed(percentile(chain.km, 0.5))} | ${fixed(legs)} | ${fixed(perMigration, 2)} s | ${gbPerOrbit.toFixed(1)} GB | ` +
+      `| ${spec.label} | ${perWorkloadPerOrbit.toFixed(1)} | ${fixed(boughtSeconds)} s = ${fixed(boughtDeg)}° | ${fixed(perLegDeg)}°/leg | ` +
+        `${fixed(percentile(chain.km, 0.5))} | ${fixed(legs)} | ${gbPerOrbit.toFixed(1)} GB | ` +
         `${darkAtAppCadence.toFixed(1)}% | ${(100 * dutyCycle).toFixed(3)}% |`,
     );
   }

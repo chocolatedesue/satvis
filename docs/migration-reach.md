@@ -185,46 +185,90 @@ sunlit arc left**, wherever it is, relays included.
 3020 s of dwell against a 3080 s sunlit arc: the rule gets essentially the whole arc. Followed
 as a chain it lands on **1.9 migrations per workload per orbit** — the 1.86 floor, attained.
 
-### Bandwidth is conserved; only the slicing changes
+### The whole thing in one equation
 
-The thing that makes this a real choice rather than a free lunch is that the freshest target is
-19 918 km away and five legs, so each migration costs 0.86 s instead of 0.16 s. Per orbit,
-53° / 550 km, 10 × 22:
+Everything above follows from two facts and one constraint, and it is worth deriving rather
+than tabulating, because the derivation says which knob is which.
 
-| policy                         | migrations /orbit | km     | legs | per migration | KV /orbit | leg-transfers /orbit | dark  |
-| ------------------------------ | ----------------- | ------ | ---- | ------------- | --------- | -------------------- | ----- |
-| naive, nearest lit             | 32.2              | 1254   | 1    | 0.16 s        | 64.3 GB   | **32.2**             | 2.8%  |
-| naive, next lit slot in ring   | 17.9              | 1973   | 1    | 0.17 s        | 35.7 GB   | 17.9                 | 1.6%  |
-| naive, furthest slot in ring   | 9.2               | 3906   | 1    | 0.17 s        | 18.4 GB   | **9.2**              | 0.8%  |
-| **naive, freshest sunlit**     | **1.9**           | 17 174 | 5    | 0.86 s        | 19.4 GB   | **9.5**              | **0.2%** |
-| naive, freshest in own ring    | 2.0               | 21 489 | 6    | 1.03 s        | 24.2 GB   | 12.0                 | 0.2%  |
-| predictive 90 s, freshest      | 2.0               | 17 166 | 5    | 0.86 s        | 20.0 GB   | 10.0                 | 0.7%  |
+**Fact 1 — the shadow is fixed, the satellites move through it.** The Earth's shadow points
+away from the sun, which moves 1° per day, so over one 96-minute orbit the dark sector is
+effectively stationary in inertial space. Let φ be a satellite's phase along its orbit. The lit
+sector is a fixed range of φ, and at 550 km with a zenith panel it is **193° wide** (a
+hemisphere, plus ~5.7° of `sunlit_edge` at each end).
 
-**Furthest-slot-in-ring and freshest-sunlit move almost exactly the same bytes** — 18.4 vs
-19.4 GB per workload per orbit — and differ by **5× in how many migration events that is**.
-The same holds in every shape measured: long rings 7.6 vs 7.6, short rings 9.5 vs 10.0.
-
-There is a reason, and it is the link horizon again. Dwell bought is proportional to orbital
-arc traversed, and arc traversed is proportional to legs, so `migrations × legs` is invariant
-along the efficient frontier. One direct leg spans at most the horizon arc — 42.8° at
-550 km — so:
+**Fact 2 — inside one orbital plane, angle *is* time.** Every satellite in a plane flies the
+same orbit, so one k slots behind reaches any given point `k·T/S` later. Distance and dwell are
+not correlated quantities there, they are the same quantity in different units:
 
 ```
-leg-transfers per orbit ≥ 360° / 42.8° = 8.4
+k slots back   =   2r·sin(kπ/S) of chord   =   k·T/S seconds of dwell
 ```
 
-Measured: 7.6–10.0 for every efficient rule. **You do not get to choose the bandwidth. You
-choose whether to spend it as nine one-leg migrations or two five-leg ones** — and two is
-better, because a migration event is a consistency window and a stall, not just bytes.
+**The constraint — a leg cannot span more than the horizon.** Two satellites link only if the
+chord clears the Earth: 5053 km at 550 km altitude, which subtends **42.8°** of orbital arc.
 
-Naive-nearest is the only rule *off* the frontier: 32.2 leg-transfers, 3.8× the floor. It is
-not expensive because it moves far — it moves the shortest distance of any rule. It is
-expensive because it spends that distance without buying any residence.
+Now the whole problem is one sentence. A satellite carries the workload *forward* through
+360° of phase per orbit; to stay in the lit sector the workload must jump *backward* by 360°
+per orbit. So:
+
+```
+migrations per orbit  =  360° / (arc bought per migration)
+legs      per orbit  =  360° / (arc bought per leg)          ≥ 360° / 42.8°  =  8.4
+```
+
+Two different denominators, and **that is the entire design space**. One migration may contain
+several legs, so the two are independent: the first is how many *events* you slice the 360°
+into, the second is how many *transfers* — and only the second is bounded from below.
+
+### Arc bought per leg is the efficiency metric
+
+A leg costs one full KV serialisation (160 ms for 2 GB at 100 Gbps) whether it spans 1° or
+42.8°. So the figure of merit for a migration policy is **how much arc each leg buys**, against
+a hard ceiling of 42.8°:
+
+| policy                           | arc bought /migration | **arc /leg** | of the 42.8° ceiling | migrations /orbit | KV /orbit |
+| -------------------------------- | --------------------- | ------------ | -------------------- | ----------------- | --------- |
+| naive, nearest lit               | 150 s = 9°            | **9°**       | 21%                  | 32.2              | 64.3 GB   |
+| naive, next lit slot in ring     | 260 s = 16°           | 16°          | 37%                  | 17.9              | 35.7 GB   |
+| naive, furthest slot in ring     | 520 s = 33°           | 33°          | 77%                  | 9.2               | 18.4 GB   |
+| predictive 90 s, furthest in ring | 610 s = 38°          | **38°**      | 89%                  | 9.3               | 18.5 GB   |
+| naive, freshest sunlit           | 3020 s = 189°         | **38°**      | 89%                  | **1.9**           | 19.4 GB   |
+| predictive 90 s, freshest sunlit | 3105 s = 195°         | **39°**      | 91%                  | 2.0               | 20.0 GB   |
+
+Nothing exceeds 42.8°, as it cannot. Two rules sit at ~90% of it and one sits at 21%.
+
+**That 21% is the whole indictment of naive-nearest, and it is not about distance.**
+Naive-nearest moves the *shortest* distance of any rule here — 1254 km against the ring rule's
+3906 km. It is wasteful because it pays a full leg, a full 2 GB serialisation, to buy 9° of
+phase, when the same leg could have bought 42.8°. It hands the cache to the satellite directly
+behind it, which is about to cross the same terminator.
+
+### Which leaves one real choice: how to slice the 360°
+
+Furthest-slot-in-ring and freshest-sunlit have the *same* efficiency, ~38°/leg, so they move the
+same bytes — 18.4 vs 19.4 GB per workload per orbit, and 7.6 vs 7.6 in long rings, 9.5 vs 10.0
+in short ones. They differ only in how the 360° is cut up:
+
+- **9.2 migrations × 1 leg** — each cheap (0.17 s) and in view, on a ring link that never
+  changes length. Nine consistency windows per orbit.
+- **1.9 migrations × 5 legs** — each expensive (0.86 s) and relayed most of the way round the
+  orbit. **Two** consistency windows per orbit, and 0.2% dark against 0.8%.
+
+Same bandwidth, 5× fewer events. Which is better depends on what a migration costs you *beside*
+bytes — and for a KV cache mid-decode, an event is a stall and a chance to lose state, so
+fewer and larger is usually the right side of that trade. The countervailing cost is that five
+relays each have to hold a 2 GB cache in flight, which this model does not charge for.
+
+(The relation `migrations = 360° / arc` holds on the *mean* arc, while the table quotes medians.
+For the skewed rules — naive-nearest especially — the median understates, which is why 360°/9°
+predicts 40 migrations where 32.2 were measured. The efficient rules are tight: 360°/38° = 9.5
+against 9.2 and 9.3 measured, 360°/189° = 1.9 against 1.9.)
 
 ### High inclination breaks the floor outright
 
-The 8.4 floor assumes you have to traverse orbital arc to reach sunlight. Across planes with
-different β you do not — and at 97.6° that is exactly what happens:
+The 8.4 floor comes from Fact 2 — angle is time — and Fact 2 holds *inside one plane*. Across
+planes with different β it does not: another plane's lit sector sits at a different φ, so a
+workload can gain sun phase without traversing arc. At 97.6° that is exactly what happens:
 
 | policy at 97.6° / 550 km  | migrations /orbit | km     | legs | KV /orbit  | fleet ISL duty |
 | ------------------------- | ----------------- | ------ | ---- | ---------- | -------------- |
@@ -240,7 +284,8 @@ the same inclination**, and it beats the 53° frontier by 5× on both.
 Same lever as everywhere else in this file, and this is its clearest expression: **a spread of
 β across planes is what lets a hand-off buy residence without buying distance.** At 53° the
 planes' sun phases are too alike, so residence has to be bought by going most of the way round
-the orbit.
+the orbit — 38° of arc at a time, five legs of it. At 97.6° it is bought by changing plane, and
+the 42.8° ceiling simply does not apply, because no arc is being traversed.
 
 ---
 
