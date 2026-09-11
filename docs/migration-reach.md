@@ -38,7 +38,9 @@ unpowered, and the hand-off distance still ranges over a factor of six. What mov
    migration rate from 32.2 to **1.9 per orbit**, the theoretical floor, for the same bytes.
 
 Bandwidth is not on the list: the busiest policy measured occupies 0.21% of one ISL, and along
-the efficient frontier the bytes are conserved no matter which rule you pick.
+the efficient frontier the bytes are conserved no matter which rule you pick. Nor is placement:
+at whole-constellation scale, greedy local rules run the fleet to its arithmetic ceiling and a
+scheduler buys under a percentage point.
 
 Density (T, P, S) sets a floor under the first and does nothing to the rest.
 
@@ -401,6 +403,80 @@ But near is not the same as good, and two measurements say so:
   into shadow briefly and comes out. So "wait for the sun instead of migrating" is never the
   cheaper option at LEO — the wait is ~44 minutes, and it is ~44 minutes at 53°, at 70°, at
   97.6°, at the equator crossing and at the pole alike.
+
+
+---
+
+## One workload or the whole constellation
+
+Everything up to here follows workloads independently — two may pick the same target and
+neither is charged for the other. That is the right model for one pipeline on a big fleet and
+the wrong one for what this fork is actually about: a constellation where *everything*
+computes. There the question is not where one cache goes, it is **how many caches the fleet can
+keep powered at once**, with one workload per satellite and everyone contending for the same
+lit hosts.
+
+The ceiling is arithmetic, and it is tighter than "54% on average" suggests:
+
+| pattern            | satellites powered at once | mean  | load 1.00 places |
+| ------------------ | -------------------------- | ----- | ---------------- |
+| 10 × 22 at 53°     | **117–120** of 220         | 54.0% | 119 workloads    |
+| 5 × 44 at 53°      | 118–121                    | 54.0% | 119              |
+| 20 × 11 at 53°     | **116–122**                | 54.0% | 119              |
+| 10 × 22 at 97.6°   | 122–125                    | 56.1% | **123**          |
+
+The lit population barely moves — ±1.3% in the base case — so the ceiling is effectively a hard
+number rather than a distribution. Two consequences fall straight out. **Sizing is a division**:
+to run W concurrent workloads you need `W / (lit fraction)` satellites, and inclination sets
+that fraction (97.6° carries 123 workloads where 53° carries 119, on the same 220 satellites).
+And **a fleet loaded past it cannot be rescued by scheduling** — at load 1.10 every rule lands
+at 91–93%, which is just 119/131.
+
+### There is no scheduling problem to solve
+
+The interesting prediction was that the rules would invert under load: `fresh` is greedy and
+global — every workload wants the same few satellites at the head of the lit arc — while
+`ring-far` only ever asks about its own ring. A rule that wins alone could lose in a crowd.
+
+It does not happen. Served fraction, 53° / 550 km, 10 × 22:
+
+| rule                              | load 0.50 | load 0.90 | load 1.00 | load 1.10 |
+| --------------------------------- | --------- | --------- | --------- | --------- |
+| naive, nearest lit                | 99.7%     | 99.8%     | **99.8%** | 93.0%     |
+| naive, furthest slot in ring      | 99.7%     | 99.8%     | 98.5%     | 92.9%     |
+| naive, freshest sunlit            | 99.8%     | 99.4%     | 98.6%     | 92.3%     |
+| predictive 90 s, freshest sunlit  | 100.0%    | 100.0%    | **99.5%** | 92.9%     |
+| predictive 90 s, furthest in ring | 100.0%    | 100.0%    | 98.6%     | 93.2%     |
+
+**Simple greedy local rules run the fleet to its arithmetic ceiling.** At load 1.00 — as many
+workloads as there are lit satellites — the spread between the best and worst rule is 1.3
+percentage points, and the best is within a fraction of a point of what perfect global
+assignment could do. Contention never becomes the binding constraint: the busiest receiver is
+chosen by one satellite at a time, because only 1.2 of 220 satellites cross the terminator per
+5 s step and each has a whole hemisphere of lit candidates.
+
+This is a negative result worth having, because it says where *not* to spend engineering. There
+is no global assignment problem, no matching, no scheduler that buys anything. The entire
+available win is in **migration cost** — the arc-per-leg metric above — not in placement.
+
+Which makes one row the answer:
+
+| at full load (W = 118)           | served    | migrations /orbit |
+| -------------------------------- | --------- | ----------------- |
+| naive, nearest lit               | 99.8%     | 32.2              |
+| naive, furthest slot in ring     | 98.5%     | 9.2               |
+| **predictive 90 s, freshest sunlit** | **99.5%** | **2.0**       |
+
+0.3 points of served time against **16× fewer migration events**.
+
+### What this does not model
+
+One workload per satellite, migration treated as instantaneous for the purpose of occupancy,
+and workloads processed in a fixed order each step — a greedy heuristic, not an optimum, which
+is the point (the finding is that greedy suffices, and a better assignment has under a
+percentage point to win). A satellite that hosts two workloads, a transfer that blocks its
+endpoints for the 160 ms it takes, and relays that must hold a 2 GB cache in flight are all
+outside it.
 
 ---
 

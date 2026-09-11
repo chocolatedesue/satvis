@@ -759,6 +759,127 @@ function followChains(flight: Flight, label: string, rule: TargetRule, lookahead
 }
 
 /**
+ * How many satellites are powered at once, over the flight.
+ *
+ * The ceiling on concurrent workloads, and — more to the point — how much it *moves*.
+ * A mean of 54% says nothing about whether 118 workloads fit: if the lit count dips to
+ * 110 at some instant then eight of them are dark no matter how good the policy is.
+ * Separating that arithmetic shortfall from a policy's own failures is the only way to
+ * read a served fraction honestly.
+ */
+function litCensus(flight: Flight): { min: number; max: number; mean: number } {
+  let min = Infinity;
+  let max = 0;
+  let sum = 0;
+  for (let step = 0; step < flight.steps; step += 1) {
+    let lit = 0;
+    for (let sat = 0; sat < flight.names.length; sat += 1) {
+      if (flight.power[step]?.[sat] === true) {
+        lit += 1;
+      }
+    }
+    min = Math.min(min, lit);
+    max = Math.max(max, lit);
+    sum += lit;
+  }
+  return { min, max, mean: sum / flight.steps };
+}
+
+/**
+ * How many workloads a constellation can actually carry at once.
+ *
+ * Every measurement above follows workloads *independently*: two of them may pick the
+ * same target and neither is charged for the other. That is the right model for one
+ * pipeline on a big fleet, and it is the wrong model for the question this whole fork
+ * is about — a constellation where **everything computes**. There the binding question
+ * is not where one cache goes, it is how many caches the fleet can keep powered at
+ * once, and the answer is not simply "the lit fraction".
+ *
+ * Two things stop it being that. **Occupancy**: a satellite hosts one workload, so a
+ * target that is lit and reachable can still be taken. And **reachability**: a workload
+ * can only move to a satellite its host can reach, so the lit satellites on the far
+ * side of the fleet are not available to it however free they are.
+ *
+ * The interesting prediction to test is that the rules invert under load. `fresh` is
+ * greedy and global — every workload wants the same few satellites at the head of the
+ * lit arc — while `ring-far` is local and asks only for its own ring. A rule that wins
+ * alone can lose in a crowd.
+ *
+ * `loadFactor` is workloads as a share of the *lit* population, so 1.0 asks the fleet
+ * to carry exactly as many workloads as it has lit satellites, which is the ceiling
+ * arithmetic allows and no policy can beat.
+ */
+interface CapacityResult {
+  loadFactor: number;
+  workloads: number;
+  /** Share of workload-steps where the workload was on a powered host. */
+  served: number;
+  /** Share of migration attempts that found nothing free and reachable. */
+  blocked: number;
+  migrations: number;
+  km: number[];
+  legs: number[];
+}
+
+function measureCapacity(flight: Flight, rule: TargetRule, lookaheadSeconds: number, loadFactor: number, planeCount: number, wrapsPlanes: boolean): CapacityResult {
+  const lookaheadSteps = Math.round(lookaheadSeconds / flight.stepSeconds);
+  const litAtStart = flight.names.map((_, sat) => sat).filter((sat) => flight.power[0]?.[sat] === true);
+  const workloadCount = Math.max(1, Math.round(loadFactor * litAtStart.length));
+  // Spread the initial placement across the lit set rather than taking a prefix, so a
+  // dense load does not start life packed into one corner of one plane.
+  const stride = litAtStart.length / workloadCount;
+  const hosts: number[] = Array.from({ length: workloadCount }, (_, at) => litAtStart[Math.floor(at * stride)] as number);
+  const occupied = new Set(hosts.map((sat) => flight.names[sat] as string));
+
+  const result: CapacityResult = { loadFactor, workloads: workloadCount, served: 0, blocked: 0, migrations: 0, km: [], legs: [] };
+  let poweredSteps = 0;
+  let totalSteps = 0;
+
+  for (let step = 0; step < flight.steps - lookaheadSteps; step += 1) {
+    const frame = hostsAt(flight, step, lookaheadSteps);
+    for (let workload = 0; workload < hosts.length; workload += 1) {
+      const host = hosts[workload] as number;
+      const powered = flight.power[step]?.[host] === true;
+      totalSteps += 1;
+      if (powered) {
+        poweredSteps += 1;
+      }
+      const aboutToGoDark = lookaheadSteps > 0 && powered && flight.power[step + lookaheadSteps]?.[host] !== true;
+      if (powered && !aboutToGoDark) {
+        continue;
+      }
+      const source = frame[host] as MigrationHost;
+      const lit = frame.filter(
+        (candidate, index) =>
+          index !== host &&
+          candidate.hasPower &&
+          // The constraint the independent model does not have: someone else is there.
+          !occupied.has(candidate.name) &&
+          eligibleUnder(flight, rule, host, index, planeCount, wrapsPlanes),
+      );
+      const safe = lookaheadSteps === 0 ? lit : lit.filter((candidate) => flight.power[step + lookaheadSteps]?.[flight.names.indexOf(candidate.name)] === true);
+      const candidates = safe.length > 0 ? safe : lit;
+      // Relays need only be powered, not free — forwarding is not hosting.
+      const pool = rule.startsWith("ring") ? frame.filter((_, index) => eligibleUnder(flight, "ring", host, index, planeCount, wrapsPlanes)) : frame;
+      const route = candidates.length === 0 ? undefined : selectRoute(flight, step, source, candidates, pool, rule);
+      if (!route) {
+        result.blocked += 1;
+        continue;
+      }
+      const target = flight.names.indexOf(route.hops[route.hops.length - 1] as string);
+      occupied.delete(flight.names[host] as string);
+      occupied.add(flight.names[target] as string);
+      hosts[workload] = target;
+      result.migrations += 1;
+      result.km.push(route.linkKm);
+      result.legs.push(route.legsKm.length);
+    }
+  }
+  result.served = poweredSteps / totalSteps;
+  return result;
+}
+
+/**
  * How many workloads would pick the *same* satellite at the same instant.
  *
  * The single-workload model cannot see this and the pipeline model only avoids it
@@ -1171,6 +1292,33 @@ function reportLoad(label: string, params: WalkerDeltaParams, options: RunOption
         `${darkAtAppCadence.toFixed(1)}% | ${(100 * dutyCycle).toFixed(3)}% |`,
     );
   }
+
+  console.log("");
+  console.log("Whole-constellation capacity: W workloads at once, one per satellite, contending for the same lit hosts.");
+  console.log("");
+  console.log("| rule | load 0.50 | load 0.90 | load 1.00 | load 1.10 |");
+  console.log("| --- | ---: | ---: | ---: | ---: |");
+  const litShare = 1 - darkFractions(flight).dark;
+  for (const [ruleLabel, rule, lookahead] of [
+    ["naive, nearest lit", "nearest", 0],
+    ["naive, furthest slot in ring", "ring-far", 0],
+    ["naive, freshest sunlit", "fresh", 0],
+    ["predictive 90 s, freshest sunlit", "fresh", 90],
+    ["predictive 90 s, furthest slot in ring", "ring-far", 90],
+  ] as Array<[string, TargetRule, number]>) {
+    const cells = [0.5, 0.9, 1, 1.1].map((load) => {
+      const capacity = measureCapacity(flight, rule, lookahead, load, params.planes, wrapsPlanes);
+      return `${(100 * capacity.served).toFixed(1)}% served (W=${capacity.workloads})`;
+    });
+    console.log(`| ${ruleLabel} | ${cells.join(" | ")} |`);
+  }
+  console.log("");
+  const census = litCensus(flight);
+  console.log(
+    `Ceiling: ${census.min}–${census.max} of ${params.total} satellites are powered at once (mean ${census.mean.toFixed(1)}, ${(100 * litShare).toFixed(1)}%). ` +
+      `Load 1.00 places ${Math.round(litShare * params.total)} workloads, so ${Math.max(0, Math.round(litShare * params.total) - census.min)} of them are unservable by arithmetic at the fleet's darkest instant, ` +
+      `whatever the policy — ${((100 * Math.max(0, Math.round(litShare * params.total) - census.min)) / Math.max(1, Math.round(litShare * params.total))).toFixed(1)}% of the load.`,
+  );
 
   console.log("");
   for (const rule of ["nearest", "ring-far"] as TargetRule[]) {
