@@ -33,6 +33,7 @@
 // readings, and the appendix there for the self-check.
 
 import { writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 import { propagate, type SatRec } from "satellite.js";
 
@@ -74,9 +75,9 @@ function wrap360(value: number): number {
 // ---------------------------------------------------------------------------
 
 /** A mean-anomaly offset added to the generated records before they are propagated. */
-type PhaseOffset = (index: number, total: number, params: WalkerDeltaParams) => number;
+export type PhaseOffset = (index: number, total: number, params: WalkerDeltaParams) => number;
 
-interface Scenario {
+export interface Scenario {
   id: string;
   label: string;
   params: WalkerDeltaParams;
@@ -91,7 +92,7 @@ interface Scenario {
  * asserted: F = 0 and F = P/2 at fixed T/P/h, and a fifth of the satellites at
  * fixed planes/phasing.
  */
-const SCENARIOS: Scenario[] = [
+export const SCENARIOS: Scenario[] = [
   {
     id: "walker25",
     label: "53 250/25/1 @550",
@@ -153,7 +154,7 @@ const SCENARIOS: Scenario[] = [
  * else changes, so any difference in the ingress geometry is the phase spread and
  * not a second model.
  */
-function migrationScenarios(base: Scenario): Scenario[] {
+export function migrationScenarios(base: Scenario): Scenario[] {
   const altitudeKm = base.params.altitudeKm;
   // The drag budget's own worst spread: B = 0.11 m^2/kg, disagreed by 100%, over
   // the window. differentialDragDriftM returns metres of along-track separation.
@@ -662,4 +663,8 @@ function main(argv: string[]): void {
   writeCsv([...results, ...migration]);
 }
 
-main(process.argv.slice(2));
+// Run only when invoked directly: eclipse-dwell.ts imports this module for its
+// scenario list, and an unguarded main would print this script's tables too.
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main(process.argv.slice(2));
+}
