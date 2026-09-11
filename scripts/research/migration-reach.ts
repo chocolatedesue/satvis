@@ -517,13 +517,15 @@ function measureReach(flight: Flight, demands: readonly number[], planeCount: nu
  * plane over. Included because it is what an ISL topology already wired for routing
  * would reach for first, and it is worth knowing what it costs in dwell.
  */
-type TargetRule = "nearest" | "ring" | "ring-far" | "adjacent";
+type TargetRule = "nearest" | "ring" | "ring-far" | "adjacent" | "fresh" | "ring-fresh";
 
 const TARGET_RULES: ReadonlyArray<{ rule: TargetRule; label: string }> = [
   { rule: "nearest", label: "nearest lit, any plane" },
   { rule: "ring", label: "same plane, next lit slot" },
   { rule: "ring-far", label: "same plane, furthest lit slot in view" },
   { rule: "adjacent", label: "adjacent plane only" },
+  { rule: "fresh", label: "freshest sunlit, anywhere reachable" },
+  { rule: "ring-fresh", label: "freshest sunlit in own ring" },
 ];
 
 /**
@@ -549,6 +551,29 @@ function selectRoute(
   pool: readonly MigrationHost[],
   rule: TargetRule,
 ): MigrationRoute | undefined {
+  if (rule === "fresh" || rule === "ring-fresh") {
+    // Residence, not distance: take the satellite with the most sunlit arc left, over
+    // every target a chain of lit relays can reach. Relays are allowed here where
+    // `ring-far` refuses them, because the whole point of the rule is that the freshest
+    // satellite is *not* in view — it is most of a dark arc away round the orbit.
+    const routes = routesFrom(source, pool.some((host) => host.name === source.name) ? pool : [...pool, source]);
+    let best: MigrationRoute | undefined;
+    let bestDwell = -1;
+    for (const candidate of candidates) {
+      const route = routes.get(candidate.name);
+      if (!route) {
+        continue;
+      }
+      const dwell = stepsUntilDark(flight, flight.names.indexOf(candidate.name), step);
+      // Ties on dwell go to the shorter wire, so the rule is deterministic and does not
+      // wander between equally fresh targets.
+      if (dwell > bestDwell || (dwell === bestDwell && best !== undefined && route.linkKm < best.linkKm)) {
+        bestDwell = dwell;
+        best = route;
+      }
+    }
+    return best;
+  }
   if (rule !== "ring-far") {
     return chooseRoute(source, candidates, false, pool);
   }
@@ -577,7 +602,7 @@ function eligibleUnder(flight: Flight, rule: TargetRule, host: number, candidate
   }
   const hostPlane = flight.planes[host] as number;
   const candidatePlane = flight.planes[candidate] as number;
-  if (rule === "ring" || rule === "ring-far") {
+  if (rule === "ring" || rule === "ring-far" || rule === "ring-fresh") {
     return hostPlane === candidatePlane;
   }
   const gap = Math.abs(candidatePlane - hostPlane);
@@ -775,6 +800,47 @@ function measureHotspots(flight: Flight, rule: TargetRule, planeCount: number, w
     samples += 1;
   }
   return { peak, mean: samples === 0 ? 0 : sum / samples, busiestStep };
+}
+
+/**
+ * The two arcs themselves: how long a satellite holds power, and how long it loses it.
+ *
+ * The quantity every policy above is implicitly spending, and the one that was missing.
+ * A hand-off does not buy "distance", it buys **residence** — the target's remaining
+ * lit arc — and the ceiling on that is the lit arc itself. So the best any policy can
+ * do is land on a satellite at the *start* of its sunlit arc, which makes the floor on
+ * the migration rate `T / lit arc` and not zero.
+ *
+ * Runs that touch either end of the flight are dropped: a lit run still going when the
+ * window closes is not a measurement of a lit run, it is a measurement of the window.
+ */
+function residenceArcs(flight: Flight): { lit: number[]; dark: number[]; litByPlane: Map<number, number[]> } {
+  const lit: number[] = [];
+  const dark: number[] = [];
+  const litByPlane = new Map<number, number[]>();
+  for (let sat = 0; sat < flight.names.length; sat += 1) {
+    let runStart = 0;
+    let runState = flight.power[0]?.[sat] === true;
+    for (let step = 1; step <= flight.steps; step += 1) {
+      const state = step < flight.steps ? flight.power[step]?.[sat] === true : !runState;
+      if (state === runState) {
+        continue;
+      }
+      // Interior runs only — one that started at step 0 or is still open at the end is
+      // truncated by the window rather than by the orbit.
+      if (runStart > 0 && step < flight.steps) {
+        const seconds = (step - runStart) * flight.stepSeconds;
+        (runState ? lit : dark).push(seconds);
+        if (runState) {
+          const plane = flight.planes[sat] as number;
+          litByPlane.set(plane, [...(litByPlane.get(plane) ?? []), seconds]);
+        }
+      }
+      runStart = step;
+      runState = state;
+    }
+  }
+  return { lit, dark, litByPlane };
 }
 
 /**
@@ -998,6 +1064,20 @@ function reportRules(flight: Flight, params: WalkerDeltaParams): void {
     }
   }
 
+  const arcs = residenceArcs(flight);
+  const period = periodSeconds(params.altitudeKm);
+  const litP50 = percentile(arcs.lit, 0.5);
+  const planeMedians = [...arcs.litByPlane.entries()].map(([plane, runs]) => ({ plane, median: percentile(runs, 0.5) }));
+  console.log("");
+  console.log(
+    `Residence: sunlit arc p50 ${fixed(litP50)} s (p10 ${fixed(percentile(arcs.lit, 0.1))}, p90 ${fixed(percentile(arcs.lit, 0.9))}), ` +
+      `dark arc p50 ${fixed(percentile(arcs.dark, 0.5))} s, over a ${fixed(period)} s orbit. ` +
+      `Across planes the sunlit arc runs ${fixed(Math.min(...planeMedians.map((entry) => entry.median)))}–${fixed(Math.max(...planeMedians.map((entry) => entry.median)))} s.`,
+  );
+  console.log(
+    `So a workload that always landed at the *start* of a sunlit arc would migrate ${(period / litP50).toFixed(2)} times per orbit. ` +
+      `That is the floor; every rule below is measured against it.`,
+  );
   console.log("");
   console.log(
     `Ring arithmetic: ${perPlane} slots × ${fixed(ring.slotSeconds)} s each; a direct ring hop reaches ${ring.slots} slot(s) ` +
@@ -1036,15 +1116,20 @@ function reportLoad(label: string, params: WalkerDeltaParams, options: RunOption
   console.log(`\n### ${label} — ${encodeWalker(params)}`);
   console.log(`Following ${Math.ceil(params.total / sampleEvery)} workloads for ${options.orbits} revolutions, one policy at a time.`);
   console.log("");
-  console.log("| policy | migrations per workload per orbit | hop km p50 | KV moved per workload per orbit | dark, this cadence | dark at 5 s cadence | fleet ISL duty |");
-  console.log("| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+  console.log(
+    "| policy | migrations per workload per orbit | hop km p50 | legs p50 | transfer per migration | KV moved per workload per orbit | dark at 5 s cadence | fleet ISL duty |",
+  );
+  console.log("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
 
   const chains: Array<{ label: string; rule: TargetRule; lookahead: number }> = [
     { label: "naive, nearest lit", rule: "nearest", lookahead: 0 },
     { label: "naive, next lit slot in ring", rule: "ring", lookahead: 0 },
     { label: "naive, furthest lit slot in ring", rule: "ring-far", lookahead: 0 },
+    { label: "naive, freshest sunlit anywhere", rule: "fresh", lookahead: 0 },
+    { label: "naive, freshest sunlit in own ring", rule: "ring-fresh", lookahead: 0 },
     { label: "predictive 90 s, nearest lit", rule: "nearest", lookahead: 90 },
     { label: "predictive 90 s, furthest lit slot in ring", rule: "ring-far", lookahead: 90 },
+    { label: "predictive 90 s, freshest sunlit anywhere", rule: "fresh", lookahead: 90 },
   ];
   for (const spec of chains) {
     const chain = followChains(flight, spec.label, spec.rule, spec.lookahead, params.planes, wrapsPlanes, sampleEvery);
@@ -1061,9 +1146,16 @@ function reportLoad(label: string, params: WalkerDeltaParams, options: RunOption
     // measured figure alone would be quoting this script's step size; the second column
     // rescales it to MIGRATION_EVAL_SIM_SECONDS, which is what the app actually runs.
     const darkAtAppCadence = spec.lookahead > 0 ? (100 * chain.darkSteps) / chain.totalSteps : (100 * perWorkloadPerOrbit * 5) / period;
+    const perMigration = Number.isFinite(legs)
+      ? routeTransferCost(
+          DEFAULT_KV_GIGABYTES,
+          ISL_GBPS,
+          Array.from({ length: legs }, () => percentile(chain.km, 0.5) / legs),
+        ).totalSeconds
+      : Number.NaN;
     console.log(
-      `| ${spec.label} | ${perWorkloadPerOrbit.toFixed(1)} | ${fixed(percentile(chain.km, 0.5))} | ${gbPerOrbit.toFixed(1)} GB | ` +
-        `${((100 * chain.darkSteps) / chain.totalSteps).toFixed(1)}% | ${darkAtAppCadence.toFixed(1)}% | ${(100 * dutyCycle).toFixed(3)}% |`,
+      `| ${spec.label} | ${perWorkloadPerOrbit.toFixed(1)} | ${fixed(percentile(chain.km, 0.5))} | ${fixed(legs)} | ${fixed(perMigration, 2)} s | ${gbPerOrbit.toFixed(1)} GB | ` +
+        `${darkAtAppCadence.toFixed(1)}% | ${(100 * dutyCycle).toFixed(3)}% |`,
     );
   }
 

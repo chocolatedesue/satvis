@@ -33,10 +33,12 @@ unpowered, and the hand-off distance still ranges over a factor of six. What mov
 3. **Which link fabric the hand-off is allowed to use** — the direct chord, or a walk across
    the ISL lattice the app actually draws. A factor of four in transfer time, and it is the
    one nobody budgets for.
-4. **Which satellite you hand to** — nearest lit, or several slots back round your own ring.
-   The ring hand-off is 3× further and 5× cheaper in hops, and cuts the migration rate 3.5×.
+4. **Which satellite you hand to** — nearest lit, several slots back round your own ring, or
+   the one with the most sunlit arc left. Handing to the freshest sunlit satellite cuts the
+   migration rate from 32.2 to **1.9 per orbit**, the theoretical floor, for the same bytes.
 
-Bandwidth is not on the list: the busiest policy measured occupies 0.21% of one ISL.
+Bandwidth is not on the list: the busiest policy measured occupies 0.21% of one ISL, and along
+the efficient frontier the bytes are conserved no matter which rule you pick.
 
 Density (T, P, S) sets a floor under the first and does nothing to the rest.
 
@@ -136,6 +138,109 @@ The caveat is that this only holds at low demand: at ≥ 600 s the same 5 × 44 
 along-track and a long ring is many ring steps. Long rings make cheap reactive hand-offs and
 expensive predictive ones.
 
+
+
+---
+
+## Residence is the quantity being bought
+
+A hand-off does not buy distance. It buys **residence** — the target's remaining sunlit arc —
+and that reframes every table above, because it puts a ceiling on what any hand-off can
+achieve and a floor under how often you must repeat it.
+
+At 53° / 550 km, measured over interior runs only (a run still open when the window closes is
+a measurement of the window, not of the orbit):
+
+| arc            | p50      | p10  | p90  | across planes |
+| -------------- | -------- | ---- | ---- | ------------- |
+| sunlit         | **3080 s** | 3060 | 3160 | 3060–3160 s   |
+| dark           | 2660 s   | —    | —    | —             |
+| orbit          | 5739 s   |      |      |               |
+
+The sunlit arc is strikingly uniform — 100 s of spread across every plane — which matters,
+because it means the ceiling is the same everywhere in the fleet. And it gives the floor
+directly:
+
+```
+migrations per orbit ≥ T / (sunlit arc) = 5739 / 3080 = 1.86
+```
+
+**A workload that always landed at the *start* of a sunlit arc would migrate 1.86 times per
+orbit.** Everything measured earlier — 32.2 for naive, 9.2 for furthest-slot-in-ring — is a
+multiple of that floor, and the multiple is the policy's waste.
+
+### The freshest-sunlit rule attains the floor
+
+Add the obvious rule the residence argument implies: hand to the satellite with the **most
+sunlit arc left**, wherever it is, relays included.
+
+| target rule                         | hand-off km | legs | ISL lattice hops | target dwell |
+| ----------------------------------- | ----------- | ---- | ---------------- | ------------ |
+| nearest lit, any plane              | 1279 km     | 1    | 5                | 140 s        |
+| same plane, next lit slot           | 1973 km     | 1    | 1                | 260 s        |
+| same plane, furthest lit slot in view | 3906 km   | 1    | 2                | 520 s        |
+| **freshest sunlit, anywhere**       | **19 918 km** | **5** | 9              | **3020 s**   |
+| freshest sunlit in own ring         | 21 493 km   | 6    | 11               | 2880 s       |
+
+3020 s of dwell against a 3080 s sunlit arc: the rule gets essentially the whole arc. Followed
+as a chain it lands on **1.9 migrations per workload per orbit** — the 1.86 floor, attained.
+
+### Bandwidth is conserved; only the slicing changes
+
+The thing that makes this a real choice rather than a free lunch is that the freshest target is
+19 918 km away and five legs, so each migration costs 0.86 s instead of 0.16 s. Per orbit,
+53° / 550 km, 10 × 22:
+
+| policy                         | migrations /orbit | km     | legs | per migration | KV /orbit | leg-transfers /orbit | dark  |
+| ------------------------------ | ----------------- | ------ | ---- | ------------- | --------- | -------------------- | ----- |
+| naive, nearest lit             | 32.2              | 1254   | 1    | 0.16 s        | 64.3 GB   | **32.2**             | 2.8%  |
+| naive, next lit slot in ring   | 17.9              | 1973   | 1    | 0.17 s        | 35.7 GB   | 17.9                 | 1.6%  |
+| naive, furthest slot in ring   | 9.2               | 3906   | 1    | 0.17 s        | 18.4 GB   | **9.2**              | 0.8%  |
+| **naive, freshest sunlit**     | **1.9**           | 17 174 | 5    | 0.86 s        | 19.4 GB   | **9.5**              | **0.2%** |
+| naive, freshest in own ring    | 2.0               | 21 489 | 6    | 1.03 s        | 24.2 GB   | 12.0                 | 0.2%  |
+| predictive 90 s, freshest      | 2.0               | 17 166 | 5    | 0.86 s        | 20.0 GB   | 10.0                 | 0.7%  |
+
+**Furthest-slot-in-ring and freshest-sunlit move almost exactly the same bytes** — 18.4 vs
+19.4 GB per workload per orbit — and differ by **5× in how many migration events that is**.
+The same holds in every shape measured: long rings 7.6 vs 7.6, short rings 9.5 vs 10.0.
+
+There is a reason, and it is the link horizon again. Dwell bought is proportional to orbital
+arc traversed, and arc traversed is proportional to legs, so `migrations × legs` is invariant
+along the efficient frontier. One direct leg spans at most the horizon arc — 42.8° at
+550 km — so:
+
+```
+leg-transfers per orbit ≥ 360° / 42.8° = 8.4
+```
+
+Measured: 7.6–10.0 for every efficient rule. **You do not get to choose the bandwidth. You
+choose whether to spend it as nine one-leg migrations or two five-leg ones** — and two is
+better, because a migration event is a consistency window and a stall, not just bytes.
+
+Naive-nearest is the only rule *off* the frontier: 32.2 leg-transfers, 3.8× the floor. It is
+not expensive because it moves far — it moves the shortest distance of any rule. It is
+expensive because it spends that distance without buying any residence.
+
+### High inclination breaks the floor outright
+
+The 8.4 floor assumes you have to traverse orbital arc to reach sunlight. Across planes with
+different β you do not — and at 97.6° that is exactly what happens:
+
+| policy at 97.6° / 550 km  | migrations /orbit | km     | legs | KV /orbit  | fleet ISL duty |
+| ------------------------- | ----------------- | ------ | ---- | ---------- | -------------- |
+| naive, nearest lit        | 73.9              | 460    | 1    | 147.9 GB   | 0.206%         |
+| naive, furthest in ring   | 9.2               | 3907   | 1    | 18.4 GB    | 0.026%         |
+| **naive, freshest sunlit** | **1.9**          | **3212** | **1** | **3.8 GB** | **0.005%**   |
+
+The freshest sunlit satellite is **3212 km away and a single leg** — inside the horizon. It is
+in another plane whose sun phase is offset, so the workload jumps sun phase instead of
+traversing arc. That is **17× fewer migrations and 39× less bandwidth than naive-nearest at
+the same inclination**, and it beats the 53° frontier by 5× on both.
+
+Same lever as everywhere else in this file, and this is its clearest expression: **a spread of
+β across planes is what lets a hand-off buy residence without buying distance.** At 53° the
+planes' sun phases are too alike, so residence has to be bought by going most of the way round
+the orbit.
 
 ---
 
@@ -364,3 +469,10 @@ a property of the pattern *and the season*, and needs the range.
   accurate at this fleet size, not that it is accurate in general.
 - The ring rule's relay pool is its own ring, which is what the drawn topology gives it. A
   fleet with more ISLs than that would do better and is not measured here.
+- The freshest-sunlit rule is an oracle: it reads each candidate's *actual* remaining sunlit
+  arc from the propagated timeline. A flight implementation would predict it, and the
+  prediction is the easy part (illumination is a closed function of the element set and the
+  date) — but the rule as measured is an upper bound, not a flown policy.
+- A relayed hand-off is charged store-and-forward per leg and nothing else. Five relays that
+  each hold a 2 GB cache in flight is a memory and power claim on five other satellites, and
+  none of that is modelled.
