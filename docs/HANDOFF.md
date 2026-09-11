@@ -11,6 +11,9 @@
   - `https://satvis-inertial-frame.pages.dev`
   - `https://satvis-orbit-lab.pages.dev`
 - **Main Branch**: `main`
+- **Chinese usage guide for end users**: [`docs/usage-zh.md`](usage-zh.md) — the interface tour,
+  the nine `?demo=` scenes, common URL combinations and the FAQ (inertial-frame perspective,
+  level-2 imagery on Pages, `/ot` 404).
 
 ---
 
@@ -128,7 +131,9 @@ node scripts/verify/verify-migration.mjs http://127.0.0.1:8791 /tmp/mig-verify
 node scripts/verify/verify-links.mjs http://127.0.0.1:8791 /tmp/links-verify   # ?demo=shells and ?demo=stable-shells
 kill $PID
 
-# 5. Production Deployment (Cloudflare Pages)
+# 5. Deployment
+#    this fork: push to main -> .github/workflows/deploy-pages.yml -> GitHub Pages
+#    optional (credentialed host only): Cloudflare Pages with the worker build
 bash scripts/deploy-pages.sh
 ```
 
@@ -136,12 +141,12 @@ bash scripts/deploy-pages.sh
 
 ## 4. Key Modified Files & Module Mapping
 
-- [`src/modules/util/shellLayout.ts`](file:///home/ccds/satvis/src/modules/util/shellLayout.ts): The multi-shell layout math — plus the cluster finder (`nodeLockedGroups`, `commonRepeatCycle`, `findStableClusters`) and the family constructor (`shellFamily`, `familyCycleHours`). The multi-shell layout math — secular rates, `coPrecessingInclinationDeg`, `coPrecessingCeilingKm`, `resonantCompanion`, `searchStableShellLayouts`, `shellPairLayout`. No runtime imports, so the derivation script can run it under node's type stripping.
-- [`src/config/migration.ts`](file:///home/ccds/satvis/src/config/migration.ts): Policies (`predictive`, `naive`), 90s lookahead window, time step bounds, incremental-KV defaults and growth-rate constants (`KV_TOKENS_PER_SECOND` × `KV_MEGABYTES_PER_TOKEN`).
-- [`src/modules/util/migration.ts`](file:///home/ccds/satvis/src/modules/util/migration.ts): Line-of-sight routing (`routesFrom` / `routeBetween` / `chooseRouteExcluding` — the Earth is opaque, so a hand-off takes the shortest path of real legs and strands when there is none), store-and-forward pricing (`routeTransferCost`), differential snapshot (`deltaSnapshot`), predictive decision engine (`decideStageMigration`).
-- [`src/modules/MigrationLayer.ts`](file:///home/ccds/satvis/src/modules/MigrationLayer.ts): Cesium rendering layer, lookahead illumination sampler, per-leg transfer pricing, incremental sync points, ledger with full-snapshot baseline, real-time metrics status generator.
-- [`src/modules/util/fleetContinuity.ts`](file:///home/ccds/satvis/src/modules/util/fleetContinuity.ts): Pure real-fleet service-continuity evaluation (fixed greedy placement vs the ≥k-lit service ceiling).
-- [`src/modules/ConstellationLinksLayer.ts`](file:///home/ccds/satvis/src/modules/ConstellationLinksLayer.ts): Per-frame line-of-sight in the positions callbacks (occluded links draw nothing that frame), per-frame bond dimming.
-- [`src/modules/demoScenes.ts`](file:///home/ccds/satvis/src/modules/demoScenes.ts): `applyRealFleetScene` (Iridium NEXT mapping) + `?demo=real-fleet`.
-- [`src/components/OrbitLabPanel.vue`](file:///home/ccds/satvis/src/components/OrbitLabPanel.vue): Policy toggle, incremental KV toggle, KV-moved compression ratio, Sunlit GPU utilization metric display, pipeline state badges, real-fleet demo button + continuity report.
-- [`src/stores/sat.ts`](file:///home/ccds/satvis/src/stores/sat.ts) & [`src/modules/sceneSync.ts`](file:///home/ccds/satvis/src/modules/sceneSync.ts): URL parameter synchronization (`migpol`, `mig`, `miginc`, `migst`, `links`, `mark`, `demo=real-fleet`).
+- [`src/modules/util/shellLayout.ts`](../src/modules/util/shellLayout.ts): The multi-shell layout math — plus the cluster finder (`nodeLockedGroups`, `commonRepeatCycle`, `findStableClusters`) and the family constructor (`shellFamily`, `familyCycleHours`). The multi-shell layout math — secular rates, `coPrecessingInclinationDeg`, `coPrecessingCeilingKm`, `resonantCompanion`, `searchStableShellLayouts`, `shellPairLayout`. No runtime imports, so the derivation script can run it under node's type stripping.
+- [`src/config/migration.ts`](../src/config/migration.ts): Policies (`predictive`, `naive`), 90s lookahead window, time step bounds, incremental-KV defaults and growth-rate constants (`KV_TOKENS_PER_SECOND` × `KV_MEGABYTES_PER_TOKEN`).
+- [`src/modules/util/migration.ts`](../src/modules/util/migration.ts): Line-of-sight routing (`routesFrom` / `routeBetween` / `chooseRouteExcluding` — the Earth is opaque, so a hand-off takes the shortest path of real legs and strands when there is none), store-and-forward pricing (`routeTransferCost`), differential snapshot (`deltaSnapshot`), predictive decision engine (`decideStageMigration`).
+- [`src/modules/MigrationLayer.ts`](../src/modules/MigrationLayer.ts): Cesium rendering layer, lookahead illumination sampler, per-leg transfer pricing, incremental sync points, ledger with full-snapshot baseline, real-time metrics status generator.
+- [`src/modules/util/fleetContinuity.ts`](../src/modules/util/fleetContinuity.ts): Pure real-fleet service-continuity evaluation (fixed greedy placement vs the ≥k-lit service ceiling).
+- [`src/modules/ConstellationLinksLayer.ts`](../src/modules/ConstellationLinksLayer.ts): Per-frame line-of-sight in the positions callbacks (occluded links draw nothing that frame), per-frame bond dimming.
+- [`src/modules/demoScenes.ts`](../src/modules/demoScenes.ts): `applyRealFleetScene` (Iridium NEXT mapping) + `?demo=real-fleet`.
+- [`src/components/OrbitLabPanel.vue`](../src/components/OrbitLabPanel.vue): Policy toggle, incremental KV toggle, KV-moved compression ratio, Sunlit GPU utilization metric display, pipeline state badges, real-fleet demo button + continuity report.
+- [`src/stores/sat.ts`](../src/stores/sat.ts) & [`src/modules/sceneSync.ts`](../src/modules/sceneSync.ts): URL parameter synchronization (`migpol`, `mig`, `miginc`, `migst`, `links`, `mark`, `demo=real-fleet`).

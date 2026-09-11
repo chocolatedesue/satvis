@@ -185,10 +185,12 @@ discussion; sharpen them here when they drift.
   and any number can be. Which kind a layer is, is a fact about the layer rather
   than about the selection (`base` on its registry entry), and it decides both the
   invariant and the control the menu offers.
-- **Offline imagery**: the basemap that ships inside the app and is precached, so
-  it is the only one guaranteed with no network. The high-resolution copy of the
-  same map is data shipped beside the app and cached only as it is viewed: same
-  map, different promise, which is why they are two selectable layers and not one.
+- **Natural Earth (offline base map)**: the one basemap that ships inside the
+  app, so it is the only one guaranteed with no network. It is a single selectable
+  layer, `NaturalEarth`: levels 0–2 are committed to the repository, levels 0–3 are
+  precached by the service worker, and levels 4–5 are generated on demand
+  (`pnpm update-imagery`) and cached as they are viewed. Same map, two promises,
+  one layer — the retired `Offline` / `OfflineHighres` names both resolve to it.
 - **Preset**: the per-route starting configuration — a title, the element sets
   to register, and the default value of each shared setting. A preset supplies
   defaults, not initial state: the URL carries only deviations from the

@@ -1,14 +1,53 @@
-# [satvis.space](https://satvis.space) [![CI](https://github.com/Flowm/satvis/actions/workflows/ci.yml/badge.svg)](https://github.com/Flowm/satvis/actions/workflows/ci.yml)
+# Satvis: 3D satellite tracker and pass predictor
 
-3D satellite tracker and pass predictor.
+[![CI](https://github.com/chocolatedesue/satvis/actions/workflows/ci.yml/badge.svg)](https://github.com/chocolatedesue/satvis/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Satvis is a free, open-source satellite tracker that runs in the browser.
-It draws more than 12,000 satellites on a 3D globe in real time and works out when each one passes over a ground station you set.
-The sky view trades the globe for a ground-level camera aimed by your phone's compass and gyroscope, so you look for the satellite in the sky rather than on a map of it.
+**Live site: <https://chocolatedesue.github.io/satvis/>**
 
-![Screenshot](https://user-images.githubusercontent.com/1117666/47623704-f0c3e900-db14-11e8-9cf9-7bf13acb267c.png)
+Satvis is a free, open-source satellite tracker that runs in the browser. It draws more than
+12,000 satellites on a 3D globe in real time, propagated in the browser with SGP4 from CelesTrak GP
+element sets, and works out when each one passes over a ground station you set. It also generates
+constellations from scratch — Walker patterns and free-flying formations — draws the stable
+inter-satellite links a propagation derivation picks, colours every satellite by what the sun is
+doing to it, and runs a live GPU-pipeline migration overlay over the result. The sky view then
+trades the globe for a ground-level camera aimed by your phone's compass and gyroscope, so you look
+for the satellite in the sky rather than on a map of it.
 
-## Features
+> **Screenshot:** none is checked in — this repository stays free of binary assets. Open the live
+> site to see the globe. If you add a screenshot, put the file under `docs/` and link it here.
+
+This repository is a fork of [Flowm/satvis](https://github.com/Flowm/satvis). Everything below
+describes this fork, which is published at the GitHub Pages address above; upstream's own home is
+<https://satvis.space>. The fork adds the orbital-compute layer — Walker and formation generators,
+the orbit lab, the constellation topology, and the multi-satellite migration overlay.
+
+## Quickstart
+
+Requires Node (the repo pins Node 24 and pnpm 11 in `mise.toml`) and pnpm. One install at the
+root covers both the SPA and the `worker/` workspace.
+
+```sh
+pnpm i                 # install the SPA and worker workspaces
+pnpm dev               # dev server, http://localhost:5173
+pnpm test              # frontend unit tests (vitest)
+pnpm lint              # oxlint + oxfmt check + vue-tsc, both packages
+pnpm build             # production build into dist/
+```
+
+The worker's own suite is not covered by `pnpm test`: run
+`pnpm --filter satvis-worker test`.
+
+### Deploying this fork
+
+- **GitHub Pages (the live site).** Push to `main`. `.github/workflows/deploy-pages.yml` builds
+  the worker-less shape and publishes it to `https://<owner>.github.io/<repo>/`. One manual step
+  is unavoidable, once: **Settings → Pages → Source: GitHub Actions**. Imagery is capped at level 2
+  there and `/ot` 404s — see [GitHub Pages](#github-pages).
+- **Cloudflare Pages (optional).** `bash scripts/deploy-pages.sh` deploys the full worker-backed
+  build; it needs a credentialed host, so a plain fork cannot run it.
+
+## What you can do
 
 - Visualize more than 12,000 satellites on a 3D globe in real time, propagated in the browser with SGP4 from CelesTrak GP element sets (OMM/TLE)
 - Draw points, labels, orbits, orbit tracks, ground tracks, sensor cones and 3D models per satellite, coloured by orbit class (LEO, MEO, GEO, HEO)
@@ -19,15 +58,18 @@ The sky view trades the globe for a ground-level camera aimed by your phone's co
 - Add OpenStreetMap buildings to the globe, or Google's photorealistic tiles under the sky view
 - Generate a Walker Delta or Walker Star constellation from its `i: T/P/F` specification and fly it beside the real catalog, with every per-satellite visual the real ones get
 - Wire the generated constellation into the stable inter-satellite topology a propagation derivation picks — rigid intra-plane rings, same-slot inter-plane links, the Walker Star seam dropped — and mark a small cluster of satellites, bonded pairwise even across shells, to watch its geometry hold or shear
-- Stack several shells in one scene (`?demo=shells`) with the clock fast enough that the relative motion between them is the thing you see, design a second shell that holds against the first (`?demo=stable-shells`) instead of shearing away from it, and fly a whole family of them at once (`?demo=sso-family`)
+- Stack several shells in one scene (`?demo=shells`), design a second shell that holds against the first (`?demo=stable-shells`) instead of shearing away from it, and fly a whole family of them at once (`?demo=sso-family`)
 - Fly a free-flying formation — dozens of satellites inside a kilometre of one orbit, Google's Suncatcher cluster among them — generated in closed form as an eccentricity-vector lattice rather than integrated, and drawn at a scale a globe can resolve
 - Colour satellites by what the sun is doing to them — eclipse (ν) _and_ solar panel incidence (κ) — as a point colour, and as the orbit line itself cut into sunlit, penumbra and back-sun arcs
 - Read one satellite's eclipse and back-sun budget over its next two orbits, as percentages and as a strip of colour
-- Share the exact view you are looking at as a link: the url carries the satellites, the components, the ground station and the map layers
+- Run the **orbit lab** panel (the sun button in the left toolbar): generate Walker patterns, compute the sun-synchronous inclination for an altitude, switch between the two point-colour modes, and read the stable-cluster and multi-shell layout results
+- Run a distributed GPU inference pipeline over the fleet and watch live KV-cache migration chase the sun (`?demo=migration`, `?demo=real-fleet`)
+- Share the exact view you are looking at as a link: the url carries the satellites, the components, the ground station, the generated constellations and the map layers
 - Install it as a Progressive Web App and keep using it offline, from a cached element-set snapshot and base map
 - Deploy it serverless: static files on a CDN, with an optional Cloudflare Worker serving fresh satellite data
 
-Every parameter in that url is specified in `docs/adr/0001-url-parameter-specification.md`.
+The full url contract is `docs/adr/0001-url-parameter-specification.md`; the reference below is the
+practical index.
 
 ## Built With
 
@@ -37,6 +79,123 @@ Every parameter in that url is specified in `docs/adr/0001-url-parameter-specifi
 - [Nuxt UI](https://ui.nuxt.com)
 - [Cloudflare Workers](https://workers.cloudflare.com)
 - [Workbox](https://developers.google.com/web/tools/workbox)
+
+## Demo scenes
+
+`?demo=<name>` opens straight into a prepared scene — patterns generated, components and camera
+set, clock rate chosen — before any panel mounts. It is read once at startup and then stripped from
+the url as the state it sets round-trips normally, so the address bar ends up self-describing. Nine
+scenes exist:
+
+| `?demo=`        | What it shows                                                                                                | Reach for it when…                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `two-orbit`     | Two orbital planes 90° apart, ten satellites each, illumination arcs on, inertial frame, clock at 60×        | it is your first look at the orbit lab                                    |
+| `sso`           | One dawn–dusk and one noon–midnight sun-synchronous orbit at the same altitude and inclination               | you want to see why "always sunlit" is about the plane, not the orbit     |
+| `migration`     | The two-orbit scene plus the live KV-cache migration overlay over exactly those satellites                   | you want the smallest scene that shows a hand-off                         |
+| `walker25`      | 25 planes × 10 satellites (250 total) at 53° / 550 km, illumination colouring and migration, inertial        | you want a fleet big enough that an eclipse is always happening somewhere |
+| `shells`        | Three shells — 53° / 550 km, 70° / 1200 km, 97.6° / 1200 km — topology wired, one satellite per shell marked | you want to watch shells move against each other                          |
+| `stable-shells` | A reference shell, the 8:7 companion designed to hold against it, and a control that was not designed        | you want designed vs accidental multi-shell layout side by side           |
+| `sso-family`    | Five sun-synchronous shells that all return on one 24.46 h cycle, every cross-shell bond solid               | you want family-scale stability, not a single pair                        |
+| `real-fleet`    | The migration overlay mapped onto the real Iridium NEXT catalog (80 satellites)                              | you want the machinery on real, catalogued orbits                         |
+| `cluster`       | A free-flying formation at a globe-resolvable scale (~120 km), every pair bonded                             | you want to see a formation rather than a constellation                   |
+
+The clock rate is live viewer state and is not in the url, which is exactly why `?demo=` exists: a
+plain shared link opens frozen at 1×, where nothing migrates for half an orbit.
+
+## URL parameters
+
+Every parameter is optional; an absent one means "use this route's default". The table lists what
+each parameter sets, its wire form and the value it falls back to. Values are percent-encoded as
+usual (a space is `+` or `%20`); a comma-joined list must not contain a literal comma in a member.
+
+### Satellites and components
+
+| Parameter  | Sets                           | Wire form / accepted values                                                                                         | Default                                        |
+| ---------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `elements` | Components drawn per satellite | comma list: `Point`, `Label`, `Orbit`, `Illumination arc`, `Orbit track`, `Ground track`, `Sensor cone`, `3D model` | `Point,Label`                                  |
+| `tags`     | Catalog tags switched on       | comma list of tag names (`Starlink`, `GNSS`, `Weather`, `Stations`, `OT`, …)                                        | route preset (`Weather` on `/`, `OT` on `/ot`) |
+| `sats`     | Individual satellites on       | comma list of satellite names                                                                                       | empty                                          |
+| `xsats`    | Opt-outs from tag activation   | comma list of satellite names                                                                                       | empty                                          |
+| `track`    | The one tracked satellite      | one satellite name; empty tracks nothing                                                                            | empty                                          |
+| `paint`    | Point colour question          | `class` \| `illumination`                                                                                           | `class`                                        |
+| `psize`    | Point size                     | `small` \| `medium` \| `large` (5 / 9 / 14 px)                                                                      | `small`                                        |
+| `panel`    | Assumed solar-panel normal (κ) | `zenith` \| `velocity` \| `normal`                                                                                  | `zenith`                                       |
+| `overpass` | How passes are computed        | `elevation` \| `swath`                                                                                              | `elevation`                                    |
+| `gs`       | Ground stations                | `_`-joined; each `lat,lon` or `lat,lon,name`, 4 decimal places                                                      | empty                                          |
+
+### Generated constellations
+
+| Parameter | Sets                             | Wire form / accepted values                                                                | Default |
+| --------- | -------------------------------- | ------------------------------------------------------------------------------------------ | ------- |
+| `walker`  | Generated Walker patterns        | comma list, each `i:T/P/F@altKm`, optional `~spanDeg` (RAAN span) and `+offsetDeg`         | empty   |
+| `cluster` | Generated free-flying formations | comma list, each `i:ringsXpitchM@altKm`, optional `+offsetDeg`                             | empty   |
+| `mark`    | Marked-cluster members           | comma list, each `<plane>-<slot>@<wire>` with 1-based plane/slot, e.g. `1-1@53:40/4/1@550` | empty   |
+| `links`   | Stable-topology link overlay     | `true` \| `false`                                                                          | `true`  |
+
+### Migration overlay
+
+| Parameter | Sets                            | Wire form / accepted values     | Default |
+| --------- | ------------------------------- | ------------------------------- | ------- |
+| `mig`     | KV-cache live-migration overlay | `true` \| `false`               | `false` |
+| `migpol`  | Migration policy                | `predictive` \| `naive`         | `naive` |
+| `migst`   | Pipeline stages                 | `1` \| `2` \| `4` \| `6` \| `8` | `4`     |
+| `miginc`  | Incremental KV sync             | `true` \| `false`               | `false` |
+
+`predictive` pre-empts eclipse entry (default 90 s lookahead) and is the zero-stall policy; `naive`
+waits for power loss and stalls. `?demo=migration` does not override the policy, so add
+`&migpol=predictive` to watch the predictive hand-off.
+
+### Globe, camera and rendering
+
+| Parameter    | Sets                           | Wire form / accepted values                                                                                                                              | Default            |
+| ------------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `scene`      | View mode                      | `3D` \| `2D` \| `Columbus` \| `Sky`                                                                                                                      | `3D`               |
+| `camera`     | Camera reference frame         | `Fixed` \| `Inertial`                                                                                                                                    | `Fixed`            |
+| `layers`     | Imagery layers                 | comma list; base layers `NaturalEarth`, `ArcGis`, `VersaTiles`, `OSM`, `BlackMarble`; overlays `Tiles`, `GOES-IR`, `Nextrad`; optional `_<alpha>` suffix | `NaturalEarth`     |
+| `terrain`    | Terrain provider               | `None` \| `CesiumWorldTerrain` \| `ReEarth` \| `Maptiler`                                                                                                | `None`             |
+| `surface`    | Surface model                  | `None` \| `OsmBuildings` \| `GooglePhotorealistic`                                                                                                       | `None`             |
+| `stars`      | Star field                     | `Tycho1K` \| `DeepStar1K` \| `DeepStar2K`                                                                                                                | `Tycho1K`          |
+| `pixelratio` | Drawing-buffer pixel ratio     | `1` \| `1.5` \| `native`                                                                                                                                 | `native`           |
+| `msaa`       | Multisample antialiasing       | `off` \| `2` \| `4`                                                                                                                                      | per display[^msaa] |
+| `bg`         | Sky box, sun, moon, atmosphere | `true` \| `false`                                                                                                                                        | `true`             |
+| `fps`        | Frame counter                  | `true` \| `false`                                                                                                                                        | `false`            |
+| `bench`      | Benchmark panel                | `true` \| `false`                                                                                                                                        | `false`            |
+| `time`       | Pins the clock                 | ISO-8601 at minute precision, e.g. `2026-07-26T20:46Z`; absent means the clock is live                                                                   | absent (live)      |
+
+[^msaa]:
+    `msaa` is the one default that depends on the machine: `off` at a device pixel ratio of
+    2 or more, `2` below it. A link that must pin the rate says so.
+
+`scene=Sky` is the odd one out: the other three name a Cesium scene mode and it is the ground-level
+sky view. See `docs/adr/0003-sky-view.md`.
+
+Two parameters are not part of that state schema:
+
+- `demo` — the startup shorthand above. It is read once when the app boots, applied, and then
+  dropped as its effects round-trip into the ordinary parameters.
+- `embed` — valueless, preserved verbatim so an `iframe` can be recognised.
+
+### Copyable examples
+
+```
+# one Walker shell, illumination-coloured, inertial camera
+https://chocolatedesue.github.io/satvis/?walker=53:1584/72/17@550&tags=Walker%2053:1584/72/17@550&elements=Point,Orbit&paint=illumination&camera=Inertial
+
+# two shells side by side
+https://chocolatedesue.github.io/satvis/?walker=53:1584/72/17@550,97.6:348/6/58@560&tags=Walker%2053:1584/72/17@550,Walker%2097.6:348/6/58@560&elements=Point
+
+# one satellite per shell, bonded pairwise across shells
+https://chocolatedesue.github.io/satvis/?walker=53:40/4/1@550,70:24/4/1@1200,97.6:24/4/1@1200&tags=Walker%2053:40/4/1@550,Walker%2070:24/4/1@1200,Walker%2097.6:24/4/1@1200&mark=1-1@53:40/4/1@550,1-1@70:24/4/1@1200,1-1@97.6:24/4/1@1200&camera=Inertial
+
+# Google's Suncatcher formation: 81 satellites inside 1 km, 650 km dawn–dusk SSO
+https://chocolatedesue.github.io/satvis/?cluster=97.99:5x100@650&tags=Cluster%2097.99:5x100@650&elements=Point,Orbit&camera=Inertial
+
+# a ground station under the sky view, with one group switched on
+https://chocolatedesue.github.io/satvis/?scene=Sky&gs=48.1770,11.7476&tags=Stations
+
+# a demo scene with its clock pinned to a chosen minute
+https://chocolatedesue.github.io/satvis/?demo=shells&time=2026-07-26T20:46Z
+```
 
 ## Development
 
@@ -234,6 +393,8 @@ offline wherever it is turned; 4 and 5 are cached as they are requested, and any
 you have not been shows level 3 magnified rather than nothing at all.
 `pnpm update-starmap` does the same job for the optional star maps.
 
+## Deep dives
+
 ### Orbit lab: Walker constellations and illumination
 
 The **sun button** in the left toolbar opens a panel with two halves.
@@ -259,10 +420,10 @@ Patterns travel in the url as a comma-joined list, so a link is a whole scene:
 
 ```
 # one shell
-https://satvis.space/?walker=53:1584/72/17@550&tags=Walker%2053:1584/72/17@550&elements=Point&paint=illumination
+https://chocolatedesue.github.io/satvis/?walker=53:1584/72/17@550&tags=Walker%2053:1584/72/17@550&elements=Point&paint=illumination
 
 # two, side by side
-https://satvis.space/?walker=53:1584/72/17@550,97.6:348/6/58@560&tags=Walker%2053:1584/72/17@550,Walker%2097.6:348/6/58@560&elements=Point
+https://chocolatedesue.github.io/satvis/?walker=53:1584/72/17@550,97.6:348/6/58@560&tags=Walker%2053:1584/72/17@550,Walker%2097.6:348/6/58@560&elements=Point
 ```
 
 **Sun-synchronous orbits, and永久 sunlight.** The panel computes the sun-synchronous
@@ -366,7 +527,7 @@ pattern (the space encodes as `%20`). Without the tags the url draws nothing:
 
 ```
 # one satellite per shell, bonded pairwise across shells
-https://satvis.space/?walker=53:40/4/1@550,70:24/4/1@1200,97.6:24/4/1@1200&tags=Walker%2053:40/4/1@550,Walker%2070:24/4/1@1200,Walker%2097.6:24/4/1@1200&mark=1-1@53:40/4/1@550,1-1@70:24/4/1@1200,1-1@97.6:24/4/1@1200&camera=Inertial
+https://chocolatedesue.github.io/satvis/?walker=53:40/4/1@550,70:24/4/1@1200,97.6:24/4/1@1200&tags=Walker%2053:40/4/1@550,Walker%2070:24/4/1@1200,Walker%2097.6:24/4/1@1200&mark=1-1@53:40/4/1@550,1-1@70:24/4/1@1200,1-1@97.6:24/4/1@1200&camera=Inertial
 ```
 
 Each member carries an **amber halo** and its slot label; every pair is **bonded in amber**,
@@ -410,10 +571,10 @@ lattice index rather than an ellipse. The radius `R = 2·pitch·rings` and the m
 
 ```
 # Google's Suncatcher cluster: 81 satellites inside 1 km, 650 km dawn-dusk SSO
-https://satvis.space/?cluster=97.99:5x100@650&tags=Cluster%2097.99:5x100@650&elements=Point,Orbit&camera=Inertial
+https://chocolatedesue.github.io/satvis/?cluster=97.99:5x100@650&tags=Cluster%2097.99:5x100@650&elements=Point,Orbit&camera=Inertial
 
 # the same lattice at a size a globe can resolve, wired and marked
-https://satvis.space/?demo=cluster
+https://chocolatedesue.github.io/satvis/?demo=cluster
 ```
 
 Flown against SGP4 the Suncatcher cluster reproduces the paper's own numbers: the outermost member
@@ -468,10 +629,10 @@ reports the answer, and **Add the companion shell** puts it on the globe beside 
 
 ```
 # a 53° / 550 km shell, the 8:7 companion designed to hold against it, and a control
-https://satvis.space/?demo=stable-shells
+https://chocolatedesue.github.io/satvis/?demo=stable-shells
 
 # the designed pair on its own, one satellite of each marked
-https://satvis.space/?walker=53:40/4/1@550,34.47:40/4/1@1201.887&tags=Walker%2053:40/4/1@550,Walker%2034.47:40/4/1@1201.887&mark=1-1@53:40/4/1@550,1-1@34.47:40/4/1@1201.887&paint=illumination&psize=large&camera=Inertial
+https://chocolatedesue.github.io/satvis/?walker=53:40/4/1@550,34.47:40/4/1@1201.887&tags=Walker%2053:40/4/1@550,Walker%2034.47:40/4/1@1201.887&mark=1-1@53:40/4/1@550,1-1@34.47:40/4/1@1201.887&paint=illumination&psize=large&camera=Inertial
 ```
 
 Against a 53° / 550 km reference the search returns 6:5 at 1455.8 km / 22.30° (returning every
@@ -506,7 +667,7 @@ whole fleet holds a fixed local solar time _and_ returns its cross-shell geometr
 ```
 # five shells at once, every pair of them returning on one 24.46 h cycle:
 # 353 / 650 / 982 / 1355 / 1780 km, all sun-synchronous, spanning 96.9°-103.5°
-https://satvis.space/?demo=sso-family
+https://chocolatedesue.github.io/satvis/?demo=sso-family
 ```
 
 The orbit lab's **Stable clusters** section builds one from whatever is in its form: set how many
@@ -590,34 +751,10 @@ the 1632 km co-precession ceiling. Altitudes are km, angles are degrees, pitches
 whole model is `CircularOrbit` in `src/modules/util/orbitModel.ts`, and `orbit` on any design-time
 orbit the app can build is the same two numbers.
 
-Node ≥ 22 strips the types of the imported modules natively, so the script runs directly; the one
-constraint that imposes is that a module a script can reach carries its own `.ts` extension on
-import. `scripts/research/derive-isl-topology.ts` is the same idea a level deeper — it flies the geometry
+Node strips the types of the imported modules natively (the flag needs Node ≥ 22.6; this repo pins
+Node 24 in `mise.toml`), so the script runs directly; the one constraint that imposes is that a
+module a script can reach carries its own `.ts` extension on import. `scripts/research/derive-isl-topology.ts` is the same idea a level deeper — it flies the geometry
 with SGP4 rather than reading it off a closed form.
-
-### Orbit analysis from the terminal
-
-Nothing in the orbit lab needs a globe to answer. `src/modules/util/` is Cesium-free and Vue-free on
-purpose — a circular orbit's period, its two secular rates, whether its planes ever escape the
-shadow and which other orbits hold a fixed relation to it are all closed form — so the same modules
-the panel reads can be driven from a shell, with no build step and no browser:
-
-```sh
-pnpm orbit-lab orbit 550 53          # one orbit's own numbers
-pnpm orbit-lab shells 550 53         # companion shells that hold a fixed relation to it
-pnpm orbit-lab clusters 550:53,1200:70,600:97.79
-pnpm orbit-lab formation 650 100 5   # a free-flying lattice: 81 satellites inside 1 km
-```
-
-`orbit` is the model reduced to one screen: period, `Ω̇`, `u̇`, the inclination that would make it
-sun-synchronous, the `|β|` the shadow demands against the best any plane here reaches, and the
-co-precession ceiling above which no companion keeps its node rate. `shells` and `clusters` are the
-relative questions — which second orbit holds against this one, and which subsets of a fleet return
-together (`docs/adr/0009` and `0010`). What is printed is a property of a design, not of a date: no
-drag, no third body, no station-keeping.
-
-The script runs under `node --experimental-strip-types`, which is also why an import a script can
-reach carries its `.ts` extension — node resolves no specifier a bundler would have to.
 
 ### Multi-satellite Space Compute & Live Migration (多星协同与日照区 GPU 利用率优化)
 
@@ -711,7 +848,7 @@ supported](https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API#Br
 a simple app wraps the webview and handles the scheduling of
 [UserNotifications](https://developer.apple.com/documentation/usernotifications).
 
-<p align="center"><a href="https://apps.apple.com/app/satvis/id1441084766"><img src="src/assets/app-store-badge.svg" width="250" /></a></p>
+<p align="center"><a href="https://apps.apple.com/app/satvis/id1441084766">Download on the App Store</a></p>
 
 ## License
 
